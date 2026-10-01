@@ -65,6 +65,10 @@ export interface AgentSession {
   worktree_id: number;
   agent_name: string;
   status: SessionStatus;
+  /** The agent this chat is bound to once it has messages. */
+  provider?: ModelProvider;
+  /** Claude session id or Codex thread id, used to resume the agent's memory. */
+  native_session_id?: string;
 }
 
 export interface Connection {
@@ -91,6 +95,8 @@ export interface ChatMessage {
   role?: "user" | "assistant";
   model?: string;
   images?: ImageAttachment[];
+  /** How the agent turn that produced this reply ended. */
+  outcome?: "completed" | "failed" | "cancelled";
 }
 
 export interface ImageAttachment {
@@ -106,6 +112,25 @@ export interface AgentRequest {
   prompt: string;
   permissionMode: PermissionMode;
   images?: ImageAttachment[];
+}
+
+export type AgentEvent =
+  | { type: "session-started"; nativeId: string }
+  | { type: "session-reset" }
+  | { type: "text-delta"; messageId: string | null; text: string }
+  | { type: "turn-completed" }
+  | { type: "turn-cancelled" }
+  | { type: "turn-failed"; message: string };
+
+export interface AgentStartTurnRequest {
+  chatId: string;
+  provider: ModelProvider;
+  model: string;
+  cwd: string;
+  permissionMode: PermissionMode;
+  prompt: string;
+  images: ImageAttachment[];
+  resumeId?: string;
 }
 
 export interface WorktreeRequest {

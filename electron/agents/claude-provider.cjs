@@ -2,11 +2,11 @@ const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { PendingPermissions, claudeRequest, claudeResult } = require("./permissions.cjs");
 
-// Milagre permission mode -> Claude Code permission mode. Approvals arrive in a later step,
-// so Ask uses acceptEdits like the old `claude --print` call; Ask also keeps Milagre's
-// pre-run confirmation in the renderer.
-const CLAUDE_MODES = { ask: "acceptEdits", auto: "acceptEdits", full: "bypassPermissions" };
+// Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
+// the user, through canUseTool, before edits and commands its rules don't already allow.
+const CLAUDE_MODES = { ask: "default", auto: "acceptEdits", full: "bypassPermissions" };
 
 // Claude Code prints this when --resume names a session it no longer has.
 const MISSING_CONVERSATION = /No conversation found/i;
@@ -50,6 +50,7 @@ class ClaudeSession {
     this.turnActive = false;
     this.cancelRequested = false;
     this.closed = false;
+    this.permissions = new PendingPermissions((event) => this.emit(event));
   }
 
   get nativeId() {
@@ -67,7 +68,7 @@ class ClaudeSession {
     this.cancelRequested = false;
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
-    const mode = CLAUDE_MODES[permissionMode] ?? "acceptEdits";
+    const mode = CLAUDE_MODES[permissionMode] ?? "default";
     try {
       if (!this.query) await this.start(model, mode, effort, ultracode);
       if (!this.closed) {
@@ -128,6 +129,9 @@ class ClaudeSession {
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS },
+        canUseTool: (toolName, input, options) => this.askPermission(toolName, input, options),
+        // Questions to the user are out of scope for now; Claude asks in its reply instead.
+        disallowedTools: ["AskUserQuestion"],
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
@@ -139,6 +143,25 @@ class ClaudeSession {
       },
     });
     void this.readMessages(this.query);
+  }
+
+  // Claude Code waits on this promise until the user answers in Milagre, the turn stops, or the SDK
+  // aborts the request.
+  askPermission(toolName, input, options = {}) {
+    const request = claudeRequest(toolName, input, options);
+    return new Promise((resolve) => {
+      const abort = () => this.permissions.resolve(request.requestId, "cancelled");
+      this.permissions.add(request, (decision) => {
+        options.signal?.removeEventListener("abort", abort);
+        resolve(claudeResult(decision, input, options.suggestions));
+      });
+      if (options.signal?.aborted) abort();
+      else options.signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  respondToPermission(requestId, decision) {
+    return this.permissions.resolve(requestId, decision);
   }
 
   async readMessages(query) {
@@ -184,6 +207,7 @@ class ClaudeSession {
     if (!this.turnActive) return;
     this.turnActive = false;
     clearTimeout(this.interruptTimer);
+    this.permissions.cancelAll();
     this.emit(event);
   }
 
@@ -195,12 +219,14 @@ class ClaudeSession {
     this.interruptTimer = setTimeout(() => {
       void this.close().then(() => this.finishTurn({ type: "turn-cancelled" }));
     }, this.interruptGraceMs);
+    this.permissions.cancelAll();
     // interrupt() rejects with "Query closed before response received" when the query
     // closes first; that is expected during cancel and shutdown.
     await this.query?.interrupt().catch(() => {});
   }
 
   async close() {
+    this.permissions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     this.inbox?.end();

@@ -32,24 +32,42 @@ const scripts = {
   async *missing() {
     throw new Error("No conversation found with session ID: gone");
   },
+  async *asks({ options, signal }) {
+    yield init;
+    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
+      signal,
+      requestId: "req-1",
+      toolUseID: "tool-1",
+      suggestions: [{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "localSettings" }],
+    });
+    yield delta(JSON.stringify(result));
+    yield success;
+  },
 };
 
-// Stands in for the SDK's query(): consumes the streaming prompt and plays a script per turn.
+// Stands in for the SDK's query(): consumes the streaming prompt and plays a script per message.
+// Scripts get the query options (for canUseTool), an abort signal that interrupt() trips, a gate
+// the test opens with calls.release(), and next() to read a message sent while they run.
 function fakeSdk(script) {
-  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], interrupts: 0 };
+  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], interrupts: 0, release: () => {} };
   const query = ({ prompt, options }) => {
     calls.queries += 1;
     calls.options = options;
     let markInterrupted;
     const interrupted = new Promise((resolve) => { markInterrupted = resolve; });
+    const released = new Promise((resolve) => { calls.release = resolve; });
+    const controller = new AbortController();
+    const messages = prompt[Symbol.asyncIterator]();
+    const next = async () => {
+      const { value } = await messages.next();
+      if (value) calls.prompts.push(value);
+      return value;
+    };
     async function* run() {
-      for await (const message of prompt) {
-        calls.prompts.push(message);
-        yield* script({ interrupted });
-      }
+      while (await next()) yield* script({ interrupted, released, options, signal: controller.signal, next });
     }
     return Object.assign(run(), {
-      interrupt: async () => { calls.interrupts += 1; markInterrupted(); },
+      interrupt: async () => { calls.interrupts += 1; controller.abort(); markInterrupted(); },
       setModel: async (model) => { calls.models.push(model); },
       setPermissionMode: async (mode) => { calls.modes.push(mode); },
     });
@@ -84,6 +102,8 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   assert.deepEqual(calls.options.systemPrompt, { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS });
   assert.equal("resume" in calls.options, false);
   assert.deepEqual(calls.prompts[0].message.content, [{ type: "text", text: "Hi" }]);
+  assert.equal(typeof calls.options.canUseTool, "function");
+  assert.deepEqual(calls.options.disallowedTools, ["AskUserQuestion"]);
 });
 
 test("keeps one query across turns and applies model and mode changes", async (t) => {
@@ -192,4 +212,73 @@ test("refuses new turns once closed", async (t) => {
   const { session } = claude(t);
   await session.close();
   await assert.rejects(session.startTurn(TURN), /closed/);
+});
+
+const asked = (events) => waitUntil(() => events.some((event) => event.type === "permission-request"));
+const replyText = (events) => events.filter((event) => event.type === "text-delta").map((event) => event.text).join("");
+
+test("Ask mode lets Claude Code check with the user", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await ended(events);
+  assert.equal(calls.options.permissionMode, "default");
+});
+
+test("asks before a tool runs and passes the answer back", async (t) => {
+  const { session, events } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
+    type: "permission-request", requestId: "req-1", kind: "edit", tool: "Write", title: "Write hello.txt?", files: ["/repo/hello.txt"], diff: "+hi", allowForChat: true,
+  });
+  assert.equal(session.respondToPermission("req-1", "allow"), true);
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { file_path: "/repo/hello.txt", content: "hi" } });
+  const types = events.map((event) => event.type);
+  assert.ok(types.indexOf("permission-resolved") < types.indexOf("turn-completed"));
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "allow" });
+});
+
+test("always allowing in this chat keeps the rule in the session", async (t) => {
+  const { session, events } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  session.respondToPermission("req-1", "allow-for-chat");
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)).updatedPermissions, [{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "session" }]);
+});
+
+test("denying tells Claude it was denied in Milagre", async (t) => {
+  const { session, events } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  session.respondToPermission("req-1", "deny");
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "Denied in Milagre" });
+});
+
+test("interrupting cancels a pending approval", async (t) => {
+  const { session, events } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "cancelled" });
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.equal(session.respondToPermission("req-1", "allow"), false);
+});
+
+test("closing cancels a pending approval", async (t) => {
+  const { session, events } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  await session.close();
+  assert.ok(events.some((event) => event.type === "permission-resolved" && event.decision === "cancelled"));
+  // The script may still flush its last text while the query closes, so check the ending, not the order.
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
+});
+
+test("an answer for an unknown request changes nothing", async (t) => {
+  const { session } = claude(t);
+  assert.equal(session.respondToPermission("nope", "allow"), false);
 });

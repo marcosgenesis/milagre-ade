@@ -35,7 +35,7 @@ Do not commit certificates, private keys, passwords or credential files. Keep th
 
 ## Release checks
 
-The workflow checks that all five secrets exist before `semantic-release` creates a tag and GitHub Release. The installer build requires code signing, uses hardened runtime and notarizes the app with `electron-builder`. The app's notarization ticket is stapled before the ZIP and DMG are built.
+The workflow checks that all five secrets exist before `semantic-release` creates a tag and GitHub Release. Each macOS job also checks the app-specific password format and authenticates with Apple before installing dependencies. The installer build requires code signing, uses hardened runtime and notarizes the app with `electron-builder`. The app's notarization ticket is stapled before the ZIP and DMG are built.
 
 The workflow also signs the DMG, submits it to Apple, requires the explicit `Accepted` status and staples the DMG ticket. Before uploading installers, it verifies the app and DMG signatures, validates stapled tickets, checks Gatekeeper acceptance for the app and verifies DMG integrity. A missing credential, rejected submission or failed check stops the workflow. `npm run test:release` exercises these failure paths without real credentials or Apple requests.
 
@@ -44,3 +44,5 @@ After configuring secrets, merge a Conventional Commit with a `fix:` or `feat:` 
 ## Local builds
 
 Use `npm run package:mac:local` for an ad-hoc build without Apple credentials. It explicitly skips notarization and does not provide Gatekeeper trust. Public releases never use this command.
+
+Apple ID, app-specific password and Team ID have surrounding whitespace removed before both app and DMG notarization. The certificate export password is preserved exactly.

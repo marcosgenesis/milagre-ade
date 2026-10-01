@@ -11,6 +11,7 @@ const credentials = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPEC
 const credentialStep = workflow.jobs.release.steps.find(step => step.name === 'Check Apple release credentials')
 const notarizeStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
 const verifyStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Verify macOS signatures, notarization and disk images')
+const authStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple notarization authentication')
 
 function runStep(step, cwd, overrides = {}) {
   const env = { ...process.env }
@@ -27,6 +28,8 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.mkdirSync(path.join(root, 'release/mac-arm64/Milagre.app'), { recursive: true })
   fs.mkdirSync(path.join(root, 'bin'))
+  fs.mkdirSync(path.join(root, 'scripts'))
+  fs.copyFileSync(path.join(__dirname, 'with-apple-credentials.cjs'), path.join(root, 'scripts/with-apple-credentials.cjs'))
   fs.writeFileSync(path.join(root, 'release/Milagre-arm64.dmg'), '')
   const mock = `#!/bin/bash
 printf '%s %s %s\\n' "$(basename "$0")" "$1" "$2" >> "$CALL_LOG"
@@ -95,4 +98,47 @@ test('signature, ticket, Gatekeeper and disk image failures stop verification', 
     assert.notEqual(result.status, 0, `${tool} failure must block upload`)
   }
   assert.equal(runStep(verifyStep, f.root, f.env).status, 0)
+})
+
+
+test('an invalid app-specific password stops before contacting Apple and is never printed', t => {
+  const f = fixture(t)
+  const secret = 'test-private-password-value'
+  const result = runStep(authStep, f.root, { ...f.env, APPLE_APP_SPECIFIC_PASSWORD: secret })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stdout, /App-specific password has the expected format: false/)
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret))
+  assert.equal(f.calls(), '')
+})
+
+test('Apple authentication rejection stops the preflight without printing credentials', t => {
+  const f = fixture(t)
+  const password = 'abcd-efgh-ijkl-mnop'
+  const result = runStep(authStep, f.root, { ...f.env, APPLE_APP_SPECIFIC_PASSWORD: password, NOTARY_EXIT: '1' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Apple authentication check failed/)
+  assert.doesNotMatch(result.stdout + result.stderr, /abcd-efgh-ijkl-mnop|test-secret-/)
+  assert.match(f.calls(), /xcrun notarytool history/)
+})
+
+test('accepted Apple credentials pass the authentication preflight', t => {
+  const f = fixture(t)
+  const result = runStep(authStep, f.root, { ...f.env, APPLE_APP_SPECIFIC_PASSWORD: 'abcd-efgh-ijkl-mnop' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Apple accepted the configured notarization credentials/)
+  assert.match(f.calls(), /xcrun notarytool history/)
+})
+
+test('release commands trim Apple credentials, preserve certificate passwords and propagate failure', () => {
+  const secret = 'certificate-password-with-intentional-spaces'
+  const command = [path.join(__dirname, 'with-apple-credentials.cjs'), process.execPath, '-e', "const assert = require('node:assert/strict'); assert.equal(process.env.APPLE_ID, 'developer@example.test'); assert.equal(process.env.APPLE_APP_SPECIFIC_PASSWORD, 'abcd-efgh-ijkl-mnop'); assert.equal(process.env.APPLE_TEAM_ID, 'TESTTEAM01'); assert.equal(process.env.CSC_KEY_PASSWORD, '  certificate-password-with-intentional-spaces  '); process.exit(7)"]
+  const result = spawnSync(process.execPath, command, {
+    env: { ...process.env, APPLE_ID: ' developer@example.test\n', APPLE_APP_SPECIFIC_PASSWORD: ' abcd-efgh-ijkl-mnop\n', APPLE_TEAM_ID: ' TESTTEAM01\n', CSC_KEY_PASSWORD: '  ' + secret + '  ' },
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 7, result.stderr)
+  assert.equal(result.stdout + result.stderr, '')
+  const build = workflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
+  assert.match(build.run, /^node scripts\/with-apple-credentials\.cjs npm run package:mac /)
+  assert.match(notarizeStep.run, /^node scripts\/with-apple-credentials\.cjs bash -e -o pipefail/)
 })

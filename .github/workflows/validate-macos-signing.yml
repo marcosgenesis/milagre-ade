@@ -59,7 +59,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="0.9.1-signing-check" --config.forceCodeSigning=true --config.dmg.sign=true
+        run: node scripts/with-apple-credentials.cjs npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="0.9.1-signing-check" --config.forceCodeSigning=true --config.dmg.sign=true
       - name: Notarize and staple disk images
         shell: bash
         env:
@@ -67,6 +67,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          node scripts/with-apple-credentials.cjs bash -e -o pipefail <<'NOTARIZE'
           result="$(mktemp)"
           trap 'rm -f "$result"' EXIT
           for dmg in release/*.dmg; do
@@ -80,6 +81,7 @@ jobs:
             ' "$result"
             xcrun stapler staple "$dmg"
           done
+          NOTARIZE
       - name: Verify macOS signatures, notarization and disk images
         shell: bash
         run: |

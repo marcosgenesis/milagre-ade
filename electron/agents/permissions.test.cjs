@@ -115,6 +115,9 @@ test("Codex: the shell wrapper is removed from commands", () => {
   assert.equal(unwrapShell("/bin/zsh -lc 'ls -la'"), "ls -la");
   assert.equal(unwrapShell("/bin/bash -lc 'echo '\\''hi'\\'''"), "echo 'hi'");
   assert.equal(unwrapShell("git status"), "git status");
+  assert.equal(unwrapShell("/bin/zsh -lc ls"), "ls");
+  assert.equal(unwrapShell("/usr/bin/bash -lc pwd"), "pwd");
+  assert.equal(unwrapShell("/bin/zsh -lc ls -la"), "/bin/zsh -lc ls -la");
 });
 
 test("Codex: command requests", () => {

@@ -59,10 +59,16 @@ function claudeResult(decision, input, suggestions = []) {
   return { behavior: "deny", message: DENIED_MESSAGE };
 }
 
-// Codex runs commands through the user's login shell: `/bin/zsh -lc 'npm test'`. The card shows `npm test`.
+// Codex runs commands through the user's login shell: `/bin/zsh -lc 'npm test'` or `/bin/zsh -lc ls`.
+// The card shows `npm test` or `ls`. Handles both quoted and unquoted single-word forms.
 function unwrapShell(command) {
-  const match = /^\/(?:usr\/)?bin\/(?:ba|z)?sh -lc '((?:[^']|'\\'')*)'$/.exec(command);
-  return match ? match[1].replace(/'\\''/g, "'") : command;
+  const match = /^\/(?:usr\/)?bin\/(?:ba|z)?sh -lc (?:'((?:[^']|'\\'')*)'|([^ ]+))$/.exec(command);
+  if (match) {
+    const quoted = match[1];
+    const unquoted = match[2];
+    return quoted !== undefined ? quoted.replace(/'\\''/g, "'") : unquoted;
+  }
+  return command;
 }
 
 // item/commandExecution/requestApproval params -> request.

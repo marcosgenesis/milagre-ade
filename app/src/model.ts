@@ -7,7 +7,7 @@ export type PermissionMode = "ask" | "auto" | "full";
 export type Isolation = "local" | "worktree";
 
 export const PERMISSION_MODES: Array<{ id: PermissionMode; name: string; description: string }> = [
-  { id: "ask", name: "Ask approval", description: "Approve each run before the agent starts" },
+  { id: "ask", name: "Ask approval", description: "Approve edits and commands as the agent asks" },
   { id: "auto", name: "Auto mode", description: "Allow changes inside this worktree" },
   { id: "full", name: "Full permission", description: "Remove filesystem and network limits" },
 ];

@@ -8,6 +8,9 @@ const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessag
 // pre-run confirmation in the renderer.
 const CLAUDE_MODES = { ask: "acceptEdits", auto: "acceptEdits", full: "bypassPermissions" };
 
+// Claude Code prints this when --resume names a session it no longer has.
+const MISSING_CONVERSATION = /No conversation found/i;
+
 // User messages for a running query: the SDK's streaming-input mode reads this until it ends.
 class Inbox {
   constructor() {
@@ -55,6 +58,7 @@ class ClaudeSession {
   }
 
   async startTurn({ prompt, images = [], model, permissionMode }) {
+    if (this.closed) throw new Error("This Claude session is closed.");
     if (this.turnActive) throw new Error("This chat already has a turn running.");
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
@@ -67,16 +71,28 @@ class ClaudeSession {
     const mode = CLAUDE_MODES[permissionMode] ?? "acceptEdits";
     try {
       if (!this.query) await this.start(model, mode);
-      if (model !== this.model) {
-        await this.query.setModel(model);
-        this.model = model;
-      }
-      if (mode !== this.mode) {
-        await this.query.setPermissionMode(mode);
-        this.mode = mode;
+      if (!this.closed) {
+        if (model !== this.model) {
+          await this.query.setModel(model);
+          this.model = model;
+        }
+        if (mode !== this.mode) {
+          await this.query.setPermissionMode(mode);
+          this.mode = mode;
+        }
       }
     } catch (error) {
       this.finishTurn({ type: "turn-failed", message: error.message });
+      return { turnId: null };
+    }
+    // close() or interrupt() may have landed while the SDK was loading or the query starting.
+    if (this.closed) {
+      await this.close();
+      this.finishTurn({ type: "turn-cancelled" });
+      return { turnId: null };
+    }
+    if (this.cancelRequested) {
+      this.finishTurn({ type: "turn-cancelled" });
       return { turnId: null };
     }
     const content = [{ type: "text", text: prompt }, ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }))];
@@ -86,6 +102,10 @@ class ClaudeSession {
 
   async start(model, mode) {
     const { query } = await this.loadSdk();
+    if (this.closed) return;
+    this.initSeen = false;
+    this.stderr = "";
+    this.child = null;
     this.inbox = new Inbox();
     this.model = model;
     this.mode = mode;
@@ -120,22 +140,29 @@ class ClaudeSession {
         for (const event of mapClaudeMessage(message, this.state)) {
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
-          else if (event.type === "turn-failed" && this.resumeId && !this.initSeen) this.resumeFailed();
+          else if (event.type === "turn-failed" && this.resumeGone(`${event.message}\n${message.errors ?? ""}\n${message.result ?? ""}`)) this.resumeFailed();
           else this.finishTurn(event);
         }
       }
-      this.handleEnd(null);
+      this.handleEnd(query, null);
     } catch (error) {
-      this.handleEnd(error);
+      this.handleEnd(query, error);
     }
   }
 
-  handleEnd(error) {
+  // Only a "conversation is missing" failure may discard the saved id; spawn errors,
+  // crashes and bad paths must keep it.
+  resumeGone(text) {
+    return Boolean(this.resumeId) && MISSING_CONVERSATION.test(`${text}\n${this.stderr}`);
+  }
+
+  handleEnd(query, error) {
+    if (query !== this.query) return;
     this.query = null;
     this.closed = true;
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
-    else if (this.resumeId && !this.initSeen) this.resumeFailed();
+    else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
     else this.finishTurn({ type: "turn-failed", message: error?.message || this.stderr.trim() || "Claude Code stopped unexpectedly." });
   }
 
@@ -175,6 +202,7 @@ class ClaudeSession {
     // An async generator stuck on an await never settles return(), so don't wait forever.
     await Promise.race([query?.return?.().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 1000))]);
     await killTree(this.child);
+    this.finishTurn({ type: "turn-cancelled" });
   }
 }
 

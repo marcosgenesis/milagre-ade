@@ -155,3 +155,41 @@ test("explains a missing CLI without starting anything", async (t) => {
   assert.deepEqual(events, [{ type: "turn-failed", message: missingCliMessage("claude") }]);
   assert.equal(calls.queries, 0);
 });
+
+test("keeps the saved session when a resumed start fails for another reason", async (t) => {
+  const script = async function* () { throw new Error("spawn EACCES"); };
+  const { session, events } = claude(t, { script, resumeId: "session-1" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events, [{ type: "turn-failed", message: "spawn EACCES" }]);
+});
+
+test("cancels a turn interrupted while the SDK is still loading", async (t) => {
+  const sdk = fakeSdk(scripts.reply);
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const events = [];
+  const session = new ClaudeSession({ cwd: "/repo", command: "/usr/local/bin/claude", emit: (event) => events.push(event), loadSdk: async () => { await gate; return sdk.loadSdk(); } });
+  t.after(() => session.close());
+  const turn = session.startTurn(TURN);
+  await session.interrupt();
+  release();
+  await turn;
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.deepEqual(sdk.calls.prompts, []);
+});
+
+test("close() ends a running turn even when Claude never answers", async (t) => {
+  const { session, events } = claude(t, { script: scripts.unresponsive });
+  await session.startTurn(TURN);
+  await waitUntil(() => events.length > 0);
+  await session.close();
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+});
+
+test("refuses new turns once closed", async (t) => {
+  const { session } = claude(t);
+  await session.close();
+  await assert.rejects(session.startTurn(TURN), /closed/);
+});

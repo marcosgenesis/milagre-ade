@@ -59,6 +59,7 @@ test("starts threads and turns with Milagre's identity, instructions and policy"
 
   assert.equal(find("initialize").clientInfo.name, "milagre");
   assert.equal(find("thread/start").developerInstructions, MILAGRE_INSTRUCTIONS);
+  assert.deepEqual(find("thread/start").config, { features: { default_mode_request_user_input: true } });
   assert.equal(find("turn/start").approvalPolicy, "never");
   assert.deepEqual(find("turn/start").sandboxPolicy, { type: "dangerFullAccess" });
   assert.deepEqual(find("turn/start").input, [{ type: "text", text: "Hi", text_elements: [] }]);
@@ -82,7 +83,9 @@ test("resumes a saved thread without announcing it again", async (t) => {
   const { session, events } = codex(t, { resumeId: "thread-9" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.equal((await received(session)).find((message) => message.method === "thread/resume").params.threadId, "thread-9");
+  const resume = (await received(session)).find((message) => message.method === "thread/resume").params;
+  assert.equal(resume.threadId, "thread-9");
+  assert.deepEqual(resume.config, { features: { default_mode_request_user_input: true } });
   assert.equal(events.some((event) => event.type === "session-started"), false);
   assert.equal(session.nativeId, "thread-9");
 });
@@ -372,4 +375,85 @@ test("an unknown permission mode uses Ask's policy", async (t) => {
   assert.equal(params.approvalPolicy, "untrusted");
   assert.equal(params.sandboxPolicy.type, "workspaceWrite");
   assert.equal((await received(session)).find((message) => message.method === "thread/start").params.sandbox, "workspace-write");
+});
+
+const questioned = (events) => waitUntil(() => events.some((event) => event.type === "question-request"));
+// Polls until the fake app-server has received the client's reply to one of its own requests.
+async function replyTo(session, id) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const reply = (await received(session)).find((message) => message.id === id && !message.method);
+    if (reply) return reply;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for the reply to ${id}`);
+}
+
+test("Codex's question becomes a card, and the answers go back per question id", async (t) => {
+  const { session, events } = codex(t, { scenario: "question" });
+  await session.startTurn(TURN);
+  await questioned(events);
+  assert.deepEqual(events.find((event) => event.type === "question-request"), {
+    type: "question-request",
+    requestId: "srv-q",
+    questions: [{ id: "color", header: "Color", question: "Which color?", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false, allowOther: true, secret: false }],
+  });
+  assert.equal(session.answerQuestion("srv-q", { color: ["Green"] }), true);
+  await ended(events);
+  assert.equal(replyText(events), 'answer:{"answers":{"color":{"answers":["Green"]}}}');
+  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "answered" });
+});
+
+test("dismissing Codex's question sends no answers", async (t) => {
+  const { session, events } = codex(t, { scenario: "question" });
+  await session.startTurn(TURN);
+  await questioned(events);
+  session.answerQuestion("srv-q", null);
+  await ended(events);
+  assert.equal(replyText(events), 'answer:{"answers":{}}');
+  assert.equal(events.find((event) => event.type === "question-resolved").outcome, "dismissed");
+});
+
+test("interrupting cancels Codex's open question", async (t) => {
+  const { session, events } = codex(t, { scenario: "question" });
+  await session.startTurn(TURN);
+  await questioned(events);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" });
+  assert.equal(replyText(events), 'answer:{"answers":{}}');
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.equal(session.answerQuestion("srv-q", { color: ["Green"] }), false);
+});
+
+test("a question Codex withdraws is dropped without an answer", async (t) => {
+  const { session, events } = codex(t, { scenario: "question-withdrawn" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" });
+  assert.equal((await received(session)).some((message) => message.id === "srv-q"), false);
+  assert.equal(session.answerQuestion("srv-q", null), false);
+});
+
+test("a steering message dismisses Codex's open question, then steers the turn", async (t) => {
+  const { session, events } = codex(t, { scenario: "question-steer" });
+  await session.startTurn(TURN);
+  await questioned(events);
+  assert.deepEqual(await session.startTurn({ ...TURN, prompt: "Green, please" }), { turnId: "turn-1", steered: true });
+  await ended(events);
+  assert.equal(events.find((event) => event.type === "question-resolved").outcome, "dismissed");
+  assert.equal(replyText(events), "steered:Green, please");
+  const messages = await received(session);
+  const answer = messages.findIndex((message) => message.id === "srv-q");
+  assert.deepEqual(messages[answer].result, { answers: {} });
+  assert.ok(answer < messages.findIndex((message) => message.method === "turn/steer"));
+});
+
+test("a question asked after the turn was stopped gets no answers at once", async (t) => {
+  const { session, events } = codex(t, { scenario: "late-question" });
+  await session.startTurn(TURN);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual((await replyTo(session, "srv-late")).result, { answers: {} });
+  assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
+  assert.equal(session.questions.size, 0);
 });

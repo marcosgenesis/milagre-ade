@@ -4,7 +4,10 @@
 // takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
 // "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume), slow-stop (the first turn takes 150ms to stop after an interrupt),
-// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping).
+// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping),
+// question (Codex asks a question and ends the turn on the answer), question-steer (Codex asks a question
+// and the turn waits for turn/steer), question-withdrawn (a question Codex takes back), late-question
+// (like late-approval, with a question).
 // fake/turn-started makes it announce a turn nobody asked for.
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -17,6 +20,9 @@ let pendingTurn = null;
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const notify = (method, params) => send({ method, params });
 const completeTurn = (threadId, turnId, status, error = null) => notify("turn/completed", { threadId, turn: { id: turnId, items: [], status, error } });
+
+const QUESTIONS = [{ id: "color", header: "Color", question: "Which color?", isOther: true, isSecret: false, options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }] }];
+const askQuestion = (id, threadId, turnId) => send({ id, method: "item/tool/requestUserInput", params: { threadId, turnId, itemId: "call-1", questions: QUESTIONS, isBlocking: false, autoResolutionMs: null } });
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -73,7 +79,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
-      if ((scenario === "slow-stop" || scenario === "late-approval") && turnId === "turn-1") {
+      if ((scenario === "slow-stop" || scenario === "late-approval" || scenario === "late-question") && turnId === "turn-1") {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
@@ -89,6 +95,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
         notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] } });
         return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
+      }
+      if (scenario === "question") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-q" };
+        return askQuestion("srv-q", threadId, turnId);
+      }
+      if (scenario === "question-steer") {
+        pendingTurn = { threadId, turnId };
+        return askQuestion("srv-q", threadId, turnId);
+      }
+      if (scenario === "question-withdrawn") {
+        askQuestion("srv-q", threadId, turnId);
+        notify("serverRequest/resolved", { threadId, requestId: "srv-q" });
+        return completeTurn(threadId, turnId, "completed");
       }
       if (scenario === "permissions") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
@@ -109,12 +128,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: {} });
     case "turn/interrupt":
       if (scenario === "stubborn") return undefined;
-      if (scenario === "slow-stop" || scenario === "late-approval") {
+      if (scenario === "slow-stop" || scenario === "late-approval" || scenario === "late-question") {
         const stopping = pendingTurn;
         pendingTurn = null;
         setTimeout(() => {
           send({ id, result: {} });
           if (scenario === "late-approval") send({ id: "srv-late", method: "item/commandExecution/requestApproval", params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+          if (scenario === "late-question") askQuestion("srv-late", stopping.threadId, stopping.turnId);
           completeTurn(stopping.threadId, stopping.turnId, "interrupted");
         }, 150);
         return undefined;

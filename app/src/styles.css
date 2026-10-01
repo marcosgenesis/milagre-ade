@@ -502,8 +502,10 @@ a:focus-visible .animated-underline::after {
   left: 8px;
 }
 
+/* Centers the 36px controls in the 76px collapsed rail. */
 [data-sidebar-collapsed="true"] .sidebar-row {
   width: 36px;
+  margin-left: 20px;
 }
 
 [data-sidebar-collapsed="true"] .sidebar-copy {

@@ -80,7 +80,8 @@ type SidebarNavProps = {
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
-  collapsedWidth: 52,
+  // Wide enough to sit under the macOS traffic lights (x 24→76 in main.cjs).
+  collapsedWidth: 76,
   duration: 280,
   copyDuration: 180,
   copyOffset: 8,
@@ -331,7 +332,7 @@ export default function SidebarNav({
             aria-hidden={!collapsed}
             tabIndex={collapsed ? 0 : -1}
             onClick={() => setCollapsed(false)}
-            className="sidebar-expand-control absolute left-2 top-0.5 flex size-9 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color] duration-150 hover:bg-hover-2 hover:text-ink"
+            className="sidebar-expand-control absolute left-5 top-0.5 flex size-9 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color] duration-150 hover:bg-hover-2 hover:text-ink"
           >
             <IconSidebarLeftArrow size={18} className="rotate-180" />
           </button>
@@ -437,7 +438,7 @@ export default function SidebarNav({
           </GlideGroup>
         </div>
 
-        <div className={`mx-2 mt-3 flex border-t border-line py-1.5 ${collapsed ? "w-9 flex-col-reverse gap-1" : "w-[208px] items-center justify-between"}`}>
+        <div className={`mt-3 flex border-t border-line py-1.5 ${collapsed ? "ml-5 w-9 flex-col-reverse gap-1" : "mx-2 w-[208px] items-center justify-between"}`}>
           <Tooltip label="Add project" shortcut="⌘O">
             <button type="button" aria-label="Add project" onClick={onOpenProject} className={BOTTOM_BAR_BUTTON}>
               <IconFolderAdd size={17} />

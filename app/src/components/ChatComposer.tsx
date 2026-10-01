@@ -227,8 +227,14 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [tab, setTab] = useState("Worktrees");
   const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    if (isNewChat) setScrolled(false);
+  }, [isNewChat]);
   return (
-    <div className={`flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}>
+    <div className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}>
+      {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
+      {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && <MessageScroller
         navigation="rail"
         followOutput
@@ -238,6 +244,7 @@ export function ChatComposer({
         viewportClassName="pt-4 pb-2"
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}`}
+        viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         {tab === "Worktrees" ? (
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">

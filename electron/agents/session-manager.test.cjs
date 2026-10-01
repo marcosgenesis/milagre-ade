@@ -194,3 +194,15 @@ test("an idle close never reaches the session that replaced it", async (t) => {
   assert.equal(created[0].closed, true);
   assert.equal(created[1].closed, false);
 });
+
+test("a turn the provider starts itself is not closed by the idle timer", async (t) => {
+  const { manager, created } = harness({ idleMs: 30 });
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "turn-completed" });
+  created[0].emit({ type: "turn-started", turnId: "t2" });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(created[0].closed, false);
+  created[0].emit({ type: "turn-completed" });
+  await waitUntil(() => created[0].closed);
+});

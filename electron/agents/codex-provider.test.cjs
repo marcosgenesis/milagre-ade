@@ -288,3 +288,25 @@ test("a steer for a turn Codex gave no id becomes the next turn", async (t) => {
   assert.equal(starts.length, 2);
   assert.equal(starts[1].params.input[0].text, "Also add tests");
 });
+
+test("a turn's end settles even when a new turn starts during its cleanup", async (t) => {
+  const { session } = codex(t, { scenario: "slow" });
+  await session.startTurn(TURN);
+  const firstEnded = session.turnEnded;
+  let settled = false;
+  void firstEnded.then(() => { settled = true; });
+  // Hold the first turn's finishTurn on a pending image cleanup, so a new turn can start inside it.
+  let release;
+  session.imageSets.push({ cleanup: () => new Promise((resolve) => { release = resolve; }) });
+  await session.interrupt();
+  await waitUntil(() => release);
+  assert.equal(session.turnActive, false);
+  await session.startTurn(TURN);
+  const secondEnded = session.turnEnded;
+  let secondSettled = false;
+  void secondEnded.then(() => { secondSettled = true; });
+  release();
+  await waitUntil(() => settled);
+  assert.notEqual(firstEnded, secondEnded);
+  assert.equal(secondSettled, false);
+});

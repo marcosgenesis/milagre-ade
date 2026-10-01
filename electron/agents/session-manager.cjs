@@ -62,6 +62,9 @@ class SessionManager {
     }
     this.flush(chatId);
     this.send(chatId, event);
+    // A turn the provider started itself (a steer that missed the end of the last one) isn't covered by
+    // startTurn's clear; the timer armed by the previous turn's end must not close it mid-run.
+    if (event.type === "turn-started") clearTimeout(entry.idleTimer);
     if (isTerminal(event)) this.scheduleIdleClose(chatId);
   }
 

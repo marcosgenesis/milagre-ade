@@ -111,10 +111,11 @@ class CodexSession {
   // refuses because the turn already ended, the message starts the next turn instead.
   async steer(request) {
     await this.turnReady;
+    const ended = this.turnEnded;
     if (!this.turnActive) return this.startTurn(request);
     // Without a turn id Codex can't be steered; send the message as the next turn once this one ends.
     if (!this.state.turnId) {
-      await this.turnEnded;
+      await ended;
       return this.startTurn(request);
     }
     const turnId = this.state.turnId;
@@ -125,7 +126,7 @@ class CodexSession {
       return { turnId, steered: true };
     } catch (error) {
       if (!error.rpcError) throw error;
-      await this.turnEnded;
+      await ended;
       return this.startTurn(request);
     }
   }
@@ -209,6 +210,9 @@ class CodexSession {
   async finishTurn(events) {
     if (!this.turnActive) return;
     this.turnActive = false;
+    // Bind to this turn's own resolver: a new turn may start while image cleanup is awaited.
+    const markEnded = this.markTurnEnded;
+    this.markTurnEnded = null;
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
     this.fileChanges.clear();
@@ -216,7 +220,7 @@ class CodexSession {
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));
     events.forEach((event) => this.emit(event));
-    this.markTurnEnded?.();
+    markEnded?.();
   }
 
   async interrupt() {

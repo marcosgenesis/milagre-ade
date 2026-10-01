@@ -41,7 +41,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
     "electron": "^44.5.1",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "26.17.0",
     "postcss": "^8.5.28",
     "semantic-release": "^25.0.9",
     "shadow-plugin": "^2.1.1",

@@ -413,6 +413,8 @@ function App() {
             isSending={isSending}
             sendBlocked={preparing}
             streamingText={run?.text}
+            streamingSteps={run?.steps}
+            waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             selectedModel={selectedModel}

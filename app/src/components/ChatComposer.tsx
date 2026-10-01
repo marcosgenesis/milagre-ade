@@ -14,7 +14,7 @@ import {
   Link01Icon,
   Message01Icon,
 } from "@hugeicons/core-free-icons";
-import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -22,13 +22,30 @@ import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { parseRecommendation, RecommendationCard } from "./agents/recommendation-card";
+import { StepRow } from "./agents/StepRow";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
+import { replyParts } from "../lib/reply-parts";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
 function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
+}
+
+function StepGroup({ steps, waitingStepIds }: { steps: ChatStep[]; waitingStepIds: string[] }) {
+  return <div className="-mx-1.5 my-1 flex flex-col">{steps.map((step) => <StepRow key={step.id} step={step} waiting={waitingStepIds.includes(step.id)} />)}</div>;
+}
+
+/** A reply's text with its tool steps where they happened. */
+function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; waitingStepIds: string[] }) {
+  return (
+    <>
+      {replyParts(body, steps).map((part, index) => (part.type === "text"
+        ? <Markdown key={index} text={streaming ? closeOpenMarkdown(part.text) : part.text} />
+        : <StepGroup key={index} steps={part.steps} waitingStepIds={waitingStepIds} />))}
+    </>
+  );
 }
 
 function MessageSection({
@@ -38,6 +55,7 @@ function MessageSection({
   modelName,
   onRecommendationSelect,
   streaming = false,
+  waitingStepIds = [],
 }: {
   message: AppChatMessage;
   session?: AgentSession;
@@ -45,8 +63,11 @@ function MessageSection({
   modelName: string;
   onRecommendationSelect: (option: string) => void;
   streaming?: boolean;
+  /** Steps whose approval card is open. */
+  waitingStepIds?: string[];
 }) {
   const recommendation = !isUser ? parseRecommendation(message.body) : null;
+  const steps = message.steps ?? [];
   return (
     <article
       id={`message-${message.id}`}
@@ -65,9 +86,12 @@ function MessageSection({
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
-          <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+          <>
+            {steps.length > 0 && <StepGroup steps={steps} waitingStepIds={waitingStepIds} />}
+            <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+          </>
         ) : (
-          <Markdown text={streaming ? closeOpenMarkdown(message.body) : message.body} />
+          <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />
         )}
       </div>
     </article>
@@ -86,6 +110,10 @@ interface ChatComposerProps {
   /** Sending is briefly blocked while a message is being prepared; a running turn doesn't block it. */
   sendBlocked: boolean;
   streamingText?: string;
+  /** The running turn's tool steps, where they happened in `streamingText`. */
+  streamingSteps?: ChatStep[];
+  /** Steps of the running turn whose approval card is open. */
+  waitingStepIds?: string[];
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
@@ -228,6 +256,8 @@ export function ChatComposer({
   isSending,
   sendBlocked,
   streamingText,
+  streamingSteps,
+  waitingStepIds,
   runModelName,
   lockedProvider,
   selectedModel,
@@ -280,7 +310,7 @@ export function ChatComposer({
         className="min-h-0 flex-1"
         viewportClassName="pt-4 pb-2"
         contentClassName="min-h-full"
-        autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}`}
+        autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         {tab === "Worktrees" ? (
@@ -296,16 +326,17 @@ export function ChatComposer({
               />
             ))}
 
-            {isSending && streamingText && (
+            {isSending && (streamingText || streamingSteps?.length) ? (
               <MessageSection
-                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText, context: null, role: "assistant" }}
+                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
                 session={sessions[String(messages.at(-1)?.session_id)]}
                 isUser={false}
                 modelName={workingModelName}
                 onRecommendationSelect={onRecommendationSelect}
                 streaming
+                waitingStepIds={waitingStepIds}
               />
-            )}
+            ) : null}
             {isSending && (
               <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
                 <ThinkingIndicator label={`Working with ${workingModelName}`} />

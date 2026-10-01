@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
-const { readClaudeUsage, readCodexUsage } = require("./usage.cjs");
+const { createUsageReader, readClaudeUsage, readCodexUsage } = require("./usage.cjs");
 
 const TOKEN = "sk-ant-oat01-SECRET-TOKEN";
 const NOW = Date.parse("2026-10-01T19:30:00Z");
@@ -269,4 +269,56 @@ test("reports an error when Codex exits early or returns no windows", async () =
   const empty = fakeCodex({ rateLimits: { primary: null, secondary: null } });
   const none = await readCodexUsage(codexDeps(empty).deps);
   assert.deepEqual([none.status, none.message], ["error", "Codex returned no usage windows."]);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+test("shares one in-flight read between concurrent callers", async () => {
+  let claudeReads = 0;
+  let codexReads = 0;
+  const claude = deferred();
+  const updatedAt = new Date(NOW).toISOString();
+  const readUsage = createUsageReader({
+    now: () => NOW,
+    readClaude: () => {
+      claudeReads += 1;
+      return claude.promise;
+    },
+    readCodex: async () => {
+      codexReads += 1;
+      return { provider: "codex", status: "unavailable", windows: [], updatedAt, message: "Codex CLI not found." };
+    },
+  });
+
+  const first = readUsage();
+  const second = readUsage();
+  assert.equal(first, second);
+  claude.resolve({ provider: "claude", status: "ok", windows: [], updatedAt });
+  const snapshot = await first;
+  assert.deepEqual(snapshot.providers.map((item) => item.provider), ["claude", "codex"]);
+  assert.deepEqual([claudeReads, codexReads], [1, 1]);
+
+  await readUsage();
+  assert.deepEqual([claudeReads, codexReads], [2, 2]);
+});
+
+test("turns a reader crash into an error for that provider only", async () => {
+  const updatedAt = new Date(NOW).toISOString();
+  const readUsage = createUsageReader({
+    now: () => NOW,
+    readClaude: () => {
+      throw new Error(`boom ${TOKEN}`);
+    },
+    readCodex: async () => ({ provider: "codex", status: "ok", windows: [], updatedAt }),
+  });
+  const { providers } = await readUsage();
+  assert.deepEqual(providers[0], { provider: "claude", status: "error", windows: [], updatedAt, message: "Couldn't read usage." });
+  assert.equal(providers[1].status, "ok");
+  assert.ok(!JSON.stringify(providers).includes(TOKEN));
 });

@@ -203,4 +203,20 @@ function readCodexUsage(deps = {}) {
   });
 }
 
-module.exports = { readClaudeUsage, readCodexUsage };
+function createUsageReader(deps = {}) {
+  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now } = deps;
+  const safely = (provider, read) => Promise.resolve()
+    .then(() => read())
+    .catch(() => providerResult(provider, now, "error", [], "Couldn't read usage."));
+  let inFlight = null;
+  return function readUsage() {
+    inFlight ??= Promise.all([safely("claude", readClaude), safely("codex", readCodex)])
+      .then((providers) => ({ providers }))
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+}
+
+module.exports = { createUsageReader, readClaudeUsage, readCodexUsage };

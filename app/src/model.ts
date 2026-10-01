@@ -321,3 +321,23 @@ export interface SkillCatalog {
   skills: SkillOption[];
   warnings: string[];
 }
+
+export interface UsageWindow {
+  id: string;
+  label: string;
+  shortLabel: string;
+  usedPercent: number;
+  resetsAt: string | null;
+}
+
+export interface ProviderUsage {
+  provider: ModelProvider;
+  status: "ok" | "unavailable" | "error";
+  windows: UsageWindow[];
+  updatedAt: string;
+  message?: string;
+}
+
+export interface UsageSnapshot {
+  providers: ProviderUsage[];
+}

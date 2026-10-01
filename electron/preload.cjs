@@ -26,4 +26,5 @@ contextBridge.exposeInMainWorld("milagre", {
     ipcRenderer.on("update:state", listener);
     return () => ipcRenderer.removeListener("update:state", listener);
   },
+  readUsage: () => ipcRenderer.invoke("usage:read"),
 });

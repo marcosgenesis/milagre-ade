@@ -1,6 +1,6 @@
 export {};
 
-import type { ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, QuestionAnswers, SkillCatalog, WorktreeRequest } from "./model";
+import type { ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -25,6 +25,7 @@ declare global {
       getUpdateState: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
+      readUsage: () => Promise<UsageSnapshot>;
     };
   }
 }

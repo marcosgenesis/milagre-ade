@@ -17,11 +17,13 @@ const { createWorktree, listBranches } = require("./worktrees.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
+const { createUsageReader } = require("./usage.cjs");
 
 const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
+const readUsage = createUsageReader();
 
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };
@@ -118,6 +120,8 @@ function executable(name) {
   }
   return executables.get(name);
 }
+
+ipcMain.handle("usage:read", () => readUsage());
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);

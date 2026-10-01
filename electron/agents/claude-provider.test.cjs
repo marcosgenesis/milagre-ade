@@ -43,6 +43,30 @@ const scripts = {
     yield delta(JSON.stringify(result));
     yield success;
   },
+  async *sdkAbortsPending({ options }) {
+    yield init;
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 10);
+    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
+      signal: controller.signal,
+      requestId: "req-2",
+      toolUseID: "tool-2",
+    });
+    yield delta(JSON.stringify(result));
+    yield success;
+  },
+  async *sdkAbortsAlready({ options }) {
+    yield init;
+    const controller = new AbortController();
+    controller.abort();
+    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
+      signal: controller.signal,
+      requestId: "req-3",
+      toolUseID: "tool-3",
+    });
+    yield delta(JSON.stringify(result));
+    yield success;
+  },
 };
 
 // Stands in for the SDK's query(): consumes the streaming prompt and plays a script per message.
@@ -281,4 +305,29 @@ test("closing cancels a pending approval", async (t) => {
 test("an answer for an unknown request changes nothing", async (t) => {
   const { session } = claude(t);
   assert.equal(session.respondToPermission("nope", "allow"), false);
+});
+
+test("the SDK can abort a pending approval", async (t) => {
+  const { session, events } = claude(t, { script: scripts.sdkAbortsPending });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  // Wait for the abort to fire and resolve the request
+  await waitUntil(() => events.some((event) => event.type === "permission-resolved" && event.decision === "cancelled"));
+  // The turn should end normally with turn-completed since the SDK aborted, not the session
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
+  const types = events.map((event) => event.type);
+  assert.deepEqual(events.at(-1), { type: "turn-completed" });
+});
+
+test("canUseTool works when the signal is already aborted", async (t) => {
+  const { session, events } = claude(t, { script: scripts.sdkAbortsAlready });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  // The request should be immediately resolved as cancelled
+  await waitUntil(() => events.some((event) => event.type === "permission-resolved" && event.decision === "cancelled"));
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
+  // respondToPermission should return false since the request is already resolved
+  assert.equal(session.respondToPermission("req-3", "allow"), false);
 });

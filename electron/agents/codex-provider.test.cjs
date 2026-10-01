@@ -134,7 +134,7 @@ test("asks before running a command and passes the answer back", async (t) => {
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await asked(events);
   assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true,
+    type: "permission-request", requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true, stepId: "cmd-1",
   });
   assert.equal(session.respondToPermission("srv-1", "allow-for-chat"), true);
   await ended(events);
@@ -156,7 +156,7 @@ test("file changes show the diff Codex is about to apply", async (t) => {
   await session.startTurn(TURN);
   await asked(events);
   assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "srv-1", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true,
+    type: "permission-request", requestId: "srv-1", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true, stepId: "patch-1",
   });
   session.respondToPermission("srv-1", "allow");
   await ended(events);

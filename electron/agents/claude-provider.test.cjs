@@ -282,7 +282,7 @@ test("asks before a tool runs and passes the answer back", async (t) => {
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await asked(events);
   assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "req-1", kind: "edit", tool: "Write", title: "Write hello.txt?", files: ["/repo/hello.txt"], diff: "+hi", allowForChat: true,
+    type: "permission-request", requestId: "req-1", kind: "edit", tool: "Write", title: "Write hello.txt?", files: ["/repo/hello.txt"], diff: "+hi", allowForChat: true, stepId: "tool-1",
   });
   assert.equal(session.respondToPermission("req-1", "allow"), true);
   await ended(events);

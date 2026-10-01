@@ -7,6 +7,7 @@ const {
   capText,
   claudeRequest,
   claudeResult,
+  codexChangesDiff,
   codexCommandRequest,
   codexDecision,
   codexFileRequest,
@@ -67,7 +68,7 @@ test("forget drops a withdrawn request without answering it", () => {
 
 test("Claude: a shell command shows the command", () => {
   const request = claudeRequest("Bash", { command: "npm test", description: "Run tests" }, { requestId: "r1", toolUseID: "t1", suggestions: [{ type: "addRules" }] });
-  assert.deepEqual(request, { requestId: "r1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test", allowForChat: true });
+  assert.deepEqual(request, { requestId: "r1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test", allowForChat: true, stepId: "t1" });
 });
 
 test("Claude: edits show the file and a diff", () => {
@@ -132,7 +133,7 @@ test("Codex: the shell wrapper is removed from commands", () => {
 
 test("Codex: command requests", () => {
   assert.deepEqual(codexCommandRequest("srv-1", { itemId: "c", command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" }), {
-    requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true,
+    requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true, stepId: "c",
   });
   assert.deepEqual(codexCommandRequest(7, { command: "curl x", reason: null, networkApprovalContext: { host: "example.com", protocol: "https" } }), {
     requestId: "7", kind: "command", tool: "Shell", title: "Allow network access to example.com?", command: "curl x", allowForChat: true,
@@ -142,7 +143,7 @@ test("Codex: command requests", () => {
 test("Codex: file requests show the changes Codex reported when the edit started", () => {
   const changes = [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }];
   assert.deepEqual(codexFileRequest("srv-2", { itemId: "p", reason: "Write notes" }, changes), {
-    requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true,
+    requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true, stepId: "p",
   });
   assert.equal(codexFileRequest("s", {}, [changes[0], { path: "/repo/b", diff: "" }]).title, "Edit 2 files?");
   assert.deepEqual(codexFileRequest("s", { grantRoot: "/tmp/out" }, undefined), { requestId: "s", kind: "edit", tool: "Edit files", title: "Allow writing to /tmp/out?", files: [], allowForChat: true });
@@ -160,6 +161,14 @@ test("Codex: added and deleted files get +/- markers, real diffs are left alone"
   assert.equal(diffOf({ type: "add" }, ""), "--- /r/a\n");
   const big = codexFileRequest("s", {}, [{ path: "/r/a", kind: { type: "add" }, diff: "x\n".repeat(20_000) }]).diff;
   assert.ok(big.endsWith("\n… truncated") && big.startsWith("--- /r/a\n+x\n+x"));
+});
+
+test("Codex: new and deleted files are whole contents; updates are already diffs", () => {
+  assert.equal(codexChangesDiff([
+    { path: "/repo/new.txt", kind: { type: "add" }, diff: "one\ntwo\n" },
+    { path: "/repo/old.txt", kind: { type: "delete" }, diff: "gone\n" },
+    { path: "/repo/app.js", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-Hello\n+Hi\n" },
+  ]), "--- /repo/new.txt\n+one\n+two\n\n--- /repo/old.txt\n-gone\n\n--- /repo/app.js\n@@ -1 +1 @@\n-Hello\n+Hi\n");
 });
 
 test("Codex: decisions", () => {

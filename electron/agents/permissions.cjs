@@ -3,7 +3,8 @@ const path = require("node:path");
 // Approval requests from both agents, in the shape of the `permission-request` event, and the
 // replies each agent expects for the user's answer. A request is
 //   { requestId, kind: "command"|"edit"|"other", tool, title, description?, command?, cwd?,
-//     diff?, files?, detail?, reason?, allowForChat }
+//     diff?, files?, detail?, reason?, allowForChat, stepId? }
+// where stepId names the tool step (see steps.cjs) the request is about,
 // and a decision is "allow" | "allow-for-chat" | "deny", or "cancelled" when the turn stops first.
 
 const DENIED_MESSAGE = "Denied in Milagre";
@@ -40,6 +41,7 @@ function claudeRequest(toolName, input, options = {}) {
     description: options.description || undefined,
     reason: options.decisionReason || (options.blockedPath ? `Reaches outside this chat's folder: ${options.blockedPath}` : undefined),
     allowForChat: Boolean(options.suggestions?.length) && !options.suppressAlwaysAllowRule,
+    stepId: options.toolUseID || undefined,
   };
   if (toolName === "Bash") return compact({ ...base, kind: "command", title: options.title || "Run this command?", command: String(input.command ?? "") });
   if (EDIT_TOOLS.has(toolName)) {
@@ -83,6 +85,7 @@ function codexCommandRequest(id, params) {
     cwd: params.cwd ?? undefined,
     reason: params.reason ?? undefined,
     allowForChat: true,
+    stepId: params.itemId ?? undefined,
   });
 }
 
@@ -95,6 +98,12 @@ function markedDiff(change) {
   const lines = diff.split("\n");
   if (lines.at(-1) === "") lines.pop();
   return lines.map((line) => mark + line).join("\n") + (diff.endsWith("\n") ? "\n" : "");
+}
+
+// The changes of a Codex fileChange as diff text, each under a `--- path` header. Used by the
+// approval card and the step rows, so both show the same thing.
+function codexChangesDiff(changes) {
+  return capText(changes.map((change) => `--- ${change.path}\n${markedDiff(change)}`).join("\n"));
 }
 
 // item/fileChange/requestApproval params -> request. The request has no diff of its own; `changes`
@@ -110,9 +119,10 @@ function codexFileRequest(id, params, changes = []) {
     tool: "Edit files",
     title,
     files,
-    diff: changes.length ? capText(changes.map((change) => `--- ${change.path}\n${markedDiff(change)}`).join("\n")) : undefined,
+    diff: changes.length ? codexChangesDiff(changes) : undefined,
     reason: params.reason ?? undefined,
     allowForChat: true,
+    stepId: params.itemId ?? undefined,
   });
 }
 
@@ -168,8 +178,10 @@ module.exports = {
   USER_DECISIONS,
   PendingPermissions,
   capText,
+  claudeEditDiff,
   claudeRequest,
   claudeResult,
+  codexChangesDiff,
   codexCommandRequest,
   codexDecision,
   codexFileRequest,

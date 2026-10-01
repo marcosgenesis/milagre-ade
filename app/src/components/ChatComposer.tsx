@@ -15,6 +15,7 @@ import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
+import { parseRecommendation, RecommendationCard } from "./agents/recommendation-card";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -27,12 +28,15 @@ function MessageSection({
   session,
   isUser,
   modelName,
+  onRecommendationSelect,
 }: {
   message: AppChatMessage;
   session?: AgentSession;
   isUser: boolean;
   modelName: string;
+  onRecommendationSelect: (option: string) => void;
 }) {
+  const recommendation = !isUser ? parseRecommendation(message.body) : null;
   return (
     <article
       id={`message-${message.id}`}
@@ -48,7 +52,11 @@ function MessageSection({
       </div>
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
         {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name}><img src={image.dataUrl} alt={image.name} className="max-h-60 max-w-full rounded-lg object-contain" /></a>)}</div>}
-        <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
+        {recommendation ? (
+          <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+        ) : (
+          <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
+        )}
       </div>
     </article>
   );
@@ -77,6 +85,7 @@ interface ChatComposerProps {
   onToggleFirst: () => void;
   onToggleSecond: () => void;
   onCycleConnection: () => void;
+  onRecommendationSelect: (option: string) => void;
   approval?: ReactNode;
 }
 
@@ -103,6 +112,7 @@ export function ChatComposer({
   onToggleFirst,
   onToggleSecond,
   onCycleConnection,
+  onRecommendationSelect,
   approval,
 }: ChatComposerProps) {
   const [tab, setTab] = useState("Worktrees");
@@ -134,6 +144,7 @@ export function ChatComposer({
                   session={sessions[String(message.session_id)]}
                   isUser={message.role === "user"}
                   modelName={message.model ?? selectedModel.name}
+                  onRecommendationSelect={onRecommendationSelect}
                 />
               ))
             )}

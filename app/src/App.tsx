@@ -287,6 +287,7 @@ function App() {
             onToggleFirst={() => { if (firstWorktree) void toggleSession(firstWorktree.id); }}
             onToggleSecond={() => { if (secondWorktree) void toggleSession(secondWorktree.id); }}
             onCycleConnection={() => void cycleConnection()}
+            onRecommendationSelect={(option) => void executeSend(option, permissionMode)}
             approval={approvalPrompt ? (
               <ToolApproval
                 tool="agent.run"

@@ -9,6 +9,7 @@ declare global {
     milagre: {
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;
+      getProjectImage: (projectPath: string) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number }>;
       getCurrentProject: () => Promise<OpenProject>;

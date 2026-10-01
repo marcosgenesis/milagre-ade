@@ -11,12 +11,15 @@ import {
   FolderAddIcon,
   Search01Icon,
   Settings01Icon,
+  SidebarLeft01Icon,
+  SidebarRight01Icon,
   SparklesIcon,
   Tick02Icon,
   UserAdd01Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
+import { WorkspaceIcon } from "./WorkspaceIcon";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -34,7 +37,6 @@ const IconMagnifyingGlass = (props: HugeIconProps) => <HugeIcon icon={Search01Ic
 const IconPlusMedium = (props: HugeIconProps) => <HugeIcon icon={Add01Icon} {...props} />;
 const IconPopsicle2 = (props: HugeIconProps) => <HugeIcon icon={SparklesIcon} {...props} />;
 const IconSettingsGear1 = (props: HugeIconProps) => <HugeIcon icon={Settings01Icon} {...props} />;
-const IconSidebarLeftArrow = (props: HugeIconProps) => <HugeIcon icon={ArrowLeft01Icon} {...props} />;
 const IconUserAdd = (props: HugeIconProps) => <HugeIcon icon={UserAdd01Icon} {...props} />;
 
 /* ─────────────────────────────────────────────────────────
@@ -63,8 +65,16 @@ const DEFAULT_RECENTS: SidebarRecent[] = [
   { id: "subway", label: "Subway surfing" },
 ];
 
+function recentInitials(label: string) {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
 type SidebarNavProps = {
   workspaceName?: string;
+  workspaceImage?: string | null;
   onOpenProject?: () => void;
   activeTitle?: string | null;
   /** Controlled selection of a recent by id; takes precedence over title matching. */
@@ -80,8 +90,8 @@ type SidebarNavProps = {
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
-  // Wide enough to sit under the macOS traffic lights (x 24→76 in main.cjs).
-  collapsedWidth: 76,
+  // A 32px control with 6px of space on each side.
+  collapsedWidth: 44,
   duration: 280,
   copyDuration: 180,
   copyOffset: 8,
@@ -105,7 +115,7 @@ const CHATS_HEADER_BUTTON =
   "flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
 
 const BOTTOM_BAR_BUTTON =
-  "flex size-9 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
+  "flex items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
 
 export function GlideGroup({ children }: { children: ReactNode }) {
   return (
@@ -163,7 +173,7 @@ function WorkspaceMenu({
 }: {
   position: { top: number; left: number };
   onClose: () => void;
-  workspace: { name: string; monogram: string };
+  workspace: { name: string; monogram: string; image?: string | null };
 }) {
   return createPortal(
     <div
@@ -184,7 +194,7 @@ function WorkspaceMenu({
           className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
         >
           <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
-            {workspace.monogram}
+            <WorkspaceIcon src={workspace.image} fallback={workspace.monogram} />
           </span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{workspace.name}</span>
           <span className="shrink-0 text-ink"><IconCheckmark1Small size={18} /></span>
@@ -224,6 +234,7 @@ function WorkspaceMenu({
 
 export default function SidebarNav({
   workspaceName = WORKSPACE.name,
+  workspaceImage,
   onOpenProject,
   activeTitle,
   activeId,
@@ -245,7 +256,7 @@ export default function SidebarNav({
 
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
   const visibleRecents = recents.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()));
-  const workspace = { name: workspaceName, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
+  const workspace = { name: workspaceName, image: workspaceImage, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -271,29 +282,40 @@ export default function SidebarNav({
   };
 
   return (
-    <aside
-      data-sidebar-collapsed={collapsed}
-      aria-label="Workspace navigation"
-      className={`relative flex shrink-0 overflow-hidden rounded-window bg-surface shadow-card transition-[width] ${fill ? "h-full" : "h-[600px]"} ${className}`}
-      style={{
-        width: collapsed ? SIDEBAR_MOTION.collapsedWidth : SIDEBAR_MOTION.expandedWidth,
-        transitionDuration: `${SIDEBAR_MOTION.duration}ms`,
-        transitionTimingFunction: SIDEBAR_MOTION.easing,
-        "--sidebar-copy-duration": `${SIDEBAR_MOTION.copyDuration}ms`,
-        "--sidebar-copy-offset": `${SIDEBAR_MOTION.copyOffset}px`,
-        "--sidebar-easing": SIDEBAR_MOTION.easing,
-      } as CSSProperties}
-    >
-      <div className="flex min-h-0 w-[224px] shrink-0 flex-col">
-        <div aria-hidden className="h-8 shrink-0" />
-        <div className="relative mb-2.5 h-10 shrink-0">
+    <div className={`relative flex min-h-0 shrink-0 flex-col ${fill ? "h-full" : "h-[600px]"} ${className}`}>
+      <button
+        type="button"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!collapsed}
+        onClick={() => collapsed ? setCollapsed(false) : collapse()}
+        className="absolute left-[76px] top-[-46px] z-[60] flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink [-webkit-app-region:no-drag]"
+      >
+        <span className="pointer-events-none flex items-center justify-center">
+          <HugeIcon icon={collapsed ? SidebarRight01Icon : SidebarLeft01Icon} size={18} />
+        </span>
+      </button>
+      <aside
+        data-sidebar-collapsed={collapsed}
+        aria-label="Workspace navigation"
+        className="relative flex min-h-0 shrink-0 overflow-hidden rounded-window bg-surface shadow-card transition-[width]"
+        style={{
+          width: collapsed ? SIDEBAR_MOTION.collapsedWidth : SIDEBAR_MOTION.expandedWidth,
+          flex: "1 1 0%",
+          transitionDuration: `${SIDEBAR_MOTION.duration}ms`,
+          transitionTimingFunction: SIDEBAR_MOTION.easing,
+          "--sidebar-copy-duration": `${SIDEBAR_MOTION.copyDuration}ms`,
+          "--sidebar-copy-offset": `${SIDEBAR_MOTION.copyOffset}px`,
+          "--sidebar-easing": SIDEBAR_MOTION.easing,
+        } as CSSProperties}
+      >
+      <div className="flex min-h-0 w-full shrink-0 flex-col">
+        <div className="relative h-10 shrink-0">
           <button
             ref={workspaceButtonRef}
             data-workspace-trigger
             type="button"
             aria-expanded={workspaceOpen}
-            aria-hidden={collapsed}
-            tabIndex={collapsed ? -1 : 0}
+            aria-label={workspace.name}
             onClick={() => {
               if (!workspaceOpen && workspaceButtonRef.current) {
                 const rect = workspaceButtonRef.current.getBoundingClientRect();
@@ -301,10 +323,10 @@ export default function SidebarNav({
               }
               setWorkspaceOpen((open) => !open);
             }}
-            className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[164px] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
+            className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
           >
             <span className="sidebar-logo flex size-5 shrink-0 items-center justify-center text-ink">
-              <IconPopsicle2 size={18} />
+              <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />
             </span>
             <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">
               {workspace.name}
@@ -316,30 +338,10 @@ export default function SidebarNav({
 
           {workspaceOpen && <WorkspaceMenu position={workspacePosition} workspace={workspace} onClose={() => setWorkspaceOpen(false)} />}
 
-          <button
-            type="button"
-            aria-label="Collapse sidebar"
-            aria-hidden={collapsed}
-            tabIndex={collapsed ? -1 : 0}
-            onClick={collapse}
-            className="sidebar-collapse-control absolute right-2 top-1 flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color] duration-150 hover:bg-hover-2 hover:text-ink"
-          >
-            <IconSidebarLeftArrow size={18} />
-          </button>
-          <button
-            type="button"
-            aria-label="Expand sidebar"
-            aria-hidden={!collapsed}
-            tabIndex={collapsed ? 0 : -1}
-            onClick={() => setCollapsed(false)}
-            className="sidebar-expand-control absolute left-5 top-0.5 flex size-9 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color] duration-150 hover:bg-hover-2 hover:text-ink"
-          >
-            <IconSidebarLeftArrow size={18} className="rotate-180" />
-          </button>
         </div>
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
-          <div className="sidebar-copy relative mx-2 mb-1 h-8">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={`sidebar-copy relative mx-2 mb-1 h-8 ${collapsed ? "hidden" : ""}`}>
             <div
               aria-hidden={searchOpen}
               className={`absolute inset-0 flex items-center gap-1.5 px-2 text-[12.5px] font-medium text-ink-3 transition-[opacity,transform] ${searchOpen ? "pointer-events-none -translate-x-1 opacity-0" : "translate-x-0 opacity-100"}`}
@@ -426,6 +428,9 @@ export default function SidebarNav({
                     active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
                   }`}
                 >
+                  <span className="sidebar-chat-initials size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">
+                    {recentInitials(item.label)}
+                  </span>
                   <span className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] font-medium ${active ? "text-ink" : "text-ink-2"}`}>
                     {item.label}
                   </span>
@@ -438,19 +443,20 @@ export default function SidebarNav({
           </GlideGroup>
         </div>
 
-        <div className={`mt-3 flex border-t border-line py-1.5 ${collapsed ? "ml-5 w-9 flex-col-reverse gap-1" : "mx-2 w-[208px] items-center justify-between"}`}>
+        <div className={`mt-3 flex border-t border-line py-1.5 ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}>
           <Tooltip label="Add project" shortcut="⌘O">
-            <button type="button" aria-label="Add project" onClick={onOpenProject} className={BOTTOM_BAR_BUTTON}>
+            <button type="button" aria-label="Add project" onClick={onOpenProject} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
               <IconFolderAdd size={17} />
             </button>
           </Tooltip>
           <Tooltip label="Settings" shortcut="⌘," align={collapsed ? "start" : "end"}>
-            <button type="button" aria-label="Settings" onClick={onOpenSettings} className={BOTTOM_BAR_BUTTON}>
+            <button type="button" aria-label="Settings" onClick={onOpenSettings} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
               <IconSettingsGear1 size={17} />
             </button>
           </Tooltip>
         </div>
       </div>
-    </aside>
+      </aside>
+    </div>
   );
 }

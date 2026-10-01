@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("milagre", {
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
+  getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
   getCurrentProject: () => ipcRenderer.invoke("project:current"),

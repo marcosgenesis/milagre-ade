@@ -467,12 +467,12 @@ a:focus-visible .animated-underline::after {
 
 /* ══════════════════════════════════════════════════════════
  * COMPONENT-SPECIFIC — SidebarNav
- * The 52↔224px collapsible sidebar tree.
+ * The 44↔224px collapsible sidebar tree.
  * Copy this block only alongside SidebarNav; it is not part of the
  * generic foundation above.
  * ══════════════════════════════════════════════════════════ */
 .sidebar-row {
-  width: 208px;
+  width: calc(100% - 16px);
   transition-duration: var(--sidebar-copy-duration);
   transition-timing-function: var(--sidebar-easing);
 }
@@ -492,6 +492,10 @@ a:focus-visible .animated-underline::after {
   transition-timing-function: ease-out;
 }
 
+.sidebar-chat-initials {
+  display: none;
+}
+
 .sidebar-expand-control {
   pointer-events: none;
   opacity: 0;
@@ -502,10 +506,13 @@ a:focus-visible .animated-underline::after {
   left: 8px;
 }
 
-/* Centers the 36px controls in the 76px collapsed rail. */
+/* Centers the 32px controls in the 44px collapsed rail. */
 [data-sidebar-collapsed="true"] .sidebar-row {
-  width: 36px;
-  margin-left: 20px;
+  width: 32px;
+  margin-inline: 6px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 [data-sidebar-collapsed="true"] .sidebar-copy {
@@ -514,14 +521,32 @@ a:focus-visible .animated-underline::after {
   transform: translateX(calc(var(--sidebar-copy-offset) * -1));
 }
 
-[data-sidebar-collapsed="true"] .sidebar-workspace-control {
-  pointer-events: none;
+/* Hidden labels must not take space away from the centered icon. */
+[data-sidebar-collapsed="true"] .sidebar-row > .sidebar-copy,
+[data-sidebar-collapsed="true"] .sidebar-workspace-control > .sidebar-copy {
+  display: none;
 }
 
-[data-sidebar-collapsed="true"] .sidebar-logo,
+[data-sidebar-collapsed="true"] .sidebar-workspace-control {
+  width: 32px;
+  left: 6px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  pointer-events: auto;
+}
+
 [data-sidebar-collapsed="true"] .sidebar-collapse-control {
   pointer-events: none;
   opacity: 0;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-logo {
+  opacity: 1;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-chat-initials {
+  display: flex;
 }
 
 [data-sidebar-collapsed="true"] .sidebar-expand-control {
@@ -530,8 +555,9 @@ a:focus-visible .animated-underline::after {
 }
 
 [data-sidebar-collapsed="true"] .sidebar-glide-highlight {
+  left: 6px;
   right: auto;
-  width: 36px;
+  width: 32px;
 }
 
 @media (prefers-reduced-motion: reduce) {

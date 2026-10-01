@@ -8,6 +8,7 @@ const { runAgentWithImages } = require("./image-input.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
 const { reconcileState } = require("./project-state.cjs");
+const { resolveProjectImage } = require("./project-image.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -81,6 +82,7 @@ async function saveProject(projectPath, state) {
 
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
 ipcMain.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
+ipcMain.handle("project:image", (_event, projectPath) => resolveProjectImage(projectPath));
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("worktree:create", async (_event, request) => {

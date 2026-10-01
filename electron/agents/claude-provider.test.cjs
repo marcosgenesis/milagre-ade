@@ -83,6 +83,17 @@ const scripts = {
     yield delta(`${JSON.stringify(result)}|${steer.message.content[0].text}`);
     yield success;
   },
+  // Claude Code sends the finished tool_use block, then asks, then sends the tool's result.
+  async *runsTools({ options, signal }) {
+    yield init;
+    yield delta("Checking.");
+    yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "npm test" } }] } };
+    const answer = await options.canUseTool("Bash", { command: "npm test" }, { signal, requestId: "req-1", toolUseID: "tool-1" });
+    const allowed = answer.behavior === "allow";
+    yield { type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: allowed ? "ok" : answer.message, is_error: !allowed }] }, tool_use_result: allowed ? { stdout: "ok", stderr: "" } : `Error: ${answer.message}` };
+    yield delta("All green.");
+    yield success;
+  },
   async *sdkAbortsAlready({ options }) {
     yield init;
     const controller = new AbortController();
@@ -329,6 +340,32 @@ test("closing cancels a pending approval", async (t) => {
   assert.ok(events.some((event) => event.type === "permission-resolved" && event.decision === "cancelled"));
   // The script may still flush its last text while the query closes, so check the ending, not the order.
   assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
+});
+
+test("a tool call shows as a step before its approval, and ends with its result", async (t) => {
+  const { session, events } = claude(t, { script: scripts.runsTools });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  const request = events.find((event) => event.type === "permission-request");
+  const started = events.find((event) => event.type === "step-started");
+  assert.deepEqual(started, { type: "step-started", step: { id: "tool-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" } });
+  assert.equal(request.stepId, started.step.id);
+  assert.ok(events.indexOf(started) < events.indexOf(request));
+  session.respondToPermission("req-1", "allow");
+  await ended(events);
+  assert.deepEqual(events.filter((event) => event.type !== "permission-request").map((event) => event.type), [
+    "turn-started", "session-started", "text-delta", "step-started", "permission-resolved", "step-completed", "text-delta", "turn-completed",
+  ]);
+  assert.deepEqual(events.find((event) => event.type === "step-completed"), { type: "step-completed", id: "tool-1", status: "done", detail: "$ npm test\nok" });
+});
+
+test("a denied tool call ends as a failed step", async (t) => {
+  const { session, events } = claude(t, { script: scripts.runsTools });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  session.respondToPermission("req-1", "deny");
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "step-completed"), { type: "step-completed", id: "tool-1", status: "failed", detail: "$ npm test\nDenied in Milagre" });
 });
 
 test("an answer for an unknown request changes nothing", async (t) => {

@@ -9,6 +9,8 @@
 // question (Codex asks a question and ends the turn on the answer), question-steer (Codex asks a question
 // and the turn waits for turn/steer), question-withdrawn (a question Codex takes back), late-question
 // (like late-approval, with a question).
+// steps (a command with streamed output and a new file, then a reply), running-step (a command
+// starts and the turn waits until it's interrupted).
 // fake/turn-started makes it announce a turn nobody asked for.
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -89,6 +91,22 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
+      }
+      if (scenario === "steps" || scenario === "running-step") {
+        const command = { type: "commandExecution", id: "exec-1", command: "/bin/zsh -lc 'npm test'", cwd: "/repo", status: "inProgress", commandActions: [{ type: "unknown", command: "npm test" }], aggregatedOutput: null, exitCode: null };
+        notify("item/started", { threadId, turnId, item: command });
+        if (scenario === "running-step") {
+          pendingTurn = { threadId, turnId };
+          return undefined;
+        }
+        notify("item/commandExecution/outputDelta", { threadId, turnId, itemId: "exec-1", delta: "ok 2\n" });
+        notify("item/completed", { threadId, turnId, item: { ...command, status: "completed", aggregatedOutput: "ok 1\nok 2\n", exitCode: 0 } });
+        notify("item/started", { threadId, turnId, item: { type: "reasoning", id: "rs-1", summary: [], content: [] } });
+        const patch = { type: "fileChange", id: "exec-2", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] };
+        notify("item/started", { threadId, turnId, item: patch });
+        notify("item/completed", { threadId, turnId, item: { ...patch, status: "completed" } });
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Done" });
+        return completeTurn(threadId, turnId, "completed");
       }
       if (scenario === "approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };

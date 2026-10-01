@@ -39,7 +39,8 @@ const sessionClosedError = () => Object.assign(new Error("The agent session clos
 class CodexSession {
   constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
     Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
-    this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false };
+    // steps: ids of the tool steps started in this turn and not yet completed.
+    this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
     this.starting = null;
     this.turnActive = false;
@@ -272,6 +273,8 @@ class CodexSession {
     this.permissions.cancelAll();
     this.questions.cancelAll();
     this.fileChanges.clear();
+    // A command still running when the turn stopped never completes; the renderer closes its step.
+    this.state.steps.clear();
     const imageSets = this.imageSets;
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));

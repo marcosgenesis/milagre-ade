@@ -44,7 +44,7 @@ class CodexSession {
     return this.state.threadId;
   }
 
-  async startTurn({ prompt, images = [], model, permissionMode }) {
+  async startTurn({ prompt, images = [], model, permissionMode, effort }) {
     if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("codex") });
@@ -67,6 +67,7 @@ class CodexSession {
         threadId: this.state.threadId,
         input,
         model,
+        ...(effort ? { effort } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });

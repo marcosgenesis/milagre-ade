@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("milagre", {
   openProject: () => ipcRenderer.invoke("project:open"),
   saveProject: (projectPath, state) => ipcRenderer.invoke("project:save", projectPath, state),
   startTurn: (request) => ipcRenderer.invoke("agent:start-turn", request),
+  getModelCapabilities: () => ipcRenderer.invoke("agent:capabilities"),
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   onAgentEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);

@@ -7,6 +7,7 @@ const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
+const { createCapabilityCache } = require("./agents/capabilities.cjs");
 const { resolveExecutable } = require("./agents/environment.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
@@ -122,6 +123,9 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
   const command = await executable(request.provider === "codex" ? "codex" : "claude");
   return agents.startTurn({ ...request, prompt, images, command });
 });
+
+const modelCapabilities = createCapabilityCache({ executable, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
+ipcMain.handle("agent:capabilities", () => modelCapabilities());
 
 ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 

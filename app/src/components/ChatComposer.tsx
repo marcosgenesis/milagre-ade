@@ -14,7 +14,7 @@ import {
   Link01Icon,
   Message01Icon,
 } from "@hugeicons/core-free-icons";
-import type { AgentSession, ChatMessage as AppChatMessage, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -83,6 +83,11 @@ interface ChatComposerProps {
   lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
+  capability: ModelCapability;
+  effort?: EffortLevel;
+  onEffortChange: (effort: EffortLevel) => void;
+  ultracode: boolean;
+  onUltracodeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
   worktreeSummary: string;
@@ -218,6 +223,11 @@ export function ChatComposer({
   lockedProvider,
   selectedModel,
   onModelChange,
+  capability,
+  effort,
+  onEffortChange,
+  ultracode,
+  onUltracodeChange,
   permissionMode,
   onPermissionModeChange,
   worktreeSummary,
@@ -322,6 +332,11 @@ export function ChatComposer({
           lockedProvider={lockedProvider}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
+          capability={capability}
+          effort={effort}
+          onEffortChange={onEffortChange}
+          ultracode={ultracode}
+          onUltracodeChange={onUltracodeChange}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}

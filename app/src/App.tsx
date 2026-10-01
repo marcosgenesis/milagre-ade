@@ -10,6 +10,10 @@ import {
   ModelOption,
   OpenProject,
   PermissionMode,
+  EffortLevel,
+  ModelCapabilities,
+  capabilityFor,
+  effortFor,
   createInitialState,
   sessionForWorktree,
   sortedWorktrees,
@@ -62,6 +66,13 @@ function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => MODEL_CATALOG.find((model) => model.id === getSettings().defaultModelId) ?? MODEL_CATALOG[0]);
+  const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
+  const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
+  const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
+  const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
+  const [capabilities, setCapabilities] = useState<ModelCapabilities | null>(null);
+  useEffect(() => { void window.milagre.getModelCapabilities().then(setCapabilities).catch(() => undefined); }, []);
+  const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
   const [isolation, setIsolation] = useState<Isolation>("local");
@@ -252,6 +263,8 @@ function App() {
       model: model.id,
       cwd: worktree.path,
       permissionMode: mode,
+      effort: effortFor(capabilityFor(model, capabilities), effort),
+      ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
       prompt: body || "Describe the attached images.",
       images,
       resumeId: chatSession.native_session_id,
@@ -423,6 +436,11 @@ function App() {
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
+            capability={selectedCapability}
+            effort={effortFor(selectedCapability, effort)}
+            onEffortChange={setEffort}
+            ultracode={selectedCapability.ultracode && ultracode}
+            onUltracodeChange={setUltracode}
             permissionMode={permissionMode}
             onPermissionModeChange={setPermissionMode}
             worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}

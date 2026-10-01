@@ -1,6 +1,6 @@
 export {};
 
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, SkillCatalog, WorktreeRequest } from "./model";
+import type { ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, SkillCatalog, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -16,6 +16,7 @@ declare global {
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
       startTurn: (request: AgentStartTurnRequest) => Promise<{ turnId: string | null }>;
+      getModelCapabilities: () => Promise<ModelCapabilities>;
       interruptAgent: (chatId: string) => Promise<void>;
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;

@@ -20,7 +20,7 @@ class SessionManager {
   async startTurn(request) {
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
     clearTimeout(entry.idleTimer);
-    return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode });
+    return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
   }
 
   async currentEntry(request) {

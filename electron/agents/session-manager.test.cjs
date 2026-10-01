@@ -58,7 +58,7 @@ test("creates one session per chat and reuses it", async (t) => {
   assert.equal(created[0].options.cwd, "/repo");
   assert.equal(created[0].options.resumeId, "thread-7");
   assert.equal(created[0].options.command, "/bin/codex");
-  assert.deepEqual(created[0].turns[0], { prompt: "hi", images: [], model: "gpt-6-sol", permissionMode: "auto" });
+  assert.deepEqual(created[0].turns[0], { prompt: "hi", images: [], model: "gpt-6-sol", permissionMode: "auto", effort: undefined, ultracode: undefined });
 });
 
 test("keeps chats apart", async (t) => {

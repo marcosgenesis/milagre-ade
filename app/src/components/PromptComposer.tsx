@@ -16,8 +16,8 @@ import {
   SecurityCheckIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
-import type { ModelOption, ModelProvider, PermissionMode } from "../model";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import type { EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { effortCopy, MODEL_CATALOG, PERMISSION_MODES } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
@@ -86,6 +86,11 @@ interface PromptComposerProps {
   lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
+  capability: ModelCapability;
+  effort?: EffortLevel;
+  onEffortChange: (effort: EffortLevel) => void;
+  ultracode: boolean;
+  onUltracodeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Keep the tall layout (input above the controls) even while the draft is empty. */
@@ -99,11 +104,33 @@ const POPOVER_BOTTOM_INSET = 16;
 // Smallest room below a tall composer that still fits a usable list.
 const POPOVER_MIN_BELOW = 220;
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, lockedProvider, selectedModel, onModelChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+/** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
+function EffortMeter({ level, total }: { level: number; total: number }) {
+  return (
+    <span aria-hidden className="flex h-3 items-end gap-[2px]">
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
+          className="w-[2.5px] rounded-full transition-[background-color,height] duration-200 ease-out motion-reduce:transition-none"
+          style={{ height: `${4 + (index * 8) / Math.max(1, total - 1)}px`, background: index <= level ? "currentColor" : "var(--line-strong)" }}
+        />
+      ))}
+    </span>
+  );
+}
+
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, lockedProvider, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
+  const effortLevels = capability.efforts;
+  const effortIndex = Math.max(0, effortLevels.indexOf(effort ?? ""));
+  const effortName = effort ? effortCopy(effort).name : "";
+  // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share the accent.
+  const orchestrating = ultracode || effort === "ultra";
+  const effortLabel = ultracode ? "Ultracode" : effortName;
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
@@ -118,7 +145,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
-  const modelRef = useRef<HTMLButtonElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
   const popoverRootRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<{ left: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -169,20 +196,21 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     const contentHeight = input.scrollHeight;
     input.style.height = `${Math.min(Math.max(contentHeight, 28), 100)}px`;
     input.style.overflowY = contentHeight > 100 ? "auto" : "hidden";
-  }, [draft, expanded, selectedModel.name, alwaysExpanded]);
+  }, [draft, expanded, selectedModel.name, effortLabel, alwaysExpanded]);
 
   useEffect(() => {
-    if (!modelOpen && !plusOpen && !permissionOpen) return;
+    if (!modelOpen && !plusOpen && !permissionOpen && !effortOpen) return;
     const close = (event: PointerEvent) => {
       if (!(event.target as Element).closest("[data-promptbar]")) {
         setModelOpen(false);
         setPlusOpen(false);
         setPermissionOpen(false);
+        setEffortOpen(false);
       }
     };
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
-  }, [modelOpen, plusOpen, permissionOpen]);
+  }, [modelOpen, plusOpen, permissionOpen, effortOpen]);
 
   // Right-align the popover with its trigger, or left-align when that would leave the composer.
   // A tall composer has its controls at the bottom, so its popovers open below when there is room.
@@ -253,12 +281,13 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   // Escape closes the slash/@ menu or an open picker, from the prompt or a picker's search field.
   // Only then is it consumed: with nothing open it reaches the window and stops the running turn.
   function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen)) return;
+    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen || effortOpen)) return;
     event.preventDefault();
     setDismissed(true);
     setPlusOpen(false);
     setModelOpen(false);
     setPermissionOpen(false);
+    setEffortOpen(false);
     setQuery("");
     inputRef.current?.focus();
   }
@@ -330,6 +359,36 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
           </PickerPanel>
         )}
 
+        {effortOpen && (
+          <PickerPanel title="Thinking effort" className={`absolute w-[320px] ${anchorClass}`} style={anchorStyle}>
+            {effortLevels.map((level, index) => (
+              <PickerRow
+                key={level}
+                icon={<span className={`flex w-[22px] shrink-0 justify-center ${level === "ultra" ? "text-accent-ink" : "text-ink-2"}`}><EffortMeter level={index} total={effortLevels.length} /></span>}
+                label={effortCopy(level).name}
+                description={effortCopy(level).description}
+                selected={effort === level}
+                onClick={() => {
+                  onEffortChange(level);
+                  setEffortOpen(false);
+                  inputRef.current?.focus();
+                }}
+              />
+            ))}
+            {capability.ultracode && (
+              <button type="button" role="switch" aria-checked={ultracode} onClick={() => onUltracodeChange(!ultracode)} className="mt-1 flex w-full items-center gap-2 rounded-control border border-transparent border-t-line px-2 pt-2.5 pb-1.5 text-left transition-colors hover:bg-inset">
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <strong className={`text-xs font-medium ${ultracode ? "text-accent-ink" : "text-ink"}`}>Ultracode</strong>
+                  <span className="text-[10px] text-ink-3">Splits big work across parallel agents, at this effort</span>
+                </span>
+                <span aria-hidden className={`relative h-[15px] w-[26px] shrink-0 rounded-full transition-colors duration-200 ${ultracode ? "bg-accent-ink" : "bg-line-strong"}`}>
+                  <span className={`absolute top-[2px] left-[2px] size-[11px] rounded-full bg-surface shadow-xs transition-transform duration-200 ease-out motion-reduce:transition-none ${ultracode ? "translate-x-[11px]" : ""}`} />
+                </span>
+              </button>
+            )}
+          </PickerPanel>
+        )}
+
         {permissionOpen && (
           <PickerPanel title="Agent permissions" className={`absolute w-[340px] ${anchorClass}`} style={anchorStyle}>
             {PERMISSION_MODES.map((mode) => (
@@ -358,8 +417,11 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
           <div ref={controlsRef} className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
             <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onChange={(event) => { onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={listening ? "Listening…" : "Prompt or tag a worktree with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px]"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
-            <button ref={modelRef} type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setModelOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
-            <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-red" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
+            <div ref={modelRef} className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
+            <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
+            {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}
+            </div>
+            <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-red" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
             <button type="button" aria-label={listening ? "Stop voice input" : "Start voice input"} aria-pressed={listening} onClick={toggleListening} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"} ${listening ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}><Icon icon={Mic01Icon} size={15} /></button>
             <button type="button" aria-label="Send" disabled={!canSend || isSending || imageDraft.loading} onClick={onSend} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-6 row-start-2" : "col-start-6 row-start-1"}`} style={{ background: canSend && !isSending ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>
           </div>

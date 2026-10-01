@@ -56,7 +56,7 @@ class ClaudeSession {
     return this.state.sessionId;
   }
 
-  async startTurn({ prompt, images = [], model, permissionMode }) {
+  async startTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
     if (this.closed) throw new Error("This Claude session is closed.");
     if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
     if (!this.command) {
@@ -69,7 +69,7 @@ class ClaudeSession {
     Object.assign(this.state, { turnId, hasText: false });
     const mode = CLAUDE_MODES[permissionMode] ?? "acceptEdits";
     try {
-      if (!this.query) await this.start(model, mode);
+      if (!this.query) await this.start(model, mode, effort, ultracode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
@@ -78,6 +78,12 @@ class ClaudeSession {
         if (mode !== this.mode) {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
+        }
+        // A new effort level alone turns ultracode off, so both keys always travel together.
+        if ((effort && effort !== this.effort) || ultracode !== this.ultracode) {
+          await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode });
+          this.effort = effort;
+          this.ultracode = ultracode;
         }
       }
     } catch (error) {
@@ -99,7 +105,7 @@ class ClaudeSession {
     return { turnId };
   }
 
-  async start(model, mode) {
+  async start(model, mode, effort, ultracode = false) {
     const { query } = await this.loadSdk();
     if (this.closed) return;
     this.stderr = "";
@@ -107,12 +113,16 @@ class ClaudeSession {
     this.inbox = new Inbox();
     this.model = model;
     this.mode = mode;
+    this.effort = effort;
+    this.ultracode = ultracode;
     this.query = query({
       prompt: this.inbox,
       options: {
         cwd: this.cwd,
         model,
         permissionMode: mode,
+        ...(effort ? { effort } : {}),
+        ...(ultracode ? { settings: { ultracode: true } } : {}),
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: this.command,

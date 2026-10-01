@@ -12,6 +12,52 @@ export const PERMISSION_MODES: Array<{ id: PermissionMode; name: string; descrip
   { id: "full", name: "Full permission", description: "Remove filesystem and network limits" },
 ];
 
+/** Effort ids come from the agents themselves (Claude: low…max, Codex adds ultra). */
+export type EffortLevel = string;
+
+export interface ModelCapability {
+  /** Effort levels the model accepts, lightest first. Empty when it has no effort control. */
+  efforts: EffortLevel[];
+  defaultEffort?: EffortLevel;
+  /** Claude only: standing multi-agent orchestration on top of any effort level. */
+  ultracode: boolean;
+}
+
+export type ModelCapabilities = Record<ModelProvider, Record<string, ModelCapability>>;
+
+export const EFFORT_COPY: Record<string, { name: string; description: string }> = {
+  minimal: { name: "Minimal", description: "Fastest replies with little reasoning" },
+  low: { name: "Low", description: "Quick answers for small, clear tasks" },
+  medium: { name: "Medium", description: "Balanced thinking for everyday work" },
+  high: { name: "High", description: "Careful reasoning for harder changes" },
+  xhigh: { name: "Extra high", description: "Deep reasoning for complex problems" },
+  max: { name: "Max", description: "Thinks as long as it needs. Slowest" },
+  ultra: { name: "Ultra", description: "Splits big work across parallel agents" },
+};
+
+export function effortCopy(level: EffortLevel) {
+  return EFFORT_COPY[level] ?? { name: level, description: "" };
+}
+
+/** What the agent reported for this model, or a cautious guess while it hasn't answered. */
+export function capabilityFor(model: ModelOption, capabilities: ModelCapabilities | null): ModelCapability {
+  const reported = capabilities?.[model.provider][model.id];
+  if (reported) return reported;
+  if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false };
+  if (model.id.includes("haiku")) return { efforts: [], ultracode: false };
+  const modern = /claude-(opus|sonnet|fable)-5/.test(model.id);
+  return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern };
+}
+
+/** Keeps the chosen effort when the model takes it, else its default, else the nearest middle level. */
+export function effortFor(capability: ModelCapability, effort: EffortLevel): EffortLevel | undefined {
+  const { efforts } = capability;
+  if (efforts.length === 0) return undefined;
+  if (efforts.includes(effort)) return effort;
+  if (capability.defaultEffort && efforts.includes(capability.defaultEffort)) return capability.defaultEffort;
+  return efforts.includes("high") ? "high" : efforts[Math.floor(efforts.length / 2)];
+}
+
 export interface ModelOption {
   id: string;
   name: string;
@@ -120,6 +166,8 @@ export interface AgentStartTurnRequest {
   model: string;
   cwd: string;
   permissionMode: PermissionMode;
+  effort?: EffortLevel;
+  ultracode?: boolean;
   prompt: string;
   images: ImageAttachment[];
   resumeId?: string;

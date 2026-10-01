@@ -3,6 +3,7 @@ const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult } = require("./permissions.cjs");
+const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
 // the user, through canUseTool, before edits and commands its rules don't already allow.
@@ -58,6 +59,7 @@ class ClaudeSession {
     this.cancelRequested = false;
     this.closed = false;
     this.permissions = new PendingPermissions((event) => this.emit(event));
+    this.questions = new PendingQuestions((event) => this.emit(event));
     // Settles once the running turn's own message is in Claude Code's input (or the turn failed to start).
     this.turnReady = Promise.resolve();
     // Settles when the running turn ends; a message sent while the turn is stopping waits on it.
@@ -141,6 +143,9 @@ class ClaudeSession {
       return this.startTurn(request);
     }
     if (!this.turnActive || !this.inbox || this.closed) return this.startTurn(request);
+    // Claude Code holds a message until the question it waits on is settled. The message is the user's
+    // reply, so the question is dismissed and the message reaches Claude right away.
+    this.questions.dismissAll();
     this.inbox.push(userMessage(request.prompt, request.images));
     return { turnId: this.state.turnId, steered: true };
   }
@@ -178,9 +183,7 @@ class ClaudeSession {
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS },
-        canUseTool: (toolName, input, options) => this.askPermission(toolName, input, options),
-        // Questions to the user are out of scope for now; Claude asks in its reply instead.
-        disallowedTools: ["AskUserQuestion"],
+        canUseTool: (toolName, input, options) => (toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options)),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
@@ -213,6 +216,28 @@ class ClaudeSession {
 
   respondToPermission(requestId, decision) {
     return this.permissions.resolve(requestId, decision);
+  }
+
+  // AskUserQuestion reaches canUseTool in every mode, Full included. Claude Code waits on this promise
+  // until the user answers or dismisses the card, a steering message dismisses it, the turn stops, or
+  // the SDK aborts the request.
+  askQuestion(input, options = {}) {
+    if (!this.turnActive || this.cancelRequested || this.closed) return Promise.resolve(claudeQuestionResult("cancelled", input));
+    const request = claudeQuestionRequest(input, options);
+    if (!request) return Promise.resolve(claudeQuestionResult("unshown", input));
+    return new Promise((resolve) => {
+      const abort = () => this.questions.cancel(request.requestId);
+      this.questions.add(request, (outcome, answers) => {
+        options.signal?.removeEventListener("abort", abort);
+        resolve(claudeQuestionResult(outcome, input, answers));
+      });
+      if (options.signal?.aborted) abort();
+      else options.signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  answerQuestion(requestId, answers) {
+    return this.questions.answer(requestId, answers);
   }
 
   async readMessages(query) {
@@ -263,6 +288,7 @@ class ClaudeSession {
     const markEnded = this.markEnded;
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     this.emit(event);
     markEnded();
   }
@@ -276,6 +302,7 @@ class ClaudeSession {
       void this.close().then(() => this.finishTurn({ type: "turn-cancelled" }));
     }, this.interruptGraceMs);
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     // interrupt() rejects with "Query closed before response received" when the query
     // closes first; that is expected during cancel and shutdown.
     await this.query?.interrupt().catch(() => {});
@@ -283,6 +310,7 @@ class ClaudeSession {
 
   async close() {
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     this.inbox?.end();

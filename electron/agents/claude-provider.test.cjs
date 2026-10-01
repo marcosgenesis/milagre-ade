@@ -2,12 +2,15 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { ClaudeSession } = require("./claude-provider.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, missingCliMessage } = require("./events.cjs");
+const { DISMISSED_MESSAGE, UNSHOWN_MESSAGE } = require("./questions.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
 const TURN = { prompt: "Hi", images: [], model: "claude-opus-5-5", permissionMode: "auto" };
 const init = { type: "system", subtype: "init", session_id: "session-1" };
 const delta = (text) => ({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
 const success = { type: "result", subtype: "success", is_error: false, result: "Hello" };
+
+const COLOR_QUESTION = { questions: [{ question: "Which color?", header: "Color", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false }] };
 
 const scripts = {
   async *absorbs({ next }) {
@@ -65,6 +68,19 @@ const scripts = {
       toolUseID: "tool-2",
     });
     yield delta(JSON.stringify(result));
+    yield success;
+  },
+  async *questions({ options, signal }) {
+    yield init;
+    const result = await options.canUseTool("AskUserQuestion", COLOR_QUESTION, { signal, requestId: "q-1", toolUseID: "tool-q", displayName: "AskUserQuestion", requiresUserInteraction: true });
+    yield delta(JSON.stringify(result));
+    yield success;
+  },
+  async *questionThenSteer({ options, signal, next }) {
+    yield init;
+    const result = await options.canUseTool("AskUserQuestion", COLOR_QUESTION, { signal, requestId: "q-1", toolUseID: "tool-q" });
+    const steer = await next();
+    yield delta(`${JSON.stringify(result)}|${steer.message.content[0].text}`);
     yield success;
   },
   async *sdkAbortsAlready({ options }) {
@@ -139,7 +155,7 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   assert.equal("resume" in calls.options, false);
   assert.deepEqual(calls.prompts[0].message.content, [{ type: "text", text: "Hi" }]);
   assert.equal(typeof calls.options.canUseTool, "function");
-  assert.deepEqual(calls.options.disallowedTools, ["AskUserQuestion"]);
+  assert.equal("disallowedTools" in calls.options, false);
 });
 
 test("keeps one query across turns and applies model and mode changes", async (t) => {
@@ -442,4 +458,87 @@ test("an approval requested after the turn was stopped is cancelled at once", as
   assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
   assert.equal(session.respondToPermission("late-1", "allow"), false);
+});
+
+const questioned = (events) => waitUntil(() => events.some((event) => event.type === "question-request"));
+
+test("Claude's question becomes a card, and the answers go back keyed by question text", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.questions });
+  await session.startTurn({ ...TURN, permissionMode: "full" });
+  await questioned(events);
+  assert.equal(calls.options.permissionMode, "bypassPermissions");
+  assert.deepEqual(events.find((event) => event.type === "question-request"), {
+    type: "question-request",
+    requestId: "q-1",
+    questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false, allowOther: true, secret: false }],
+  });
+  assert.equal(session.answerQuestion("q-1", { "0": ["Green"] }), true);
+  assert.equal(session.answerQuestion("q-1", { "0": ["Red"] }), false);
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { ...COLOR_QUESTION, answers: { "Which color?": "Green" } } });
+  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "q-1", outcome: "answered" });
+  assert.deepEqual(events.at(-1), { type: "turn-completed" });
+});
+
+test("dismissing Claude's question tells Claude the user closed it", async (t) => {
+  const { session, events } = claude(t, { script: scripts.questions });
+  await session.startTurn(TURN);
+  await questioned(events);
+  assert.equal(session.answerQuestion("q-1", null), true);
+  await ended(events);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: DISMISSED_MESSAGE });
+  assert.equal(events.find((event) => event.type === "question-resolved").outcome, "dismissed");
+});
+
+test("interrupting cancels Claude's open question", async (t) => {
+  const { session, events } = claude(t, { script: scripts.questions });
+  await session.startTurn(TURN);
+  await questioned(events);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "q-1", outcome: "cancelled" });
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.equal(session.answerQuestion("q-1", { "0": ["Green"] }), false);
+});
+
+test("a steering message dismisses Claude's open question and reaches Claude", async (t) => {
+  const { session, events } = claude(t, { script: scripts.questionThenSteer });
+  const first = await session.startTurn(TURN);
+  await questioned(events);
+  assert.deepEqual(await session.startTurn({ ...TURN, prompt: "Green, please" }), { turnId: first.turnId, steered: true });
+  await ended(events);
+  const [result, steer] = replyText(events).split("|");
+  assert.deepEqual(JSON.parse(result), { behavior: "deny", message: DISMISSED_MESSAGE });
+  assert.equal(steer, "Green, please");
+  assert.equal(events.find((event) => event.type === "question-resolved").outcome, "dismissed");
+});
+
+test("a question Milagre can't show is turned down without a card", async (t) => {
+  const script = async function* ({ options }) {
+    yield init;
+    yield delta(JSON.stringify(await options.canUseTool("AskUserQuestion", { questions: [] }, { requestId: "q-bad", toolUseID: "tool-bad" })));
+    yield success;
+  };
+  const { session, events } = claude(t, { script });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(events.some((event) => event.type === "question-request"), false);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: UNSHOWN_MESSAGE });
+});
+
+test("a question asked after the turn was stopped is cancelled at once", async (t) => {
+  const script = async function* ({ interrupted, options }) {
+    yield init;
+    await interrupted;
+    yield delta(JSON.stringify(await options.canUseTool("AskUserQuestion", COLOR_QUESTION, { requestId: "q-late", toolUseID: "tool-late" })));
+    yield { type: "result", subtype: "error_during_execution", is_error: true, errors: ["Request was aborted."] };
+  };
+  const { session, events } = claude(t, { script });
+  await session.startTurn(TURN);
+  await waitUntil(() => events.length > 0);
+  await session.interrupt();
+  await ended(events);
+  assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
+  assert.equal(session.answerQuestion("q-late", null), false);
 });

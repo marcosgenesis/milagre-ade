@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -25,6 +25,9 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
   const [drafts, setDrafts] = useState<QuestionDrafts>({});
   const [active, setActive] = useState(0);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Next moves to another question and the panel remounts, so focus would fall to the page: put it in the new panel.
+  const focusPanel = useRef(false);
   const questions = request.questions;
   const count = questions.length;
   const several = count > 1;
@@ -45,7 +48,10 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
 
   function advance() {
     if (!ready) return;
-    if (action === "next") setActive(nextTab(count, active));
+    if (action === "next") {
+      focusPanel.current = true;
+      setActive(nextTab(count, active));
+    }
     else if (answers) onAnswer(answers);
   }
 
@@ -68,6 +74,15 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
     setActive(index);
     tabRefs.current[index]?.focus();
   }
+
+  useEffect(() => {
+    if (!focusPanel.current) return;
+    focusPanel.current = false;
+    const controls = panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+    // The picked option, else the first option, else the field when there are no options.
+    const target = panelRef.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? controls?.[0];
+    target?.focus();
+  }, [active]);
 
   const draft = draftOf(drafts, question.id);
 
@@ -113,6 +128,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
         <div
           key={question.id}
           id="question-panel"
+          ref={panelRef}
           role={several ? "tabpanel" : question.multiSelect ? "group" : "radiogroup"}
           aria-labelledby={several ? `question-tab-${question.id}` : undefined}
           aria-label={several ? undefined : question.question}

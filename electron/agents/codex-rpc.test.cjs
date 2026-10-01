@@ -32,6 +32,16 @@ test("rejects with the server's error message", async (t) => {
   await assert.rejects(rpc.request("thread/nope"), /unknown method thread\/nope/);
 });
 
+test("marks server error responses but not exits", async (t) => {
+  const rpc = client(t);
+  const error = await rpc.request("thread/nope").catch((caught) => caught);
+  assert.equal(error.rpcError.code, -32601);
+
+  const missing = client(t, "reply", "milagre-definitely-missing-cli");
+  const exit = await missing.request("initialize", {}).catch((caught) => caught);
+  assert.equal(exit.rpcError, undefined);
+});
+
 test("delivers server requests and sends the reply back", async (t) => {
   const rpc = client(t, "approval");
   const deltas = [];

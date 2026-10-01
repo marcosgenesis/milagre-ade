@@ -1,5 +1,7 @@
 // Stand-in for `codex app-server` in tests. It speaks the JSON-RPC subset Milagre uses.
-// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval.
+// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval,
+// stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
+// resume-exit (exits on thread/resume).
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
 
@@ -26,6 +28,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   switch (method) {
     case "initialize":
+      if (scenario === "hang-init") return undefined;
       return send({ id, result: { userAgent: "fake/0.158.0" } });
     case "initialized":
       return undefined;
@@ -35,6 +38,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       threadStarts += 1;
       return send({ id, result: { thread: { id: `thread-${threadStarts}` }, model: params.model } });
     case "thread/resume":
+      if (scenario === "resume-exit") {
+        process.stderr.write("resume exploded\n");
+        process.exit(4);
+      }
       if (params.threadId === "missing") return send({ id, error: { code: -32600, message: "no rollout found for thread id missing" } });
       return send({ id, result: { thread: { id: params.threadId }, model: params.model } });
     case "thread/unarchive":
@@ -50,6 +57,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         process.stderr.write("boom: model unavailable\n");
         process.exit(3);
       }
+      if (scenario === "stubborn") return undefined;
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
@@ -64,6 +72,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return completeTurn(threadId, turnId, "completed");
     }
     case "turn/interrupt":
+      if (scenario === "stubborn") return undefined;
       send({ id, result: {} });
       if (pendingTurn) {
         completeTurn(pendingTurn.threadId, pendingTurn.turnId, "interrupted");

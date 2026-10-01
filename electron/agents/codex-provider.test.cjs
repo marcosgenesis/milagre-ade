@@ -12,13 +12,14 @@ const { waitUntil } = require("./test-helpers.cjs");
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const TURN = { prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto" };
 
-function codex(t, { scenario = "reply", resumeId, command = process.execPath } = {}) {
+function codex(t, { scenario = "reply", resumeId, command = process.execPath, interruptGraceMs } = {}) {
   const events = [];
   const session = new CodexSession({
     cwd: os.tmpdir(),
     resumeId,
     command,
     clientVersion: "test",
+    interruptGraceMs,
     emit: (event) => events.push(event),
     createRpc: (options) => new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } }),
   });
@@ -147,4 +148,32 @@ test("explains a missing CLI without starting anything", async (t) => {
   const { session, events } = codex(t, { command: null });
   await session.startTurn(TURN);
   assert.deepEqual(events, [{ type: "turn-failed", message: missingCliMessage("codex") }]);
+});
+
+test("gives up on an interrupt Codex never answers", async (t) => {
+  const { session, events } = codex(t, { scenario: "stubborn", interruptGraceMs: 50 });
+  await session.startTurn(TURN);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.equal(session.closed, true);
+});
+
+test("cancels a startup that hangs", async (t) => {
+  const { session, events } = codex(t, { scenario: "hang-init", interruptGraceMs: 50 });
+  const pending = session.startTurn(TURN);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+  assert.equal(session.closed, true);
+  await pending;
+});
+
+test("keeps the saved thread when resuming fails without an answer", async (t) => {
+  const { session, events } = codex(t, { scenario: "resume-exit", resumeId: "thread-9" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.equal(events.at(-1).type, "turn-failed");
+  assert.equal(session.nativeId, "thread-9");
 });

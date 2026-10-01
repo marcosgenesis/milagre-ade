@@ -4,8 +4,6 @@ const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 
-const INTERRUPT_GRACE_MS = 3000;
-
 // Milagre permission mode -> Codex policy. Approvals arrive in a later step, so no mode asks
 // yet. Ask and Auto work inside the workspace sandbox, as `codex exec` did before; Ask also
 // keeps Milagre's pre-run confirmation in the renderer.
@@ -30,8 +28,8 @@ async function writeImages(images) {
 }
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, emit, clientVersion, createRpc });
+  constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false };
     this.rpc = null;
     this.starting = null;
@@ -110,11 +108,14 @@ class CodexSession {
     const params = { ...threadParams, threadId: this.resumeId };
     try {
       return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
-    } catch {
+    } catch (first) {
+      // Only an answer from Codex itself means the thread is gone; timeouts and exits keep the saved id.
+      if (!first.rpcError) throw first;
       try {
         await this.rpc.request("thread/unarchive", { threadId: this.resumeId });
         return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
-      } catch {
+      } catch (second) {
+        if (!second.rpcError) throw second;
         throw Object.assign(new Error(RESUME_FAILED_MESSAGE), { resumeFailed: true });
       }
     }
@@ -147,21 +148,28 @@ class CodexSession {
     clearTimeout(this.interruptTimer);
     const images = this.images;
     this.images = null;
-    await images?.cleanup();
+    await images?.cleanup().catch(() => {});
     events.forEach((event) => this.emit(event));
   }
 
   async interrupt() {
     if (!this.turnActive) return;
     this.cancelRequested = true;
-    if (!this.state.turnId || !this.rpc) return;
     clearTimeout(this.interruptTimer);
-    this.interruptTimer = setTimeout(() => void this.close(), INTERRUPT_GRACE_MS);
+    this.interruptTimer = setTimeout(() => void this.stopNow(), this.interruptGraceMs);
+    if (!this.state.turnId || !this.rpc) return;
     try {
-      await this.rpc.request("turn/interrupt", { threadId: this.state.threadId, turnId: this.state.turnId }, { timeoutMs: INTERRUPT_GRACE_MS });
+      await this.rpc.request("turn/interrupt", { threadId: this.state.threadId, turnId: this.state.turnId }, { timeoutMs: this.interruptGraceMs });
     } catch {
       await this.close();
     }
+  }
+
+  // Fallback for an interrupt Codex doesn't honour: kill the process, and end the turn
+  // ourselves in case nothing was spawned yet (or the exit event never comes).
+  async stopNow() {
+    await this.close();
+    await this.finishTurn([{ type: "turn-cancelled" }]);
   }
 
   async close() {

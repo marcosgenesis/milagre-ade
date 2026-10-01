@@ -54,7 +54,7 @@ class CodexRpc extends EventEmitter {
     if (!waiter) return;
     this.pending.delete(message.id);
     clearTimeout(waiter.timer);
-    if (message.error) waiter.reject(new Error(message.error.message || `Codex ${waiter.method} failed.`));
+    if (message.error) waiter.reject(Object.assign(new Error(message.error.message || `Codex ${waiter.method} failed.`), { rpcError: message.error }));
     else waiter.resolve(message.result ?? {});
   }
 

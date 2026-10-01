@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 
 export interface PreviewRailItem {
@@ -65,11 +65,40 @@ export function PreviewRail({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const previewRowRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewBounds, setPreviewBounds] = useState<{ offset: number; maxHeight?: number }>({ offset: 0 });
   const selectedId = activeId ?? internalActiveId;
   const displayedId = hoveredId ?? pinnedId ?? focusedId ?? "";
   const highlightedId = displayedId || (highlightActive ? selectedId : "");
   const displayedIndex = items.findIndex((item) => item.id === highlightedId);
-  const rowTemplate = items.length ? `repeat(${items.length}, ${itemSize}px)` : undefined;
+  const rowTemplate = items.length ? `repeat(${items.length}, minmax(0, ${itemSize}px))` : undefined;
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const row = previewRowRef.current;
+    const preview = previewRef.current;
+    if (!root || !row || !preview) return;
+
+    // Keep the whole card inside the conversation, even at the first/last tick
+    // or after the composer grows and reduces the available height.
+    const measure = () => {
+      const rootRect = root.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const maxHeight = Math.max(0, rootRect.height - 12);
+      const height = Math.min(preview.offsetHeight, maxHeight);
+      const centeredTop = rowRect.top - rootRect.top + (rowRect.height - height) / 2;
+      const top = Math.max(6, Math.min(centeredTop, rootRect.height - height - 6));
+      const offset = top - centeredTop;
+      setPreviewBounds(current => current.offset === offset && current.maxHeight === maxHeight ? current : { offset, maxHeight });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, [displayedId, items, itemSize, showPreview]);
 
   function selectItem(item: PreviewRailItem) {
     if (activeId === undefined) setInternalActiveId(item.id);
@@ -78,7 +107,7 @@ export function PreviewRail({
   }
 
   return (
-    <motion.div layoutRoot className={`isolate relative flex w-full overflow-visible ${className}`}>
+    <motion.div ref={rootRef} layoutRoot className={`isolate relative flex w-full ${className}`}>
       <nav
         aria-label={label}
         onPointerLeave={() => setHoveredId(null)}
@@ -111,7 +140,7 @@ export function PreviewRail({
                 if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocusedId(null);
               }}
               onClick={() => selectItem(item)}
-              style={{ height: itemSize }}
+              style={{ height: "100%" }}
               className="relative flex h-6 w-12 items-center justify-end text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <motion.span
@@ -133,9 +162,9 @@ export function PreviewRail({
           className={`pointer-events-none absolute inset-y-0 right-16 left-4 z-50 grid content-center ${previewSide === "after" ? "right-4 left-16" : ""} ${previewContainerClassName}`}
         >
           {items.map((item) => (
-            <div key={item.id} style={{ height: itemSize }} className="relative flex items-center">
+            <div key={item.id} ref={item.id === displayedId ? previewRowRef : undefined} className="relative flex min-h-0 items-center">
               {item.id === displayedId ? (
-                <div className={`w-full max-w-sm ${previewSide === "before" ? "ml-auto" : ""} ${previewClassName}`}>
+                <div ref={previewRef} style={{ transform: `translateY(${previewBounds.offset}px)`, maxHeight: previewBounds.maxHeight }} className={`w-full max-w-sm overflow-hidden ${previewSide === "before" ? "ml-auto" : ""} ${previewClassName}`}>
                   <motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.div

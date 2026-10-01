@@ -1,0 +1,133 @@
+// Run with node scripts/test-chat-layout.cjs. Uses the app's existing Vite and
+// Electron dependencies to check browser geometry without an extra test runner.
+const assert = require("node:assert/strict");
+const path = require("node:path");
+const { setTimeout: delay } = require("node:timers/promises");
+
+const fixture = `
+import React, { useState } from "react";
+import { createRoot } from "react-dom/client";
+import { ChatComposer } from "/src/components/ChatComposer";
+import { MODEL_CATALOG } from "/src/model";
+import "/src/styles.css";
+const noop = () => {};
+function Fixture() {
+  const [count, setCount] = useState(50);
+  const [draft, setDraft] = useState("");
+  window.setMessageCount = setCount;
+  window.setDraft = setDraft;
+  const messages = Array.from({ length: count }, (_, index) => ({
+    id: index + 1, session_id: 1, context: null, role: "assistant",
+    body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
+  }));
+  return <div style={{ height: "100%", padding: 12 }}>
+    <ChatComposer messages={messages} sessions={{ "1": { id: 1, worktree_id: 1, agent_name: "main", status: "Stopped" } }}
+      imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false}
+      selectedModel={MODEL_CATALOG[0]} onModelChange={noop} permissionMode="auto" onPermissionModeChange={noop}
+      worktreeSummary="main" connectionSummary="No connection" eventsCount={0} firstWorktreeName="main"
+      firstAgentRunning={false} secondAgentRunning={false} onToggleFirst={noop} onToggleSecond={noop}
+      onCycleConnection={noop} onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
+      isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} />
+  </div>;
+}
+document.documentElement.classList.add("dark");
+createRoot(document.getElementById("root")).render(<Fixture />);
+`;
+
+async function browserChecks() {
+  const { app, BrowserWindow } = require("electron");
+  await app.whenReady();
+  const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  async function waitFor(source) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
+    throw new Error(`Timed out: ${source}`);
+  }
+  try {
+    await window.loadURL(process.argv[2]);
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
+    for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 8, ""]]) {
+      window.setContentSize(800, height);
+      await evaluate(`window.setMessageCount(${count})`);
+      await evaluate(`window.setDraft(${JSON.stringify(draft)})`);
+      await waitFor(`document.querySelectorAll("[data-slot=preview-rail-item]").length === ${count}`);
+      await delay(450);
+      for (const edge of ["first", "last"]) {
+        const target = await evaluate(`(() => {
+          const viewport = document.querySelector('[aria-label="Conversation"]').getBoundingClientRect();
+          const buttons = [...document.querySelectorAll('[data-slot="preview-rail-item"]')];
+          const button = buttons.filter(node => {
+            const rect = node.getBoundingClientRect();
+            return rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+          }).at(${edge === "first" ? 0 : -1});
+          if (!button) throw new Error('No visible navigation item');
+          button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+          return button.getAttribute('aria-label');
+        })()`);
+        await waitFor('!!document.querySelector("[data-slot=preview-rail-card]")');
+        await delay(350);
+        const geometry = await evaluate(`(() => {
+          const rect = selector => {
+            const { top, bottom, left, right } = document.querySelector(selector).getBoundingClientRect();
+            return { top, bottom, left, right };
+          };
+          const rail = document.querySelector('[aria-label="Message navigation"]');
+          const rows = [...rail.children].map(node => node.getBoundingClientRect());
+          return { viewport: rect('[aria-label="Conversation"]'), preview: rect('[data-slot="preview-rail-card"]'), prompt: rect('[data-promptbar]'), railTop: Math.min(...rows.map(row => row.top)), railBottom: Math.max(...rows.map(row => row.bottom)) };
+        })()`);
+        console.log(JSON.stringify({ height, count, target, ...geometry }));
+        assert.ok(geometry.preview.bottom <= geometry.prompt.top, "Message preview overlaps the prompt");
+        assert.ok(geometry.preview.top >= geometry.viewport.top && geometry.preview.bottom <= geometry.viewport.bottom, "Message preview escapes the conversation viewport");
+        assert.ok(geometry.railTop >= geometry.viewport.top && geometry.railBottom <= geometry.viewport.bottom, "Navigation items escape the conversation viewport");
+        await evaluate(`document.querySelector('[aria-label="Message navigation"]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+      }
+    }
+    console.log("PASS: message previews stay inside the conversation and above the prompt");
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
+}
+
+async function main() {
+  const { createServer } = await import("vite");
+  const { spawn } = require("node:child_process");
+  const server = await createServer({
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [{
+      name: "chat-layout-fixture",
+      resolveId(id) { if (id === "/__chat_layout_fixture.tsx") return id; },
+      load(id) { if (id === "/__chat_layout_fixture.tsx") return fixture; },
+      configureServer(server) {
+        server.middlewares.use(async (request, response, next) => {
+          if (request.url !== "/__chat_layout__") return next();
+          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_layout_fixture.tsx"></script></body></html>');
+          response.setHeader("Content-Type", "text/html");
+          response.end(html);
+        });
+      },
+    }],
+  });
+  try {
+    await server.listen();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__chat_layout__`], { env, stdio: "inherit" });
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", code => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
+}
+
+(process.versions.electron ? browserChecks() : main()).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

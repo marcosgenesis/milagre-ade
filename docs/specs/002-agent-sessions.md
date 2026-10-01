@@ -72,6 +72,7 @@ Main sends `agent:event` messages `{ chatId, event }` to the renderer. Event typ
 - `permission-request { requestId, kind, title, command?, cwd?, diff?, files? }`, where `kind` is `command`, `edit` or `other`.
 - `permission-resolved { requestId, decision }`
 - `turn-completed`, `turn-failed { message }`, `turn-cancelled`
+- `session-reset`: the saved native id can't be resumed (transcript or thread deleted). The renderer forgets it and the next message starts a fresh session.
 
 Text deltas are batched in main into 50 ms windows before sending, to keep IPC traffic low during fast streaming.
 
@@ -158,7 +159,7 @@ The changes to `coordination.json` are additive, so older files load unchanged.
 - Assistant `ChatMessage`s gain:
   - `steps?: ChatStep[]`, with `ChatStep = { id, kind, title, status, detail? }`. Each step's `detail` is capped at 20 KB, with a truncation note.
   - `outcome?: "completed" | "failed" | "cancelled"`
-- Streaming state lives in memory. The finished assistant message (text plus steps) is saved when the turn ends. A turn interrupted by quitting the app is saved with `outcome: "cancelled"`.
+- Streaming state lives in memory. The finished assistant message (text plus steps) is saved when the turn ends. A turn still running when the last window closes or the app quits is interrupted; the user's message is already saved, but its partial reply is not.
 
 ### Renderer
 

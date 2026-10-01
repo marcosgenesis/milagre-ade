@@ -8,10 +8,12 @@
 //   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id
 //   { type: "permission-request", ...request } and { type: "permission-resolved", requestId, decision }
 //                                           an approval the turn waits on (see permissions.cjs)
+//   { type: "question-request", ...request } and { type: "question-resolved", requestId, outcome }
+//                                           questions the turn waits on (see questions.cjs)
 //   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message }
 // Exactly one of the last three ends every turn.
 
-const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask in your reply as a short list, not through a question tool.";
+const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.";
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 

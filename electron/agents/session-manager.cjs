@@ -1,5 +1,6 @@
 const { isTerminal } = require("./events.cjs");
 const { USER_DECISIONS } = require("./permissions.cjs");
+const { validAnswers } = require("./questions.cjs");
 
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
@@ -104,6 +105,12 @@ class SessionManager {
   respondToPermission(chatId, requestId, decision) {
     if (!USER_DECISIONS.has(decision)) throw new Error(`Unknown permission decision: ${decision}`);
     return this.sessions.get(chatId)?.session.respondToPermission(requestId, decision) ?? false;
+  }
+
+  // Answers come from the renderer too: only null or a few short strings per question id reach a session.
+  answerQuestion(chatId, requestId, answers) {
+    if (!validAnswers(answers)) throw new Error("Invalid answers to an agent question.");
+    return this.sessions.get(chatId)?.session.answerQuestion(requestId, answers) ?? false;
   }
 
   async interruptAll() {

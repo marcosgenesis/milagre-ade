@@ -133,6 +133,8 @@ ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 
 ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decision }) => agents.respondToPermission(chatId, requestId, decision));
 
+ipcMain.handle("agent:answer-question", (_event, { chatId, requestId, answers }) => agents.answerQuestion(chatId, requestId, answers));
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1240,

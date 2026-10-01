@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { isTerminal, mapClaudeMessage, mapCodexNotification } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, isTerminal, mapClaudeMessage, mapCodexNotification } = require("./events.cjs");
 
 const claudeState = () => ({ sessionId: null, turnId: "turn-a", hasText: false });
 const codexState = () => ({ threadId: "thread-1", turnId: null, lastItemId: null, hasText: false });
@@ -70,4 +70,9 @@ test("Codex: a started turn is announced", () => {
   const state = { threadId: "thread-1", turnId: null, lastItemId: null, hasText: false };
   assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-1", turn: { id: "t-2" } }, state), [{ type: "turn-started", turnId: "t-2" }]);
   assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-9", turn: { id: "t-3" } }, state), []);
+});
+
+test("agents are told to ask with their question tool, and in a short list without one", () => {
+  assert.match(MILAGRE_INSTRUCTIONS, /ask with your question tool if you have one \(AskUserQuestion or request_user_input\)/);
+  assert.match(MILAGRE_INSTRUCTIONS, /otherwise ask in your reply as a short numbered list\.$/);
 });

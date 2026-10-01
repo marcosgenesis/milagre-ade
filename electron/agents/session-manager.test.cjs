@@ -26,6 +26,11 @@ class FakeSession {
     return true;
   }
 
+  answerQuestion(requestId, answers) {
+    this.replies = [...(this.replies ?? []), { requestId, answers }];
+    return true;
+  }
+
   async close() {
     this.closed = true;
     if (this.running) {
@@ -271,4 +276,28 @@ test("a second sessionClosed failure propagates instead of retrying forever", as
   };
   await assert.rejects(manager.startTurn(request("1")), (error) => error.sessionClosed === true);
   assert.equal(created.length, 2);
+});
+
+test("routes question answers to the chat's session and refuses malformed ones", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  assert.equal(manager.answerQuestion("1", "q-1", { color: ["Green", "a darker one"] }), true);
+  assert.equal(manager.answerQuestion("1", "q-2", null), true);
+  assert.deepEqual(created[0].replies, [{ requestId: "q-1", answers: { color: ["Green", "a darker one"] } }, { requestId: "q-2", answers: null }]);
+  assert.equal(manager.answerQuestion("9", "q-1", null), false);
+  for (const bad of [undefined, "Green", ["Green"], { color: "Green" }, { color: [7] }, { color: ["x".repeat(10_001)] }]) {
+    assert.throws(() => manager.answerQuestion("1", "q-1", bad), /Invalid answers to an agent question/);
+  }
+  assert.equal(created[0].replies.length, 2);
+});
+
+test("a question is sent right after the text before it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "One thing first" });
+  created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
+  created[0].emit({ type: "question-resolved", requestId: "q-1", outcome: "dismissed" });
+  assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "question-request", "question-resolved"]);
 });

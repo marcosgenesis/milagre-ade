@@ -182,6 +182,11 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
-  void agents.closeAll();
+let agentsClosed = false;
+app.on("before-quit", (event) => {
+  if (agentsClosed) return;
+  event.preventDefault();
+  agentsClosed = true;
+  // Agents run in their own process groups, so stop them before the app exits.
+  Promise.race([agents.closeAll(), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
 });

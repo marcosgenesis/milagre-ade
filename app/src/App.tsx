@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ConnectionType,
   ChatMessage,
+  AgentSession,
   ImageAttachment,
   CoordinatorState,
   Isolation,
@@ -160,28 +161,21 @@ function App() {
     setDraft("");
   }
 
-  // An open chat keeps its session. A new chat in "New worktree" isolation gets its own worktree
-  // before the first message goes out; a new local chat gets a session in the selected worktree.
+  // Where a message goes, without building state: an open chat keeps its session, a new local chat
+  // (session null) gets one from the latest state at commit time, and a new chat in "New worktree"
+  // isolation gets its own worktree first. Callers merge into the latest state, never a stale copy.
   async function resolveSendTarget(body: string) {
     if (!state || !project || !selectedWorktree) return null;
-    if (selectedSession) return { baseState: state, session: selectedSession, worktree: selectedWorktree };
-    if (isolation === "local") {
-      const idle = Object.values(state.sessions).find((session) => session.worktree_id === selectedWorktree.id && !state.messages.some((message) => message.session_id === session.id));
-      const session = idle ?? { id: state.next_id, worktree_id: selectedWorktree.id, agent_name: selectedWorktree.name, status: "Created" as const };
-      setSelectedSessionId(session.id);
-      return { baseState: idle ? state : { ...state, next_id: state.next_id + 1, sessions: { ...state.sessions, [session.id]: session } }, session, worktree: selectedWorktree };
-    }
+    if (selectedSession) return { session: selectedSession as AgentSession | null, worktree: selectedWorktree, createdNextId: undefined as number | undefined };
+    if (isolation === "local") return { session: null, worktree: selectedWorktree, createdNextId: undefined };
     const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: baseBranch ?? selectedWorktree.name, prompt: body });
     const worktree = created.project.state.worktrees[created.worktreeId];
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
-    setState(created.project.state);
-    setSelectedSessionId(session.id);
-    setSelectedWorktreeId(worktree.id);
     setIsolation("local");
     setBaseBranch(null);
     void window.milagre.listBranches(project.path).then(setBranches);
-    return { baseState: created.project.state, session, worktree };
+    return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
@@ -198,16 +192,26 @@ function App() {
       setPreparing(false);
       return;
     }
-    if (!target) {
+    // Read the state only now: a turn in another chat may have finished while the target resolved.
+    const latest = stateRef.current;
+    if (!target || !latest) {
       setPreparing(false);
       return;
     }
-    const { baseState, session, worktree } = target;
+    const { worktree } = target;
+    let nextId = Math.max(latest.next_id, target.createdNextId ?? 0);
+    const worktrees = target.createdNextId !== undefined ? { ...latest.worktrees, [worktree.id]: worktree } : latest.worktrees;
+    let session = target.session;
+    if (!session) {
+      session = Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
+        ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" as const };
+    }
+    const chatSession = session;
 
-    const model = modelForChat(selectedModel, session.provider, baseState.messages.filter((message) => message.session_id === session.id), MODEL_CATALOG);
+    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), MODEL_CATALOG);
     const userMessage = {
-      id: baseState.next_id,
-      session_id: session.id,
+      id: nextId++,
+      session_id: chatSession.id,
       body,
       images,
       context: null,
@@ -215,23 +219,26 @@ function App() {
       model: model.id,
     };
     commit({
-      ...baseState,
-      next_id: baseState.next_id + 1,
-      messages: [...baseState.messages, userMessage],
-      sessions: { ...baseState.sessions, [session.id]: { ...session, provider: model.provider } },
+      ...latest,
+      next_id: nextId,
+      worktrees,
+      sessions: { ...latest.sessions, [chatSession.id]: { ...chatSession, provider: model.provider } },
+      messages: [...latest.messages, userMessage],
     });
+    setSelectedSessionId(chatSession.id);
+    setSelectedWorktreeId(worktree.id);
     setDraft("");
     imageDraft.clear();
     setPreparing(false);
     await agentRuns.start({
-      chatId: String(session.id),
+      chatId: String(chatSession.id),
       provider: model.provider,
       model: model.id,
       cwd: worktree.path,
       permissionMode: mode,
       prompt: body || "Describe the attached images.",
       images,
-      resumeId: session.native_session_id,
+      resumeId: chatSession.native_session_id,
     });
   }
 

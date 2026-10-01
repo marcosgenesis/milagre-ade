@@ -104,7 +104,10 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const [provider, setProvider] = useState<ModelProvider>(selectedModel.provider);
+  const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
+  // The provider tab follows the open chat, and a locked chat always opens on its own provider.
+  useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
+  useEffect(() => { if (modelOpen) setProvider(lockedProvider ?? selectedModel.provider); }, [modelOpen]);
   const [query, setQuery] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const [active, setActive] = useState(0);

@@ -465,6 +465,45 @@ a:focus-visible .animated-underline::after {
   mask-image: linear-gradient(to bottom, black 35%, transparent);
 }
 
+/* Agent replies rendered from Markdown: compact chat spacing, no document-sized headings. */
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown :where(p, ul, ol, blockquote) { margin-block: 0.5em; }
+.markdown :where(h1, h2, h3, h4, h5, h6) { margin-block: 0.9em 0.35em; font-weight: 600; line-height: 1.35; color: var(--ink); }
+.markdown h1 { font-size: 16px; }
+.markdown h2 { font-size: 15px; }
+.markdown h3 { font-size: 14px; }
+.markdown :where(h4, h5, h6) { font-size: 13px; }
+.markdown :where(ul, ol) { padding-left: 1.35em; }
+.markdown ul { list-style: disc; }
+.markdown ol { list-style: decimal; }
+.markdown li { margin-block: 0.2em; }
+.markdown li::marker { color: var(--ink-3); }
+.markdown li > :where(ul, ol) { margin-block: 0.2em; }
+.markdown li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.35em; }
+.markdown input[type="checkbox"] { margin-right: 0.45em; vertical-align: -0.1em; accent-color: var(--accent); }
+.markdown strong { font-weight: 600; color: var(--ink); }
+.markdown blockquote { border-left: 2px solid var(--line-strong); padding-left: 0.8em; color: var(--ink-2); }
+.markdown hr { margin-block: 1em; border: 0; border-top: 1px solid var(--line); }
+.markdown table { border-collapse: collapse; font-size: 12px; overflow-wrap: normal; }
+.markdown :where(th, td) { border: 1px solid var(--line); padding: 0.3em 0.65em; text-align: left; vertical-align: top; }
+.markdown th { background: var(--inset); font-weight: 600; }
+.markdown del { color: var(--ink-2); }
+
+/* Shiki tokens carry both themes' colours as variables; the app's theme class picks one. */
+.code-token {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style, inherit);
+  font-weight: var(--shiki-light-font-weight, inherit);
+  text-decoration: var(--shiki-light-text-decoration, inherit);
+}
+.dark .code-token {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style, inherit);
+  font-weight: var(--shiki-dark-font-weight, inherit);
+  text-decoration: var(--shiki-dark-text-decoration, inherit);
+}
+
 /* ══════════════════════════════════════════════════════════
  * COMPONENT-SPECIFIC — SidebarNav
  * The 44↔224px collapsible sidebar tree.

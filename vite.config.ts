@@ -18,5 +18,7 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    // Chunks load from disk in Electron, so size matters less than on the web. The largest are the app itself and Shiki's C++ grammar.
+    chunkSizeWarningLimit: 1000,
   },
 });

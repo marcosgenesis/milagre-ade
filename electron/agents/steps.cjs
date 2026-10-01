@@ -44,7 +44,7 @@ function blocksText(content) {
 
 function claudeStep(id, name, input = {}) {
   const step = (kind, title, detail) => compact({ id: String(id), kind, title, detail });
-  if (name === "Bash") return step("shell", `Ran ${code(input.command)}`, `$ ${input.command ?? ""}\n`);
+  if (name === "Bash") return step("shell", `Ran ${code(input.command)}`, capOutput(`$ ${input.command ?? ""}\n`));
   if (name === "Read") return step("read", `Read ${fileName(input.file_path)}`);
   if (CLAUDE_EDIT_TOOLS.has(name)) return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`);
   if (name === "Write") return step("edit", `Wrote ${fileName(input.file_path)}`);
@@ -120,7 +120,7 @@ function codexStep(item) {
     case "commandExecution": {
       const command = unwrapShell(String(item.command ?? ""));
       const action = commandAction(item);
-      const detail = `$ ${command}\n`;
+      const detail = capOutput(`$ ${command}\n`);
       if (action?.type === "read") return step("read", `Read ${code(action.name || path.basename(String(action.path ?? command)))}`, detail);
       if (action?.type === "search") return step("search", action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`, detail);
       if (action?.type === "listFiles") return step("search", action.path ? `Listed files in ${code(action.path)}` : "Listed files", detail);

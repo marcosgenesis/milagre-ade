@@ -94,6 +94,12 @@ const scripts = {
     yield delta("All green.");
     yield success;
   },
+  // A tool call that never gets its result before the turn ends.
+  async *toolWithoutResult() {
+    yield init;
+    yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "tool-9", name: "Bash", input: { command: "sleep 9" } }] } };
+    yield success;
+  },
   async *sdkAbortsAlready({ options }) {
     yield init;
     const controller = new AbortController();
@@ -366,6 +372,13 @@ test("a denied tool call ends as a failed step", async (t) => {
   session.respondToPermission("req-1", "deny");
   await ended(events);
   assert.deepEqual(events.find((event) => event.type === "step-completed"), { type: "step-completed", id: "tool-1", status: "failed", detail: "$ npm test\nDenied in Milagre" });
+});
+
+test("tool calls still waiting for a result are forgotten when the turn ends", async (t) => {
+  const { session, events } = claude(t, { script: scripts.toolWithoutResult });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(session.state.tools.size, 0);
 });
 
 test("an answer for an unknown request changes nothing", async (t) => {

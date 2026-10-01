@@ -129,6 +129,14 @@ test("Codex: messages, reasoning and other items are not steps", () => {
   for (const type of ["agentMessage", "reasoning", "userMessage", "plan", "contextCompaction", "somethingNew"]) assert.equal(codexStep({ type, id: "x" }), null);
 });
 
+test("a long command's starting detail keeps its end too", () => {
+  const command = `cat > big.txt <<'EOF'\n${"x".repeat(60_000)}\nEOF`;
+  const claude = claudeStep("t1", "Bash", { command }).detail;
+  assert.ok(claude.length <= 20_012 && claude.endsWith("\nEOF\n"));
+  const codex = codexStep({ type: "commandExecution", id: "e", command, status: "inProgress", commandActions: [{ type: "unknown", command }] }).detail;
+  assert.ok(codex.length <= 20_012 && codex.endsWith("\nEOF\n"));
+});
+
 test("command output keeps its end when it's long", () => {
   assert.equal(capOutput("short"), "short");
   const capped = capOutput(`${"a".repeat(5_000)}${"b".repeat(20_000)}`);

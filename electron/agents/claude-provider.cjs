@@ -289,6 +289,8 @@ class ClaudeSession {
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
     this.questions.cancelAll();
+    // Tool calls still waiting for a result never get one.
+    this.state.tools?.clear();
     this.emit(event);
     markEnded();
   }

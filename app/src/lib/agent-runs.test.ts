@@ -326,6 +326,11 @@ test("streamed output keeps its last 20,000 characters", () => {
   assert.equal(capOutput("short"), "short");
 });
 
+test("a step that starts with a huge detail is saved capped when the turn is cancelled", () => {
+  const { state } = fold([{ type: "step-started", step: { ...npmTest, detail: `$ ${"x".repeat(60_000)}\n` } }, { type: "turn-cancelled" }]);
+  assert.ok((state.messages.at(-1)?.steps?.[0].detail?.length ?? 0) <= 20_012);
+});
+
 test("step events for a chat with nothing running change nothing", () => {
   const state = base();
   for (const event of [{ type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "x" }, { type: "step-completed", id: "s1", status: "done" }] as AgentEvent[]) {

@@ -171,7 +171,7 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     }
     case "step-started": {
       if (!run) return { state, runs, changed: false };
-      const step: ChatStep = { ...event.step, status: "running", offset: run.text.length };
+      const step: ChatStep = { ...event.step, ...(event.step.detail === undefined ? {} : { detail: capOutput(event.step.detail) }), status: "running", offset: run.text.length };
       return { state, runs: { ...runs, [chatId]: { ...run, steps: [...run.steps.filter((item) => item.id !== step.id), step] } }, changed: false };
     }
     case "step-output": {

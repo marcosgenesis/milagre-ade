@@ -140,12 +140,26 @@ test("Codex: command requests", () => {
 });
 
 test("Codex: file requests show the changes Codex reported when the edit started", () => {
-  const changes = [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "+hello\n" }];
+  const changes = [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }];
   assert.deepEqual(codexFileRequest("srv-2", { itemId: "p", reason: "Write notes" }, changes), {
     requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true,
   });
   assert.equal(codexFileRequest("s", {}, [changes[0], { path: "/repo/b", diff: "" }]).title, "Edit 2 files?");
   assert.deepEqual(codexFileRequest("s", { grantRoot: "/tmp/out" }, undefined), { requestId: "s", kind: "edit", tool: "Edit files", title: "Allow writing to /tmp/out?", files: [], allowForChat: true });
+});
+
+test("Codex: added and deleted files get +/- markers, real diffs are left alone", () => {
+  const diffOf = (kind, diff) => codexFileRequest("s", {}, [{ path: "/r/a", kind, diff }]).diff;
+  assert.equal(diffOf({ type: "add" }, "hello\nworld\n"), "--- /r/a\n+hello\n+world\n");
+  assert.equal(diffOf({ type: "add" }, "a\n\nb"), "--- /r/a\n+a\n+\n+b");
+  assert.equal(diffOf({ type: "delete" }, "gone\n"), "--- /r/a\n-gone\n");
+  assert.equal(diffOf({ type: "add" }, "+hello\n"), "--- /r/a\n++hello\n");
+  assert.equal(diffOf({ type: "add" }, "@@ -0,0 +1 @@\n+hello\n"), "--- /r/a\n@@ -0,0 +1 @@\n+hello\n");
+  const update = "@@ -1 +1 @@\n-a\n+b\n";
+  assert.equal(diffOf({ type: "update", move_path: null }, update), "--- /r/a\n" + update);
+  assert.equal(diffOf({ type: "add" }, ""), "--- /r/a\n");
+  const big = codexFileRequest("s", {}, [{ path: "/r/a", kind: { type: "add" }, diff: "x\n".repeat(20_000) }]).diff;
+  assert.ok(big.endsWith("\n… truncated") && big.startsWith("--- /r/a\n+x\n+x"));
 });
 
 test("Codex: decisions", () => {

@@ -87,7 +87,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       if (scenario === "file-approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
-        notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "+hello\n" }] } });
+        notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] } });
         return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
       }
       if (scenario === "permissions") {

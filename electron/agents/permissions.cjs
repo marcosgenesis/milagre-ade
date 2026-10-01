@@ -86,6 +86,17 @@ function codexCommandRequest(id, params) {
   });
 }
 
+// Codex sends an added file's content (and a deleted file's old content) as the diff, with no
+// markers. Mark each line so the card shows it as added or removed; real unified diffs pass through.
+function markedDiff(change) {
+  const diff = change.diff ?? "";
+  const mark = change.kind?.type === "add" ? "+" : change.kind?.type === "delete" ? "-" : null;
+  if (!mark || !diff || /^(@@ |--- |diff --git )/m.test(diff)) return diff;
+  const lines = diff.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines.map((line) => mark + line).join("\n") + (diff.endsWith("\n") ? "\n" : "");
+}
+
 // item/fileChange/requestApproval params -> request. The request has no diff of its own; `changes`
 // are the ones the matching fileChange item reported in item/started.
 function codexFileRequest(id, params, changes = []) {
@@ -99,7 +110,7 @@ function codexFileRequest(id, params, changes = []) {
     tool: "Edit files",
     title,
     files,
-    diff: changes.length ? capText(changes.map((change) => `--- ${change.path}\n${change.diff ?? ""}`).join("\n")) : undefined,
+    diff: changes.length ? capText(changes.map((change) => `--- ${change.path}\n${markedDiff(change)}`).join("\n")) : undefined,
     reason: params.reason ?? undefined,
     allowForChat: true,
   });

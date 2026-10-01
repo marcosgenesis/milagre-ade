@@ -25,6 +25,22 @@ test("killTree stops a detached child and the processes it started", async () =>
   await waitUntil(() => !isAlive(grandchildPid));
 });
 
+test("killTree stops the rest of the group after its leader already exited", async (t) => {
+  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(grandchild.pid); setInterval(() => {}, 1000);';
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+  const grandchildPid = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
+  t.after(() => {
+    if (isAlive(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
+  });
+  process.kill(child.pid, "SIGKILL");
+  await new Promise((resolve) => child.once("exit", resolve));
+  assert.ok(isAlive(grandchildPid));
+
+  await killTree(child, { graceMs: 500 });
+
+  await waitUntil(() => !isAlive(grandchildPid));
+});
+
 test("killTree resolves for a process that already exited", async () => {
   const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
   await new Promise((resolve) => child.once("exit", resolve));

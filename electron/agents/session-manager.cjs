@@ -19,9 +19,18 @@ class SessionManager {
   }
 
   async startTurn(request) {
+    const start = (entry) => {
+      clearTimeout(entry.idleTimer);
+      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
+    };
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
-    clearTimeout(entry.idleTimer);
-    return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
+    try {
+      return await start(entry);
+    } catch (error) {
+      if (!error.sessionClosed) throw error;
+      // The session closed under this message (Stop had to close it); retry once on a fresh one.
+      return start(await this.serial(request.chatId, () => this.currentEntry(request)));
+    }
   }
 
   async currentEntry(request) {

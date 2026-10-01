@@ -415,6 +415,17 @@ test("a message sent while a turn is stopping starts the next turn", async (t) =
   assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Next"]);
 });
 
+test("a message sent while Stop closes the session is handed back as sessionClosed", async (t) => {
+  const { session, events } = claude(t, { script: scripts.unresponsive, interruptGraceMs: 50 });
+  await session.startTurn(TURN);
+  await waitUntil(() => events.length > 0);
+  await session.interrupt();
+  await assert.rejects(session.startTurn({ ...TURN, prompt: "Next" }), (error) => error.sessionClosed === true);
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
+  assert.equal(session.closed, true);
+  await assert.rejects(session.startTurn(TURN), (error) => error.sessionClosed === true);
+});
+
 test("an approval requested after the turn was stopped is cancelled at once", async (t) => {
   const script = async function* ({ interrupted, options }) {
     yield init;

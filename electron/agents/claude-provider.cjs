@@ -44,6 +44,8 @@ function userMessage(prompt, images = []) {
   return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 }
 
+const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
+
 class ClaudeSession {
   constructor({ cwd, resumeId, command, emit, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
     Object.assign(this, { cwd, resumeId, command, emit, loadSdk, spawnImpl, interruptGraceMs });
@@ -68,7 +70,7 @@ class ClaudeSession {
   }
 
   async startTurn(request) {
-    if (this.closed) throw new Error("This Claude session is closed.");
+    if (this.closed) throw Object.assign(new Error("This Claude session is closed."), { sessionClosed: true });
     if (this.turnActive) return this.steer(request);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
@@ -135,6 +137,7 @@ class ClaudeSession {
     // A turn that was asked to stop takes no more messages; this one starts the next turn.
     if (this.cancelRequested) {
       await ended;
+      if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
     if (!this.turnActive || !this.inbox || this.closed) return this.startTurn(request);

@@ -29,6 +29,8 @@ async function writeImages(images) {
 
 const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
 
+const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
+
 class CodexSession {
   constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
     Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
@@ -116,11 +118,13 @@ class CodexSession {
     // A turn that was asked to stop takes no more messages; this one starts the next turn.
     if (this.cancelRequested) {
       await ended;
+      if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
     // Without a turn id Codex can't be steered; send the message as the next turn once this one ends.
     if (!this.state.turnId) {
       await ended;
+      if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
     const turnId = this.state.turnId;
@@ -132,6 +136,7 @@ class CodexSession {
     } catch (error) {
       if (!error.rpcError) throw error;
       await ended;
+      if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
   }

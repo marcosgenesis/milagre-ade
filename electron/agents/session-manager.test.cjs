@@ -240,3 +240,35 @@ test("an approval request is sent right after the text before it", async (t) => 
   created[0].emit({ type: "permission-request", requestId: "r1", kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
   assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "permission-request"]);
 });
+
+test("a message a closed session hands back is retried once on a fresh session", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].startTurn = async function () {
+    this.closed = true;
+    throw Object.assign(new Error("closed"), { sessionClosed: true });
+  };
+  assert.deepEqual(await manager.startTurn(request("1", { prompt: "again" })), { turnId: "t1" });
+  assert.equal(created.length, 2);
+  assert.equal(created[1].turns[0].prompt, "again");
+});
+
+test("a second sessionClosed failure propagates instead of retrying forever", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  const closing = async function () {
+    this.closed = true;
+    throw Object.assign(new Error("closed"), { sessionClosed: true });
+  };
+  await manager.startTurn(request("1"));
+  created[0].startTurn = closing;
+  const original = manager.createSession;
+  manager.createSession = (provider, options) => {
+    const session = original(provider, options);
+    session.startTurn = closing;
+    return session;
+  };
+  await assert.rejects(manager.startTurn(request("1")), (error) => error.sessionClosed === true);
+  assert.equal(created.length, 2);
+});

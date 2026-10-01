@@ -29,10 +29,11 @@ The approach follows [Paseo](https://github.com/getpaseo/paseo) (Apache-2.0), wh
 4. As a user, I want to see each command, file edit and search the agent performs as a short row, and expand it for the raw output or diff.
 5. As a user in Ask mode, I want the agent to stop and show me the exact command or change before it runs, and to allow it once, allow it for the rest of the chat, or deny it.
 6. As a user, I want Cancel (or Escape) to stop the current turn without losing the chat.
-7. As a user, I want two chats to run agents at the same time.
-8. As a user, I want the model picker to list the Codex models my account can actually use.
-9. As a user who opens Milagre from Finder, I want it to find the `claude` and `codex` CLIs installed in my shell.
-10. As a user, I want a clear message when a CLI is missing, not logged in, or crashes, and the next message to recover on its own.
+7. As a user, I want to send a message while the agent works, so I can steer it without stopping the turn.
+8. As a user, I want two chats to run agents at the same time.
+9. As a user, I want the model picker to list the Codex models my account can actually use.
+10. As a user who opens Milagre from Finder, I want it to find the `claude` and `codex` CLIs installed in my shell.
+11. As a user, I want a clear message when a CLI is missing, not logged in, or crashes, and the next message to recover on its own.
 
 ## Implementation Decisions
 
@@ -54,7 +55,7 @@ The agent host lives in the Electron main process, which already owns processes 
 
 Each provider session exposes:
 
-- `startTurn({ prompt, images, model, permissionMode })`
+- `startTurn({ prompt, images, model, permissionMode })`, which resolves to `{ turnId, steered }`. When the chat already has a turn running, the message steers that turn instead of starting a new one (see Steering).
 - `respondToPermission(requestId, decision)`, where `decision` is `"allow" | "allow-for-chat" | "deny"`
 - `interrupt()`
 - `close()`
@@ -65,12 +66,13 @@ Each provider session exposes:
 Main sends `agent:event` messages `{ chatId, event }` to the renderer. Event types:
 
 - `session-started { nativeId }`: the renderer saves it on the chat.
+- `turn-started { turnId }`: the first event of every turn. The renderer already shows a turn it started itself; this event matters for turns it didn't start, such as a steering message that arrived just after the previous turn ended.
 - `text-delta { messageId, text }`
 - `step-started { step }`, where `step = { id, kind, title, detail? }`. `kind` is one of `shell`, `edit`, `read`, `search`, `other`.
 - `step-output { id, text }`: streamed command output, appended to the step.
 - `step-completed { id, status, detail? }`, where `status` is `done` or `failed`. `detail` holds the raw output or a unified diff.
-- `permission-request { requestId, kind, title, command?, cwd?, diff?, files? }`, where `kind` is `command`, `edit` or `other`.
-- `permission-resolved { requestId, decision }`
+- `permission-request { requestId, kind, tool, title, description?, command?, cwd?, diff?, files?, detail?, reason?, allowForChat }`, where `kind` is `command`, `edit` or `other`. `allowForChat` says whether "Always allow in this chat" can be offered. `diff` and `detail` are capped at 20 KB.
+- `permission-resolved { requestId, decision }`, where `decision` is `allow`, `allow-for-chat`, `deny` or `cancelled`. A request is cancelled when its turn is interrupted or ends, or when the agent withdraws it.
 - `turn-completed`, `turn-failed { message }`, `turn-cancelled`
 - `session-reset`: the saved native id can't be resumed (transcript or thread deleted). The renderer forgets it and the next message starts a fresh session.
 
@@ -117,7 +119,10 @@ Renderer to main:
   - `allow-for-chat`: `{ behavior: "allow", updatedPermissions: <the suggestions the SDK passed in> }`
   - `deny`: `{ behavior: "deny", message: "Denied in Milagre" }`
 
-  Pending requests are rejected when the turn is interrupted.
+  Pending requests are rejected when the turn is interrupted, with `interrupt: true`, or when the SDK aborts them.
+- **Always allow in this chat.** The SDK's suggestions are applied with every `destination` rewritten to `session`, so nothing is written to the user's settings files. The option is hidden when there are no suggestions or the SDK sets `suppressAlwaysAllowRule`.
+- **Card text.** The SDK's `title`, `displayName` and `description` are used when present; otherwise Milagre builds them from the tool name and input.
+- **Questions.** `AskUserQuestion` is out of scope, so it is passed in `disallowedTools` and Claude asks in its reply instead.
 - **Mode mapping.** Ask is `default`, Auto is `acceptEdits`, Full is `bypassPermissions`. Full needs `allowDangerouslySkipPermissions: true`.
 
 ### Codex provider
@@ -132,7 +137,11 @@ Renderer to main:
   - `item/completed` becomes `step-completed`.
   - `turn/completed` becomes `turn-completed`, `turn-failed` or `turn-cancelled`.
   - Unknown notifications are ignored.
-- **Approvals.** The server requests `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` become `permission-request`. The reply is `accept`, `acceptForSession` or `decline`.
+- **Approvals.** The server requests `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` become `permission-request`. The reply is `accept`, `acceptForSession` or `decline`, and `cancel` for requests still open when the turn is interrupted or ends.
+  - File-change requests carry no diff, so the provider keeps the `changes` of each `fileChange` item from `item/started` and shows those.
+  - Shell commands arrive wrapped (`/bin/zsh -lc '…'`); the card shows the inner command.
+  - `serverRequest/resolved` withdraws a request the user hasn't answered; it resolves as `cancelled`.
+  - `item/permissions/requestApproval` is declined with `{ permissions: {}, scope: "turn" }`. Other server requests get an error reply.
 - **Mode mapping.**
 
   | Milagre mode | `approvalPolicy` | `sandbox` |
@@ -144,6 +153,14 @@ Renderer to main:
   The exact behaviour of `untrusted` and `on-request` for file changes is verified against the CLI during implementation.
 - **Interrupt.** `turn/interrupt { threadId, turnId }`.
 - **Protocol types.** Only the subset of the app-server protocol used here is relied on, and it is documented in `codex-rpc.cjs`. Field access is defensive, because the protocol is marked experimental. The minimum supported Codex version is 0.158.0, checked with `codex --version`.
+
+### Steering
+
+A message sent while the chat's turn is running joins that turn instead of waiting for it to end. Model and permission-mode changes apply from the next turn.
+
+- **Claude.** The message is pushed into the running query's streaming input, with no `priority`. Probing Claude Code 2.1.286 showed that a message pushed during a tool call is picked up at the next tool boundary, inside the same turn. One pushed while the final text streams ends that turn as usual, and Claude Code then starts a new turn for it on its own. That turn opens with a `system` `init` message while the session is idle, so the provider starts an implicit turn and emits `turn-started`.
+- **Codex.** `turn/steer { threadId, expectedTurnId, input }`. A message sent before `turn/start` has returned waits for the turn id. If Codex refuses because the turn has already ended, the message starts the next turn once the current one is over.
+- **Weaker models may ignore it.** gpt-6-sol followed a steering message in testing; gpt-6-luna received it and carried on with the original task.
 
 ### Models
 
@@ -163,7 +180,9 @@ The changes to `coordination.json` are additive, so older files load unchanged.
 
 ### Renderer
 
-- **Run state.** Each chat has its own run state, replacing the single `isSending`. Escape interrupts the turn in the open chat.
+- **Run state.** Each chat has its own run state, replacing the single `isSending`. Escape denies the open chat's pending approval if there is one, and otherwise interrupts its turn.
+- **Steering.** Send stays enabled while a turn runs, and a message sent then steers the turn. The text streamed so far is saved as its own assistant message, then the new user message, and the reply continues below it.
+- **Reload.** Reloading the renderer interrupts every running turn, so no turn is left waiting on an approval card that no longer exists.
 - **Live message.** The live assistant message shows streamed text, then tool rows: an icon, a title such as "Ran `npm test`" or "Edited `App.tsx`", and a spinner or status. Clicking a row expands the output or diff.
 - **Approval card.** The existing `ToolApproval` card appears inline when the open chat has a pending request. Its buttons are Allow once, Always allow in this chat, and Deny.
 - **Removed.** The prompt regex (`requiresApproval`), the pre-run approval flow and the slash-command confirmation in Ask mode are removed.
@@ -174,7 +193,7 @@ The changes to `coordination.json` are additive, so older files load unchanged.
 The work ships as four stacked pull requests, each usable on its own:
 
 1. **Sessions and streaming text.** Session manager, both providers without approvals, the event stream, resume, cancel, and the persistence fields. Ask keeps today's pre-run check in this step, so it never becomes less strict.
-2. **Real approvals.** Permission requests, the approval card, the mode mapping, and removal of the prompt regex.
+2. **Real approvals and steering.** Permission requests, the approval card, the mode mapping, removal of the prompt regex, and steering a running turn.
 3. **Tool steps.** Step events, tool rows, and saving steps.
 4. **Models and environment.** `model/list`, login-shell `PATH`, version checks, and missing-CLI errors.
 
@@ -190,7 +209,6 @@ The work ships as four stacked pull requests, each usable on its own:
 
 ## Out of Scope
 
-- Steering a running turn with a new message, which is queued until the turn ends instead.
 - Plan mode, `AskUserQuestion`, rewind, fork and checkpoints.
 - Showing reasoning, token usage or cost.
 - MCP server configuration from Milagre.

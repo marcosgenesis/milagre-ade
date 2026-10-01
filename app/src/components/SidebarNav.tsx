@@ -283,19 +283,40 @@ export default function SidebarNav({
     setQuery("");
   };
 
+  // ⌘B / Ctrl+B toggles the sidebar exactly like its collapse button.
+  useEffect(() => {
+    function handleToggle(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== "b") return;
+      event.preventDefault();
+      if (collapsed) setCollapsed(false);
+      else collapse();
+    }
+    window.addEventListener("keydown", handleToggle);
+    return () => window.removeEventListener("keydown", handleToggle);
+  }, [collapsed]);
+
   return (
     <div className={`relative flex min-h-0 shrink-0 flex-col ${fill ? "h-full" : "h-[600px]"} ${className}`}>
-      <button
-        type="button"
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        aria-expanded={!collapsed}
-        onClick={() => collapsed ? setCollapsed(false) : collapse()}
-        className="absolute left-[76px] top-[-46px] z-[60] flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink [-webkit-app-region:no-drag]"
+      <Tooltip
+        label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        shortcut="⌘B"
+        side="bottom"
+        className="absolute left-[76px] top-[-46px] z-[60]"
       >
-        <span className="pointer-events-none flex items-center justify-center">
-          <HugeIcon icon={collapsed ? SidebarRight01Icon : SidebarLeft01Icon} size={18} />
-        </span>
-      </button>
+        <button
+          type="button"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          onClick={() => collapsed ? setCollapsed(false) : collapse()}
+          className="flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink [-webkit-app-region:no-drag]"
+        >
+          <span className="pointer-events-none flex items-center justify-center">
+            <HugeIcon icon={collapsed ? SidebarRight01Icon : SidebarLeft01Icon} size={18} />
+          </span>
+        </button>
+      </Tooltip>
       <aside
         data-sidebar-collapsed={collapsed}
         aria-label="Workspace navigation"

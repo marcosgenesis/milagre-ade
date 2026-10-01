@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionRequest } from "../model";
+import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest } from "../model";
 
 /** A turn streaming in a chat, keyed by chat key (see `chatKey`). */
 export interface AgentRun {
@@ -6,6 +6,10 @@ export interface AgentRun {
   model: string;
   /** Approval requests the turn waits on, oldest first. */
   approvals: PermissionRequest[];
+  /** The answer sent for each approval request (by request id) until the agent takes it. */
+  answered: Record<string, PermissionDecision>;
+  /** A steering message split the reply, so a turn that ends with no more text saves nothing more. */
+  split?: boolean;
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -30,7 +34,22 @@ export function chatInProject(projectPath: string, key: string): boolean {
 }
 
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns {
-  return { ...runs, [chatId]: { text: "", model, approvals: [] } };
+  return { ...runs, [chatId]: { text: "", model, approvals: [], answered: {} } };
+}
+
+/** Records the answer the user sent for a chat's approval request. Kept on the run, so another chat's request with the same id is untouched. */
+export function markAnswered(runs: AgentRuns, chatId: string, requestId: string, decision: PermissionDecision): AgentRuns {
+  const run = runs[chatId];
+  if (!run) return runs;
+  return { ...runs, [chatId]: { ...run, answered: { ...run.answered, [requestId]: decision } } };
+}
+
+/** Forgets an answer, so the card is pending again (the answer didn't reach the agent). */
+export function clearAnswered(runs: AgentRuns, chatId: string, requestId: string): AgentRuns {
+  const run = runs[chatId];
+  if (!run || !(requestId in run.answered)) return runs;
+  const { [requestId]: _forgotten, ...answered } = run.answered;
+  return { ...runs, [chatId]: { ...run, answered } };
 }
 
 /**
@@ -69,8 +88,9 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     case "permission-resolved": {
       if (!run) return { state, runs, changed: false };
       const approvals = run.approvals.filter((item) => item.requestId !== event.requestId);
-      if (approvals.length === run.approvals.length) return { state, runs, changed: false };
-      return { state, runs: { ...runs, [chatId]: { ...run, approvals } }, changed: false };
+      const { [event.requestId]: _answered, ...answered } = run.answered;
+      if (approvals.length === run.approvals.length && !(event.requestId in run.answered)) return { state, runs, changed: false };
+      return { state, runs: { ...runs, [chatId]: { ...run, approvals, answered } }, changed: false };
     }
     case "text-delta": {
       if (!run) return { state, runs, changed: false };
@@ -81,6 +101,8 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const { [chatId]: _finished, ...remaining } = runs;
+      // The reply so far was saved when a steering message split it; there is nothing left to say.
+      if (event.type === "turn-completed" && run.split && !run.text.trim()) return { state, runs: remaining, changed: false };
       const message: ChatMessage = {
         id: state.next_id,
         session_id: sessionId,
@@ -117,7 +139,7 @@ export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, proje
   const message: ChatMessage = { id: state.next_id, session_id: sessionId, body, context: null, role: "assistant", model: run.model };
   return {
     state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
-    runs: { ...runs, [chatId]: { ...run, text: "" } },
+    runs: { ...runs, [chatId]: { ...run, text: "", split: true } },
     changed: true,
   };
 }

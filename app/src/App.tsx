@@ -70,8 +70,6 @@ function App() {
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
-  // The answer sent for the open approval, shown on the card until the agent takes it.
-  const [answering, setAnswering] = useState<{ requestId: string; decision: PermissionDecision } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [update, setUpdate] = useState<UpdateState | null>(null);
@@ -128,11 +126,8 @@ function App() {
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
-    const { requestId } = pendingApproval;
-    setAnswering({ requestId, decision });
-    // If the answer doesn't reach the agent, the card goes back to pending so it can be answered again.
-    const recover = () => setAnswering((current) => (current?.requestId === requestId ? null : current));
-    void agentRuns.respond(chatKey(project.path, selectedSession.id), requestId, decision).then((accepted) => { if (!accepted) recover(); }, recover);
+    // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
+    void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
   }
 
   // A chat stays on the agent it started with; the picker follows the open chat.
@@ -340,14 +335,14 @@ function App() {
         event.preventDefault();
         // Escape denies the open approval; once that's answered, Escape stops the turn.
         const pending = run.approvals[0];
-        if (pending && answering?.requestId !== pending.requestId) answerApproval("deny");
+        if (pending && !run.answered[pending.requestId]) answerApproval("deny");
         else void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
       }
     }
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [run, answering, project?.path, selectedSession?.id, view]);
+  }, [run, project?.path, selectedSession?.id, view]);
 
   if (loading || !project || !state) {
     return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;
@@ -440,7 +435,7 @@ function App() {
                 key={pendingApproval.requestId}
                 request={pendingApproval}
                 waiting={(run?.approvals.length ?? 1) - 1}
-                answering={answering?.requestId === pendingApproval.requestId ? answering.decision : null}
+                answering={run?.answered[pendingApproval.requestId] ?? null}
                 onAnswer={answerApproval}
               />
             ) : undefined}

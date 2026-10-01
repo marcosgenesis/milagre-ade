@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision } from "../model";
-import { applyAgentEvent, chatInProject, splitRunForSteer, startRun } from "../lib/agent-runs";
+import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, splitRunForSteer, startRun } from "../lib/agent-runs";
 import type { AgentRuns } from "../lib/agent-runs";
 
 /**
@@ -69,7 +69,22 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
     commitRef.current(result.state);
   }, []);
 
-  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => window.milagre.respondToPermission(chatId, requestId, decision), []);
+  /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
+  const respond = useCallback(async (chatId: string, requestId: string, decision: PermissionDecision) => {
+    const setAnswers = (next: AgentRuns) => {
+      runsRef.current = next;
+      setRuns(next);
+    };
+    setAnswers(markAnswered(runsRef.current, chatId, requestId, decision));
+    try {
+      const accepted = await window.milagre.respondToPermission(chatId, requestId, decision);
+      if (!accepted) setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      return accepted;
+    } catch (error) {
+      setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      throw error;
+    }
+  }, []);
 
   return { runs, start, interrupt, respond, splitForSteer };
 }

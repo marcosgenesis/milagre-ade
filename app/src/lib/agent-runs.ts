@@ -1,9 +1,15 @@
-import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider } from "../model";
+import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest } from "../model";
 
 /** A turn streaming in a chat, keyed by chat key (see `chatKey`). */
 export interface AgentRun {
   text: string;
   model: string;
+  /** Approval requests the turn waits on, oldest first. */
+  approvals: PermissionRequest[];
+  /** The answer sent for each approval request (by request id) until the agent takes it. */
+  answered: Record<string, PermissionDecision>;
+  /** A steering message split the reply, so a turn that ends with no more text saves nothing more. */
+  split?: boolean;
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -14,6 +20,15 @@ export type AgentRuns = Record<string, AgentRun>;
  */
 export function chatKey(projectPath: string, sessionId: number): string {
   return `${projectPath}#${sessionId}`;
+}
+
+/** Session ids of the project's chats that wait on at least one approval, so the sidebar can mark them. */
+export function chatsWaitingForApproval(runs: AgentRuns, projectPath: string): Set<number> {
+  const waiting = new Set<number>();
+  for (const [key, run] of Object.entries(runs)) {
+    if (run.approvals.length > 0 && chatInProject(projectPath, key)) waiting.add(sessionIdFromKey(key));
+  }
+  return waiting;
 }
 
 /** The session id at the end of a chat key (after the last `#`), or NaN. */
@@ -28,7 +43,22 @@ export function chatInProject(projectPath: string, key: string): boolean {
 }
 
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns {
-  return { ...runs, [chatId]: { text: "", model } };
+  return { ...runs, [chatId]: { text: "", model, approvals: [], answered: {} } };
+}
+
+/** Records the answer the user sent for a chat's approval request. Kept on the run, so another chat's request with the same id is untouched. */
+export function markAnswered(runs: AgentRuns, chatId: string, requestId: string, decision: PermissionDecision): AgentRuns {
+  const run = runs[chatId];
+  if (!run) return runs;
+  return { ...runs, [chatId]: { ...run, answered: { ...run.answered, [requestId]: decision } } };
+}
+
+/** Forgets an answer, so the card is pending again (the answer didn't reach the agent). */
+export function clearAnswered(runs: AgentRuns, chatId: string, requestId: string): AgentRuns {
+  const run = runs[chatId];
+  if (!run || !(requestId in run.answered)) return runs;
+  const { [requestId]: _forgotten, ...answered } = run.answered;
+  return { ...runs, [chatId]: { ...run, answered } };
 }
 
 /**
@@ -52,6 +82,25 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       const { native_session_id: _forgotten, ...rest } = session;
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: rest } }, runs, changed: true };
     }
+    case "turn-started": {
+      // A turn this window didn't start, such as a steering message that arrived as the last turn ended.
+      if (run) return { state, runs, changed: false };
+      const model = [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "user")?.model ?? "";
+      return { state, runs: startRun(runs, chatId, model), changed: false };
+    }
+    case "permission-request": {
+      if (!run) return { state, runs, changed: false };
+      const { type: _type, ...request } = event;
+      const approvals = [...run.approvals.filter((item) => item.requestId !== request.requestId), request];
+      return { state, runs: { ...runs, [chatId]: { ...run, approvals } }, changed: false };
+    }
+    case "permission-resolved": {
+      if (!run) return { state, runs, changed: false };
+      const approvals = run.approvals.filter((item) => item.requestId !== event.requestId);
+      const { [event.requestId]: _answered, ...answered } = run.answered;
+      if (approvals.length === run.approvals.length && !(event.requestId in run.answered)) return { state, runs, changed: false };
+      return { state, runs: { ...runs, [chatId]: { ...run, approvals, answered } }, changed: false };
+    }
     case "text-delta": {
       if (!run) return { state, runs, changed: false };
       return { state, runs: { ...runs, [chatId]: { ...run, text: run.text + event.text } }, changed: false };
@@ -61,6 +110,8 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const { [chatId]: _finished, ...remaining } = runs;
+      // The reply so far was saved when a steering message split it; there is nothing left to say.
+      if (event.type === "turn-completed" && run.split && !run.text.trim()) return { state, runs: remaining, changed: false };
       const message: ChatMessage = {
         id: state.next_id,
         session_id: sessionId,
@@ -83,6 +134,23 @@ function replyBody(text: string, event: AgentEvent) {
   if (event.type === "turn-failed") return reply ? `${reply}\n\nAgent error: ${event.message}` : `Agent error: ${event.message}`;
   if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
   return reply || "The agent finished without a reply.";
+}
+
+/**
+ * Before a steering message joins a running turn, the reply streamed so far is saved as its own
+ * message, so the chat reads in order: the reply so far, the new message, then the rest of the reply.
+ */
+export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): { state: CoordinatorState; runs: AgentRuns; changed: boolean } {
+  const sessionId = sessionIdFromKey(chatId);
+  const run = runs[chatId];
+  const body = run?.text.trim();
+  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, changed: false };
+  const message: ChatMessage = { id: state.next_id, session_id: sessionId, body, context: null, role: "assistant", model: run.model };
+  return {
+    state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
+    runs: { ...runs, [chatId]: { ...run, text: "", split: true } },
+    changed: true,
+  };
 }
 
 /** The model to use for a chat. A chat bound to a provider never runs another provider's model. */

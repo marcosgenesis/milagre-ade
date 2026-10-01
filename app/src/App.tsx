@@ -9,6 +9,7 @@ import {
   MODEL_CATALOG,
   ModelOption,
   OpenProject,
+  PermissionDecision,
   PermissionMode,
   EffortLevel,
   ModelCapabilities,
@@ -19,7 +20,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatKey, modelForChat } from "./lib/agent-runs";
+import { chatKey, chatsWaitingForApproval, modelForChat } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -27,21 +28,10 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme } from "./lib/settings";
-import { ToolApproval, ToolApprovalCode } from "./components/agents/tool-approval";
-import type { ToolApprovalStatus } from "./components/agents/tool-approval";
+import { PermissionCard } from "./components/agents/PermissionCard";
 import type { UpdateState } from "./electron";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
-
-const MUTATING_INTENT = /\b(add|adicion(e|ar)|alter(e|ar|ado|ada)|atualiz(e|ar)|change|configur(e|ar)|corrij(a|e|ar)|crie|criar|create|delete|delet(e|ar)|edite|editar|edit|exclu(a|ir)|escrev(a|er)|faça|faca|implement(e|ar)|instal(e|ar)|mude|modifiqu(e|ar)|mov(a|er)|rebatiz(e|ar)|remove|remov(e|ar)|renome(i|ar)|salv(e|ar)|substitu(a|ir)|troqu(e|ar)|write)\b/i;
-const READ_ONLY_INTENT = /^(como|o que|qual|por que|porque|explique|mostre|liste|analise|analisa|revise|revisa|verifique|verifica|inspecione|inspeciona|status|me diga|pode me dizer|how|what|which|why|explain|show|list|analy[sz]e|review|inspect|check)\b/i;
-const EXPLICIT_MUTATION = /\b(e|and)\s+(add|adicion(e|ar)|alter(e|ar)|atualiz(e|ar)|change|configur(e|ar)|corrij(a|e|ar)|crie|criar|create|delete|delet(e|ar)|edite|editar|edit|exclu(a|ir)|escrev(a|er)|faça|faca|implement(e|ar)|instal(e|ar)|modifiqu(e|ar)|remove|remov(e|ar)|renome(i|ar)|salv(e|ar)|substitu(a|ir)|troqu(e|ar)|write)\b/i;
-
-function requiresApproval(prompt: string) {
-  const normalized = prompt.trim();
-  if (!MUTATING_INTENT.test(normalized)) return false;
-  return !READ_ONLY_INTENT.test(normalized) || EXPLICIT_MUTATION.test(normalized);
-}
 
 // The chat with the most recent message, or none so the app opens on a new chat.
 function latestSessionId(state: CoordinatorState) {
@@ -80,13 +70,9 @@ function App() {
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
-  const [approvalImages, setApprovalImages] = useState<ImageAttachment[]>([]);
-  const [approvalPrompt, setApprovalPrompt] = useState<string | null>(null);
-  const [approvalStatus, setApprovalStatus] = useState<ToolApprovalStatus>("pending");
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [update, setUpdate] = useState<UpdateState | null>(null);
-  const approvalTimerRef = useRef<number | null>(null);
   useApplyTheme();
 
   useEffect(() => {
@@ -136,6 +122,13 @@ function App() {
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
+  const pendingApproval = run?.approvals[0];
+
+  function answerApproval(decision: PermissionDecision) {
+    if (!project || !selectedSession || !pendingApproval) return;
+    // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
+    void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
+  }
 
   // A chat stays on the agent it started with; the picker follows the open chat.
   useEffect(() => {
@@ -155,14 +148,16 @@ function App() {
     commit(nextState);
   }
 
+  // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
+  const waiting = useMemo(() => chatsWaitingForApproval(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
       .filter(({ sessionMessages }) => sessionMessages.length > 0)
       .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
-      .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name) }));
-  }, [state]);
+      .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name), waiting: waiting.has(session.id) }));
+  }, [state, waiting]);
 
   function startNewChat() {
     setSelectedSessionId(null);
@@ -205,7 +200,7 @@ function App() {
   }
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
-    if ((!body && !images.length) || !state || !selectedWorktree || !project || isSending || imageDraft.loading) return;
+    if ((!body && !images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     setPreparing(true);
     setNewChatError(null);
 
@@ -218,10 +213,16 @@ function App() {
       setPreparing(false);
       return;
     }
+    if (!target || projectRef.current?.path !== project.path) {
+      setPreparing(false);
+      return;
+    }
+    // A message sent while this chat's turn runs steers it; the reply streamed so far is saved first,
+    // so it stays above the new message.
+    if (target.session) agentRuns.splitForSteer(chatKey(project.path, target.session.id));
     // Read the state only now: a turn in another chat may have finished while the target resolved.
-    // If another project was opened meanwhile, the latest state is that project's; drop the send.
     const latest = stateRef.current;
-    if (!target || !latest || projectRef.current?.path !== project.path) {
+    if (!latest) {
       setPreparing(false);
       return;
     }
@@ -273,13 +274,7 @@ function App() {
 
   async function sendMessage() {
     const body = draft.trim();
-    if ((!body && !imageDraft.images.length) || !state || !selectedWorktree || !project || isSending || imageDraft.loading) return;
-    if (permissionMode === "ask" && (requiresApproval(body) || /(^|\s)\/[a-zA-Z0-9][\w.:-]*(?=\s|$)/.test(body))) {
-      setApprovalImages([...imageDraft.images]);
-      setApprovalStatus("pending");
-      setApprovalPrompt(body);
-      return;
-    }
+    if ((!body && !imageDraft.images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
 
@@ -310,31 +305,6 @@ function App() {
     });
   }
 
-  function approvePending(mode: PermissionMode) {
-    const body = approvalPrompt;
-    if (!body) return;
-    if (mode === "auto") setPermissionMode("auto");
-    setApprovalStatus("approving");
-    if (approvalTimerRef.current !== null) window.clearTimeout(approvalTimerRef.current);
-    approvalTimerRef.current = window.setTimeout(() => {
-      approvalTimerRef.current = null;
-      setApprovalPrompt(null);
-      void executeSend(body, mode, approvalImages);
-    }, 350);
-  }
-
-  function denyPending() {
-    if (approvalTimerRef.current !== null) {
-      window.clearTimeout(approvalTimerRef.current);
-      approvalTimerRef.current = null;
-    }
-    setApprovalStatus("denied");
-    approvalTimerRef.current = window.setTimeout(() => {
-      approvalTimerRef.current = null;
-      setApprovalPrompt(null);
-    }, 300);
-  }
-
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
@@ -363,20 +333,18 @@ function App() {
         setView("chat");
         return;
       }
-      if (approvalPrompt) {
-        event.preventDefault();
-        denyPending();
-        return;
-      }
       if (run && project && selectedSession) {
         event.preventDefault();
-        void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
+        // Escape denies the open approval; once that's answered, Escape stops the turn.
+        const pending = run.approvals[0];
+        if (pending && !run.answered[pending.requestId]) answerApproval("deny");
+        else void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
       }
     }
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [approvalPrompt, run, project?.path, selectedSession?.id, view]);
+  }, [run, project?.path, selectedSession?.id, view]);
 
   if (loading || !project || !state) {
     return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;
@@ -431,6 +399,7 @@ function App() {
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
             isSending={isSending}
+            sendBlocked={preparing}
             streamingText={run?.text}
             runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
@@ -463,30 +432,13 @@ function App() {
             baseBranch={baseBranch ?? selectedWorktree?.name ?? branches[0] ?? ""}
             onBaseBranchChange={setBaseBranch}
             newChatError={newChatError}
-            approval={approvalPrompt ? (
-              <ToolApproval
-                tool="agent.run"
-                title="Allow this agent to run?"
-                description={`The agent wants to work inside ${isolation === "worktree" && !selectedSession ? `a new worktree from ${baseBranch ?? selectedWorktree?.name}` : selectedWorktree?.name ?? "the selected worktree"}. Choose how this run can access files and execute operations.`}
-                status={approvalStatus}
-                defaultOpen
-                parameters={[
-                  {
-                    id: "request",
-                    label: "Request",
-                    value: <span className="whitespace-pre-wrap">{approvalPrompt}</span>,
-                  },
-                  { id: "worktree", label: "Worktree", value: selectedWorktree?.path ?? "Selected project worktree" },
-                  { id: "access", label: "Access", value: "Write access inside this worktree" },
-                  {
-                    id: "command",
-                    label: "Command preview",
-                    value: <ToolApprovalCode code={`${selectedModel.provider} · ${selectedModel.id}`} language="text" />,
-                  },
-                ]}
-                onApprove={() => approvePending("ask")}
-                onAlwaysAllow={() => approvePending("auto")}
-                onDeny={denyPending}
+            approval={pendingApproval ? (
+              <PermissionCard
+                key={pendingApproval.requestId}
+                request={pendingApproval}
+                waiting={(run?.approvals.length ?? 1) - 1}
+                answering={run?.answered[pendingApproval.requestId] ?? null}
+                onAnswer={answerApproval}
               />
             ) : undefined}
           />

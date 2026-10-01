@@ -1,4 +1,5 @@
 const { isTerminal } = require("./events.cjs");
+const { USER_DECISIONS } = require("./permissions.cjs");
 
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
@@ -8,7 +9,7 @@ const BATCH_MS = 50;
 // period, and are replaced when they crash or the chat changes provider or working directory.
 // Text deltas are batched so fast streams don't flood IPC. Replacing and closing a chat's
 // session run one at a time per chat, and events from a session that is no longer the chat's
-// current one are dropped.
+// current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
   constructor({ createSession, send, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
     Object.assign(this, { createSession, send, idleMs, batchMs });
@@ -18,9 +19,18 @@ class SessionManager {
   }
 
   async startTurn(request) {
+    const start = (entry) => {
+      clearTimeout(entry.idleTimer);
+      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
+    };
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
-    clearTimeout(entry.idleTimer);
-    return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
+    try {
+      return await start(entry);
+    } catch (error) {
+      if (!error.sessionClosed) throw error;
+      // The session closed under this message (Stop had to close it); retry once on a fresh one.
+      return start(await this.serial(request.chatId, () => this.currentEntry(request)));
+    }
   }
 
   async currentEntry(request) {
@@ -62,6 +72,9 @@ class SessionManager {
     }
     this.flush(chatId);
     this.send(chatId, event);
+    // A turn the provider started itself (a steer that missed the end of the last one) isn't covered by
+    // startTurn's clear; the timer armed by the previous turn's end must not close it mid-run.
+    if (event.type === "turn-started") clearTimeout(entry.idleTimer);
     if (isTerminal(event)) this.scheduleIdleClose(chatId);
   }
 
@@ -85,6 +98,16 @@ class SessionManager {
 
   async interrupt(chatId) {
     await this.sessions.get(chatId)?.session.interrupt();
+  }
+
+  // The renderer is untrusted input: only the user's three answers reach a session.
+  respondToPermission(chatId, requestId, decision) {
+    if (!USER_DECISIONS.has(decision)) throw new Error(`Unknown permission decision: ${decision}`);
+    return this.sessions.get(chatId)?.session.respondToPermission(requestId, decision) ?? false;
+  }
+
+  async interruptAll() {
+    await Promise.all([...this.sessions.values()].map((entry) => entry.session.interrupt()));
   }
 
   closeChat(chatId) {

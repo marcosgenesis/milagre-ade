@@ -2,15 +2,15 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest } = require("./permissions.cjs");
 
-// Milagre permission mode -> Codex policy. Approvals arrive in a later step, so no mode asks
-// yet. Ask and Auto work inside the workspace sandbox, as `codex exec` did before; Ask also
-// keeps Milagre's pre-run confirmation in the renderer.
+// Milagre permission mode -> Codex policy. Ask asks before any command Codex doesn't already trust,
+// Auto only when Codex wants to go beyond the workspace sandbox, and Full never asks.
 function codexPolicy(permissionMode, cwd) {
   if (permissionMode === "full") return { approvalPolicy: "never", sandbox: "danger-full-access", sandboxPolicy: { type: "dangerFullAccess" } };
   return {
-    approvalPolicy: "never",
+    approvalPolicy: permissionMode === "auto" ? "on-request" : "untrusted",
     sandbox: "workspace-write",
     sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
   };
@@ -27,6 +27,10 @@ async function writeImages(images) {
   return { paths, cleanup: () => fs.rm(directory, { recursive: true, force: true }) };
 }
 
+const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
+
+const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
+
 class CodexSession {
   constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
     Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
@@ -35,37 +39,55 @@ class CodexSession {
     this.starting = null;
     this.turnActive = false;
     this.cancelRequested = false;
-    this.images = null;
+    // Image files written for this turn's messages; removed when the turn ends.
+    this.imageSets = [];
+    // Settle once the running turn has its id (or failed to start), and once it has ended.
+    this.turnReady = Promise.resolve();
+    this.turnEnded = Promise.resolve();
     this.ready = false;
     this.closed = false;
+    this.permissions = new PendingPermissions((event) => this.emit(event));
+    // fileChange items by id, from item/started: their approval requests carry no diff of their own.
+    this.fileChanges = new Map();
   }
 
   get nativeId() {
     return this.state.threadId;
   }
 
-  async startTurn({ prompt, images = [], model, permissionMode, effort }) {
-    if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
+  async startTurn(request) {
+    if (this.turnActive) return this.steer(request);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("codex") });
-      return { turnId: null };
+      return { turnId: null, steered: false };
     }
     this.turnActive = true;
     this.cancelRequested = false;
     Object.assign(this.state, { turnId: null, lastItemId: null, hasText: false });
+    let markReady;
+    this.turnReady = new Promise((resolve) => { markReady = resolve; });
+    this.turnEnded = new Promise((resolve) => { this.markTurnEnded = resolve; });
+    try {
+      return await this.beginTurn(request);
+    } finally {
+      markReady();
+    }
+  }
+
+  async beginTurn({ prompt, images = [], model, permissionMode, effort }) {
     const policy = codexPolicy(permissionMode, this.cwd);
     try {
       this.starting ??= this.start(model, policy);
       await this.starting;
       if (this.cancelRequested) {
         await this.finishTurn([{ type: "turn-cancelled" }]);
-        return { turnId: null };
+        return { turnId: null, steered: false };
       }
-      this.images = images.length ? await writeImages(images) : null;
-      const input = [{ type: "text", text: prompt, text_elements: [] }, ...(this.images?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
+      const files = images.length ? await writeImages(images) : null;
+      if (files) this.imageSets.push(files);
       const { turn } = await this.rpc.request("turn/start", {
         threadId: this.state.threadId,
-        input,
+        input: turnInput(prompt, files),
         model,
         ...(effort ? { effort } : {}),
         approvalPolicy: policy.approvalPolicy,
@@ -73,7 +95,7 @@ class CodexSession {
       }, { timeoutMs: 90_000 });
       this.state.turnId ??= turn?.id ?? null;
       if (this.cancelRequested) void this.interrupt();
-      return { turnId: this.state.turnId };
+      return { turnId: this.state.turnId, steered: false };
     } catch (error) {
       if (error.resumeFailed) {
         await this.finishTurn([{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
@@ -83,7 +105,39 @@ class CodexSession {
         // A session that never finished starting is unusable; closing it lets the manager start over.
         if (!this.ready) await this.close();
       }
-      return { turnId: null };
+      return { turnId: null, steered: false };
+    }
+  }
+
+  // A message for the running turn joins it through turn/steer, once the turn has an id. If Codex
+  // refuses because the turn already ended, the message starts the next turn instead.
+  async steer(request) {
+    await this.turnReady;
+    const ended = this.turnEnded;
+    if (!this.turnActive) return this.startTurn(request);
+    // A turn that was asked to stop takes no more messages; this one starts the next turn.
+    if (this.cancelRequested) {
+      await ended;
+      if (this.closed) throw sessionClosedError();
+      return this.startTurn(request);
+    }
+    // Without a turn id Codex can't be steered; send the message as the next turn once this one ends.
+    if (!this.state.turnId) {
+      await ended;
+      if (this.closed) throw sessionClosedError();
+      return this.startTurn(request);
+    }
+    const turnId = this.state.turnId;
+    const files = request.images?.length ? await writeImages(request.images) : null;
+    if (files) this.imageSets.push(files);
+    try {
+      await this.rpc.request("turn/steer", { threadId: this.state.threadId, expectedTurnId: turnId, input: turnInput(request.prompt, files) });
+      return { turnId, steered: true };
+    } catch (error) {
+      if (!error.rpcError) throw error;
+      await ended;
+      if (this.closed) throw sessionClosedError();
+      return this.startTurn(request);
     }
   }
 
@@ -91,7 +145,7 @@ class CodexSession {
     const rpc = this.createRpc({ command: this.command, cwd: this.cwd });
     this.rpc = rpc;
     rpc.on("notification", ({ method, params }) => this.handleNotification(method, params));
-    rpc.on("request", ({ id, method }) => this.handleServerRequest(id, method));
+    rpc.on("request", ({ id, method, params }) => this.handleServerRequest(id, method, params));
     rpc.on("exit", ({ detail }) => this.handleExit(detail));
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
@@ -123,6 +177,10 @@ class CodexSession {
   }
 
   handleNotification(method, params) {
+    if (method === "item/started" && params.item?.type === "fileChange") this.fileChanges.set(params.item.id, params.item.changes ?? []);
+    if (method === "serverRequest/resolved") this.permissions.forget(String(params.requestId));
+    // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
+    if (method === "turn/started" && !this.turnActive) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
     const events = mapCodexNotification(method, params, this.state);
     if (!events.some(isTerminal)) {
@@ -132,10 +190,31 @@ class CodexSession {
     void this.finishTurn(this.cancelRequested ? events.map((event) => (isTerminal(event) ? { type: "turn-cancelled" } : event)) : events);
   }
 
-  // Approvals arrive in a later step; until then nothing may wait on the user.
-  handleServerRequest(id, method) {
-    if (method.endsWith("/requestApproval")) this.rpc.respond(id, { decision: "decline" });
-    else this.rpc.respondError(id, `Milagre does not support ${method} yet.`);
+  handleServerRequest(id, method, params = {}) {
+    const answer = (decision) => this.reply(id, { decision: codexDecision(decision) });
+    const approval = method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval";
+    // A request that arrives once its turn has stopped has nobody to ask.
+    if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
+    else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
+    else if (method === "item/fileChange/requestApproval") this.permissions.add(codexFileRequest(id, params, this.fileChanges.get(params.itemId)), answer);
+    // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
+    else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
+    else {
+      try {
+        this.rpc.respondError(id, `Milagre does not support ${method} yet.`);
+      } catch {}
+    }
+  }
+
+  // Codex may already have exited; then there is nobody left to answer.
+  reply(id, result) {
+    try {
+      this.rpc?.respond(id, result);
+    } catch {}
+  }
+
+  respondToPermission(requestId, decision) {
+    return this.permissions.resolve(requestId, decision);
   }
 
   handleExit(detail) {
@@ -146,11 +225,17 @@ class CodexSession {
   async finishTurn(events) {
     if (!this.turnActive) return;
     this.turnActive = false;
+    // Bind to this turn's own resolver: a new turn may start while image cleanup is awaited.
+    const markEnded = this.markTurnEnded;
+    this.markTurnEnded = null;
     clearTimeout(this.interruptTimer);
-    const images = this.images;
-    this.images = null;
-    await images?.cleanup().catch(() => {});
+    this.permissions.cancelAll();
+    this.fileChanges.clear();
+    const imageSets = this.imageSets;
+    this.imageSets = [];
+    await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));
     events.forEach((event) => this.emit(event));
+    markEnded?.();
   }
 
   async interrupt() {
@@ -158,6 +243,7 @@ class CodexSession {
     this.cancelRequested = true;
     clearTimeout(this.interruptTimer);
     this.interruptTimer = setTimeout(() => void this.stopNow(), this.interruptGraceMs);
+    this.permissions.cancelAll();
     if (!this.state.turnId || !this.rpc) return;
     try {
       await this.rpc.request("turn/interrupt", { threadId: this.state.threadId, turnId: this.state.turnId }, { timeoutMs: this.interruptGraceMs });
@@ -174,6 +260,7 @@ class CodexSession {
   }
 
   async close() {
+    this.permissions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     await this.rpc?.close();

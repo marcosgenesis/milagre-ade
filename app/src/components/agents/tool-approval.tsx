@@ -53,6 +53,8 @@ export interface ToolApprovalProps {
   onOpenChange?: (open: boolean) => void;
   onApprove?: () => void;
   onAlwaysAllow?: () => void;
+  /** Label for the always-allow button. */
+  alwaysAllowLabel?: ReactNode;
   onDeny?: () => void;
   className?: string;
 }
@@ -104,6 +106,7 @@ export function ToolApproval({
   onOpenChange,
   onApprove,
   onAlwaysAllow,
+  alwaysAllowLabel = "Always allow",
   onDeny,
   className = "",
 }: ToolApprovalProps) {
@@ -137,9 +140,6 @@ export function ToolApproval({
       className={`flex max-h-[min(72vh,620px)] w-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-overlay ${className}`}
     >
       <div className="flex items-start gap-3 p-4">
-        <div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-control border ${statusTone(status)}`}>
-          <StatusIcon status={status} reduce={Boolean(reduce)} />
-        </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
@@ -204,7 +204,7 @@ export function ToolApproval({
               Deny
             </motion.button>
             {onAlwaysAllow && <motion.button type="button" onClick={onAlwaysAllow} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover">
-              Always allow
+              {alwaysAllowLabel}
             </motion.button>}
             <motion.button type="button" onClick={onApprove} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="rounded-control bg-ink px-3 py-2 text-xs font-medium text-surface transition-opacity hover:opacity-85">
               Allow once

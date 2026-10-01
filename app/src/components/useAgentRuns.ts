@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState } from "../model";
-import { applyAgentEvent, chatInProject, startRun } from "../lib/agent-runs";
+import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision } from "../model";
+import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, splitRunForSteer, startRun } from "../lib/agent-runs";
 import type { AgentRuns } from "../lib/agent-runs";
 
 /**
@@ -41,8 +41,11 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   }, [projectPath]);
 
   const start = useCallback(async (request: AgentStartTurnRequest) => {
-    runsRef.current = startRun(runsRef.current, request.chatId, request.model);
-    setRuns(runsRef.current);
+    // A chat whose turn is running keeps its run: the message steers that turn.
+    if (!runsRef.current[request.chatId]) {
+      runsRef.current = startRun(runsRef.current, request.chatId, request.model);
+      setRuns(runsRef.current);
+    }
     try {
       await window.milagre.startTurn(request);
       // The project was left while the turn was starting, before it could be interrupted.
@@ -55,5 +58,33 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
 
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
 
-  return { runs, start, interrupt };
+  /** Saves the reply streamed so far in a chat, so a steering message can follow it. */
+  const splitForSteer = useCallback((chatId: string) => {
+    const state = getStateRef.current();
+    if (!state) return;
+    const result = splitRunForSteer(state, runsRef.current, projectPathRef.current, chatId);
+    if (!result.changed) return;
+    runsRef.current = result.runs;
+    setRuns(result.runs);
+    commitRef.current(result.state);
+  }, []);
+
+  /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
+  const respond = useCallback(async (chatId: string, requestId: string, decision: PermissionDecision) => {
+    const setAnswers = (next: AgentRuns) => {
+      runsRef.current = next;
+      setRuns(next);
+    };
+    setAnswers(markAnswered(runsRef.current, chatId, requestId, decision));
+    try {
+      const accepted = await window.milagre.respondToPermission(chatId, requestId, decision);
+      if (!accepted) setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      return accepted;
+    } catch (error) {
+      setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      throw error;
+    }
+  }, []);
+
+  return { runs, start, interrupt, respond, splitForSteer };
 }

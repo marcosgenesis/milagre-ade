@@ -1,7 +1,11 @@
 // Stand-in for `codex app-server` in tests. It speaks the JSON-RPC subset Milagre uses.
-// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval,
-// stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
-// resume-exit (exits on thread/resume).
+// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval (command
+// approval), file-approval, permissions (extra sandbox permissions), withdrawn (an approval Codex
+// takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
+// "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
+// resume-exit (exits on thread/resume), slow-stop (the first turn takes 150ms to stop after an interrupt),
+// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping).
+// fake/turn-started makes it announce a turn nobody asked for.
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
 
@@ -20,7 +24,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const { id, method, params = {} } = message;
   if (method === undefined) {
     if (pendingTurn && pendingTurn.approvalId === id) {
-      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: `decision:${message.result && message.result.decision}` });
+      const result = message.result || {};
+      const answer = result.decision !== undefined ? `decision:${result.decision}` : `answer:${JSON.stringify(message.result ?? message.error)}`;
+      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: answer });
       completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
       pendingTurn = null;
     }
@@ -50,6 +56,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const { threadId } = params;
       const turnId = `turn-${received.filter((item) => item.method === "turn/start").length}`;
       message.imagesExist = (params.input || []).filter((input) => input.type === "localImage").map((input) => fs.existsSync(input.path));
+      if (scenario === "no-turn-id" && turnId === "turn-1") {
+        send({ id, result: { turn: { items: [], status: "inProgress", error: null } } });
+        setTimeout(() => completeTurn(threadId, turnId, "completed"), 50);
+        return undefined;
+      }
       send({ id, result: { turn: { id: turnId, items: [], status: "inProgress", error: null } } });
       notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
       notify("mcpServer/startupStatus/updated", { name: "noise", status: "ready" });
@@ -58,27 +69,76 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         process.exit(3);
       }
       if (scenario === "stubborn") return undefined;
+      if (scenario === "steer" && turnId === "turn-1") {
+        pendingTurn = { threadId, turnId };
+        return undefined;
+      }
+      if ((scenario === "slow-stop" || scenario === "late-approval") && turnId === "turn-1") {
+        pendingTurn = { threadId, turnId };
+        return undefined;
+      }
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
       if (scenario === "approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
-        return send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", command: "rm -rf build" } });
+        return send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" } });
+      }
+      if (scenario === "file-approval") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-1" };
+        notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] } });
+        return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
+      }
+      if (scenario === "permissions") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-1" };
+        return send({ id: "srv-1", method: "item/permissions/requestApproval", params: { threadId, turnId, itemId: "perm-1" } });
+      }
+      if (scenario === "withdrawn") {
+        send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+        notify("serverRequest/resolved", { threadId, requestId: "srv-1" });
+        return completeTurn(threadId, turnId, "completed");
       }
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Hel" });
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "lo" });
       if (scenario === "fail") return completeTurn(threadId, turnId, "failed", { message: "The model gpt-x is not supported." });
       return completeTurn(threadId, turnId, "completed");
     }
+    case "fake/turn-started":
+      notify("turn/started", { threadId: "thread-1", turn: { id: "turn-ghost", status: "inProgress" } });
+      return send({ id, result: {} });
     case "turn/interrupt":
       if (scenario === "stubborn") return undefined;
+      if (scenario === "slow-stop" || scenario === "late-approval") {
+        const stopping = pendingTurn;
+        pendingTurn = null;
+        setTimeout(() => {
+          send({ id, result: {} });
+          if (scenario === "late-approval") send({ id: "srv-late", method: "item/commandExecution/requestApproval", params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+          completeTurn(stopping.threadId, stopping.turnId, "interrupted");
+        }, 150);
+        return undefined;
+      }
       send({ id, result: {} });
       if (pendingTurn) {
         completeTurn(pendingTurn.threadId, pendingTurn.turnId, "interrupted");
         pendingTurn = null;
       }
       return undefined;
+    case "turn/steer": {
+      const text = (params.input || []).map((input) => input.text || "").join("");
+      if (!pendingTurn || params.expectedTurnId !== pendingTurn.turnId || text.includes("too late")) {
+        send({ id, error: { code: -32600, message: "no active turn to steer" } });
+        if (pendingTurn) completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
+        pendingTurn = null;
+        return undefined;
+      }
+      send({ id, result: { turnId: pendingTurn.turnId } });
+      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: `steered:${text}` });
+      completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
+      pendingTurn = null;
+      return undefined;
+    }
     default:
       return send({ id, error: { code: -32601, message: `unknown method ${method}` } });
   }

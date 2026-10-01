@@ -7,7 +7,7 @@ export type PermissionMode = "ask" | "auto" | "full";
 export type Isolation = "local" | "worktree";
 
 export const PERMISSION_MODES: Array<{ id: PermissionMode; name: string; description: string }> = [
-  { id: "ask", name: "Ask approval", description: "Approve each run before the agent starts" },
+  { id: "ask", name: "Ask approval", description: "Approve edits and commands as the agent asks" },
   { id: "auto", name: "Auto mode", description: "Allow changes inside this worktree" },
   { id: "full", name: "Full permission", description: "Remove filesystem and network limits" },
 ];
@@ -151,10 +151,35 @@ export interface ImageAttachment {
   dataUrl: string;
 }
 
+/** What an agent asks to do, as shown on the approval card. */
+export interface PermissionRequest {
+  requestId: string;
+  kind: "command" | "edit" | "other";
+  /** Short name of the tool, e.g. "Bash", "Shell" or "Edit files". */
+  tool: string;
+  title: string;
+  description?: string;
+  command?: string;
+  cwd?: string;
+  /** A unified diff (or the new content), capped at 20,000 characters. */
+  diff?: string;
+  files?: string[];
+  /** The tool's raw input, for tools that are neither commands nor edits. */
+  detail?: string;
+  reason?: string;
+  /** Whether "Always allow in this chat" can be offered. */
+  allowForChat: boolean;
+}
+
+export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
+
 export type AgentEvent =
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
+  | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
+  | ({ type: "permission-request" } & PermissionRequest)
+  | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | { type: "turn-completed" }
   | { type: "turn-cancelled" }
   | { type: "turn-failed"; message: string };

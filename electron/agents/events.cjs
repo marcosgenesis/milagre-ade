@@ -2,13 +2,17 @@
 // renderer as { chatId, event }, where chatId is the chat key `${projectPath}#${sessionId}`:
 //   { type: "session-started", nativeId }   provider session or thread id; the chat saves it
 //   { type: "session-reset" }               the saved id can't be resumed; the chat forgets it
+//   { type: "turn-started", turnId }        first event of every turn that starts, including turns the renderer
+//                                           didn't start (a steering message that arrived as the last turn ended);
+//                                           a turn that fails before starting ends with a terminal event and no turn-started
 //   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id
+//   { type: "permission-request", ...request } and { type: "permission-resolved", requestId, decision }
+//                                           an approval the turn waits on (see permissions.cjs)
 //   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message }
 // Exactly one of the last three ends every turn.
 
-const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.";
+const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask in your reply as a short list, not through a question tool.";
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
-const TURN_RUNNING_MESSAGE = "This chat already has a turn running.";
 const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 
 function missingCliMessage(name) {
@@ -48,6 +52,7 @@ function mapClaudeMessage(message, state) {
 // the server also reports MCP startup, hooks, rate limits and token usage.
 function mapCodexNotification(method, params, state) {
   if (params.threadId && state.threadId && params.threadId !== state.threadId) return [];
+  if (method === "turn/started") return [{ type: "turn-started", turnId: params.turn?.id ?? null }];
   if (method === "item/agentMessage/delta" && params.delta) {
     // Late text from an earlier turn is not part of this reply, and must not take over turnId.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
@@ -69,4 +74,4 @@ function mapCodexNotification(method, params, state) {
   return [];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };

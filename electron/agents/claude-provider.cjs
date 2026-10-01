@@ -1,12 +1,12 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { PendingPermissions, claudeRequest, claudeResult } = require("./permissions.cjs");
 
-// Milagre permission mode -> Claude Code permission mode. Approvals arrive in a later step,
-// so Ask uses acceptEdits like the old `claude --print` call; Ask also keeps Milagre's
-// pre-run confirmation in the renderer.
-const CLAUDE_MODES = { ask: "acceptEdits", auto: "acceptEdits", full: "bypassPermissions" };
+// Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
+// the user, through canUseTool, before edits and commands its rules don't already allow.
+const CLAUDE_MODES = { ask: "default", auto: "acceptEdits", full: "bypassPermissions" };
 
 // Claude Code prints this when --resume names a session it no longer has.
 const MISSING_CONVERSATION = /No conversation found/i;
@@ -39,6 +39,13 @@ class Inbox {
   }
 }
 
+function userMessage(prompt, images = []) {
+  const content = [{ type: "text", text: prompt }, ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }))];
+  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
+}
+
+const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
+
 class ClaudeSession {
   constructor({ cwd, resumeId, command, emit, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
     Object.assign(this, { cwd, resumeId, command, emit, loadSdk, spawnImpl, interruptGraceMs });
@@ -50,24 +57,41 @@ class ClaudeSession {
     this.turnActive = false;
     this.cancelRequested = false;
     this.closed = false;
+    this.permissions = new PendingPermissions((event) => this.emit(event));
+    // Settles once the running turn's own message is in Claude Code's input (or the turn failed to start).
+    this.turnReady = Promise.resolve();
+    // Settles when the running turn ends; a message sent while the turn is stopping waits on it.
+    this.turnEnded = Promise.resolve();
+    this.markEnded = () => {};
   }
 
   get nativeId() {
     return this.state.sessionId;
   }
 
-  async startTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
-    if (this.closed) throw new Error("This Claude session is closed.");
-    if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
+  async startTurn(request) {
+    if (this.closed) throw Object.assign(new Error("This Claude session is closed."), { sessionClosed: true });
+    if (this.turnActive) return this.steer(request);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
-      return { turnId: null };
+      return { turnId: null, steered: false };
     }
     this.turnActive = true;
     this.cancelRequested = false;
+    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
+    let markReady;
+    this.turnReady = new Promise((resolve) => { markReady = resolve; });
+    try {
+      return await this.beginTurn(request);
+    } finally {
+      markReady();
+    }
+  }
+
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
-    const mode = CLAUDE_MODES[permissionMode] ?? "acceptEdits";
+    const mode = CLAUDE_MODES[permissionMode] ?? "default";
     try {
       if (!this.query) await this.start(model, mode, effort, ultracode);
       if (!this.closed) {
@@ -88,21 +112,47 @@ class ClaudeSession {
       }
     } catch (error) {
       this.finishTurn({ type: "turn-failed", message: error.message });
-      return { turnId: null };
+      return { turnId: null, steered: false };
     }
     // close() or interrupt() may have landed while the SDK was loading or the query starting.
     if (this.closed) {
       await this.close();
       this.finishTurn({ type: "turn-cancelled" });
-      return { turnId: null };
+      return { turnId: null, steered: false };
     }
     if (this.cancelRequested) {
       this.finishTurn({ type: "turn-cancelled" });
-      return { turnId: null };
+      return { turnId: null, steered: false };
     }
-    const content = [{ type: "text", text: prompt }, ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }))];
-    this.inbox.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
-    return { turnId };
+    this.inbox.push(userMessage(prompt, images));
+    this.emit({ type: "turn-started", turnId });
+    return { turnId, steered: false };
+  }
+
+  // A message for the running turn goes straight into Claude Code's input. Claude Code picks it up at
+  // the next tool boundary; if the turn ends first, it starts a new turn for it (see readMessages).
+  async steer(request) {
+    await this.turnReady;
+    const ended = this.turnEnded;
+    // A turn that was asked to stop takes no more messages; this one starts the next turn.
+    if (this.cancelRequested) {
+      await ended;
+      if (this.closed) throw sessionClosedError();
+      return this.startTurn(request);
+    }
+    if (!this.turnActive || !this.inbox || this.closed) return this.startTurn(request);
+    this.inbox.push(userMessage(request.prompt, request.images));
+    return { turnId: this.state.turnId, steered: true };
+  }
+
+  beginImplicitTurn() {
+    const turnId = randomUUID();
+    this.turnActive = true;
+    this.cancelRequested = false;
+    Object.assign(this.state, { turnId, hasText: false });
+    this.turnReady = Promise.resolve();
+    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
+    this.emit({ type: "turn-started", turnId });
   }
 
   async start(model, mode, effort, ultracode = false) {
@@ -128,6 +178,9 @@ class ClaudeSession {
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS },
+        canUseTool: (toolName, input, options) => this.askPermission(toolName, input, options),
+        // Questions to the user are out of scope for now; Claude asks in its reply instead.
+        disallowedTools: ["AskUserQuestion"],
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
@@ -141,9 +194,33 @@ class ClaudeSession {
     void this.readMessages(this.query);
   }
 
+  // Claude Code waits on this promise until the user answers in Milagre, the turn stops, or the SDK
+  // aborts the request.
+  askPermission(toolName, input, options = {}) {
+    // A request that arrives once its turn has stopped has nobody to ask.
+    if (!this.turnActive || this.cancelRequested || this.closed) return Promise.resolve(claudeResult("cancelled", input));
+    const request = claudeRequest(toolName, input, options);
+    return new Promise((resolve) => {
+      const abort = () => this.permissions.resolve(request.requestId, "cancelled");
+      this.permissions.add(request, (decision) => {
+        options.signal?.removeEventListener("abort", abort);
+        resolve(claudeResult(decision, input, options.suggestions));
+      });
+      if (options.signal?.aborted) abort();
+      else options.signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  respondToPermission(requestId, decision) {
+    return this.permissions.resolve(requestId, decision);
+  }
+
   async readMessages(query) {
     try {
       for await (const message of query) {
+        // Claude Code opens every turn with init. One arriving while no turn runs is a turn Claude Code
+        // started by itself, for a steering message that came in just as the last turn ended.
+        if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.beginImplicitTurn();
         for (const event of mapClaudeMessage(message, this.state)) {
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
@@ -183,8 +260,11 @@ class ClaudeSession {
   finishTurn(event) {
     if (!this.turnActive) return;
     this.turnActive = false;
+    const markEnded = this.markEnded;
     clearTimeout(this.interruptTimer);
+    this.permissions.cancelAll();
     this.emit(event);
+    markEnded();
   }
 
   async interrupt() {
@@ -195,12 +275,14 @@ class ClaudeSession {
     this.interruptTimer = setTimeout(() => {
       void this.close().then(() => this.finishTurn({ type: "turn-cancelled" }));
     }, this.interruptGraceMs);
+    this.permissions.cancelAll();
     // interrupt() rejects with "Query closed before response received" when the query
     // closes first; that is expected during cancel and shutdown.
     await this.query?.interrupt().catch(() => {});
   }
 
   async close() {
+    this.permissions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     this.inbox?.end();

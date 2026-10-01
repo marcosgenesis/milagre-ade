@@ -262,7 +262,7 @@ The changes to `coordination.json` are additive, so older files load unchanged.
 - **Reload.** Reloading the renderer interrupts every running turn, so no turn is left waiting on an approval card that no longer exists.
 - **Live message.** The live assistant message shows streamed text with tool rows where they happened. Saved replies show their rows the same way.
   - A row has an icon for its kind and a title such as "Ran `npm test`" or "Edited `App.tsx`".
-  - It ends with a spinner while the step runs, then a check or "Failed".
+  - While the step runs, its title shimmers; when it's done the row just stops shimmering, with no check. A failed step shows "Failed".
   - A row whose step waits on the open approval card says "Waiting for approval". Both agents report a tool call before asking about it, so the row appears first.
   - Clicking a row that has output or a diff expands it.
 - **Approval card.** The existing `ToolApproval` card appears inline when the open chat has a pending request. Its buttons are Allow once, Always allow in this chat, and Deny.

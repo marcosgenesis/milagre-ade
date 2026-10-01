@@ -329,7 +329,6 @@ test("the SDK can abort a pending approval", async (t) => {
   // The turn should end normally with turn-completed since the SDK aborted, not the session
   await ended(events);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
-  const types = events.map((event) => event.type);
   assert.deepEqual(events.at(-1), { type: "turn-completed" });
 });
 
@@ -380,4 +379,56 @@ test("a steer sent while the SDK is still loading waits for the turn", async (t)
   await first;
   await ended(events);
   assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Also add tests"]);
+});
+
+test("a message sent while a turn is stopping starts the next turn", async (t) => {
+  let runs = 0;
+  const script = async function* ({ interrupted, released }) {
+    runs += 1;
+    yield init;
+    if (runs === 1) {
+      await interrupted;
+      await released;
+      yield { type: "result", subtype: "error_during_execution", is_error: true, errors: ["Request was aborted."] };
+      return;
+    }
+    yield delta("second");
+    yield success;
+  };
+  const { session, events, calls } = claude(t, { script });
+  const first = await session.startTurn(TURN);
+  await waitUntil(() => events.length > 0);
+  const release = calls.release;
+  await session.interrupt();
+  const pending = session.startTurn({ ...TURN, prompt: "Next" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls.prompts.length, 1);
+  release();
+  const second = await pending;
+  await ended(events, 2);
+
+  assert.equal(second.steered, false);
+  assert.notEqual(second.turnId, first.turnId);
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }, { type: "turn-completed" }]);
+  const types = events.map((event) => event.type);
+  assert.ok(types.indexOf("turn-cancelled") < types.lastIndexOf("turn-started"));
+  assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Next"]);
+});
+
+test("an approval requested after the turn was stopped is cancelled at once", async (t) => {
+  const script = async function* ({ interrupted, options }) {
+    yield init;
+    await interrupted;
+    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, { requestId: "late-1", toolUseID: "tool-late" });
+    yield delta(JSON.stringify(result));
+    yield { type: "result", subtype: "error_during_execution", is_error: true, errors: ["Request was aborted."] };
+  };
+  const { session, events } = claude(t, { script });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await waitUntil(() => events.length > 0);
+  await session.interrupt();
+  await ended(events);
+  assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
+  assert.equal(session.respondToPermission("late-1", "allow"), false);
 });

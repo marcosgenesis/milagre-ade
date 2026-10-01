@@ -310,3 +310,54 @@ test("a turn's end settles even when a new turn starts during its cleanup", asyn
   assert.notEqual(firstEnded, secondEnded);
   assert.equal(secondSettled, false);
 });
+
+test("a message sent while a turn is stopping starts the next turn", async (t) => {
+  const { session, events } = codex(t, { scenario: "slow-stop" });
+  const first = await session.startTurn(TURN);
+  const stopping = session.interrupt();
+  const second = await session.startTurn({ ...TURN, prompt: "Next" });
+  await stopping;
+  await ended(events, 2);
+  assert.deepEqual(first, { turnId: "turn-1", steered: false });
+  assert.deepEqual(second, { turnId: "turn-2", steered: false });
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }, { type: "turn-completed" }]);
+  const types = events.map((event) => event.type);
+  assert.ok(types.indexOf("turn-cancelled") < types.lastIndexOf("turn-started"));
+  const messages = await received(session);
+  assert.equal(messages.filter((message) => message.method === "turn/steer").length, 0);
+  assert.equal(messages.filter((message) => message.method === "turn/start").length, 2);
+});
+
+test("an approval requested after the turn was stopped is cancelled at once", async (t) => {
+  const { session, events } = codex(t, { scenario: "late-approval" });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await session.interrupt();
+  await ended(events);
+  let answer;
+  await waitUntil(() => {
+    void received(session).then((messages) => { answer = messages.find((message) => message.id === "srv-late"); });
+    return answer;
+  });
+  assert.deepEqual(answer.result, { decision: "cancel" });
+  assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
+  assert.equal(session.permissions.size, 0);
+});
+
+test("a turn Codex announces that this session isn't running is ignored", async (t) => {
+  const { session, events } = codex(t);
+  await session.startTurn(TURN);
+  await ended(events);
+  await session.rpc.request("fake/turn-started");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(events.filter((event) => event.type === "turn-started").length, 1);
+});
+
+test("an unknown permission mode uses Ask's policy", async (t) => {
+  const { session, events } = codex(t);
+  await session.startTurn({ ...TURN, permissionMode: "something-else" });
+  await ended(events);
+  const params = (await received(session)).find((message) => message.method === "turn/start").params;
+  assert.equal(params.approvalPolicy, "untrusted");
+  assert.equal(params.sandboxPolicy.type, "workspaceWrite");
+  assert.equal((await received(session)).find((message) => message.method === "thread/start").params.sandbox, "workspace-write");
+});

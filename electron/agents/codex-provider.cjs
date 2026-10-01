@@ -113,6 +113,11 @@ class CodexSession {
     await this.turnReady;
     const ended = this.turnEnded;
     if (!this.turnActive) return this.startTurn(request);
+    // A turn that was asked to stop takes no more messages; this one starts the next turn.
+    if (this.cancelRequested) {
+      await ended;
+      return this.startTurn(request);
+    }
     // Without a turn id Codex can't be steered; send the message as the next turn once this one ends.
     if (!this.state.turnId) {
       await ended;
@@ -169,6 +174,8 @@ class CodexSession {
   handleNotification(method, params) {
     if (method === "item/started" && params.item?.type === "fileChange") this.fileChanges.set(params.item.id, params.item.changes ?? []);
     if (method === "serverRequest/resolved") this.permissions.forget(String(params.requestId));
+    // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
+    if (method === "turn/started" && !this.turnActive) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
     const events = mapCodexNotification(method, params, this.state);
     if (!events.some(isTerminal)) {
@@ -180,7 +187,10 @@ class CodexSession {
 
   handleServerRequest(id, method, params = {}) {
     const answer = (decision) => this.reply(id, { decision: codexDecision(decision) });
-    if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
+    const approval = method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval";
+    // A request that arrives once its turn has stopped has nobody to ask.
+    if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
+    else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
     else if (method === "item/fileChange/requestApproval") this.permissions.add(codexFileRequest(id, params, this.fileChanges.get(params.itemId)), answer);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });

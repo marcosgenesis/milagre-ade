@@ -3,7 +3,9 @@
 // approval), file-approval, permissions (extra sandbox permissions), withdrawn (an approval Codex
 // takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
 // "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
-// resume-exit (exits on thread/resume).
+// resume-exit (exits on thread/resume), slow-stop (the first turn takes 150ms to stop after an interrupt),
+// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping).
+// fake/turn-started makes it announce a turn nobody asked for.
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
 
@@ -71,6 +73,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
+      if ((scenario === "slow-stop" || scenario === "late-approval") && turnId === "turn-1") {
+        pendingTurn = { threadId, turnId };
+        return undefined;
+      }
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
@@ -98,8 +104,21 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (scenario === "fail") return completeTurn(threadId, turnId, "failed", { message: "The model gpt-x is not supported." });
       return completeTurn(threadId, turnId, "completed");
     }
+    case "fake/turn-started":
+      notify("turn/started", { threadId: "thread-1", turn: { id: "turn-ghost", status: "inProgress" } });
+      return send({ id, result: {} });
     case "turn/interrupt":
       if (scenario === "stubborn") return undefined;
+      if (scenario === "slow-stop" || scenario === "late-approval") {
+        const stopping = pendingTurn;
+        pendingTurn = null;
+        setTimeout(() => {
+          send({ id, result: {} });
+          if (scenario === "late-approval") send({ id: "srv-late", method: "item/commandExecution/requestApproval", params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+          completeTurn(stopping.threadId, stopping.turnId, "interrupted");
+        }, 150);
+        return undefined;
+      }
       send({ id, result: {} });
       if (pendingTurn) {
         completeTurn(pendingTurn.threadId, pendingTurn.turnId, "interrupted");

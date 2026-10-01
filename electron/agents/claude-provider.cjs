@@ -58,6 +58,9 @@ class ClaudeSession {
     this.permissions = new PendingPermissions((event) => this.emit(event));
     // Settles once the running turn's own message is in Claude Code's input (or the turn failed to start).
     this.turnReady = Promise.resolve();
+    // Settles when the running turn ends; a message sent while the turn is stopping waits on it.
+    this.turnEnded = Promise.resolve();
+    this.markEnded = () => {};
   }
 
   get nativeId() {
@@ -73,6 +76,7 @@ class ClaudeSession {
     }
     this.turnActive = true;
     this.cancelRequested = false;
+    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
     let markReady;
     this.turnReady = new Promise((resolve) => { markReady = resolve; });
     try {
@@ -127,6 +131,12 @@ class ClaudeSession {
   // the next tool boundary; if the turn ends first, it starts a new turn for it (see readMessages).
   async steer(request) {
     await this.turnReady;
+    const ended = this.turnEnded;
+    // A turn that was asked to stop takes no more messages; this one starts the next turn.
+    if (this.cancelRequested) {
+      await ended;
+      return this.startTurn(request);
+    }
     if (!this.turnActive || !this.inbox || this.closed) return this.startTurn(request);
     this.inbox.push(userMessage(request.prompt, request.images));
     return { turnId: this.state.turnId, steered: true };
@@ -138,6 +148,7 @@ class ClaudeSession {
     this.cancelRequested = false;
     Object.assign(this.state, { turnId, hasText: false });
     this.turnReady = Promise.resolve();
+    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
     this.emit({ type: "turn-started", turnId });
   }
 
@@ -183,6 +194,8 @@ class ClaudeSession {
   // Claude Code waits on this promise until the user answers in Milagre, the turn stops, or the SDK
   // aborts the request.
   askPermission(toolName, input, options = {}) {
+    // A request that arrives once its turn has stopped has nobody to ask.
+    if (!this.turnActive || this.cancelRequested || this.closed) return Promise.resolve(claudeResult("cancelled", input));
     const request = claudeRequest(toolName, input, options);
     return new Promise((resolve) => {
       const abort = () => this.permissions.resolve(request.requestId, "cancelled");
@@ -244,9 +257,11 @@ class ClaudeSession {
   finishTurn(event) {
     if (!this.turnActive) return;
     this.turnActive = false;
+    const markEnded = this.markEnded;
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
     this.emit(event);
+    markEnded();
   }
 
   async interrupt() {

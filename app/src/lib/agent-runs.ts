@@ -1,9 +1,11 @@
-import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider } from "../model";
+import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionRequest } from "../model";
 
 /** A turn streaming in a chat, keyed by chat key (see `chatKey`). */
 export interface AgentRun {
   text: string;
   model: string;
+  /** Approval requests the turn waits on, oldest first. */
+  approvals: PermissionRequest[];
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -28,7 +30,7 @@ export function chatInProject(projectPath: string, key: string): boolean {
 }
 
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns {
-  return { ...runs, [chatId]: { text: "", model } };
+  return { ...runs, [chatId]: { text: "", model, approvals: [] } };
 }
 
 /**
@@ -51,6 +53,24 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       if (!session.native_session_id) return { state, runs, changed: false };
       const { native_session_id: _forgotten, ...rest } = session;
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: rest } }, runs, changed: true };
+    }
+    case "turn-started": {
+      // A turn this window didn't start, such as a steering message that arrived as the last turn ended.
+      if (run) return { state, runs, changed: false };
+      const model = [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "user")?.model ?? "";
+      return { state, runs: startRun(runs, chatId, model), changed: false };
+    }
+    case "permission-request": {
+      if (!run) return { state, runs, changed: false };
+      const { type: _type, ...request } = event;
+      const approvals = [...run.approvals.filter((item) => item.requestId !== request.requestId), request];
+      return { state, runs: { ...runs, [chatId]: { ...run, approvals } }, changed: false };
+    }
+    case "permission-resolved": {
+      if (!run) return { state, runs, changed: false };
+      const approvals = run.approvals.filter((item) => item.requestId !== event.requestId);
+      if (approvals.length === run.approvals.length) return { state, runs, changed: false };
+      return { state, runs: { ...runs, [chatId]: { ...run, approvals } }, changed: false };
     }
     case "text-delta": {
       if (!run) return { state, runs, changed: false };
@@ -83,6 +103,23 @@ function replyBody(text: string, event: AgentEvent) {
   if (event.type === "turn-failed") return reply ? `${reply}\n\nAgent error: ${event.message}` : `Agent error: ${event.message}`;
   if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
   return reply || "The agent finished without a reply.";
+}
+
+/**
+ * Before a steering message joins a running turn, the reply streamed so far is saved as its own
+ * message, so the chat reads in order: the reply so far, the new message, then the rest of the reply.
+ */
+export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): { state: CoordinatorState; runs: AgentRuns; changed: boolean } {
+  const sessionId = sessionIdFromKey(chatId);
+  const run = runs[chatId];
+  const body = run?.text.trim();
+  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, changed: false };
+  const message: ChatMessage = { id: state.next_id, session_id: sessionId, body, context: null, role: "assistant", model: run.model };
+  return {
+    state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
+    runs: { ...runs, [chatId]: { ...run, text: "" } },
+    changed: true,
+  };
 }
 
 /** The model to use for a chat. A chat bound to a provider never runs another provider's model. */

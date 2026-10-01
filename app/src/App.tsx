@@ -128,8 +128,11 @@ function App() {
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
-    setAnswering({ requestId: pendingApproval.requestId, decision });
-    void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
+    const { requestId } = pendingApproval;
+    setAnswering({ requestId, decision });
+    // If the answer doesn't reach the agent, the card goes back to pending so it can be answered again.
+    const recover = () => setAnswering((current) => (current?.requestId === requestId ? null : current));
+    void agentRuns.respond(chatKey(project.path, selectedSession.id), requestId, decision).then((accepted) => { if (!accepted) recover(); }, recover);
   }
 
   // A chat stays on the agent it started with; the picker follows the open chat.

@@ -159,7 +159,7 @@ class CodexSession {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
     const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS, config: THREAD_CONFIG };
-    const thread = this.resumeId ? await this.resume(threadParams) : (await rpc.request("thread/start", threadParams, { timeoutMs: 60_000 })).thread;
+    const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;
       this.emit({ type: "session-started", nativeId: thread.id });
@@ -167,16 +167,28 @@ class CodexSession {
     this.ready = true;
   }
 
+  // Codex ignores a feature it doesn't know, but a Codex that rejects `config` outright would leave the
+  // chat unusable. On an RPC error the call is tried once more without it: no question tool, but a chat.
+  async requestThread(method, params) {
+    try {
+      return await this.rpc.request(method, params, { timeoutMs: 60_000 });
+    } catch (error) {
+      if (!error.rpcError || !params.config) throw error;
+      const { config: _config, ...bare } = params;
+      return this.rpc.request(method, bare, { timeoutMs: 60_000 });
+    }
+  }
+
   async resume(threadParams) {
     const params = { ...threadParams, threadId: this.resumeId };
     try {
-      return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
+      return (await this.requestThread("thread/resume", params)).thread;
     } catch (first) {
       // Only an answer from Codex itself means the thread is gone; timeouts and exits keep the saved id.
       if (!first.rpcError) throw first;
       try {
         await this.rpc.request("thread/unarchive", { threadId: this.resumeId });
-        return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
+        return (await this.requestThread("thread/resume", params)).thread;
       } catch (second) {
         if (!second.rpcError) throw second;
         throw Object.assign(new Error(RESUME_FAILED_MESSAGE), { resumeFailed: true });

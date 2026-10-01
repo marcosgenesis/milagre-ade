@@ -5,6 +5,7 @@
 // "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume), slow-stop (the first turn takes 150ms to stop after an interrupt),
 // late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping),
+// reject-config (thread/start and thread/resume fail with an RPC error when they carry `config`),
 // question (Codex asks a question and ends the turn on the answer), question-steer (Codex asks a question
 // and the turn waits for turn/steer), question-withdrawn (a question Codex takes back), late-question
 // (like late-approval, with a question).
@@ -47,9 +48,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "fake/received":
       return send({ id, result: { received, threadStarts } });
     case "thread/start":
+      if (scenario === "reject-config" && params.config) return send({ id, error: { code: -32602, message: "invalid params: config" } });
       threadStarts += 1;
       return send({ id, result: { thread: { id: `thread-${threadStarts}` }, model: params.model } });
     case "thread/resume":
+      if (scenario === "reject-config" && params.config) return send({ id, error: { code: -32602, message: "invalid params: config" } });
       if (scenario === "resume-exit") {
         process.stderr.write("resume exploded\n");
         process.exit(4);

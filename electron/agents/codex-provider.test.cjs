@@ -457,3 +457,18 @@ test("a question asked after the turn was stopped gets no answers at once", asyn
   assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
   assert.equal(session.questions.size, 0);
 });
+
+test("threads start and resume without the question tool when Codex rejects the config", async (t) => {
+  for (const options of [{}, { resumeId: "thread-9" }]) {
+    const { session, events } = codex(t, { scenario: "reject-config", ...options });
+    await session.startTurn(TURN);
+    await ended(events);
+    const calls = (await received(session)).filter((message) => message.method === "thread/start" || message.method === "thread/resume");
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].params.config !== undefined, true);
+    assert.equal("config" in calls[1].params, false);
+    assert.equal(events.some((event) => event.type === "session-reset"), false);
+    assert.deepEqual(events.at(-1), { type: "turn-completed" });
+  }
+});
+

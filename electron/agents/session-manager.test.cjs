@@ -5,7 +5,7 @@ const { waitUntil } = require("./test-helpers.cjs");
 
 class FakeSession {
   constructor(provider, options) {
-    Object.assign(this, { provider, options, turns: [], interrupts: 0, closed: false });
+    Object.assign(this, { provider, options, turns: [], interrupts: 0, closed: false, running: false });
   }
 
   async startTurn(turn) {
@@ -23,6 +23,10 @@ class FakeSession {
 
   async close() {
     this.closed = true;
+    if (this.running) {
+      this.running = false;
+      this.emit({ type: "turn-cancelled" });
+    }
   }
 }
 
@@ -128,4 +132,40 @@ test("routes interrupts and closes everything on shutdown", async () => {
 
   await manager.closeAll();
   assert.ok(created.every((session) => session.closed));
+});
+
+test("drops events from a session that was replaced", async (t) => {
+  const { manager, sent, created } = harness({ idleMs: 30 });
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  await manager.startTurn(request("1", { provider: "claude" }));
+  created[0].emit({ type: "text-delta", messageId: "old", text: "late" });
+  created[0].emit({ type: "turn-completed" });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(sent, []);
+  assert.equal(created[1].closed, false);
+});
+
+test("closing a chat delivers its final event and pending text, then goes quiet", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].running = true;
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "Hi" });
+  await manager.closeChat("1");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(sent, [
+    { chatId: "1", event: { type: "text-delta", messageId: "t1", text: "Hi" } },
+    { chatId: "1", event: { type: "turn-cancelled" } },
+  ]);
+});
+
+test("concurrent turns during a replacement share one new session", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].closed = true;
+  await Promise.all([manager.startTurn(request("1")), manager.startTurn(request("1"))]);
+  assert.equal(created.length, 2);
+  assert.equal(created[1].turns.length, 2);
 });

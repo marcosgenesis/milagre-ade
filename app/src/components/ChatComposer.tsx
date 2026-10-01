@@ -83,6 +83,8 @@ interface ChatComposerProps {
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   isSending: boolean;
+  /** Sending is briefly blocked while a message is being prepared; a running turn doesn't block it. */
+  sendBlocked: boolean;
   streamingText?: string;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
@@ -224,6 +226,7 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   isSending,
+  sendBlocked,
   streamingText,
   runModelName,
   lockedProvider,
@@ -335,7 +338,8 @@ export function ChatComposer({
           draft={draft}
           onDraftChange={onDraftChange}
           onSend={onSend}
-          isSending={isSending}
+          sendBlocked={sendBlocked}
+          running={isSending}
           lockedProvider={lockedProvider}
           selectedModel={selectedModel}
           onModelChange={onModelChange}

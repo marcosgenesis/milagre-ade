@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState } from "../model";
-import { applyAgentEvent, chatInProject, startRun } from "../lib/agent-runs";
+import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision } from "../model";
+import { applyAgentEvent, chatInProject, splitRunForSteer, startRun } from "../lib/agent-runs";
 import type { AgentRuns } from "../lib/agent-runs";
 
 /**
@@ -41,8 +41,11 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   }, [projectPath]);
 
   const start = useCallback(async (request: AgentStartTurnRequest) => {
-    runsRef.current = startRun(runsRef.current, request.chatId, request.model);
-    setRuns(runsRef.current);
+    // A chat whose turn is running keeps its run: the message steers that turn.
+    if (!runsRef.current[request.chatId]) {
+      runsRef.current = startRun(runsRef.current, request.chatId, request.model);
+      setRuns(runsRef.current);
+    }
     try {
       await window.milagre.startTurn(request);
       // The project was left while the turn was starting, before it could be interrupted.
@@ -55,5 +58,18 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
 
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
 
-  return { runs, start, interrupt };
+  /** Saves the reply streamed so far in a chat, so a steering message can follow it. */
+  const splitForSteer = useCallback((chatId: string) => {
+    const state = getStateRef.current();
+    if (!state) return;
+    const result = splitRunForSteer(state, runsRef.current, projectPathRef.current, chatId);
+    if (!result.changed) return;
+    runsRef.current = result.runs;
+    setRuns(result.runs);
+    commitRef.current(result.state);
+  }, []);
+
+  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => window.milagre.respondToPermission(chatId, requestId, decision), []);
+
+  return { runs, start, interrupt, respond, splitForSteer };
 }

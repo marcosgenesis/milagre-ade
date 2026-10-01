@@ -10,9 +10,9 @@ The current public alpha uses React and Electron. It is designed for a solo deve
 
 - A React renderer inside an Electron desktop shell.
 - Project and worktree-oriented chat navigation.
-- One long-lived agent session per chat, run by Electron's main process: Claude through the Claude Agent SDK and Codex through `codex app-server`. Replies stream in as formatted Markdown with syntax-highlighted code, chats remember earlier turns after a restart, and Escape cancels a running turn. Links in replies open in your browser.
+- One long-lived agent session per chat, run by Electron's main process: Claude through the Claude Agent SDK and Codex through `codex app-server`. Replies stream in as formatted Markdown with syntax-highlighted code, chats remember earlier turns after a restart, a message sent while the agent works steers it, and Escape cancels a running turn. Links in replies open in your browser.
 - Ask approval, Auto and Full permission modes.
-- Tool approval cards for file changes and other write operations.
+- Approval cards that show the exact command or file change an agent wants to make, with Allow once, Always allow in this chat, and Deny.
 - Local coordination state under `.milagre/coordination.json`.
 - Concise agent output with access to raw details.
 
@@ -78,13 +78,15 @@ Type `/` in the prompt to search commands and installed skills by name or descri
 
 Skills are discovered recursively in `.agents/skills`, `.claude/skills`, `.gemini/skills`, and `.codex/skills`, under both the active worktree and your home directory. Symlinked skill directories are supported. Workspace skills take precedence over user skills with the same name; within each scope, directories are checked in the order above. A skill with the same name as a built-in command takes precedence over that command.
 
-The menu refreshes when reopened and when switching worktrees. Skill names and descriptions come from YAML frontmatter, with the folder name as a fallback. Unreadable or invalid skills are reported without blocking the rest of the list. Discovery is limited to eight nested levels and 2,000 directories; individual skill files and the combined skill context are limited to 256 KiB. Only standalone slash tokens outside inline and fenced code invoke skills. In Ask approval mode, slash requests require confirmation before the agent runs.
+The menu refreshes when reopened and when switching worktrees. Skill names and descriptions come from YAML frontmatter, with the folder name as a fallback. Unreadable or invalid skills are reported without blocking the rest of the list. Discovery is limited to eight nested levels and 2,000 directories; individual skill files and the combined skill context are limited to 256 KiB. Only standalone slash tokens outside inline and fenced code invoke skills.
 
 ## Permission modes
 
-- **Ask approval**: pauses before risky write or execution operations and shows the requested command or change.
-- **Auto**: allows ordinary agent work while retaining safeguards for higher-risk operations.
-- **Full**: gives the selected CLI the broadest available local access. Use only when you explicitly trust the prompt and workspace.
+- **Ask approval**: the agent stops before a file edit or command it isn't already allowed to run, and shows the exact command or change. Claude asks before edits and before commands outside its allow rules; Codex asks before any command it doesn't already trust.
+- **Auto**: file edits inside the workspace go ahead. Claude still asks before commands outside its allow rules; Codex works inside its workspace sandbox and asks only to go beyond it.
+- **Full**: no approvals, and Codex runs without its sandbox. Use only when you trust the prompt and the workspace.
+
+Escape denies an open approval card. "Always allow in this chat" lasts until the chat's agent session closes, and never changes your Claude or Codex settings files.
 
 The approval boundary is enforced in the Electron main process. The renderer can request work, but it should not receive arbitrary filesystem or process privileges.
 

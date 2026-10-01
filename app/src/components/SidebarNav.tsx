@@ -87,6 +87,8 @@ type SidebarNavProps = {
   onPick?: (id: string, label: string, prompt?: string) => void;
   onOpenSettings?: () => void;
   recents?: SidebarRecent[];
+  /** Plan usage, shown above the footer buttons in both the expanded and collapsed sidebar. */
+  usage?: ReactNode;
   variant?: string;
 };
 
@@ -246,6 +248,7 @@ export default function SidebarNav({
   onPick,
   onOpenSettings,
   recents = DEFAULT_RECENTS,
+  usage,
 }: SidebarNavProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
@@ -471,7 +474,13 @@ export default function SidebarNav({
           </GlideGroup>
         </div>
 
-        <div className={`mt-3 flex border-t border-line py-1.5 ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}>
+        {usage && (
+          <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>
+            {usage}
+          </div>
+        )}
+
+        <div className={`flex border-t border-line py-1.5 ${usage ? "mt-1.5" : "mt-3"} ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}>
           <Tooltip label="Add project" shortcut="⌘O">
             <button type="button" aria-label="Add project" onClick={onOpenProject} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
               <IconFolderAdd size={17} />

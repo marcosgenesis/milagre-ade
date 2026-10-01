@@ -593,6 +593,30 @@ a:focus-visible .animated-underline::after {
   opacity: 1;
 }
 
+/* Usage rows: the rail shows only the provider mark and its fullest window. */
+.sidebar-usage-rail {
+  display: none;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-usage {
+  flex-direction: column;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-usage-row {
+  width: 100%;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-usage-row > .sidebar-copy {
+  display: none;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-usage-rail {
+  display: block;
+}
+
 [data-sidebar-collapsed="true"] .sidebar-glide-highlight {
   left: 6px;
   right: auto;

@@ -1,4 +1,5 @@
 import type { ModelProvider, ProviderUsage, UsageSnapshot } from "../../model";
+import type { UsageDisplay } from "../../lib/settings";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -17,6 +18,15 @@ export function usageTone(usedPercent: number): UsageTone {
 
 export function formatPercent(usedPercent: number) {
   return `${Math.round(usedPercent)}%`;
+}
+
+/** The percent to show: what's been used, or what's left of the window. */
+export function shownPercent(usedPercent: number, display: UsageDisplay) {
+  return display === "remaining" ? Math.max(0, 100 - usedPercent) : usedPercent;
+}
+
+export function shownSuffix(display: UsageDisplay) {
+  return display === "remaining" ? "left" : "used";
 }
 
 export function formatResetsIn(resetsAt: string | null, now: number): string | null {
@@ -43,10 +53,10 @@ export function visibleProviders(snapshot: UsageSnapshot) {
   return snapshot.providers.filter((item) => item.status !== "unavailable");
 }
 
-export function usageLabel(usage: ProviderUsage) {
+export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used") {
   const name = PROVIDER_NAMES[usage.provider];
   if (usage.windows.length === 0) return `${name} usage unavailable`;
-  const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(item.usedPercent)} used`);
+  const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(shownPercent(item.usedPercent, display))} ${shownSuffix(display)}`);
   return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;
 }
 

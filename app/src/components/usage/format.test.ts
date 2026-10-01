@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderUsage, UsageSnapshot } from "../../model";
-import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, usageLabel, usageTone, visibleProviders } from "./format.ts";
+import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, shownPercent, usageLabel, usageTone, visibleProviders } from "./format.ts";
 
 const NOW = Date.parse("2026-10-01T19:30:00Z");
 const MINUTE = 60_000;
@@ -83,6 +83,13 @@ test("hides unavailable providers and labels segments for screen readers", () =>
   assert.equal(usageLabel(claude()), "Claude usage: Session 73% used, Weekly 61% used");
   assert.equal(usageLabel(claude({ status: "error", windows: [] })), "Claude usage unavailable");
   assert.equal(usageLabel(claude({ status: "error", message: "Couldn't reach Claude." })), "Claude usage, last known: Session 73% used, Weekly 61% used");
+  assert.equal(usageLabel(claude(), "remaining"), "Claude usage: Session 27% left, Weekly 39% left");
+});
+
+test("shows used or remaining percent", () => {
+  assert.equal(shownPercent(73, "used"), 73);
+  assert.equal(shownPercent(73, "remaining"), 27);
+  assert.equal(shownPercent(104, "remaining"), 0);
 });
 
 test("drops kept windows that have already reset", () => {

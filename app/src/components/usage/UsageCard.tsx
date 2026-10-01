@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { RefreshIcon } from "@hugeicons/core-free-icons";
 import type { ProviderUsage } from "../../model";
-import { PROVIDER_NAMES, formatPercent, formatResetsIn, formatUpdatedAgo } from "./format";
+import { useSettings } from "../../lib/settings";
+import { PROVIDER_NAMES, formatPercent, formatResetsIn, formatUpdatedAgo, shownPercent, shownSuffix } from "./format";
 import { ProviderMark } from "./ProviderMark";
 import { UsageBar } from "./UsageBar";
 
@@ -23,6 +24,7 @@ type UsageCardProps = {
 export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEnter, onPointerLeave, onBlur }: UsageCardProps) {
   const [now, setNow] = useState(() => Date.now());
   const name = PROVIDER_NAMES[usage.provider];
+  const { usageDisplay } = useSettings();
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -48,7 +50,7 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
         left: position.left,
         bottom: position.bottom,
         animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both",
-        transformOrigin: "bottom right",
+        transformOrigin: "bottom left",
       }}
     >
       <div className="flex items-start gap-2 px-4 pb-3 pt-3.5">
@@ -74,7 +76,7 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
       </div>
 
       {usage.message && (
-        <p className="mx-4 mb-3 rounded-control bg-orange-tint px-2.5 py-1.5 text-[12px] leading-[1.45] text-ink">{usage.message}</p>
+        <p className="mx-4 mb-3 rounded-control bg-field px-2.5 py-1.5 text-[12px] leading-[1.45] text-ink">{usage.message}</p>
       )}
 
       {usage.windows.length > 0 && (
@@ -82,9 +84,9 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
           {usage.windows.map((item) => (
             <div key={item.id} className="flex flex-col gap-1.5">
               <p className="text-[13px] font-medium">{item.label}</p>
-              <UsageBar usedPercent={item.usedPercent} className="h-1.5 w-full" />
+              <UsageBar usedPercent={item.usedPercent} display={usageDisplay} className="h-1.5 w-full" />
               <div className="flex items-center justify-between text-[12px] tabular-nums text-ink-2">
-                <span>{formatPercent(item.usedPercent)} used</span>
+                <span>{formatPercent(shownPercent(item.usedPercent, usageDisplay))} {shownSuffix(usageDisplay)}</span>
                 <span>{formatResetsIn(item.resetsAt, now)}</span>
               </div>
             </div>

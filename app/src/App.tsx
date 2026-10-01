@@ -28,11 +28,12 @@ import { DotBackground } from "./components/DotBackground";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import type { SettingsSection } from "./components/Settings";
-import { getSettings, useApplyTheme } from "./lib/settings";
+import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
-import { UsageStatusBar } from "./components/usage/UsageStatusBar";
+import { SidebarUsage } from "./components/usage/SidebarUsage";
+import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
@@ -127,6 +128,7 @@ function App() {
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
+  const { showUsageInSidebar } = useSettings();
   const runningCount = Object.keys(agentRuns.runs).length;
   const previousRunningCount = useRef(runningCount);
 
@@ -401,6 +403,7 @@ function App() {
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
+        usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
       />
       </div>
       {view === "settings" && (
@@ -476,7 +479,6 @@ function App() {
             ) : undefined}
           />
         </div>
-        <UsageStatusBar usage={usage} />
       </main>
       </div>
     </DotBackground>

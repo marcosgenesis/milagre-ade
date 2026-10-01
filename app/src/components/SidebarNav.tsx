@@ -460,7 +460,7 @@ export default function SidebarNav({
                   </span>
                   {item.waiting && (
                     // A sidebar-copy, so the collapsed rail (no room) hides it with the labels.
-                    <span role="img" aria-label="Waiting for your approval" title="Waiting for your approval" data-slot="waiting-mark" className="sidebar-copy ml-2 size-2 shrink-0 rounded-full bg-accent" />
+                    <span role="img" aria-label="Waiting for you" title="Waiting for you" data-slot="waiting-mark" className="sidebar-copy ml-2 size-2 shrink-0 rounded-full bg-accent" />
                   )}
                 </button>
               );

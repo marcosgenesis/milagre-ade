@@ -173,7 +173,6 @@ export interface PermissionRequest {
 
 export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
 
-
 /** One option on a question card. */
 export interface QuestionOption {
   label: string;

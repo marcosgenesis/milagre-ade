@@ -156,7 +156,7 @@ function createWindow() {
   const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
   guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
   // A reload starts the renderer with no running turns, so stop the agents' turns: none may keep
-  // waiting on an approval card that no longer exists.
+  // waiting on an approval or question card that no longer exists.
   let loaded = false;
   window.webContents.on("did-finish-load", () => {
     if (loaded) void agents.interruptAll().catch(() => {});

@@ -21,7 +21,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatKey, chatsWaitingForApproval, modelForChat, sentDecision, sentReply } from "./lib/agent-runs";
+import { chatKey, chatsWaitingForUser, modelForChat, sentDecision, sentReply } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -159,7 +159,7 @@ function App() {
   }
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
-  const waiting = useMemo(() => chatsWaitingForApproval(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)
@@ -446,7 +446,7 @@ function App() {
             newChatError={newChatError}
             approval={pendingApproval ? (
               <PermissionCard
-                key={pendingApproval.requestId}
+                key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
                 request={pendingApproval}
                 waiting={(run?.approvals.length ?? 1) - 1}
                 answering={sentDecision(run, pendingApproval.requestId)}
@@ -454,7 +454,7 @@ function App() {
               />
             ) : pendingQuestion ? (
               <QuestionCard
-                key={pendingQuestion.requestId}
+                key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
                 request={pendingQuestion}
                 waiting={(run?.questions.length ?? 1) - 1}
                 answering={sentReply(run, pendingQuestion.requestId)}

@@ -39,7 +39,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
       if (answers) onAnswer(answers);
     }
     // Escape clears a typed answer first; on an empty field it reaches the window, which dismisses the question.
-    if (event.key === "Escape" && draftOf(drafts, question.id).typed) {
+    if (event.key === "Escape" && !event.nativeEvent.isComposing && draftOf(drafts, question.id).typed) {
       event.preventDefault();
       setDrafts(typeAnswer(drafts, question, ""));
     }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
-import { applyAgentEvent, chatInProject, chatsWaitingForApproval, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import { applyAgentEvent, chatInProject, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -230,7 +230,7 @@ test("a turn that completes with no text after a steer split saves no reply", ()
   assert.equal(more.state.messages.at(-1)?.body, "Rest");
 });
 
-test("chatsWaitingForApproval lists only this project's chats with a pending approval", () => {
+test("chatsWaitingForUser lists only this project's chats with a pending approval or question", () => {
   const request = { requestId: "r1" } as PermissionRequest;
   const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, questions: [], answered: {} });
   const runs: AgentRuns = {
@@ -240,8 +240,10 @@ test("chatsWaitingForApproval lists only this project's chats with a pending app
     [chatKey("/work/app#other", 4)]: run([request]),
     [chatKey("/work/other", 5)]: run([request]),
   };
-  assert.deepEqual([...chatsWaitingForApproval(runs, PROJECT)].sort(), [1, 3]);
-  assert.equal(chatsWaitingForApproval({}, PROJECT).size, 0);
+  assert.deepEqual([...chatsWaitingForUser(runs, PROJECT)].sort(), [1, 3]);
+  const asking: AgentRuns = { [key(6)]: { ...run([]), questions: [question("q1")] }, [key(7)]: run([]) };
+  assert.deepEqual([...chatsWaitingForUser(asking, PROJECT)], [6]);
+  assert.equal(chatsWaitingForUser({}, PROJECT).size, 0);
 });
 
 const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });

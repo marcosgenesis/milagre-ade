@@ -28,6 +28,8 @@ function codex(t, { scenario = "reply", resumeId, command = process.execPath, in
 }
 const ended = (events, count = 1) => waitUntil(() => events.filter(isTerminal).length >= count);
 const received = async (session) => (await session.rpc.request("fake/received")).received;
+const asked = (events) => waitUntil(() => events.some((event) => event.type === "permission-request"));
+const replyText = (events) => events.filter((event) => event.type === "text-delta").map((event) => event.text).join("");
 
 test("streams a reply and keeps one thread across turns", async (t) => {
   const { session, events } = codex(t);
@@ -61,14 +63,18 @@ test("starts threads and turns with Milagre's identity, instructions and policy"
   assert.deepEqual(find("turn/start").input, [{ type: "text", text: "Hi", text_elements: [] }]);
 });
 
-test("Ask and Auto stay inside the workspace sandbox", async (t) => {
+test("Ask asks about untrusted commands, Auto only about leaving the sandbox", async (t) => {
   const { session, events } = codex(t);
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await ended(events);
-  const turnStart = (await received(session)).find((message) => message.method === "turn/start").params;
-  assert.equal(turnStart.approvalPolicy, "never");
-  assert.equal(turnStart.sandboxPolicy.type, "workspaceWrite");
-  assert.deepEqual(turnStart.sandboxPolicy.writableRoots, [os.tmpdir()]);
+  await session.startTurn({ ...TURN, permissionMode: "auto" });
+  await ended(events, 2);
+  const turnStarts = (await received(session)).filter((message) => message.method === "turn/start").map((message) => message.params);
+  assert.deepEqual(turnStarts.map((params) => params.approvalPolicy), ["untrusted", "on-request"]);
+  for (const params of turnStarts) {
+    assert.equal(params.sandboxPolicy.type, "workspaceWrite");
+    assert.deepEqual(params.sandboxPolicy.writableRoots, [os.tmpdir()]);
+  }
 });
 
 test("resumes a saved thread without announcing it again", async (t) => {
@@ -119,11 +125,66 @@ test("reports a failed turn and a crashed process", async (t) => {
   assert.equal(crashed.session.closed, true);
 });
 
-test("declines approval requests so nothing waits on the user yet", async (t) => {
+test("asks before running a command and passes the answer back", async (t) => {
+  const { session, events } = codex(t, { scenario: "approval" });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
+    type: "permission-request", requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true,
+  });
+  assert.equal(session.respondToPermission("srv-1", "allow-for-chat"), true);
+  await ended(events);
+  assert.equal(replyText(events), "decision:acceptForSession");
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "allow-for-chat" });
+});
+
+test("denying declines the command", async (t) => {
   const { session, events } = codex(t, { scenario: "approval" });
   await session.startTurn(TURN);
+  await asked(events);
+  session.respondToPermission("srv-1", "deny");
   await ended(events);
-  assert.ok(events.some((event) => event.type === "text-delta" && event.text === "decision:decline"));
+  assert.equal(replyText(events), "decision:decline");
+});
+
+test("file changes show the diff Codex is about to apply", async (t) => {
+  const { session, events } = codex(t, { scenario: "file-approval" });
+  await session.startTurn(TURN);
+  await asked(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
+    type: "permission-request", requestId: "srv-1", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true,
+  });
+  session.respondToPermission("srv-1", "allow");
+  await ended(events);
+  assert.equal(replyText(events), "decision:accept");
+});
+
+test("interrupting cancels a pending approval", async (t) => {
+  const { session, events } = codex(t, { scenario: "approval" });
+  await session.startTurn(TURN);
+  await asked(events);
+  await session.interrupt();
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" });
+  assert.equal(replyText(events), "decision:cancel");
+  assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
+});
+
+test("a request Codex withdraws is dropped without an answer", async (t) => {
+  const { session, events } = codex(t, { scenario: "withdrawn" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" });
+  assert.equal((await received(session)).some((message) => message.id === "srv-1"), false);
+  assert.equal(session.respondToPermission("srv-1", "allow"), false);
+});
+
+test("extra sandbox permissions are declined", async (t) => {
+  const { session, events } = codex(t, { scenario: "permissions" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(replyText(events), 'answer:{"permissions":{},"scope":"turn"}');
+  assert.equal(events.some((event) => event.type === "permission-request"), false);
 });
 
 test("passes images as local files and removes them afterwards", async (t) => {

@@ -3,14 +3,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest } = require("./permissions.cjs");
 
-// Milagre permission mode -> Codex policy. Approvals arrive in a later step, so no mode asks
-// yet. Ask and Auto work inside the workspace sandbox, as `codex exec` did before; Ask also
-// keeps Milagre's pre-run confirmation in the renderer.
+// Milagre permission mode -> Codex policy. Ask asks before any command Codex doesn't already trust,
+// Auto only when Codex wants to go beyond the workspace sandbox, and Full never asks.
 function codexPolicy(permissionMode, cwd) {
   if (permissionMode === "full") return { approvalPolicy: "never", sandbox: "danger-full-access", sandboxPolicy: { type: "dangerFullAccess" } };
   return {
-    approvalPolicy: "never",
+    approvalPolicy: permissionMode === "auto" ? "on-request" : "untrusted",
     sandbox: "workspace-write",
     sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
   };
@@ -38,6 +38,9 @@ class CodexSession {
     this.images = null;
     this.ready = false;
     this.closed = false;
+    this.permissions = new PendingPermissions((event) => this.emit(event));
+    // fileChange items by id, from item/started: their approval requests carry no diff of their own.
+    this.fileChanges = new Map();
   }
 
   get nativeId() {
@@ -91,7 +94,7 @@ class CodexSession {
     const rpc = this.createRpc({ command: this.command, cwd: this.cwd });
     this.rpc = rpc;
     rpc.on("notification", ({ method, params }) => this.handleNotification(method, params));
-    rpc.on("request", ({ id, method }) => this.handleServerRequest(id, method));
+    rpc.on("request", ({ id, method, params }) => this.handleServerRequest(id, method, params));
     rpc.on("exit", ({ detail }) => this.handleExit(detail));
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
@@ -123,6 +126,8 @@ class CodexSession {
   }
 
   handleNotification(method, params) {
+    if (method === "item/started" && params.item?.type === "fileChange") this.fileChanges.set(params.item.id, params.item.changes ?? []);
+    if (method === "serverRequest/resolved") this.permissions.forget(String(params.requestId));
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
     const events = mapCodexNotification(method, params, this.state);
     if (!events.some(isTerminal)) {
@@ -132,10 +137,28 @@ class CodexSession {
     void this.finishTurn(this.cancelRequested ? events.map((event) => (isTerminal(event) ? { type: "turn-cancelled" } : event)) : events);
   }
 
-  // Approvals arrive in a later step; until then nothing may wait on the user.
-  handleServerRequest(id, method) {
-    if (method.endsWith("/requestApproval")) this.rpc.respond(id, { decision: "decline" });
-    else this.rpc.respondError(id, `Milagre does not support ${method} yet.`);
+  handleServerRequest(id, method, params = {}) {
+    const answer = (decision) => this.reply(id, { decision: codexDecision(decision) });
+    if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
+    else if (method === "item/fileChange/requestApproval") this.permissions.add(codexFileRequest(id, params, this.fileChanges.get(params.itemId)), answer);
+    // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
+    else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
+    else {
+      try {
+        this.rpc.respondError(id, `Milagre does not support ${method} yet.`);
+      } catch {}
+    }
+  }
+
+  // Codex may already have exited; then there is nobody left to answer.
+  reply(id, result) {
+    try {
+      this.rpc?.respond(id, result);
+    } catch {}
+  }
+
+  respondToPermission(requestId, decision) {
+    return this.permissions.resolve(requestId, decision);
   }
 
   handleExit(detail) {
@@ -147,6 +170,8 @@ class CodexSession {
     if (!this.turnActive) return;
     this.turnActive = false;
     clearTimeout(this.interruptTimer);
+    this.permissions.cancelAll();
+    this.fileChanges.clear();
     const images = this.images;
     this.images = null;
     await images?.cleanup().catch(() => {});
@@ -158,6 +183,7 @@ class CodexSession {
     this.cancelRequested = true;
     clearTimeout(this.interruptTimer);
     this.interruptTimer = setTimeout(() => void this.stopNow(), this.interruptGraceMs);
+    this.permissions.cancelAll();
     if (!this.state.turnId || !this.rpc) return;
     try {
       await this.rpc.request("turn/interrupt", { threadId: this.state.threadId, turnId: this.state.turnId }, { timeoutMs: this.interruptGraceMs });
@@ -174,6 +200,7 @@ class CodexSession {
   }
 
   async close() {
+    this.permissions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     await this.rpc?.close();

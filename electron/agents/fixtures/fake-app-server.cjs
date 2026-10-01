@@ -1,6 +1,7 @@
 // Stand-in for `codex app-server` in tests. It speaks the JSON-RPC subset Milagre uses.
-// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval,
-// stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
+// FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval (command
+// approval), file-approval, permissions (extra sandbox permissions), withdrawn (an approval Codex
+// takes back), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume).
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -20,7 +21,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const { id, method, params = {} } = message;
   if (method === undefined) {
     if (pendingTurn && pendingTurn.approvalId === id) {
-      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: `decision:${message.result && message.result.decision}` });
+      const result = message.result || {};
+      const answer = result.decision !== undefined ? `decision:${result.decision}` : `answer:${JSON.stringify(message.result ?? message.error)}`;
+      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: answer });
       completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
       pendingTurn = null;
     }
@@ -64,7 +67,21 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       if (scenario === "approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
-        return send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", command: "rm -rf build" } });
+        return send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" } });
+      }
+      if (scenario === "file-approval") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-1" };
+        notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "+hello\n" }] } });
+        return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
+      }
+      if (scenario === "permissions") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-1" };
+        return send({ id: "srv-1", method: "item/permissions/requestApproval", params: { threadId, turnId, itemId: "perm-1" } });
+      }
+      if (scenario === "withdrawn") {
+        send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+        notify("serverRequest/resolved", { threadId, requestId: "srv-1" });
+        return completeTurn(threadId, turnId, "completed");
       }
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Hel" });
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "lo" });

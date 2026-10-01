@@ -1,4 +1,4 @@
-const { execFile } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -121,4 +121,86 @@ async function readClaudeUsage(deps = {}) {
   return windows.length ? done("ok", windows) : done("error", [], "Claude returned no usage windows.");
 }
 
-module.exports = { readClaudeUsage };
+const APP_SERVER_CLIENT = { name: "milagre", title: "Milagre", version: "0.1.0" };
+
+function codexWindowMeta(minutes) {
+  if (minutes === 300) return SESSION;
+  if (minutes === 10080) return WEEKLY;
+  const short = minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
+  return { id: `window:${minutes}`, label: `${short} window`, shortLabel: short };
+}
+
+function codexWindows(rateLimits) {
+  return [rateLimits?.primary, rateLimits?.secondary]
+    .filter((item) => percentOrNull(item?.usedPercent) !== null && Number.isInteger(item.windowDurationMins) && item.windowDurationMins > 0)
+    .sort((a, b) => a.windowDurationMins - b.windowDurationMins)
+    .map((item) => ({
+      ...codexWindowMeta(item.windowDurationMins),
+      usedPercent: percentOrNull(item.usedPercent),
+      resetsAt: typeof item.resetsAt === "number" ? new Date(item.resetsAt * 1000).toISOString() : null,
+    }));
+}
+
+function readCodexUsage(deps = {}) {
+  const { spawnImpl = spawn, now = Date.now, timeoutMs = PROVIDER_TIMEOUT_MS } = deps;
+  const done = (status, windows, message) => providerResult("codex", now, status, windows, message);
+
+  return new Promise((resolve) => {
+    const child = spawnImpl("codex", ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: process.env, windowsHide: true });
+    let settled = false;
+    let buffer = "";
+    const timer = setTimeout(() => finish(done("error", [], "Codex usage timed out.")), timeoutMs);
+
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      resolve(value);
+    }
+
+    function send(message) {
+      if (!settled) child.stdin.write(`${JSON.stringify(message)}\n`);
+    }
+
+    function handle(message) {
+      if (message.error && [1, 2, 3].includes(message.id)) return finish(done("error", [], "Codex couldn't read usage."));
+      if (message.id === 1) {
+        send({ method: "initialized" });
+        send({ id: 2, method: "account/read", params: {} });
+      } else if (message.id === 2) {
+        if (!message.result?.account) return finish(done("unavailable", [], "Not signed in to Codex."));
+        send({ id: 3, method: "account/rateLimits/read" });
+      } else if (message.id === 3) {
+        const windows = codexWindows(message.result?.rateLimits);
+        finish(windows.length ? done("ok", windows) : done("error", [], "Codex returned no usage windows."));
+      }
+    }
+
+    child.on("error", (error) => finish(error?.code === "ENOENT"
+      ? done("unavailable", [], "Codex CLI not found.")
+      : done("error", [], "Couldn't start Codex.")));
+    child.on("close", () => finish(done("error", [], "Codex exited before reporting usage.")));
+    child.stdin.on("error", () => {});
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk.toString();
+      let newline;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        handle(message);
+      }
+    });
+
+    send({ id: 1, method: "initialize", params: { clientInfo: APP_SERVER_CLIENT } });
+  });
+}
+
+module.exports = { readClaudeUsage, readCodexUsage };

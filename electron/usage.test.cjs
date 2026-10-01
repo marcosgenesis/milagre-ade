@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { readClaudeUsage } = require("./usage.cjs");
+const { EventEmitter } = require("node:events");
+const { readClaudeUsage, readCodexUsage } = require("./usage.cjs");
 
 const TOKEN = "sk-ant-oat01-SECRET-TOKEN";
 const NOW = Date.parse("2026-10-01T19:30:00Z");
@@ -144,3 +145,128 @@ for (const [name, response, message] of FAILURES) {
     assert.ok(!JSON.stringify(result).includes(TOKEN));
   });
 }
+
+const RESETS_AT = 1791070247;
+const WEEKLY_ONLY = { primary: { usedPercent: 88, windowDurationMins: 10080, resetsAt: RESETS_AT }, secondary: null };
+
+function fakeCodex({ account = { type: "chatgpt", planType: "pro" }, rateLimits, chunked = false, reply = true } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.sent = [];
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    return true;
+  };
+  const emit = (message) => {
+    const text = `${JSON.stringify(message)}\n`;
+    if (!chunked) {
+      setImmediate(() => child.stdout.emit("data", Buffer.from(text)));
+      return;
+    }
+    const middle = Math.floor(text.length / 2);
+    const notification = `${JSON.stringify({ method: "account/updated", params: { authMode: "chatgpt" } })}\n`;
+    setImmediate(() => {
+      child.stdout.emit("data", Buffer.from(notification + text.slice(0, middle)));
+      setImmediate(() => child.stdout.emit("data", Buffer.from(text.slice(middle))));
+    });
+  };
+  child.stdin.write = (text) => {
+    for (const line of String(text).split("\n").filter(Boolean)) {
+      const message = JSON.parse(line);
+      child.sent.push(message.method);
+      if (!reply || message.id === undefined) continue;
+      if (message.method === "initialize") emit({ id: message.id, result: { userAgent: "codex" } });
+      if (message.method === "account/read") emit({ id: message.id, result: { account, requiresOpenaiAuth: true } });
+      if (message.method === "account/rateLimits/read") emit({ id: message.id, result: { rateLimits } });
+    }
+    return true;
+  };
+  return child;
+}
+
+function codexDeps(child, overrides = {}) {
+  const spawnCalls = [];
+  const deps = {
+    now: () => NOW,
+    timeoutMs: 200,
+    spawnImpl: (command, args) => {
+      spawnCalls.push({ command, args });
+      return child;
+    },
+    ...overrides,
+  };
+  return { deps, spawnCalls };
+}
+
+test("reads Codex usage from the app server and stops it", async () => {
+  const child = fakeCodex({ rateLimits: WEEKLY_ONLY });
+  const { deps, spawnCalls } = codexDeps(child);
+  const result = await readCodexUsage(deps);
+  assert.deepEqual(spawnCalls, [{ command: "codex", args: ["app-server"] }]);
+  assert.deepEqual(child.sent, ["initialize", "initialized", "account/read", "account/rateLimits/read"]);
+  assert.deepEqual(result, {
+    provider: "codex",
+    status: "ok",
+    updatedAt: new Date(NOW).toISOString(),
+    windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: new Date(RESETS_AT * 1000).toISOString() }],
+  });
+  assert.equal(child.killed, true);
+});
+
+test("orders Codex windows shortest first and labels other durations", async () => {
+  const both = fakeCodex({ rateLimits: {
+    primary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: RESETS_AT },
+    secondary: { usedPercent: 12, windowDurationMins: 300, resetsAt: null },
+  } });
+  const result = await readCodexUsage(codexDeps(both).deps);
+  assert.deepEqual(result.windows.map((item) => [item.id, item.label, item.shortLabel]), [["session", "Session", "5h"], ["weekly", "Weekly", "wk"]]);
+
+  const odd = fakeCodex({ rateLimits: {
+    primary: { usedPercent: 5, windowDurationMins: 1440, resetsAt: null },
+    secondary: { usedPercent: 6, windowDurationMins: 90, resetsAt: null },
+  } });
+  const oddResult = await readCodexUsage(codexDeps(odd).deps);
+  assert.deepEqual(oddResult.windows.map((item) => [item.id, item.label, item.shortLabel]), [["window:90", "90m window", "90m"], ["window:1440", "1d window", "1d"]]);
+});
+
+test("parses replies split across chunks and mixed with notifications", async () => {
+  const child = fakeCodex({ rateLimits: WEEKLY_ONLY, chunked: true });
+  const result = await readCodexUsage(codexDeps(child).deps);
+  assert.equal(result.status, "ok");
+  assert.equal(result.windows[0].usedPercent, 88);
+});
+
+test("reports unavailable when Codex is not signed in", async () => {
+  const child = fakeCodex({ account: null, rateLimits: WEEKLY_ONLY });
+  const result = await readCodexUsage(codexDeps(child).deps);
+  assert.deepEqual([result.status, result.message], ["unavailable", "Not signed in to Codex."]);
+  assert.ok(!child.sent.includes("account/rateLimits/read"));
+  assert.equal(child.killed, true);
+});
+
+test("reports unavailable when the Codex CLI is not installed", async () => {
+  const child = fakeCodex({ reply: false });
+  setImmediate(() => child.emit("error", Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" })));
+  const result = await readCodexUsage(codexDeps(child).deps);
+  assert.deepEqual([result.status, result.message], ["unavailable", "Codex CLI not found."]);
+});
+
+test("times out, kills Codex and reports an error", async () => {
+  const child = fakeCodex({ reply: false });
+  const result = await readCodexUsage(codexDeps(child, { timeoutMs: 20 }).deps);
+  assert.deepEqual([result.status, result.message], ["error", "Codex usage timed out."]);
+  assert.equal(child.killed, true);
+});
+
+test("reports an error when Codex exits early or returns no windows", async () => {
+  const exited = fakeCodex({ reply: false });
+  setImmediate(() => exited.emit("close", 1, null));
+  const early = await readCodexUsage(codexDeps(exited).deps);
+  assert.deepEqual([early.status, early.message], ["error", "Codex exited before reporting usage."]);
+
+  const empty = fakeCodex({ rateLimits: { primary: null, secondary: null } });
+  const none = await readCodexUsage(codexDeps(empty).deps);
+  assert.deepEqual([none.status, none.message], ["error", "Codex returned no usage windows."]);
+});

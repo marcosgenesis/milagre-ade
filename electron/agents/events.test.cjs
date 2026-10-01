@@ -65,3 +65,9 @@ test("isTerminal recognises the three turn endings", () => {
   assert.equal(isTerminal({ type: "turn-cancelled" }), true);
   assert.equal(isTerminal({ type: "text-delta", messageId: null, text: "x" }), false);
 });
+
+test("Codex: a started turn is announced", () => {
+  const state = { threadId: "thread-1", turnId: null, lastItemId: null, hasText: false };
+  assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-1", turn: { id: "t-2" } }, state), [{ type: "turn-started", turnId: "t-2" }]);
+  assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-9", turn: { id: "t-3" } }, state), []);
+});

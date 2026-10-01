@@ -37,6 +37,7 @@ test("streams a reply and keeps one thread across turns", async (t) => {
   await ended(events);
   assert.deepEqual(events, [
     { type: "session-started", nativeId: "thread-1" },
+    { type: "turn-started", turnId: "turn-1" },
     { type: "text-delta", messageId: "turn-1", text: "Hel" },
     { type: "text-delta", messageId: "turn-1", text: "lo" },
     { type: "turn-completed" },
@@ -237,4 +238,41 @@ test("keeps the saved thread when resuming fails without an answer", async (t) =
   assert.equal(events.some((event) => event.type === "session-reset"), false);
   assert.equal(events.at(-1).type, "turn-failed");
   assert.equal(session.nativeId, "thread-9");
+});
+
+test("steers a running turn", async (t) => {
+  const { session, events } = codex(t, { scenario: "steer" });
+  const first = await session.startTurn(TURN);
+  const second = await session.startTurn({ ...TURN, prompt: "Also add tests" });
+  await ended(events);
+  assert.deepEqual(first, { turnId: "turn-1", steered: false });
+  assert.deepEqual(second, { turnId: "turn-1", steered: true });
+  assert.ok(events.some((event) => event.type === "text-delta" && event.text === "steered:Also add tests"));
+  const steer = (await received(session)).find((message) => message.method === "turn/steer").params;
+  assert.equal(steer.expectedTurnId, "turn-1");
+  assert.equal(steer.threadId, "thread-1");
+  assert.deepEqual(steer.input, [{ type: "text", text: "Also add tests", text_elements: [] }]);
+});
+
+test("a steer Codex refuses starts the next turn once this one ends", async (t) => {
+  const { session, events } = codex(t, { scenario: "steer" });
+  await session.startTurn(TURN);
+  const late = await session.startTurn({ ...TURN, prompt: "too late" });
+  await ended(events, 2);
+  assert.deepEqual(late, { turnId: "turn-2", steered: false });
+  assert.deepEqual(events.filter((event) => event.type === "turn-started").map((event) => event.turnId), ["turn-1", "turn-2"]);
+  const types = events.map((event) => event.type);
+  assert.ok(types.indexOf("turn-completed") < types.lastIndexOf("turn-started"));
+  const starts = (await received(session)).filter((message) => message.method === "turn/start");
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1].params.input[0].text, "too late");
+});
+
+test("a steer sent before Codex has started the turn waits for it", async (t) => {
+  const { session, events } = codex(t, { scenario: "steer" });
+  const first = session.startTurn(TURN);
+  const second = session.startTurn({ ...TURN, prompt: "Also add tests" });
+  assert.deepEqual(await second, { turnId: "turn-1", steered: true });
+  assert.deepEqual(await first, { turnId: "turn-1", steered: false });
+  await ended(events);
 });

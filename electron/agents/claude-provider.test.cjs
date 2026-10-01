@@ -10,6 +10,18 @@ const delta = (text) => ({ type: "stream_event", parent_tool_use_id: null, event
 const success = { type: "result", subtype: "success", is_error: false, result: "Hello" };
 
 const scripts = {
+  async *absorbs({ next }) {
+    yield init;
+    const steer = await next();
+    yield delta(`steered:${steer.message.content[0].text}`);
+    yield success;
+  },
+  async *held({ released }) {
+    yield init;
+    await released;
+    yield delta("Done");
+    yield success;
+  },
   async *reply() {
     yield init;
     yield delta("Hel");
@@ -113,8 +125,8 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   await session.startTurn(TURN);
   await ended(events);
 
-  assert.deepEqual(events.map((event) => event.type), ["session-started", "text-delta", "text-delta", "turn-completed"]);
-  assert.equal(events[0].nativeId, "session-1");
+  assert.deepEqual(events.map((event) => event.type), ["turn-started", "session-started", "text-delta", "text-delta", "turn-completed"]);
+  assert.equal(events[1].nativeId, "session-1");
   assert.equal(events.filter((event) => event.type === "text-delta").map((event) => event.text).join(""), "Hello");
   assert.equal(calls.options.cwd, "/repo");
   assert.equal(calls.options.model, "claude-opus-5-5");
@@ -162,7 +174,8 @@ test("forgets a session that can't be resumed", async (t) => {
   const { session, events } = claude(t, { script: scripts.missing, resumeId: "gone" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events, [{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
+  assert.deepEqual(events.slice(1), [{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
+  assert.equal(events[0].type, "turn-started");
   assert.equal(session.closed, true);
 });
 
@@ -205,7 +218,7 @@ test("keeps the saved session when a resumed start fails for another reason", as
   const { session, events } = claude(t, { script, resumeId: "session-1" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events, [{ type: "turn-failed", message: "spawn EACCES" }]);
+  assert.deepEqual(events.slice(1), [{ type: "turn-failed", message: "spawn EACCES" }]);
 });
 
 test("cancels a turn interrupted while the SDK is still loading", async (t) => {
@@ -330,4 +343,41 @@ test("canUseTool works when the signal is already aborted", async (t) => {
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
   // respondToPermission should return false since the request is already resolved
   assert.equal(session.respondToPermission("req-3", "allow"), false);
+});
+
+test("steers a running turn", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.absorbs });
+  const first = await session.startTurn(TURN);
+  const second = await session.startTurn({ ...TURN, prompt: "Also add tests" });
+  await ended(events);
+  assert.equal(first.steered, false);
+  assert.deepEqual(second, { turnId: first.turnId, steered: true });
+  assert.equal(calls.prompts.length, 2);
+  assert.ok(events.some((event) => event.type === "text-delta" && event.text === "steered:Also add tests"));
+  assert.equal(events.filter(isTerminal).length, 1);
+});
+
+test("a steer that arrives as the turn ends becomes a turn of its own", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.held });
+  const first = await session.startTurn(TURN);
+  const second = await session.startTurn({ ...TURN, prompt: "One more thing" });
+  calls.release();
+  await ended(events, 2);
+  assert.equal(second.steered, true);
+  const started = events.filter((event) => event.type === "turn-started");
+  assert.equal(started.length, 2);
+  assert.equal(started[0].turnId, first.turnId);
+  assert.notEqual(started[1].turnId, first.turnId);
+  assert.equal(session.turnActive, false);
+  assert.equal(calls.prompts.length, 2);
+});
+
+test("a steer sent while the SDK is still loading waits for the turn", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.absorbs });
+  const first = session.startTurn(TURN);
+  const second = session.startTurn({ ...TURN, prompt: "Also add tests" });
+  assert.equal((await second).steered, true);
+  await first;
+  await ended(events);
+  assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Also add tests"]);
 });

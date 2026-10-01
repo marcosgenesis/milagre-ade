@@ -1,7 +1,8 @@
 // Stand-in for `codex app-server` in tests. It speaks the JSON-RPC subset Milagre uses.
 // FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval (command
 // approval), file-approval, permissions (extra sandbox permissions), withdrawn (an approval Codex
-// takes back), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
+// takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
+// "too late"), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume).
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -61,6 +62,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         process.exit(3);
       }
       if (scenario === "stubborn") return undefined;
+      if (scenario === "steer" && turnId === "turn-1") {
+        pendingTurn = { threadId, turnId };
+        return undefined;
+      }
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
@@ -96,6 +101,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = null;
       }
       return undefined;
+    case "turn/steer": {
+      const text = (params.input || []).map((input) => input.text || "").join("");
+      if (!pendingTurn || params.expectedTurnId !== pendingTurn.turnId || text.includes("too late")) {
+        send({ id, error: { code: -32600, message: "no active turn to steer" } });
+        if (pendingTurn) completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
+        pendingTurn = null;
+        return undefined;
+      }
+      send({ id, result: { turnId: pendingTurn.turnId } });
+      notify("item/agentMessage/delta", { threadId: pendingTurn.threadId, turnId: pendingTurn.turnId, itemId: "msg-1", delta: `steered:${text}` });
+      completeTurn(pendingTurn.threadId, pendingTurn.turnId, "completed");
+      pendingTurn = null;
+      return undefined;
+    }
     default:
       return send({ id, error: { code: -32601, message: `unknown method ${method}` } });
   }

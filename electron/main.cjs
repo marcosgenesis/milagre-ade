@@ -1,10 +1,12 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
+const { guardNavigation } = require("./links.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
 const { createCapabilityCache } = require("./agents/capabilities.cjs");
@@ -146,10 +148,13 @@ function createWindow() {
     },
   });
 
+  const indexFile = path.join(__dirname, "../dist/index.html");
+  const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
+  guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
   if (!app.isPackaged) {
-    window.loadURL(process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173");
+    window.loadURL(appUrl);
   } else {
-    window.loadFile(path.join(__dirname, "../dist/index.html"));
+    window.loadFile(indexFile);
   }
 }
 

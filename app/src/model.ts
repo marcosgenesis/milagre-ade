@@ -3,6 +3,8 @@ export type ConnectionType = "Dependency" | "Information" | "Review" | "Blocking
 export type ConnectionLifetime = "Persistent" | "Temporary";
 export type ModelProvider = "codex" | "claude";
 export type PermissionMode = "ask" | "auto" | "full";
+/** Where a new chat runs: the selected checkout, or a fresh git worktree. */
+export type Isolation = "local" | "worktree";
 
 export const PERMISSION_MODES: Array<{ id: PermissionMode; name: string; description: string }> = [
   { id: "ask", name: "Ask approval", description: "Approve each run before the agent starts" },
@@ -104,6 +106,12 @@ export interface AgentRequest {
   prompt: string;
   permissionMode: PermissionMode;
   images?: ImageAttachment[];
+}
+
+export interface WorktreeRequest {
+  projectPath: string;
+  baseBranch: string;
+  prompt: string;
 }
 
 export interface CoordinatorState {

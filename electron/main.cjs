@@ -6,6 +6,8 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 const { runAgentWithImages } = require("./image-input.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
+const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { reconcileState } = require("./project-state.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -38,23 +40,6 @@ async function checkForUpdates() {
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
 
-function emptyState(projectName) {
-  return {
-    next_id: 1,
-    projects: { 1: { id: 1, name: projectName } },
-    worktrees: {},
-    sessions: {},
-    connections: {},
-    events: [],
-    messages: [],
-    approvals: [],
-    tasks: {},
-    artifacts: {},
-    outputs: [],
-    conflicts: [],
-  };
-}
-
 async function discoverWorktrees(projectPath) {
   try {
     const { stdout } = await execFileAsync("git", ["-C", projectPath, "worktree", "list", "--porcelain"], { encoding: "utf8" });
@@ -73,48 +58,6 @@ async function discoverWorktrees(projectPath) {
   } catch {
     return [];
   }
-}
-
-function reconcileState(rawState, projectName, discoveredWorktrees) {
-  const state = rawState ?? emptyState(projectName);
-  const existingWorktrees = Object.values(state.worktrees ?? {});
-  const existingSessions = Object.values(state.sessions ?? {});
-  let nextId = Math.max(state.next_id ?? 1, ...[
-    ...existingWorktrees.map((item) => item.id),
-    ...existingSessions.map((item) => item.id),
-  ]) || 1;
-  const allocateId = () => nextId++;
-  const existingByPath = new Map(existingWorktrees.map((worktree) => [worktree.path, worktree]));
-  const worktrees = {};
-  const sessions = {};
-
-  for (const discovered of discoveredWorktrees) {
-    const previous = existingByPath.get(discovered.path);
-    const worktree = previous ?? { id: allocateId(), project_id: 1, path: discovered.path, name: discovered.name };
-    worktrees[worktree.id] = { ...worktree, project_id: 1, path: discovered.path, name: discovered.name };
-    const previousSession = existingSessions.find((session) => session.worktree_id === worktree.id);
-    const session = previousSession ?? { id: allocateId(), worktree_id: worktree.id, agent_name: discovered.name, status: "Created" };
-    sessions[session.id] = { ...session, worktree_id: worktree.id, agent_name: session.agent_name || discovered.name };
-  }
-
-  const validWorktreeIds = new Set(Object.values(worktrees).map((worktree) => worktree.id));
-  const validSessionIds = new Set(Object.values(sessions).map((session) => session.id));
-  const events = (state.events ?? []).filter((event) => validWorktreeIds.has(event.worktree_id));
-  const tasks = Object.fromEntries(Object.entries(state.tasks ?? {}).filter(([, task]) => validWorktreeIds.has(task.worktree_id)));
-  const artifacts = Object.fromEntries(Object.entries(state.artifacts ?? {}).filter(([, artifact]) => validWorktreeIds.has(artifact.worktree_id)));
-
-  return {
-    ...state,
-    next_id: nextId,
-    projects: { 1: { id: 1, name: projectName } },
-    worktrees,
-    sessions,
-    connections: Object.fromEntries(Object.entries(state.connections ?? {}).filter(([, connection]) => validWorktreeIds.has(connection.left_worktree_id) && validWorktreeIds.has(connection.right_worktree_id))),
-    events,
-    messages: (state.messages ?? []).filter((message) => validSessionIds.has(message.session_id)),
-    tasks,
-    artifacts,
-  };
 }
 
 async function readProject(projectPath) {
@@ -137,6 +80,17 @@ async function saveProject(projectPath, state) {
 }
 
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
+ipcMain.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
+// Packaged builds get their release version from electron-builder metadata, not the source package.json.
+ipcMain.handle("app:version", () => app.getVersion());
+ipcMain.handle("worktree:create", async (_event, request) => {
+  const created = await createWorktree(request);
+  const project = await readProject(request.projectPath);
+  await saveProject(request.projectPath, project.state);
+  const worktree = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
+  if (!worktree) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
+  return { project, worktreeId: worktree.id };
+});
 
 ipcMain.handle("agent:send", async (_event, request) => {
   const prompt = await expandSkillPrompt(request.projectPath, request.prompt);
@@ -193,6 +147,7 @@ function createWindow() {
     title: "Milagre",
     icon: appIconPath,
     backgroundColor: "#f7faf8",
+    ...(process.platform === "darwin" ? { titleBarStyle: "hidden", trafficLightPosition: { x: 24, y: 22 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

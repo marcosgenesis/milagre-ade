@@ -457,6 +457,14 @@ a:focus-visible .animated-underline::after {
 
 /* The sidebar is one persistent 224px tree clipped by a 52px shell.
  * Every rail glyph remains centered at x=26 in both states. */
+/* Linear blur over the top of a scrolled chat: strongest at the window edge, gone by the bottom. */
+.chat-top-blur {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 70%, transparent), transparent);
+  mask-image: linear-gradient(to bottom, black 35%, transparent);
+}
+
 /* ══════════════════════════════════════════════════════════
  * COMPONENT-SPECIFIC — SidebarNav
  * The 52↔224px collapsible sidebar tree.

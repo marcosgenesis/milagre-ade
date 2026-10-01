@@ -116,6 +116,13 @@ function App() {
       .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name) }));
   }, [state]);
 
+  function startNewChat() {
+    setSelectedSessionId(null);
+    setDraft("");
+    setNewChatError(null);
+    setView("chat");
+  }
+
   function selectInitialChat(nextState: CoordinatorState) {
     const sessionId = latestSessionId(nextState);
     setSelectedSessionId(sessionId);
@@ -306,6 +313,9 @@ function App() {
       if (event.key === ",") {
         event.preventDefault();
         setView("settings");
+      } else if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        startNewChat();
       } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
         void openProject();
@@ -368,11 +378,7 @@ function App() {
           setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null);
           setView("chat");
         }}
-        onNewChat={() => {
-          setSelectedSessionId(null);
-          setDraft("");
-          setNewChatError(null);
-        }}
+        onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
       />
       </div>

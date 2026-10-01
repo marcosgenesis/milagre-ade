@@ -8,7 +8,6 @@ import {
   ArrowDown01Icon,
   ArrowLeft01Icon,
   Cancel01Icon,
-  Edit02Icon,
   FolderAddIcon,
   Search01Icon,
   Settings01Icon,
@@ -30,7 +29,6 @@ const IconArrowBoxLeft = (props: HugeIconProps) => <HugeIcon icon={ArrowLeft01Ic
 const IconCheckmark1Small = (props: HugeIconProps) => <HugeIcon icon={Tick02Icon} {...props} />;
 const IconChevronDownSmall = (props: HugeIconProps) => <HugeIcon icon={ArrowDown01Icon} {...props} />;
 const IconCrossSmall = (props: HugeIconProps) => <HugeIcon icon={Cancel01Icon} {...props} />;
-const IconEditBig = (props: HugeIconProps) => <HugeIcon icon={Edit02Icon} {...props} />;
 const IconFolderAdd = (props: HugeIconProps) => <HugeIcon icon={FolderAddIcon} {...props} />;
 const IconMagnifyingGlass = (props: HugeIconProps) => <HugeIcon icon={Search01Icon} {...props} />;
 const IconPlusMedium = (props: HugeIconProps) => <HugeIcon icon={Add01Icon} {...props} />;
@@ -101,6 +99,9 @@ const CHAT_SEARCH_MOTION = {
   closedWidth: 28,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
+
+const CHATS_HEADER_BUTTON =
+  "flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
 
 const BOTTOM_BAR_BUTTON =
   "flex size-9 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
@@ -336,17 +337,6 @@ export default function SidebarNav({
           </button>
         </div>
 
-        <GlideGroup>
-          <RailButton
-            icon={<IconEditBig size={18} />}
-            label="New chat"
-            onClick={() => {
-              if (activeTitle === undefined) setDemoActiveTitle(null);
-              onNewChat?.();
-            }}
-          />
-        </GlideGroup>
-
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
           <div className="sidebar-copy relative mx-2 mb-1 h-8">
             <div
@@ -357,16 +347,27 @@ export default function SidebarNav({
               <span>Chats</span>
             </div>
 
-            <button
-              type="button"
-              aria-label="Search chats"
-              aria-expanded={searchOpen}
-              onClick={() => setSearchOpen(true)}
-              className={`absolute right-0 top-0 z-10 flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color,transform] hover:bg-hover-2 hover:text-ink active:scale-[0.96] ${searchOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
+            <div
+              className={`absolute right-0 top-0 z-10 flex transition-opacity ${searchOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
               style={{ transitionDuration: `${CHAT_SEARCH_MOTION.duration}ms` }}
             >
-              <IconMagnifyingGlass size={16} />
-            </button>
+              <Tooltip label="New chat" shortcut="⌘N" align="end">
+                <button
+                  type="button"
+                  aria-label="New chat"
+                  onClick={() => {
+                    if (activeTitle === undefined) setDemoActiveTitle(null);
+                    onNewChat?.();
+                  }}
+                  className={CHATS_HEADER_BUTTON}
+                >
+                  <IconPlusMedium size={16} />
+                </button>
+              </Tooltip>
+              <button type="button" aria-label="Search chats" aria-expanded={searchOpen} onClick={() => setSearchOpen(true)} className={CHATS_HEADER_BUTTON}>
+                <IconMagnifyingGlass size={16} />
+              </button>
+            </div>
 
             <div
               className={`absolute right-0 top-0 z-20 flex h-8 items-center overflow-hidden rounded-[8px] bg-field text-ink-3 shadow-hairline transition-[width,opacity] focus-within:text-ink-2 ${searchOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}

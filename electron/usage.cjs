@@ -169,7 +169,10 @@ function readCodexUsage(deps = {}) {
         send({ method: "initialized" });
         send({ id: 2, method: "account/read", params: {} });
       } else if (message.id === 2) {
-        if (!message.result?.account) return finish(done("unavailable", [], "Not signed in to Codex."));
+        const account = message.result?.account;
+        if (!account) return finish(done("unavailable", [], "Not signed in to Codex."));
+        // Plan windows only exist for ChatGPT sign-ins; API-key and Bedrock accounts have none to show.
+        if (account.type !== "chatgpt") return finish(done("unavailable", [], "Codex plan limits need a ChatGPT sign-in."));
         send({ id: 3, method: "account/rateLimits/read" });
       } else if (message.id === 3) {
         const windows = codexWindows(message.result?.rateLimits);

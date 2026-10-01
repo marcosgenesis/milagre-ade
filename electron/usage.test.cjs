@@ -322,3 +322,12 @@ test("turns a reader crash into an error for that provider only", async () => {
   assert.equal(providers[1].status, "ok");
   assert.ok(!JSON.stringify(providers).includes(TOKEN));
 });
+
+test("reports unavailable for Codex accounts without ChatGPT plan limits", async () => {
+  for (const type of ["apiKey", "amazonBedrock"]) {
+    const child = fakeCodex({ account: { type }, rateLimits: WEEKLY_ONLY });
+    const result = await readCodexUsage(codexDeps(child).deps);
+    assert.deepEqual([result.status, result.message], ["unavailable", "Codex plan limits need a ChatGPT sign-in."]);
+    assert.ok(!child.sent.includes("account/rateLimits/read"));
+  }
+});

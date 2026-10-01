@@ -386,6 +386,7 @@ export default function SidebarNav({
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
+                    event.preventDefault();
                     setSearchOpen(false);
                     setQuery("");
                   }

@@ -178,7 +178,7 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
               className="absolute top-[calc(100%+0.375rem)] w-[320px]"
               style={popoverStyle}
               onKeyDown={(event) => {
-                if (event.key === "Escape") close();
+                if (event.key === "Escape") { event.preventDefault(); close(); }
                 if (event.key === "Enter" && branchRows[0]) { branchRows[0].choose(); close(); }
               }}
             >

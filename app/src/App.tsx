@@ -326,7 +326,8 @@ function App() {
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      // A menu, picker or search that Escape closed has already consumed it.
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (view === "settings") {
         event.preventDefault();
         setView("chat");

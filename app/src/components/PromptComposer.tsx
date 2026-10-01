@@ -250,6 +250,19 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     inputRef.current?.focus();
   }
 
+  // Escape closes the slash/@ menu or an open picker, from the prompt or a picker's search field.
+  // Only then is it consumed: with nothing open it reaches the window and stops the running turn.
+  function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen)) return;
+    event.preventDefault();
+    setDismissed(true);
+    setPlusOpen(false);
+    setModelOpen(false);
+    setPermissionOpen(false);
+    setQuery("");
+    inputRef.current?.focus();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (menu && rows.length > 0) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -264,13 +277,6 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         return;
       }
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setDismissed(true);
-      setPlusOpen(false);
-      setModelOpen(false);
-      return;
-    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       onSend();
@@ -278,7 +284,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   }
 
   return (
-    <div data-promptbar className="w-full">
+    <div data-promptbar className="w-full" onKeyDown={handleEscape}>
       <div ref={popoverRootRef} className="relative">
         {menu && (
           <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>

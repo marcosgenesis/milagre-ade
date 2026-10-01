@@ -8,7 +8,7 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
-import { MODEL_CATALOG } from "/src/model";
+import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
 function Fixture() {
@@ -23,8 +23,9 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages} sessions={{ "1": { id: 1, worktree_id: 1, agent_name: "main", status: "Stopped" } }}
       imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false}
-      selectedModel={MODEL_CATALOG[0]} onModelChange={noop} permissionMode="auto" onPermissionModeChange={noop}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false} sendBlocked={false}
+      selectedModel={MODEL_CATALOG[0]} onModelChange={noop}
+      capability={capabilityFor(MODEL_CATALOG[0], null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
       worktreeSummary="main" connectionSummary="No connection" eventsCount={0} firstWorktreeName="main"
       firstAgentRunning={false} secondAgentRunning={false} onToggleFirst={noop} onToggleSecond={noop}
       onCycleConnection={noop} onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}

@@ -76,7 +76,9 @@ class SessionManager {
     const entry = this.sessions.get(chatId);
     if (!entry) return;
     clearTimeout(entry.idleTimer);
-    entry.idleTimer = setTimeout(() => void this.closeChat(chatId), this.idleMs);
+    entry.idleTimer = setTimeout(() => {
+      void this.serial(chatId, () => (this.sessions.get(chatId) === entry ? this.closeEntry(chatId, entry) : undefined)).catch(() => {});
+    }, this.idleMs);
     entry.idleTimer.unref?.();
   }
 
@@ -94,6 +96,7 @@ class SessionManager {
     if (!entry) return;
     clearTimeout(entry.idleTimer);
     await entry.session.close();
+    clearTimeout(entry.idleTimer);
     if (this.sessions.get(chatId) !== entry) return;
     this.flush(chatId);
     this.sessions.delete(chatId);

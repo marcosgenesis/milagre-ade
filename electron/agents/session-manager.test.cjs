@@ -169,3 +169,15 @@ test("concurrent turns during a replacement share one new session", async (t) =>
   assert.equal(created.length, 2);
   assert.equal(created[1].turns.length, 2);
 });
+
+test("an idle close never reaches the session that replaced it", async (t) => {
+  const { manager, created } = harness({ idleMs: 30 });
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].running = true;
+  await manager.startTurn(request("1", { provider: "claude" }));
+  await manager.startTurn(request("1", { provider: "claude" }));
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(created[0].closed, true);
+  assert.equal(created[1].closed, false);
+});

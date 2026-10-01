@@ -246,6 +246,38 @@ test("an approval request is sent right after the text before it", async (t) => 
   assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "permission-request"]);
 });
 
+test("command output is batched per step, in order with the reply around it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  const step = { id: "exec-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" };
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "Testing." });
+  created[0].emit({ type: "step-started", step });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok 1\n" });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok 2\n" });
+  created[0].emit({ type: "step-output", id: "exec-2", text: "other\n" });
+  assert.deepEqual(sent.map((item) => item.event), [
+    { type: "text-delta", messageId: "t1", text: "Testing." },
+    { type: "step-started", step },
+    { type: "step-output", id: "exec-1", text: "ok 1\nok 2\n" },
+  ]);
+  created[0].emit({ type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" });
+  assert.deepEqual(sent.slice(3).map((item) => item.event), [
+    { type: "step-output", id: "exec-2", text: "other\n" },
+    { type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" },
+  ]);
+});
+
+test("a batch of command output keeps only its end", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "step-output", id: "exec-1", text: "a".repeat(15_000) });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "b".repeat(15_000) });
+  await waitUntil(() => sent.length === 1);
+  assert.equal(sent[0].event.text, `… truncated\n${"a".repeat(5_000)}${"b".repeat(15_000)}`);
+});
+
 test("a message a closed session hands back is retried once on a fresh session", async (t) => {
   const { manager, created } = harness();
   t.after(() => manager.closeAll());

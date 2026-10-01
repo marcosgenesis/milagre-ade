@@ -12,10 +12,10 @@ const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
 const { reconcileState } = require("./project-state.cjs");
+const { saveProjectState, stateFile } = require("./project-store.cjs");
 
 const execFileAsync = promisify(execFile);
 
-const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
 
@@ -72,14 +72,8 @@ async function readProject(projectPath) {
   } catch {}
   const discoveredWorktrees = await discoverWorktrees(projectPath);
   const state = reconcileState(storedState, name, discoveredWorktrees);
-  if (storedState && JSON.stringify(storedState) !== JSON.stringify(state)) await saveProject(projectPath, state);
+  if (storedState && JSON.stringify(storedState) !== JSON.stringify(state)) await saveProjectState(projectPath, state);
   return { path: projectPath, name, state };
-}
-
-async function saveProject(projectPath, state) {
-  const directory = path.join(projectPath, ".milagre");
-  await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(stateFile(projectPath), JSON.stringify(state, null, 2));
 }
 
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
@@ -89,7 +83,7 @@ ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("worktree:create", async (_event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
-  await saveProject(request.projectPath, project.state);
+  await saveProjectState(request.projectPath, project.state);
   const worktree = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
   if (!worktree) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
   return { project, worktreeId: worktree.id };
@@ -158,7 +152,7 @@ ipcMain.handle("project:open", async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   return readProject(result.filePaths[0]);
 });
-ipcMain.handle("project:save", (_event, projectPath, state) => saveProject(projectPath, state));
+ipcMain.handle("project:save", (_event, projectPath, state) => saveProjectState(projectPath, state));
 
 app.whenReady().then(async () => {
   app.setName("Milagre");

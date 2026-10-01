@@ -52,7 +52,8 @@
       "dist/**/*",
       "electron/**/*",
       "app/public/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "directories": {
       "output": "release"

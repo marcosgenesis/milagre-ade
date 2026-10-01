@@ -83,6 +83,7 @@ interface PromptComposerProps {
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   isSending: boolean;
+  lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   permissionMode: PermissionMode;
@@ -98,7 +99,7 @@ const POPOVER_BOTTOM_INSET = 16;
 // Smallest room below a tall composer that still fits a usable list.
 const POPOVER_MIN_BELOW = 220;
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, selectedModel, onModelChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, lockedProvider, selectedModel, onModelChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -312,7 +313,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
               </div>
             }
           >

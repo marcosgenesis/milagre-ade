@@ -105,15 +105,6 @@ export interface ImageAttachment {
   dataUrl: string;
 }
 
-export interface AgentRequest {
-  provider: ModelProvider;
-  model: string;
-  projectPath: string;
-  prompt: string;
-  permissionMode: PermissionMode;
-  images?: ImageAttachment[];
-}
-
 export type AgentEvent =
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }

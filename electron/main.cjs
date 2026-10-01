@@ -4,7 +4,11 @@ const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { promisify } = require("node:util");
-const { runAgentWithImages } = require("./image-input.cjs");
+const { decodeImages } = require("./image-input.cjs");
+const { ClaudeSession } = require("./agents/claude-provider.cjs");
+const { CodexSession } = require("./agents/codex-provider.cjs");
+const { resolveExecutable } = require("./agents/environment.cjs");
+const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
 const { reconcileState } = require("./project-state.cjs");
@@ -13,7 +17,6 @@ const execFileAsync = promisify(execFile);
 
 const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
-let activeAgentProcess = null;
 let updateState = { status: "idle", version: null, progress: 0 };
 
 function publishUpdateState(nextState) {
@@ -92,51 +95,35 @@ ipcMain.handle("worktree:create", async (_event, request) => {
   return { project, worktreeId: worktree.id };
 });
 
-ipcMain.handle("agent:send", async (_event, request) => {
-  const prompt = await expandSkillPrompt(request.projectPath, request.prompt);
-  const instruction = [
-    "You are an agent inside Milagre, an agent development environment.",
-    "Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
-    "The user is asking from the shared project context below:",
-    prompt,
-  ].join("\n\n");
+const agents = new SessionManager({
+  createSession: (provider, options) => (provider === "codex"
+    ? new CodexSession({ ...options, clientVersion: app.getVersion() })
+    : new ClaudeSession(options)),
+  send: (chatId, event) => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send("agent:event", { chatId, event });
+  },
+});
 
-  // Ask approval is handled by Milagre's confirmation dialog before this IPC
-  // call. The child process is intentionally non-interactive, so after that
-  // approval it must not wait for a terminal prompt that cannot be answered.
-  const permissionMode = request.permissionMode || "ask";
-
-  if (request.provider === "codex") {
-    const codexPermissionArgs = permissionMode === "full"
-      ? ["--dangerously-bypass-approvals-and-sandbox"]
-      : ["--approve-for-me"];
-    return runAgentWithImages("codex", [
-      "exec",
-      "--model", request.model,
-      "--cd", request.projectPath,
-      ...codexPermissionArgs,
-      "--ephemeral",
-      "--color", "never",
-    ], instruction, request.projectPath, request.images, { onSpawn: (child) => { activeAgentProcess = child; } }).finally(() => {
-      activeAgentProcess = null;
-    });
+// CLI paths are looked up once per run; a missing CLI is looked up again next time.
+const executables = new Map();
+function executable(name) {
+  if (!executables.has(name)) {
+    executables.set(name, resolveExecutable(name).then((found) => {
+      if (!found) executables.delete(name);
+      return found;
+    }));
   }
+  return executables.get(name);
+}
 
-  return runAgentWithImages("claude", [
-    "--print",
-    "--model", request.model,
-    "--add-dir", request.projectPath,
-    ...(permissionMode === "full" ? ["--dangerously-skip-permissions"] : ["--permission-mode", "acceptEdits"]),
-  ], instruction, request.projectPath, request.images, { onSpawn: (child) => { activeAgentProcess = child; } }).finally(() => {
-    activeAgentProcess = null;
-  });
+ipcMain.handle("agent:start-turn", async (_event, request) => {
+  const images = decodeImages(request.images);
+  const prompt = await expandSkillPrompt(request.cwd, request.prompt);
+  const command = await executable(request.provider === "codex" ? "codex" : "claude");
+  return agents.startTurn({ ...request, prompt, images, command });
 });
 
-ipcMain.handle("agent:cancel", () => {
-  if (!activeAgentProcess) return false;
-  activeAgentProcess.kill("SIGTERM");
-  return true;
-});
+ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -190,5 +177,11 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  // The renderer saves finished turns, so running turns stop with the last window.
+  void agents.closeAll();
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  void agents.closeAll();
 });

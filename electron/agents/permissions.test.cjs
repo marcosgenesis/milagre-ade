@@ -46,6 +46,16 @@ test("cancelAll answers every waiting request as cancelled", () => {
   assert.equal(permissions.size, 0);
 });
 
+test("always allowing in this chat can't exceed what the request offered", () => {
+  const { permissions, events, answers, ask } = pending();
+  ask("a");
+  permissions.add({ requestId: "b", kind: "other", tool: "T", title: "Allow?", allowForChat: true }, (decision) => answers.push({ requestId: "b", decision }));
+  permissions.resolve("a", "allow-for-chat");
+  permissions.resolve("b", "allow-for-chat");
+  assert.deepEqual(answers, [{ requestId: "a", decision: "allow" }, { requestId: "b", decision: "allow-for-chat" }]);
+  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.decision), ["allow", "allow-for-chat"]);
+});
+
 test("forget drops a withdrawn request without answering it", () => {
   const { permissions, events, answers, ask } = pending();
   ask("a");

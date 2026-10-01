@@ -86,7 +86,7 @@ The menu refreshes when reopened and when switching worktrees. Skill names and d
 - **Auto**: file edits inside the workspace go ahead. Claude still asks before commands outside its allow rules; Codex works inside its workspace sandbox and asks only to go beyond it.
 - **Full**: no approvals, and Codex runs without its sandbox. Use only when you trust the prompt and the workspace.
 
-Escape denies an open approval card. "Always allow in this chat" lasts until the chat's agent session closes, and never changes your Claude or Codex settings files.
+Escape denies an open approval card. "Always allow in this chat" lasts while the chat's agent stays open, which ends after 10 idle minutes or when Milagre quits, and never changes your Claude or Codex settings files.
 
 The approval boundary is enforced in the Electron main process. The renderer can request work, but it should not receive arbitrary filesystem or process privileges.
 

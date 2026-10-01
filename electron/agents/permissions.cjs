@@ -116,6 +116,7 @@ function codexDecision(decision) {
 class PendingPermissions {
   constructor(emit) {
     this.emit = emit;
+    // requestId -> { answer, allowForChat }
     this.answers = new Map();
   }
 
@@ -124,16 +125,18 @@ class PendingPermissions {
   }
 
   add(request, answer) {
-    this.answers.set(request.requestId, answer);
+    this.answers.set(request.requestId, { answer, allowForChat: Boolean(request.allowForChat) });
     this.emit({ type: "permission-request", ...request });
   }
 
   resolve(requestId, decision) {
-    const answer = this.answers.get(requestId);
-    if (!answer) return false;
+    const pending = this.answers.get(requestId);
+    if (!pending) return false;
     this.answers.delete(requestId);
-    answer(decision);
-    this.emit({ type: "permission-resolved", requestId, decision });
+    // A card that didn't offer "always allow" can't grant it.
+    const given = decision === "allow-for-chat" && !pending.allowForChat ? "allow" : decision;
+    pending.answer(given);
+    this.emit({ type: "permission-resolved", requestId, decision: given });
     return true;
   }
 

@@ -132,12 +132,27 @@ function codexDecision(decision) {
   return CODEX_DECISIONS[decision] ?? "decline";
 }
 
+// Milagre permission modes the user can switch a running turn to.
+const PERMISSION_MODES = new Set(["ask", "auto", "full"]);
+
+// True when every path is inside root.
+function insideRoot(root, files) {
+  return files.every((file) => {
+    const relative = path.relative(root, path.resolve(root, file));
+    return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+  });
+}
+
 // The approval requests a session is waiting on. Each is answered exactly once: by the user, or as
 // cancelled when its turn stops. `forget` drops one the agent withdrew without replying to it.
+// The mode follows the user's switch mid-turn. Full answers every request without a card. Switching
+// to Auto answers the waiting edits Auto wouldn't have asked about (`inWorkspace`); later ones are left
+// to the agent's own Auto rules, which still ask before anything leaves the worktree.
 class PendingPermissions {
   constructor(emit) {
     this.emit = emit;
-    // requestId -> { answer, allowForChat }
+    this.mode = "ask";
+    // requestId -> { answer, allowForChat, inWorkspace }
     this.answers = new Map();
   }
 
@@ -145,9 +160,20 @@ class PendingPermissions {
     return this.answers.size;
   }
 
-  add(request, answer) {
-    this.answers.set(request.requestId, { answer, allowForChat: Boolean(request.allowForChat) });
+  add(request, answer, { inWorkspace = false } = {}) {
+    if (this.mode === "full") {
+      answer("allow");
+      return;
+    }
+    this.answers.set(request.requestId, { answer, allowForChat: Boolean(request.allowForChat), inWorkspace: request.kind === "edit" && inWorkspace });
     this.emit({ type: "permission-request", ...request });
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    for (const [requestId, pending] of [...this.answers]) {
+      if (mode === "full" || (mode === "auto" && pending.inWorkspace)) this.resolve(requestId, "allow");
+    }
   }
 
   resolve(requestId, decision) {
@@ -175,10 +201,12 @@ class PendingPermissions {
 module.exports = {
   CANCELLED_MESSAGE,
   DENIED_MESSAGE,
+  PERMISSION_MODES,
   USER_DECISIONS,
   PendingPermissions,
   capText,
   claudeEditDiff,
+  insideRoot,
   claudeRequest,
   claudeResult,
   codexChangesDiff,

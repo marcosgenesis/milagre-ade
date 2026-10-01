@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("milagre", {
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers }),
+  setAgentPermissionMode: (chatId, mode) => ipcRenderer.invoke("agent:set-permission-mode", { chatId, mode }),
   onAgentEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("agent:event", listener);

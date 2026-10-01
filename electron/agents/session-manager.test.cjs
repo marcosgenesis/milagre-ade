@@ -21,6 +21,10 @@ class FakeSession {
     this.interrupts += 1;
   }
 
+  setPermissionMode(mode) {
+    this.modes = [...(this.modes ?? []), mode];
+  }
+
   respondToPermission(requestId, decision) {
     this.answers = [...(this.answers ?? []), { requestId, decision }];
     return true;
@@ -226,6 +230,16 @@ test("routes approval answers to the chat's session and refuses unknown decision
   assert.equal(manager.respondToPermission("9", "req-1", "allow"), false);
   assert.throws(() => manager.respondToPermission("1", "req-1", "cancelled"), /Unknown permission decision: cancelled/);
   assert.throws(() => manager.respondToPermission("1", "req-1", "yes"), /Unknown permission decision: yes/);
+});
+
+test("a mode switch reaches the chat's session", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  await manager.setPermissionMode("1", "full");
+  await manager.setPermissionMode("9", "full");
+  assert.deepEqual(created[0].modes, ["full"]);
+  await assert.rejects(manager.setPermissionMode("1", "yolo"), /Unknown permission mode: yolo/);
 });
 
 test("interruptAll stops every chat's turn", async (t) => {

@@ -6,6 +6,7 @@ const {
   PendingPermissions,
   capText,
   claudeRequest,
+  insideRoot,
   claudeResult,
   codexChangesDiff,
   codexCommandRequest,
@@ -55,6 +56,39 @@ test("always allowing in this chat can't exceed what the request offered", () =>
   permissions.resolve("b", "allow-for-chat");
   assert.deepEqual(answers, [{ requestId: "a", decision: "allow" }, { requestId: "b", decision: "allow-for-chat" }]);
   assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.decision), ["allow", "allow-for-chat"]);
+});
+
+test("switching to Auto answers waiting edits inside the worktree; Full answers everything", () => {
+  const { permissions, events, answers } = pending();
+  const add = (requestId, kind, inWorkspace) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace });
+  add("edit", "edit", true);
+  add("outside", "edit", false);
+  add("command", "command", true);
+  permissions.setMode("auto");
+  assert.deepEqual(answers, [{ requestId: "edit", decision: "allow" }]);
+  permissions.setMode("full");
+  assert.deepEqual(answers.map((answer) => answer.requestId), ["edit", "outside", "command"]);
+  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId), ["edit", "outside", "command"]);
+  assert.equal(permissions.size, 0);
+});
+
+test("in Full a request is answered without a card; in Auto the agent's own rules still ask", () => {
+  const { permissions, events, answers } = pending();
+  const add = (requestId, kind) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace: true });
+  permissions.setMode("full");
+  add("command", "command");
+  assert.deepEqual(answers, [{ requestId: "command", decision: "allow" }]);
+  assert.equal(events.length, 0);
+  permissions.setMode("auto");
+  add("edit", "edit");
+  assert.equal(permissions.size, 1);
+});
+
+test("insideRoot", () => {
+  assert.equal(insideRoot("/repo", ["/repo/a.txt", "src/b.ts"]), true);
+  assert.equal(insideRoot("/repo", ["/repo/a.txt", "/etc/hosts"]), false);
+  assert.equal(insideRoot("/repo", ["/repo-other/a.txt"]), false);
+  assert.equal(insideRoot("/repo", ["/repo"]), false);
 });
 
 test("forget drops a withdrawn request without answering it", () => {

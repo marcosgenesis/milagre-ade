@@ -139,6 +139,8 @@ ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decisio
 
 ipcMain.handle("agent:answer-question", (_event, { chatId, requestId, answers }) => agents.answerQuestion(chatId, requestId, answers));
 
+ipcMain.handle("agent:set-permission-mode", (_event, { chatId, mode }) => agents.setPermissionMode(chatId, mode));
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1240,

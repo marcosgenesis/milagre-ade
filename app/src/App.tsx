@@ -141,6 +141,12 @@ function App() {
   // Approvals come first; a question shows once none is waiting.
   const pendingQuestion = pendingApproval ? undefined : run?.questions[0];
 
+  // A running turn takes the new mode at once instead of at its next message.
+  function changePermissionMode(mode: PermissionMode) {
+    setPermissionMode(mode);
+    if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
+  }
+
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
     // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
@@ -439,7 +445,7 @@ function App() {
             ultracode={selectedCapability.ultracode && ultracode}
             onUltracodeChange={setUltracode}
             permissionMode={permissionMode}
-            onPermissionModeChange={setPermissionMode}
+            onPermissionModeChange={changePermissionMode}
             worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}
             connectionSummary={connection?.kind ?? "No connection"}
             eventsCount={state.events.length}

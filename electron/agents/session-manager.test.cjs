@@ -21,6 +21,11 @@ class FakeSession {
     this.interrupts += 1;
   }
 
+  respondToPermission(requestId, decision) {
+    this.answers = [...(this.answers ?? []), { requestId, decision }];
+    return true;
+  }
+
   async close() {
     this.closed = true;
     if (this.running) {
@@ -205,4 +210,33 @@ test("a turn the provider starts itself is not closed by the idle timer", async 
   assert.equal(created[0].closed, false);
   created[0].emit({ type: "turn-completed" });
   await waitUntil(() => created[0].closed);
+});
+
+test("routes approval answers to the chat's session and refuses unknown decisions", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  assert.equal(manager.respondToPermission("1", "req-1", "allow-for-chat"), true);
+  assert.deepEqual(created[0].answers, [{ requestId: "req-1", decision: "allow-for-chat" }]);
+  assert.equal(manager.respondToPermission("9", "req-1", "allow"), false);
+  assert.throws(() => manager.respondToPermission("1", "req-1", "cancelled"), /Unknown permission decision: cancelled/);
+  assert.throws(() => manager.respondToPermission("1", "req-1", "yes"), /Unknown permission decision: yes/);
+});
+
+test("interruptAll stops every chat's turn", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  await manager.startTurn(request("2"));
+  await manager.interruptAll();
+  assert.deepEqual(created.map((session) => session.interrupts), [1, 1]);
+});
+
+test("an approval request is sent right after the text before it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "Let me check" });
+  created[0].emit({ type: "permission-request", requestId: "r1", kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
+  assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "permission-request"]);
 });

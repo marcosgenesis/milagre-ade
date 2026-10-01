@@ -131,6 +131,8 @@ ipcMain.handle("agent:capabilities", () => modelCapabilities());
 
 ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 
+ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decision }) => agents.respondToPermission(chatId, requestId, decision));
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1240,
@@ -151,6 +153,13 @@ function createWindow() {
   const indexFile = path.join(__dirname, "../dist/index.html");
   const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
   guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
+  // A reload starts the renderer with no running turns, so stop the agents' turns: none may keep
+  // waiting on an approval card that no longer exists.
+  let loaded = false;
+  window.webContents.on("did-finish-load", () => {
+    if (loaded) void agents.interruptAll().catch(() => {});
+    loaded = true;
+  });
   if (!app.isPackaged) {
     window.loadURL(appUrl);
   } else {

@@ -1,4 +1,5 @@
 const { isTerminal } = require("./events.cjs");
+const { USER_DECISIONS } = require("./permissions.cjs");
 
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
@@ -8,7 +9,7 @@ const BATCH_MS = 50;
 // period, and are replaced when they crash or the chat changes provider or working directory.
 // Text deltas are batched so fast streams don't flood IPC. Replacing and closing a chat's
 // session run one at a time per chat, and events from a session that is no longer the chat's
-// current one are dropped.
+// current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
   constructor({ createSession, send, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
     Object.assign(this, { createSession, send, idleMs, batchMs });
@@ -88,6 +89,16 @@ class SessionManager {
 
   async interrupt(chatId) {
     await this.sessions.get(chatId)?.session.interrupt();
+  }
+
+  // The renderer is untrusted input: only the user's three answers reach a session.
+  respondToPermission(chatId, requestId, decision) {
+    if (!USER_DECISIONS.has(decision)) throw new Error(`Unknown permission decision: ${decision}`);
+    return this.sessions.get(chatId)?.session.respondToPermission(requestId, decision) ?? false;
+  }
+
+  async interruptAll() {
+    await Promise.all([...this.sessions.values()].map((entry) => entry.session.interrupt()));
   }
 
   closeChat(chatId) {

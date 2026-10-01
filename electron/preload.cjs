@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("milagre", {
   startTurn: (request) => ipcRenderer.invoke("agent:start-turn", request),
   getModelCapabilities: () => ipcRenderer.invoke("agent:capabilities"),
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
+  respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   onAgentEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("agent:event", listener);

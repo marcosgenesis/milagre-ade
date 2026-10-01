@@ -47,18 +47,20 @@ export function usageLabel(usage: ProviderUsage) {
   const name = PROVIDER_NAMES[usage.provider];
   if (usage.windows.length === 0) return `${name} usage unavailable`;
   const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(item.usedPercent)} used`);
-  return `${name} usage: ${windows.join(", ")}`;
+  return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;
 }
 
 // A failed refresh keeps the last good windows and their timestamp, so the card
 // stays useful and "Updated Xm ago" stays truthful while showing the error.
-export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapshot): UsageSnapshot {
+// Windows that have reset since are dropped: their old numbers no longer apply.
+export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapshot, now: number): UsageSnapshot {
   return {
     providers: next.providers.map((current) => {
       if (current.status !== "error") return current;
       const before = previous?.providers.find((item) => item.provider === current.provider);
       if (!before || before.windows.length === 0) return current;
-      return { ...current, windows: before.windows, updatedAt: before.updatedAt };
+      const windows = before.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > now);
+      return { ...current, windows, updatedAt: before.updatedAt };
     }),
   };
 }

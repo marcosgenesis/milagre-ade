@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FocusEvent } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { RefreshIcon } from "@hugeicons/core-free-icons";
@@ -17,9 +17,10 @@ type UsageCardProps = {
   onRefresh: () => void;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
+  onBlur: (event: FocusEvent<HTMLDivElement>) => void;
 };
 
-export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEnter, onPointerLeave }: UsageCardProps) {
+export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEnter, onPointerLeave, onBlur }: UsageCardProps) {
   const [now, setNow] = useState(() => Date.now());
   const name = PROVIDER_NAMES[usage.provider];
 
@@ -40,6 +41,7 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
       data-usage-card
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
+      onBlur={onBlur}
       className="fixed z-50 rounded-[14px] bg-surface text-ink shadow-overlay"
       style={{
         width: USAGE_CARD_WIDTH,
@@ -58,9 +60,12 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
         <button
           type="button"
           aria-label={`Refresh ${name} usage`}
-          onClick={onRefresh}
-          disabled={loading}
-          className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-[background-color,color] duration-150 hover:bg-hover-2 hover:text-ink disabled:cursor-default"
+          onClick={() => {
+            if (!loading) onRefresh();
+          }}
+          // aria-disabled, not disabled: a disabled button drops focus to <body>, which would close the card.
+          aria-disabled={loading}
+          className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-[background-color,color] duration-150 hover:bg-hover-2 hover:text-ink aria-disabled:cursor-default"
         >
           <span className="flex" style={loading ? { animation: "spin 800ms linear infinite" } : undefined}>
             <HugeiconsIcon icon={RefreshIcon} size={15} strokeWidth={1.8} color="currentColor" />

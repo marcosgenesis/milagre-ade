@@ -19,6 +19,7 @@ export function UsageStatusBar({ usage }: { usage: UsageState }) {
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
   const segments = useRef(new Map<ModelProvider, HTMLButtonElement>());
+  const restoringFocus = useRef(false);
   const providers = usage.snapshot ? visibleProviders(usage.snapshot) : [];
   const openUsage = openCard ? providers.find((item) => item.provider === openCard.provider) : undefined;
 
@@ -62,6 +63,28 @@ export function UsageStatusBar({ usage }: { usage: UsageState }) {
     return () => window.removeEventListener("resize", close);
   }, [openCard]);
 
+  useEffect(() => {
+    if (!openCard || !openUsage) return;
+    const segment = segments.current.get(openCard.provider);
+    // Capture on window runs before App's window-level Escape handler, which cancels
+    // the running agent, so Escape closes the card wherever focus is and goes no further.
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const focusInCard = Boolean((document.activeElement as Element | null)?.closest("[data-usage-card]"));
+      clearTimers();
+      setOpenCard(null);
+      if (focusInCard && segment) {
+        restoringFocus.current = true;
+        segment.focus();
+        restoringFocus.current = false;
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => window.removeEventListener("keydown", closeOnEscape, true);
+  }, [openCard, openUsage]);
+
   if (providers.length === 0) return null;
 
   return (
@@ -82,21 +105,13 @@ export function UsageStatusBar({ usage }: { usage: UsageState }) {
             onPointerEnter={() => scheduleShow(item.provider)}
             onPointerLeave={scheduleHide}
             onFocus={(event) => {
-              if (event.currentTarget.matches(":focus-visible")) show(item.provider);
+              if (!restoringFocus.current && event.currentTarget.matches(":focus-visible")) show(item.provider);
             }}
             onBlur={(event) => {
               if (!(event.relatedTarget as Element | null)?.closest("[data-usage-card]")) scheduleHide();
             }}
             onClick={() => show(item.provider)}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape" || !openCard) return;
-              // Stop here: App listens for Escape on window to cancel the running agent.
-              event.preventDefault();
-              event.stopPropagation();
-              clearTimers();
-              setOpenCard(null);
-            }}
-            className={`flex h-6 items-center gap-1.5 rounded-control px-1.5 transition-[background-color,color] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""}`}
+            className={`flex h-6 items-center gap-1.5 rounded-control px-1.5 transition-[background-color,color,opacity] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""} ${item.status === "error" ? "opacity-60" : ""}`}
           >
             <ProviderMark provider={item.provider} />
             {item.windows.length === 0 ? (
@@ -123,6 +138,12 @@ export function UsageStatusBar({ usage }: { usage: UsageState }) {
           onRefresh={() => void usage.refresh()}
           onPointerEnter={keepOpen}
           onPointerLeave={scheduleHide}
+          onBlur={(event) => {
+            const next = event.relatedTarget as Node | null;
+            const segment = segments.current.get(openUsage.provider);
+            if (next && (event.currentTarget.contains(next) || segment?.contains(next))) return;
+            scheduleHide();
+          }}
         />
       )}
     </div>

@@ -55,26 +55,26 @@ test("keeps the last good numbers when a refresh fails", () => {
   const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * MINUTE) })] };
   const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude is rate limiting usage checks. Try again in a minute." })] };
 
-  const merged = mergeSnapshot(previous, failed);
+  const merged = mergeSnapshot(previous, failed, NOW);
   assert.deepEqual(merged.providers[0].windows, previous.providers[0].windows);
   assert.equal(merged.providers[0].updatedAt, at(-6 * MINUTE));
   assert.equal(merged.providers[0].status, "error");
   assert.equal(merged.providers[0].message, "Claude is rate limiting usage checks. Try again in a minute.");
 
-  const failedAgain = mergeSnapshot(merged, failed);
+  const failedAgain = mergeSnapshot(merged, failed, NOW);
   assert.deepEqual(failedAgain.providers[0].windows, previous.providers[0].windows);
   assert.equal(failedAgain.providers[0].updatedAt, at(-6 * MINUTE));
 
-  const recovered = mergeSnapshot(failedAgain, { providers: [claude()] });
+  const recovered = mergeSnapshot(failedAgain, { providers: [claude()] }, NOW);
   assert.equal(recovered.providers[0].status, "ok");
   assert.equal(recovered.providers[0].message, undefined);
 });
 
 test("does not invent data for a first-time error or keep data for an unavailable provider", () => {
   const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Couldn't reach Claude." })] };
-  assert.deepEqual(mergeSnapshot(null, failed), failed);
+  assert.deepEqual(mergeSnapshot(null, failed, NOW), failed);
   const gone: UsageSnapshot = { providers: [claude({ status: "unavailable", windows: [], message: "Not signed in to Claude Code." })] };
-  assert.deepEqual(mergeSnapshot({ providers: [claude()] }, gone), gone);
+  assert.deepEqual(mergeSnapshot({ providers: [claude()] }, gone, NOW), gone);
 });
 
 test("hides unavailable providers and labels segments for screen readers", () => {
@@ -82,4 +82,13 @@ test("hides unavailable providers and labels segments for screen readers", () =>
   assert.deepEqual(visibleProviders({ providers: [claude(), codexMissing] }).map((item) => item.provider), ["claude"]);
   assert.equal(usageLabel(claude()), "Claude usage: Session 73% used, Weekly 61% used");
   assert.equal(usageLabel(claude({ status: "error", windows: [] })), "Claude usage unavailable");
+  assert.equal(usageLabel(claude({ status: "error", message: "Couldn't reach Claude." })), "Claude usage, last known: Session 73% used, Weekly 61% used");
+});
+
+test("drops kept windows that have already reset", () => {
+  const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * HOUR) })] };
+  const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude sign-in expired. Running any Claude agent refreshes it." })] };
+  const merged = mergeSnapshot(previous, failed, NOW + 2 * HOUR);
+  assert.deepEqual(merged.providers[0].windows.map((item) => item.id), ["weekly", "weekly:fable"]);
+  assert.equal(merged.providers[0].updatedAt, at(-6 * HOUR));
 });

@@ -16,7 +16,7 @@ export function useUsage() {
     inFlight.current = window.milagre.readUsage()
       .then((next) => {
         lastReadAt.current = Date.now();
-        setSnapshot((previous) => mergeSnapshot(previous, next));
+        setSnapshot((previous) => mergeSnapshot(previous, next, Date.now()));
       })
       .catch(() => {})
       .finally(() => {

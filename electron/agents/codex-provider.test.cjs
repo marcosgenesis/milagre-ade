@@ -276,3 +276,15 @@ test("a steer sent before Codex has started the turn waits for it", async (t) =>
   assert.deepEqual(await first, { turnId: "turn-1", steered: false });
   await ended(events);
 });
+
+test("a steer for a turn Codex gave no id becomes the next turn", async (t) => {
+  const { session, events } = codex(t, { scenario: "no-turn-id" });
+  const first = await session.startTurn(TURN);
+  assert.deepEqual(first, { turnId: null, steered: false });
+  const second = await session.startTurn({ ...TURN, prompt: "Also add tests" });
+  await ended(events, 2);
+  assert.deepEqual(second, { turnId: "turn-2", steered: false });
+  const starts = (await received(session)).filter((message) => message.method === "turn/start");
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1].params.input[0].text, "Also add tests");
+});

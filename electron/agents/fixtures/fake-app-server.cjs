@@ -2,7 +2,7 @@
 // FAKE_SCENARIO picks how a turn behaves: reply (default), fail, slow, crash, approval (command
 // approval), file-approval, permissions (extra sandbox permissions), withdrawn (an approval Codex
 // takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
-// "too late"), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
+// "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume).
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -54,6 +54,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const { threadId } = params;
       const turnId = `turn-${received.filter((item) => item.method === "turn/start").length}`;
       message.imagesExist = (params.input || []).filter((input) => input.type === "localImage").map((input) => fs.existsSync(input.path));
+      if (scenario === "no-turn-id" && turnId === "turn-1") {
+        send({ id, result: { turn: { items: [], status: "inProgress", error: null } } });
+        setTimeout(() => completeTurn(threadId, turnId, "completed"), 50);
+        return undefined;
+      }
       send({ id, result: { turn: { id: turnId, items: [], status: "inProgress", error: null } } });
       notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
       notify("mcpServer/startupStatus/updated", { name: "noise", status: "ready" });

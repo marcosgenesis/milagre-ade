@@ -111,7 +111,12 @@ class CodexSession {
   // refuses because the turn already ended, the message starts the next turn instead.
   async steer(request) {
     await this.turnReady;
-    if (!this.turnActive || !this.state.turnId) return this.startTurn(request);
+    if (!this.turnActive) return this.startTurn(request);
+    // Without a turn id Codex can't be steered; send the message as the next turn once this one ends.
+    if (!this.state.turnId) {
+      await this.turnEnded;
+      return this.startTurn(request);
+    }
     const turnId = this.state.turnId;
     const files = request.images?.length ? await writeImages(request.images) : null;
     if (files) this.imageSets.push(files);

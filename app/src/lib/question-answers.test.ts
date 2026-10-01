@@ -51,6 +51,20 @@ test("a question is answered once it has a pick, or a typed answer where one is 
   assert.equal(questionAnswered(strict, typeAnswer({}, strict, "x")), false);
 });
 
+test("an untouched question is not answered, whatever its kind, until it is picked or typed in", () => {
+  assert.equal(questionAnswered(color, {}), false);
+  assert.equal(questionAnswered(fruits, {}), false);
+  assert.equal(questionAnswered(color, { color: { picked: [], typed: "" } }), false);
+  assert.equal(questionAnswered(fruits, { fruits: { picked: [], typed: "   " } }), false);
+  // Another question's answer never counts.
+  assert.equal(questionAnswered(fruits, pickOption({}, color, "Red")), false);
+  assert.equal(questionAnswered(color, pickOption({}, color, "Red")), true);
+  assert.equal(questionAnswered(fruits, pickOption({}, fruits, "Apple")), true);
+  assert.equal(questionAnswered(fruits, typeAnswer({}, fruits, "Kiwi")), true);
+  // Unpicking the only option leaves it unanswered again.
+  assert.equal(questionAnswered(fruits, pickOption(pickOption({}, fruits, "Apple"), fruits, "Apple")), false);
+});
+
 test("tabs are named by the question's header, or by position", () => {
   assert.equal(tabLabel(color, 0), "Color");
   assert.equal(tabLabel({ ...color, header: "  " }, 1), "Question 2");

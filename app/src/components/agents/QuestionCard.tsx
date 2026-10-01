@@ -167,7 +167,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
             animate={{ opacity: 1, y: 0 }}
             exit={reduce ? undefined : { opacity: 0, y: 6 }}
             transition={reduce ? { duration: 0 } : SPRING_SWAP}
-            className={`flex flex-wrap gap-2 border-t border-line bg-inset px-4 py-3 ${several ? "justify-start" : "justify-end"}`}
+            className="flex flex-wrap justify-start gap-2 border-t border-line bg-inset px-4 py-3"
           >
             <motion.button type="button" onClick={() => onAnswer(null)} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="inline-flex items-center gap-1.5 rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover">
               <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} color="currentColor" />

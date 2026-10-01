@@ -1,4 +1,7 @@
-import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest } from "../model";
+import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
+
+/** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
+export type SentAnswer = PermissionDecision | "answered" | "dismissed";
 
 /** A turn streaming in a chat, keyed by chat key (see `chatKey`). */
 export interface AgentRun {
@@ -6,8 +9,10 @@ export interface AgentRun {
   model: string;
   /** Approval requests the turn waits on, oldest first. */
   approvals: PermissionRequest[];
-  /** The answer sent for each approval request (by request id) until the agent takes it. */
-  answered: Record<string, PermissionDecision>;
+  /** Questions the turn waits on, oldest first. */
+  questions: QuestionRequest[];
+  /** What was sent for each approval or question (by request id) until the agent takes it. */
+  answered: Record<string, SentAnswer>;
   /** A steering message split the reply, so a turn that ends with no more text saves nothing more. */
   split?: boolean;
 }
@@ -43,14 +48,26 @@ export function chatInProject(projectPath: string, key: string): boolean {
 }
 
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns {
-  return { ...runs, [chatId]: { text: "", model, approvals: [], answered: {} } };
+  return { ...runs, [chatId]: { text: "", model, approvals: [], questions: [], answered: {} } };
 }
 
-/** Records the answer the user sent for a chat's approval request. Kept on the run, so another chat's request with the same id is untouched. */
-export function markAnswered(runs: AgentRuns, chatId: string, requestId: string, decision: PermissionDecision): AgentRuns {
+/** Records what the user sent for a chat's approval or question. Kept on the run, so another chat's request with the same id is untouched. */
+export function markAnswered(runs: AgentRuns, chatId: string, requestId: string, decision: SentAnswer): AgentRuns {
   const run = runs[chatId];
   if (!run) return runs;
   return { ...runs, [chatId]: { ...run, answered: { ...run.answered, [requestId]: decision } } };
+}
+
+/** The decision sent for an approval, while the agent takes it. */
+export function sentDecision(run: AgentRun | undefined, requestId: string): PermissionDecision | null {
+  const sent = run?.answered[requestId];
+  return sent === "allow" || sent === "allow-for-chat" || sent === "deny" ? sent : null;
+}
+
+/** Whether a question's answers were sent or it was dismissed, while the agent takes it. */
+export function sentReply(run: AgentRun | undefined, requestId: string): "answered" | "dismissed" | null {
+  const sent = run?.answered[requestId];
+  return sent === "answered" || sent === "dismissed" ? sent : null;
 }
 
 /** Forgets an answer, so the card is pending again (the answer didn't reach the agent). */
@@ -100,6 +117,19 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       const { [event.requestId]: _answered, ...answered } = run.answered;
       if (approvals.length === run.approvals.length && !(event.requestId in run.answered)) return { state, runs, changed: false };
       return { state, runs: { ...runs, [chatId]: { ...run, approvals, answered } }, changed: false };
+    }
+    case "question-request": {
+      if (!run) return { state, runs, changed: false };
+      const { type: _type, ...request } = event;
+      const questions = [...run.questions.filter((item) => item.requestId !== request.requestId), request];
+      return { state, runs: { ...runs, [chatId]: { ...run, questions } }, changed: false };
+    }
+    case "question-resolved": {
+      if (!run) return { state, runs, changed: false };
+      const questions = run.questions.filter((item) => item.requestId !== event.requestId);
+      const { [event.requestId]: _answered, ...answered } = run.answered;
+      if (questions.length === run.questions.length && !(event.requestId in run.answered)) return { state, runs, changed: false };
+      return { state, runs: { ...runs, [chatId]: { ...run, questions, answered } }, changed: false };
     }
     case "text-delta": {
       if (!run) return { state, runs, changed: false };

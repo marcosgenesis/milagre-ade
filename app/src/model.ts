@@ -173,6 +173,40 @@ export interface PermissionRequest {
 
 export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
 
+
+/** One option on a question card. */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question an agent asks, as shown on the question card. */
+export interface AgentQuestion {
+  /** Unique within its request; answers are keyed by it. */
+  id: string;
+  /** A short tag such as "Library"; may be empty. */
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  /** The user may pick several options. */
+  multiSelect: boolean;
+  /** The user may type an answer of their own. */
+  allowOther: boolean;
+  /** The typed answer is a secret, so the field hides it. */
+  secret: boolean;
+}
+
+/** Questions a turn waits on, asked together. */
+export interface QuestionRequest {
+  requestId: string;
+  questions: AgentQuestion[];
+}
+
+/** The labels picked and any typed answer, per question id. */
+export type QuestionAnswers = Record<string, string[]>;
+
+export type QuestionOutcome = "answered" | "dismissed" | "cancelled";
+
 export type AgentEvent =
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
@@ -180,6 +214,8 @@ export type AgentEvent =
   | { type: "text-delta"; messageId: string | null; text: string }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
+  | ({ type: "question-request" } & QuestionRequest)
+  | { type: "question-resolved"; requestId: string; outcome: QuestionOutcome }
   | { type: "turn-completed" }
   | { type: "turn-cancelled" }
   | { type: "turn-failed"; message: string };

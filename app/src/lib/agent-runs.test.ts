@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest } from "../model";
-import { applyAgentEvent, chatInProject, chatsWaitingForApproval, chatKey, clearAnswered, markAnswered, modelForChat, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
+import { applyAgentEvent, chatInProject, chatsWaitingForApproval, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -70,12 +70,12 @@ test("streams text per chat and saves each finished reply once", () => {
 });
 
 test("keeps partial text when a turn fails or is cancelled", () => {
-  const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } };
   const failed = applyAgentEvent(base(), runs, PROJECT, key(1), { type: "turn-failed", message: "Codex stopped: boom" });
   assert.equal(failed.state.messages[0].body, "Half an answer\n\nAgent error: Codex stopped: boom");
   assert.equal(failed.state.messages[0].outcome, "failed");
 
-  const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
+  const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
   assert.equal(cancelled.state.messages[0].body, "Agent run cancelled.");
   assert.equal(cancelled.state.messages[0].outcome, "cancelled");
 });
@@ -90,7 +90,7 @@ test("a key from another project path never touches this state", () => {
   const state = base();
   // "/work/app#x" + "#2" starts with "/work/app#" but belongs to the project at "/work/app#x".
   for (const other of ["/work/other", "/work", "/work/app#x", "/work/app/sub"]) {
-    const runs = { [chatKey(other, 2)]: { text: "Not yours", model: "claude-opus-5-5", approvals: [], answered: {} } };
+    const runs = { [chatKey(other, 2)]: { text: "Not yours", model: "claude-opus-5-5", approvals: [], questions: [], answered: {} } };
     for (const event of [
       { type: "session-started", nativeId: "foreign" },
       { type: "session-reset" },
@@ -104,7 +104,7 @@ test("a key from another project path never touches this state", () => {
 
 test("an unknown session id is a no-op", () => {
   const state = base();
-  const runs = { [key(99)]: { text: "Orphan", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(99)]: { text: "Orphan", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } };
   for (const chatId of [key(99), `${PROJECT}#`, `${PROJECT}#abc`]) {
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "session-started", nativeId: "x" }), { state, runs, changed: false });
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "turn-completed" }), { state, runs, changed: false });
@@ -113,7 +113,7 @@ test("an unknown session id is a no-op", () => {
 
 test("an unknown event type changes nothing", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "Partial", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Partial", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } };
   // Later steps add event types (tool steps, approvals); only the three turn endings end a run.
   const event = { type: "tool-started", toolId: "t-1" } as unknown as AgentEvent;
   assert.deepEqual(applyAgentEvent(state, runs, PROJECT, key(1), event), { state, runs, changed: false });
@@ -139,7 +139,7 @@ const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "
 test("turn-started opens a run for a turn this window didn't start", () => {
   const state = { ...base(), messages: [{ id: 5, session_id: 2, body: "One more thing", context: null, role: "user" as const, model: "claude-opus-5-5" }] };
   const opened = applyAgentEvent(state, {}, PROJECT, key(2), { type: "turn-started", turnId: "t-2" });
-  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", approvals: [], answered: {} });
+  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", approvals: [], questions: [], answered: {} });
   assert.equal(opened.changed, false);
 
   const running = startRun({}, key(2), "claude-sonnet-5-5");
@@ -169,15 +169,15 @@ test("approval requests wait on the run, oldest first, until they're resolved", 
 
 test("a steer saves the reply so far and keeps the run going", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "  Half an answer \n", model: "gpt-6-sol", approvals: [approval("a")], answered: {} } };
+  const runs = { [key(1)]: { text: "  Half an answer \n", model: "gpt-6-sol", approvals: [approval("a")], questions: [], answered: {} } };
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.changed, true);
   assert.deepEqual(split.state.messages.at(-1), { id: state.next_id, session_id: 1, body: "Half an answer", context: null, role: "assistant", model: "gpt-6-sol" });
   assert.equal(split.state.next_id, state.next_id + 1);
-  assert.deepEqual(split.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [approval("a")], answered: {}, split: true });
+  assert.deepEqual(split.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [approval("a")], questions: [], answered: {}, split: true });
 
   const cases: Array<[AgentRuns, string]> = [
-    [{ [key(1)]: { text: "  ", model: "gpt-6-sol", approvals: [], answered: {} } }, key(1)],
+    [{ [key(1)]: { text: "  ", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } }, key(1)],
     [{}, key(1)],
     [runs, chatKey("/work/other", 1)],
     [runs, key(99)],
@@ -217,7 +217,7 @@ test("a resolved request drops its answer", () => {
 
 test("a turn that completes with no text after a steer split saves no reply", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "Half", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Half", model: "gpt-6-sol", approvals: [], questions: [], answered: {} } };
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.runs[key(1)].split, true);
   const done = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-completed" });
@@ -232,7 +232,7 @@ test("a turn that completes with no text after a steer split saves no reply", ()
 
 test("chatsWaitingForApproval lists only this project's chats with a pending approval", () => {
   const request = { requestId: "r1" } as PermissionRequest;
-  const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, answered: {} });
+  const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, questions: [], answered: {} });
   const runs: AgentRuns = {
     [key(1)]: run([request]),
     [key(2)]: run([]),
@@ -242,4 +242,35 @@ test("chatsWaitingForApproval lists only this project's chats with a pending app
   };
   assert.deepEqual([...chatsWaitingForApproval(runs, PROJECT)].sort(), [1, 3]);
   assert.equal(chatsWaitingForApproval({}, PROJECT).size, 0);
+});
+
+const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });
+
+test("questions wait on the run, oldest first, until they're resolved", () => {
+  const state = base();
+  let runs = startRun({}, key(1), "claude-opus-5-5");
+  for (const requestId of ["a", "b"]) runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-request", ...question(requestId) }).runs;
+  assert.deepEqual(runs[key(1)].questions, [question("a"), question("b")]);
+  assert.deepEqual(runs[key(1)].approvals, []);
+
+  runs = markAnswered(runs, key(1), "a", "answered");
+  runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "a", outcome: "answered" }).runs;
+  assert.deepEqual(runs[key(1)].questions.map((item) => item.requestId), ["b"]);
+  assert.deepEqual(runs[key(1)].answered, {});
+
+  const unchanged = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "missing", outcome: "cancelled" });
+  assert.equal(unchanged.runs, runs);
+  assert.equal(applyAgentEvent(state, {}, PROJECT, key(1), { type: "question-request", ...question("c") }).runs[key(1)], undefined);
+  assert.equal(applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-cancelled" }).runs[key(1)], undefined);
+});
+
+test("what was sent reads back as a decision for approvals and a reply for questions", () => {
+  let runs = startRun({}, key(1), "gpt-6-sol");
+  runs = markAnswered(markAnswered(markAnswered(runs, key(1), "p", "allow-for-chat"), key(1), "q", "dismissed"), key(1), "r", "answered");
+  assert.equal(sentDecision(runs[key(1)], "p"), "allow-for-chat");
+  assert.equal(sentDecision(runs[key(1)], "q"), null);
+  assert.equal(sentReply(runs[key(1)], "q"), "dismissed");
+  assert.equal(sentReply(runs[key(1)], "r"), "answered");
+  assert.equal(sentReply(runs[key(1)], "p"), null);
+  assert.equal(sentReply(undefined, "q"), null);
 });

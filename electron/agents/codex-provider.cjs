@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 
 // Milagre permission mode -> Codex policy. Approvals arrive in a later step, so no mode asks
 // yet. Ask and Auto work inside the workspace sandbox, as `codex exec` did before; Ask also
@@ -45,7 +45,7 @@ class CodexSession {
   }
 
   async startTurn({ prompt, images = [], model, permissionMode }) {
-    if (this.turnActive) throw new Error("This chat already has a turn running.");
+    if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("codex") });
       return { turnId: null };

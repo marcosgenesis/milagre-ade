@@ -51,6 +51,14 @@ test("Codex: turn/completed maps each status", () => {
   assert.deepEqual(done("failed"), [{ type: "turn-failed", message: "Codex could not finish this turn." }]);
 });
 
+test("Codex: a stale completion or text for another turn id is ignored", () => {
+  const state = { ...codexState(), turnId: "t-2" };
+  assert.deepEqual(mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-1", status: "completed" } }, state), []);
+  assert.deepEqual(mapCodexNotification("item/agentMessage/delta", { threadId: "thread-1", turnId: "t-1", itemId: "a", delta: "late" }, state), []);
+  assert.equal(state.turnId, "t-2");
+  assert.deepEqual(mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-2", status: "completed" } }, state), [{ type: "turn-completed" }]);
+});
+
 test("isTerminal recognises the three turn endings", () => {
   assert.equal(isTerminal({ type: "turn-completed" }), true);
   assert.equal(isTerminal({ type: "turn-failed", message: "x" }), true);

@@ -1,7 +1,7 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. Approvals arrive in a later step,
 // so Ask uses acceptEdits like the old `claude --print` call; Ask also keeps Milagre's
@@ -47,7 +47,6 @@ class ClaudeSession {
     this.inbox = null;
     this.child = null;
     this.stderr = "";
-    this.initSeen = false;
     this.turnActive = false;
     this.cancelRequested = false;
     this.closed = false;
@@ -59,7 +58,7 @@ class ClaudeSession {
 
   async startTurn({ prompt, images = [], model, permissionMode }) {
     if (this.closed) throw new Error("This Claude session is closed.");
-    if (this.turnActive) throw new Error("This chat already has a turn running.");
+    if (this.turnActive) throw new Error(TURN_RUNNING_MESSAGE);
     if (!this.command) {
       this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
       return { turnId: null };
@@ -103,7 +102,6 @@ class ClaudeSession {
   async start(model, mode) {
     const { query } = await this.loadSdk();
     if (this.closed) return;
-    this.initSeen = false;
     this.stderr = "";
     this.child = null;
     this.inbox = new Inbox();
@@ -136,7 +134,6 @@ class ClaudeSession {
   async readMessages(query) {
     try {
       for await (const message of query) {
-        if (message.type === "system" && message.subtype === "init") this.initSeen = true;
         for (const event of mapClaudeMessage(message, this.state)) {
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });

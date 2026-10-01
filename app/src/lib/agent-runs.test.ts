@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { CoordinatorState, ModelOption } from "../model";
+import type { AgentEvent, CoordinatorState, ModelOption } from "../model";
 import { applyAgentEvent, chatInProject, chatKey, modelForChat, sessionIdFromKey, startRun } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -108,6 +108,14 @@ test("an unknown session id is a no-op", () => {
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "session-started", nativeId: "x" }), { state, runs, changed: false });
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "turn-completed" }), { state, runs, changed: false });
   }
+});
+
+test("an unknown event type changes nothing", () => {
+  const state = base();
+  const runs = { [key(1)]: { text: "Partial", model: "gpt-6-sol" } };
+  // Later steps add event types (tool steps, approvals); only the three turn endings end a run.
+  const event = { type: "tool-started", toolId: "t-1" } as unknown as AgentEvent;
+  assert.deepEqual(applyAgentEvent(state, runs, PROJECT, key(1), event), { state, runs, changed: false });
 });
 
 test("picks a model from the chat's provider", () => {

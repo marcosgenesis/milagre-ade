@@ -8,6 +8,7 @@
 
 const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.";
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
+const TURN_RUNNING_MESSAGE = "This chat already has a turn running.";
 const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 
 function missingCliMessage(name) {
@@ -48,6 +49,8 @@ function mapClaudeMessage(message, state) {
 function mapCodexNotification(method, params, state) {
   if (params.threadId && state.threadId && params.threadId !== state.threadId) return [];
   if (method === "item/agentMessage/delta" && params.delta) {
+    // Late text from an earlier turn is not part of this reply, and must not take over turnId.
+    if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
     const events = [];
     state.turnId = params.turnId ?? state.turnId;
     if (state.hasText && state.lastItemId && params.itemId !== state.lastItemId) events.push(textDelta(state, "\n\n"));
@@ -57,6 +60,8 @@ function mapCodexNotification(method, params, state) {
   }
   if (method === "turn/completed") {
     const turn = params.turn ?? {};
+    // A late completion for an earlier turn must not end the one running now.
+    if (state.turnId && turn.id && turn.id !== state.turnId) return [];
     if (turn.status === "interrupted") return [{ type: "turn-cancelled" }];
     if (turn.status === "failed") return [{ type: "turn-failed", message: turn.error?.message || "Codex could not finish this turn." }];
     return [{ type: "turn-completed" }];
@@ -64,4 +69,4 @@ function mapCodexNotification(method, params, state) {
   return [];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, TURN_RUNNING_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };

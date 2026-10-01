@@ -56,7 +56,9 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       if (!run) return { state, runs, changed: false };
       return { state, runs: { ...runs, [chatId]: { ...run, text: run.text + event.text } }, changed: false };
     }
-    default: {
+    case "turn-completed":
+    case "turn-cancelled":
+    case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const { [chatId]: _finished, ...remaining } = runs;
       const message: ChatMessage = {
@@ -70,6 +72,9 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       };
       return { state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] }, runs: remaining, changed: true };
     }
+    // Event types added by later steps are not turn endings.
+    default:
+      return { state, runs, changed: false };
   }
 }
 

@@ -94,7 +94,11 @@ const agents = new SessionManager({
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
   send: (chatId, event) => {
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send("agent:event", { chatId, event });
+    for (const window of BrowserWindow.getAllWindows()) {
+      // A window can be mid-teardown while agents shut down on quit.
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      window.webContents.send("agent:event", { chatId, event });
+    }
   },
 });
 

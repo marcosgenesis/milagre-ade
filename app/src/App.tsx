@@ -257,26 +257,30 @@ function App() {
     await executeSend(body, permissionMode);
   }
 
+  // Built from the latest state, so a turn that finished since the last render isn't lost.
   async function toggleSession(worktreeId: number) {
-    if (!state) return;
-    const session = sessionForWorktree(state, worktreeId);
+    const latest = stateRef.current;
+    if (!latest) return;
+    const session = sessionForWorktree(latest, worktreeId);
     if (!session) return;
     const nextStatus = session.status === "Running" ? "Stopped" : "Running";
     await persist({
-      ...state,
+      ...latest,
       sessions: {
-        ...state.sessions,
+        ...latest.sessions,
         [session.id]: { ...session, status: nextStatus },
       },
     });
   }
 
   async function cycleConnection() {
-    if (!state || !connection) return;
-    const nextKind = connectionTypes[(connectionTypes.indexOf(connection.kind) + 1) % connectionTypes.length];
+    const latest = stateRef.current;
+    const current = latest ? Object.values(latest.connections)[0] : undefined;
+    if (!latest || !current) return;
+    const nextKind = connectionTypes[(connectionTypes.indexOf(current.kind) + 1) % connectionTypes.length];
     await persist({
-      ...state,
-      connections: { ...state.connections, [connection.id]: { ...connection, kind: nextKind } },
+      ...latest,
+      connections: { ...latest.connections, [current.id]: { ...current, kind: nextKind } },
     });
   }
 
@@ -401,6 +405,7 @@ function App() {
             onSend={() => void sendMessage()}
             isSending={isSending}
             streamingText={run?.text}
+            runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}

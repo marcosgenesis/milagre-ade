@@ -70,6 +70,8 @@ interface ChatComposerProps {
   onSend: () => void;
   isSending: boolean;
   streamingText?: string;
+  /** The model the open chat's running turn uses; the picker may already show another. */
+  runModelName?: string;
   lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
@@ -203,6 +205,7 @@ export function ChatComposer({
   onSend,
   isSending,
   streamingText,
+  runModelName,
   lockedProvider,
   selectedModel,
   onModelChange,
@@ -231,6 +234,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [tab, setTab] = useState("Worktrees");
   const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
+  const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     if (isNewChat) setScrolled(false);
@@ -267,12 +271,12 @@ export function ChatComposer({
                 message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText, context: null, role: "assistant" }}
                 session={sessions[String(messages.at(-1)?.session_id)]}
                 isUser={false}
-                modelName={selectedModel.name}
+                modelName={workingModelName}
               />
             )}
             {isSending && (
               <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={`Working with ${selectedModel.name}`} />
+                <ThinkingIndicator label={`Working with ${workingModelName}`} />
               </div>
             )}
           </div>

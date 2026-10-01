@@ -34,6 +34,25 @@ jobs:
         run: npm run build
       - name: Test agent runner
         run: npm run test:agent
+      - name: Test release safeguards
+        run: npm run test:release
+      - name: Check Apple release credentials
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: Create release and tag
         run: npm run release
         env:
@@ -62,6 +81,7 @@ jobs:
           - runner: macos-latest
             arch: arm64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - name: Check out released commit
         uses: actions/checkout@v4
@@ -77,7 +97,45 @@ jobs:
       - name: Build macOS installers
         env:
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
-        run: npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="${RELEASE_TAG#v}"
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="${RELEASE_TAG#v}" --config.forceCodeSigning=true --config.dmg.sign=true
+      - name: Notarize and staple disk images
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          result="$(mktemp)"
+          trap 'rm -f "$result"' EXIT
+          for dmg in release/*.dmg; do
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json > "$result"
+            node -e '
+              const result = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+              if (result.status !== "Accepted") {
+                console.error(`Apple notarization failed: ${result.status} (submission ${result.id})`);
+                process.exit(1);
+              }
+            ' "$result"
+            xcrun stapler staple "$dmg"
+          done
+      - name: Verify macOS signatures, notarization and disk images
+        shell: bash
+        run: |
+          for app in release/mac*/Milagre.app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          done
+          for dmg in release/*.dmg; do
+            codesign --verify --strict --verbose=2 "$dmg"
+            xcrun stapler validate "$dmg"
+            hdiutil verify "$dmg"
+          done
       - name: Upload macOS installers to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

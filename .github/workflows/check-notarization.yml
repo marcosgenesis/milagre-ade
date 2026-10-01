@@ -1,0 +1,29 @@
+name: Check Milagre notarization status
+on:
+  push:
+    branches:
+      - codex/macos-signing
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check submitted Milagre files
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node - <<'NODEJS'
+          const { spawnSync } = require('node:child_process')
+          const result = spawnSync('xcrun', ['notarytool', 'history', '--apple-id', process.env.APPLE_ID.trim(), '--password', process.env.APPLE_APP_SPECIFIC_PASSWORD.trim(), '--team-id', process.env.APPLE_TEAM_ID.trim(), '--output-format', 'json'], { encoding: 'utf8' })
+          if (result.status !== 0) { console.error('Apple history check failed.'); process.exit(1) }
+          const entries = JSON.parse(result.stdout).history || []
+          for (const entry of entries.filter(entry => entry.createdDate >= '2026-10-01T22:30:00Z' && /milagre/i.test(entry.name))) console.log(JSON.stringify({ id: entry.id, status: entry.status, createdDate: entry.createdDate, name: entry.name }))
+          NODEJS

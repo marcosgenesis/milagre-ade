@@ -58,7 +58,7 @@
     },
     "mac": {
       "category": "public.app-category.developer-tools",
-      "icon": "app/public/app-icon.png",
+      "icon": "app/public/logo-milagre-image.png",
       "target": [
         "dmg",
         "zip"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision } from "../model";
+import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
 import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, splitRunForSteer, startRun } from "../lib/agent-runs";
-import type { AgentRuns } from "../lib/agent-runs";
+import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
 /**
  * Streams agent turns per chat and saves each finished turn into the open project's state.
@@ -70,14 +70,14 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   }, []);
 
   /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
-  const respond = useCallback(async (chatId: string, requestId: string, decision: PermissionDecision) => {
+  const send = useCallback(async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
     const setAnswers = (next: AgentRuns) => {
       runsRef.current = next;
       setRuns(next);
     };
-    setAnswers(markAnswered(runsRef.current, chatId, requestId, decision));
+    setAnswers(markAnswered(runsRef.current, chatId, requestId, sent));
     try {
-      const accepted = await window.milagre.respondToPermission(chatId, requestId, decision);
+      const accepted = await deliver();
       if (!accepted) setAnswers(clearAnswered(runsRef.current, chatId, requestId));
       return accepted;
     } catch (error) {
@@ -86,5 +86,10 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
     }
   }, []);
 
-  return { runs, start, interrupt, respond, splitForSteer };
+  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => send(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [send]);
+
+  /** Sends the answers to a question, or dismisses it (null). */
+  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
+
+  return { runs, start, interrupt, respond, answerQuestion, splitForSteer };
 }

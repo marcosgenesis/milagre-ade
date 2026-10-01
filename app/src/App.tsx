@@ -10,6 +10,7 @@ import {
   ModelOption,
   OpenProject,
   PermissionDecision,
+  QuestionAnswers,
   PermissionMode,
   EffortLevel,
   ModelCapabilities,
@@ -20,7 +21,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatKey, chatsWaitingForApproval, modelForChat } from "./lib/agent-runs";
+import { chatKey, chatsWaitingForApproval, modelForChat, sentDecision, sentReply } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -29,6 +30,7 @@ import { SettingsNav, SettingsPanel } from "./components/Settings";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme } from "./lib/settings";
 import { PermissionCard } from "./components/agents/PermissionCard";
+import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
@@ -123,11 +125,19 @@ function App() {
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const pendingApproval = run?.approvals[0];
+  // Approvals come first; a question shows once none is waiting.
+  const pendingQuestion = pendingApproval ? undefined : run?.questions[0];
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
     // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
     void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
+  }
+
+  /** Sends the answers to the open question, or dismisses it (null). */
+  function answerQuestion(answers: QuestionAnswers | null) {
+    if (!project || !selectedSession || !pendingQuestion) return;
+    void agentRuns.answerQuestion(chatKey(project.path, selectedSession.id), pendingQuestion.requestId, answers).catch(() => {});
   }
 
   // A chat stays on the agent it started with; the picker follows the open chat.
@@ -335,9 +345,11 @@ function App() {
       }
       if (run && project && selectedSession) {
         event.preventDefault();
-        // Escape denies the open approval; once that's answered, Escape stops the turn.
-        const pending = run.approvals[0];
-        if (pending && !run.answered[pending.requestId]) answerApproval("deny");
+        // Escape denies the open approval or dismisses the open question; once that's sent, Escape stops the turn.
+        const approval = run.approvals[0];
+        const question = approval ? undefined : run.questions[0];
+        if (approval && !run.answered[approval.requestId]) answerApproval("deny");
+        else if (question && !run.answered[question.requestId]) answerQuestion(null);
         else void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
       }
     }
@@ -437,8 +449,16 @@ function App() {
                 key={pendingApproval.requestId}
                 request={pendingApproval}
                 waiting={(run?.approvals.length ?? 1) - 1}
-                answering={run?.answered[pendingApproval.requestId] ?? null}
+                answering={sentDecision(run, pendingApproval.requestId)}
                 onAnswer={answerApproval}
+              />
+            ) : pendingQuestion ? (
+              <QuestionCard
+                key={pendingQuestion.requestId}
+                request={pendingQuestion}
+                waiting={(run?.questions.length ?? 1) - 1}
+                answering={sentReply(run, pendingQuestion.requestId)}
+                onAnswer={answerQuestion}
               />
             ) : undefined}
           />

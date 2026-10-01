@@ -13,6 +13,7 @@ The current public alpha uses React and Electron. It is designed for a solo deve
 - One long-lived agent session per chat, run by Electron's main process: Claude through the Claude Agent SDK and Codex through `codex app-server`. Replies stream in as formatted Markdown with syntax-highlighted code, chats remember earlier turns after a restart, a message sent while the agent works steers it, and Escape cancels a running turn. Links in replies open in your browser.
 - Ask approval, Auto and Full permission modes.
 - Approval cards that show the exact command or file change an agent wants to make, with Allow once, Always allow in this chat, and Deny.
+- Question cards: when an agent asks you to choose, its options appear as a card. Tap one (or several, where the agent allows it), type your own answer, or dismiss the question; the agent carries on in the same turn.
 - Local coordination state under `.milagre/coordination.json`.
 - Concise agent output with access to raw details.
 
@@ -86,7 +87,9 @@ The menu refreshes when reopened and when switching worktrees. Skill names and d
 - **Auto**: file edits inside the workspace go ahead. Claude still asks before commands outside its allow rules; Codex works inside its workspace sandbox and asks only to go beyond it.
 - **Full**: no approvals, and Codex runs without its sandbox. Use only when you trust the prompt and the workspace.
 
-Escape denies an open approval card. "Always allow in this chat" lasts while the chat's agent stays open, which ends after 10 idle minutes or when Milagre quits, and never changes your Claude or Codex settings files.
+Escape denies an open approval card and dismisses an open question card. "Always allow in this chat" lasts while the chat's agent stays open, which ends after 10 idle minutes or when Milagre quits, and never changes your Claude or Codex settings files.
+
+Question cards appear in every mode, Full included. A message you send while a question is open dismisses it and reaches the agent as your reply. Codex asks with a card through a Codex feature that is still under development; without it, Codex asks in its reply.
 
 The approval boundary is enforced in the Electron main process. The renderer can request work, but it should not receive arbitrary filesystem or process privileges.
 

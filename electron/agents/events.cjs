@@ -1,5 +1,5 @@
 // Normalised events every agent session emits. The main process forwards them to the
-// renderer as { chatId, event }:
+// renderer as { chatId, event }, where chatId is the chat key `${projectPath}#${sessionId}`:
 //   { type: "session-started", nativeId }   provider session or thread id; the chat saves it
 //   { type: "session-reset" }               the saved id can't be resumed; the chat forgets it
 //   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id

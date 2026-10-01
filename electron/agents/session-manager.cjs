@@ -3,11 +3,12 @@ const { isTerminal } = require("./events.cjs");
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
 
-// One agent session per chat. Sessions start on a chat's first turn, resume from the id the
-// chat saved, close after a quiet period, and are replaced when they crash or the chat
-// changes provider. Text deltas are batched so fast streams don't flood IPC. Replacing and
-// closing a chat's session run one at a time per chat, and events from a session that is no
-// longer the chat's current one are dropped.
+// One agent session per chat. A chat id is the renderer's chat key, `${projectPath}#${sessionId}`.
+// Sessions start on a chat's first turn, resume from the id the chat saved, close after a quiet
+// period, and are replaced when they crash or the chat changes provider or working directory.
+// Text deltas are batched so fast streams don't flood IPC. Replacing and closing a chat's
+// session run one at a time per chat, and events from a session that is no longer the chat's
+// current one are dropped.
 class SessionManager {
   constructor({ createSession, send, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
     Object.assign(this, { createSession, send, idleMs, batchMs });
@@ -23,13 +24,13 @@ class SessionManager {
   }
 
   async currentEntry(request) {
-    const { chatId, provider } = request;
+    const { chatId, provider, cwd } = request;
     const existing = this.sessions.get(chatId);
-    if (existing && existing.provider === provider && !existing.session.closed) return existing;
+    if (existing && existing.provider === provider && existing.cwd === cwd && !existing.session.closed) return existing;
     if (existing) await this.closeEntry(chatId, existing);
-    const entry = { provider, session: null, idleTimer: null };
+    const entry = { provider, cwd, session: null, idleTimer: null };
     entry.session = this.createSession(provider, {
-      cwd: request.cwd,
+      cwd,
       resumeId: request.resumeId,
       command: request.command,
       emit: (event) => this.forward(chatId, entry, event),

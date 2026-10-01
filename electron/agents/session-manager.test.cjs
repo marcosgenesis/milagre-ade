@@ -114,6 +114,19 @@ test("replaces a session after a provider switch or a crash", async (t) => {
   assert.equal(created[2].options.resumeId, "session-1");
 });
 
+test("replaces a chat's session when its working directory changes", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("2", { cwd: "/project-a" }));
+  await manager.startTurn(request("2", { cwd: "/project-b" }));
+
+  assert.equal(created.length, 2);
+  assert.equal(created[0].closed, true);
+  assert.equal(created[0].turns.length, 1);
+  assert.equal(created[1].options.cwd, "/project-b");
+  assert.equal(created[1].turns.length, 1);
+});
+
 test("closes idle sessions", async (t) => {
   const { manager, created } = harness({ idleMs: 30 });
   t.after(() => manager.closeAll());

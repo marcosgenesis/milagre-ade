@@ -15,7 +15,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { modelForChat } from "./lib/agent-runs";
+import { chatKey, modelForChat } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -52,6 +52,8 @@ function chatTitle(messages: ChatMessage[], fallback: string) {
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
+  const projectRef = useRef<OpenProject | null>(null);
+  projectRef.current = project;
   const [state, setState] = useState<CoordinatorState | null>(null);
   const stateRef = useRef<CoordinatorState | null>(null);
   stateRef.current = state;
@@ -107,8 +109,8 @@ function App() {
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
 
-  const agentRuns = useAgentRuns(() => stateRef.current, commit);
-  const run = selectedSession ? agentRuns.runs[String(selectedSession.id)] : undefined;
+  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit);
+  const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
 
   // A chat stays on the agent it started with; the picker follows the open chat.
@@ -193,8 +195,9 @@ function App() {
       return;
     }
     // Read the state only now: a turn in another chat may have finished while the target resolved.
+    // If another project was opened meanwhile, the latest state is that project's; drop the send.
     const latest = stateRef.current;
-    if (!target || !latest) {
+    if (!target || !latest || projectRef.current?.path !== project.path) {
       setPreparing(false);
       return;
     }
@@ -231,7 +234,7 @@ function App() {
     imageDraft.clear();
     setPreparing(false);
     await agentRuns.start({
-      chatId: String(chatSession.id),
+      chatId: chatKey(project.path, chatSession.id),
       provider: model.provider,
       model: model.id,
       cwd: worktree.path,
@@ -334,15 +337,15 @@ function App() {
         denyPending();
         return;
       }
-      if (run && selectedSession) {
+      if (run && project && selectedSession) {
         event.preventDefault();
-        void agentRuns.interrupt(String(selectedSession.id));
+        void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
       }
     }
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [approvalPrompt, run, selectedSession?.id, view]);
+  }, [approvalPrompt, run, project?.path, selectedSession?.id, view]);
 
   if (loading || !project || !state) {
     return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;

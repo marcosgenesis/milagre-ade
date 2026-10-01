@@ -114,6 +114,7 @@ export type AgentEvent =
   | { type: "turn-failed"; message: string };
 
 export interface AgentStartTurnRequest {
+  /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */
   chatId: string;
   provider: ModelProvider;
   model: string;

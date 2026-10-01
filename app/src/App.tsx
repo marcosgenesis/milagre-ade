@@ -32,6 +32,8 @@ import { getSettings, useApplyTheme } from "./lib/settings";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
+import { UsageStatusBar } from "./components/usage/UsageStatusBar";
+import { useUsage } from "./components/usage/useUsage";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
@@ -124,6 +126,15 @@ function App() {
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
+  const usage = useUsage();
+  const runningCount = Object.keys(agentRuns.runs).length;
+  const previousRunningCount = useRef(runningCount);
+
+  // A turn just ended: plan usage has moved, so re-read it.
+  useEffect(() => {
+    if (runningCount < previousRunningCount.current) void usage.refresh();
+    previousRunningCount.current = runningCount;
+  }, [runningCount, usage.refresh]);
   const pendingApproval = run?.approvals[0];
   // Approvals come first; a question shows once none is waiting.
   const pendingQuestion = pendingApproval ? undefined : run?.questions[0];
@@ -465,6 +476,7 @@ function App() {
             ) : undefined}
           />
         </div>
+        <UsageStatusBar usage={usage} />
       </main>
       </div>
     </DotBackground>

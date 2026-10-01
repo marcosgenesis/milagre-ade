@@ -52,6 +52,8 @@ export type SidebarRecent = {
   id: string;
   label: string;
   prompt?: string;
+  /** The chat waits on an approval from the user. */
+  waiting?: boolean;
 };
 
 const DEFAULT_RECENTS: SidebarRecent[] = [
@@ -435,6 +437,10 @@ export default function SidebarNav({
                   <span className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] font-medium ${active ? "text-ink" : "text-ink-2"}`}>
                     {item.label}
                   </span>
+                  {item.waiting && (
+                    // A sidebar-copy, so the collapsed rail (no room) hides it with the labels.
+                    <span role="img" aria-label="Waiting for your approval" title="Waiting for your approval" data-slot="waiting-mark" className="sidebar-copy ml-2 size-2 shrink-0 rounded-full bg-accent" />
+                  )}
                 </button>
               );
             })}

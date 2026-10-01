@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest } from "../model";
-import { applyAgentEvent, chatInProject, chatKey, clearAnswered, markAnswered, modelForChat, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import { applyAgentEvent, chatInProject, chatsWaitingForApproval, chatKey, clearAnswered, markAnswered, modelForChat, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -228,4 +228,18 @@ test("a turn that completes with no text after a steer split saves no reply", ()
   assert.equal(cancelled.state.messages.at(-1)?.body, "Agent run cancelled.");
   const more = applyAgentEvent(split.state, { [key(1)]: { ...split.runs[key(1)], text: "Rest" } }, PROJECT, key(1), { type: "turn-completed" });
   assert.equal(more.state.messages.at(-1)?.body, "Rest");
+});
+
+test("chatsWaitingForApproval lists only this project's chats with a pending approval", () => {
+  const request = { requestId: "r1" } as PermissionRequest;
+  const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, answered: {} });
+  const runs: AgentRuns = {
+    [key(1)]: run([request]),
+    [key(2)]: run([]),
+    [key(3)]: run([request, { requestId: "r2" } as PermissionRequest]),
+    [chatKey("/work/app#other", 4)]: run([request]),
+    [chatKey("/work/other", 5)]: run([request]),
+  };
+  assert.deepEqual([...chatsWaitingForApproval(runs, PROJECT)].sort(), [1, 3]);
+  assert.equal(chatsWaitingForApproval({}, PROJECT).size, 0);
 });

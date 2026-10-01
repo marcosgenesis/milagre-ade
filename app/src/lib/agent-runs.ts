@@ -22,6 +22,15 @@ export function chatKey(projectPath: string, sessionId: number): string {
   return `${projectPath}#${sessionId}`;
 }
 
+/** Session ids of the project's chats that wait on at least one approval, so the sidebar can mark them. */
+export function chatsWaitingForApproval(runs: AgentRuns, projectPath: string): Set<number> {
+  const waiting = new Set<number>();
+  for (const [key, run] of Object.entries(runs)) {
+    if (run.approvals.length > 0 && chatInProject(projectPath, key)) waiting.add(sessionIdFromKey(key));
+  }
+  return waiting;
+}
+
 /** The session id at the end of a chat key (after the last `#`), or NaN. */
 export function sessionIdFromKey(key: string): number {
   const match = /#(\d+)$/.exec(key);

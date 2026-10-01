@@ -20,7 +20,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatKey, modelForChat } from "./lib/agent-runs";
+import { chatKey, chatsWaitingForApproval, modelForChat } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -148,14 +148,16 @@ function App() {
     commit(nextState);
   }
 
+  // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
+  const waiting = useMemo(() => chatsWaitingForApproval(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
       .filter(({ sessionMessages }) => sessionMessages.length > 0)
       .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
-      .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name) }));
-  }, [state]);
+      .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name), waiting: waiting.has(session.id) }));
+  }, [state, waiting]);
 
   function startNewChat() {
     setSelectedSessionId(null);

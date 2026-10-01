@@ -46,3 +46,37 @@ export function draftAnswers(questions: AgentQuestion[], drafts: QuestionDrafts)
 export function sendsOnPick(questions: AgentQuestion[]): boolean {
   return questions.length === 1 && !questions[0].multiSelect;
 }
+
+/** Whether one question has an answer: a pick, or a typed answer where the agent allows one. */
+export function questionAnswered(question: AgentQuestion, drafts: QuestionDrafts): boolean {
+  return draftAnswers([question], drafts) !== null;
+}
+
+/** A tab's label: the question's header, or its position when it has none. */
+export function tabLabel(question: AgentQuestion, index: number): string {
+  return question.header.trim() || `Question ${index + 1}`;
+}
+
+/** The card's primary button: Next on every question but the last, which sends the answers. */
+export function primaryAction(questions: AgentQuestion[], active: number): "next" | "send" {
+  return active < questions.length - 1 ? "next" : "send";
+}
+
+/** Next needs the active question answered; Send needs every question answered. */
+export function primaryEnabled(questions: AgentQuestion[], drafts: QuestionDrafts, active: number): boolean {
+  return primaryAction(questions, active) === "next" ? questionAnswered(questions[active], drafts) : draftAnswers(questions, drafts) !== null;
+}
+
+/** Where Next goes: one question on, staying on the last. */
+export function nextTab(count: number, active: number): number {
+  return Math.min(active + 1, count - 1);
+}
+
+/** Where a key moves between tabs (arrows wrap, Home and End jump), or null for any other key. */
+export function arrowTab(count: number, active: number, key: string): number | null {
+  if (key === "ArrowRight") return (active + 1) % count;
+  if (key === "ArrowLeft") return (active - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}

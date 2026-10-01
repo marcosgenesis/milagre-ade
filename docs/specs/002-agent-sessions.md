@@ -70,17 +70,23 @@ Main sends `agent:event` messages `{ chatId, event }` to the renderer. Event typ
 - `session-started { nativeId }`: the renderer saves it on the chat.
 - `turn-started { turnId }`: the first event of every turn. The renderer already shows a turn it started itself; this event matters for turns it didn't start, such as a steering message that arrived just after the previous turn ended.
 - `text-delta { messageId, text }`
-- `step-started { step }`, where `step = { id, kind, title, detail? }`. `kind` is one of `shell`, `edit`, `read`, `search`, `other`.
-- `step-output { id, text }`: streamed command output, appended to the step.
-- `step-completed { id, status, detail? }`, where `status` is `done` or `failed`. `detail` holds the raw output or a unified diff.
-- `permission-request { requestId, kind, tool, title, description?, command?, cwd?, diff?, files?, detail?, reason?, allowForChat }`, where `kind` is `command`, `edit` or `other`. `allowForChat` says whether "Always allow in this chat" can be offered. `diff` and `detail` are capped at 20 KB.
+- `step-started { step }`, where `step = { id, kind, title, detail? }`:
+  - `kind` is one of `shell`, `edit`, `read`, `search`, `other`.
+  - `title` says what the step did, in the past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`".
+  - A command's `detail` starts as `$ <command>`.
+- `step-output { id, text }`: streamed command output, appended to the step. Only Codex streams output; Claude Code reports a command's output when it ends.
+- `step-completed { id, status, title?, detail? }`, where `status` is `done` or `failed`.
+  - `detail` holds the command and its output, a unified diff, or the tool's result. It replaces anything streamed into the step.
+  - `title`, when present, replaces the first one. Some steps only learn it at the end: a Codex web search learns its query, and a Claude agent turns out to run in the background.
+  - A step still running when its turn ends gets no `step-completed`. Codex sends none for a command cut off by an interrupt, so the renderer closes such steps when the turn ends.
+- `permission-request { requestId, kind, tool, title, description?, command?, cwd?, diff?, files?, detail?, reason?, allowForChat, stepId? }`, where `kind` is `command`, `edit` or `other`. `allowForChat` says whether "Always allow in this chat" can be offered. `stepId` names the step the request is about. `diff` and `detail` are capped at 20 KB.
 - `permission-resolved { requestId, decision }`, where `decision` is `allow`, `allow-for-chat`, `deny` or `cancelled`. A request is cancelled when its turn is interrupted or ends, or when the agent withdraws it.
 - `question-request { requestId, questions }`, where each question is `{ id, header, question, options, multiSelect, allowOther, secret }` and each option is `{ label, description? }` (see Questions).
 - `question-resolved { requestId, outcome }`, where `outcome` is `answered`, `dismissed` or `cancelled`.
 - `turn-completed`, `turn-failed { message }`, `turn-cancelled`
 - `session-reset`: the saved native id can't be resumed (transcript or thread deleted). The renderer forgets it and the next message starts a fresh session.
 
-Text deltas are batched in main into 50 ms windows before sending, to keep IPC traffic low during fast streaming.
+Text deltas and step output are batched in main into 50 ms windows before sending, to keep IPC traffic low during fast streaming. A batch of step output keeps only its last 20 KB, as the renderer does.
 
 ### IPC contract
 
@@ -116,8 +122,17 @@ Renderer to main:
 - **Images.** Images are sent as base64 `image` content blocks, as today.
 - **Mapping.**
   - `stream_event` `text_delta` becomes `text-delta`.
-  - Assistant `tool_use` blocks become `step-started`. `Bash` maps to `shell`; `Edit`, `Write` and `MultiEdit` to `edit`; `Read` to `read`; `Grep` and `Glob` to `search`; everything else to `other`.
+  - Assistant `tool_use` blocks become `step-started`.
+    - The block comes from the assistant message, which carries it once its input is complete. The streamed `input_json_delta` is not used.
+    - `Bash` maps to `shell`; `Edit`, `Write`, `MultiEdit` and `NotebookEdit` to `edit`; `Read` to `read`; `Grep`, `Glob` and `WebSearch` to `search`; everything else to `other`.
+    - Claude Code 2.1.287 has no `Grep` or `Glob` tool: it searches through `Bash` (`grep`, `find`), and those show as `shell`.
   - The matching `tool_result` becomes `step-completed`.
+    - The step fails when `is_error` is true: a tool error, a denied approval, or a tool cut off by Stop.
+    - Edit and Write diffs come from the message's `tool_use_result.structuredPatch`, or from the input when there is none.
+    - A read that worked keeps no detail.
+  - **Subagents.** Messages with `parent_tool_use_id` set are not shown; the `Agent` call that started them is one step.
+    - Its detail is the agent's report, from `tool_use_result.content`.
+    - Claude often starts agents in the background. Then the step completes at launch, titled "Started an agent: …". The report arrives after the turn ends, in a turn Claude Code starts by itself (see Steering).
   - `result` becomes `turn-completed`, or `turn-failed` when `is_error`.
 - **Approvals.** `canUseTool` emits `permission-request` and returns a pending promise:
   - `allow`: `{ behavior: "allow" }`
@@ -137,9 +152,17 @@ Renderer to main:
 - **Turns.** `turn/start { threadId, input, model, approvalPolicy, sandboxPolicy, cwd }`. Images are written to a temporary file and sent as `{ type: "localImage", path }`. The file is deleted when the turn ends.
 - **Mapping.**
   - `item/agentMessage/delta` becomes `text-delta`.
-  - `item/started` for `commandExecution` or `fileChange` becomes `step-started`.
-  - `item/commandExecution/outputDelta` becomes `step-output`.
+  - `item/started` for a tool item becomes `step-started`:
+    - `commandExecution`. A command that Codex's `commandActions` names as one read, search or file listing maps to `read` or `search`; any other command is `shell`.
+    - `fileChange` is `edit`; `mcpToolCall` and `dynamicToolCall` are `other`; `webSearch` is `search`; `imageView` is `read`.
+    - Messages, reasoning, plans and other items are not steps.
+  - `item/commandExecution/outputDelta` becomes `step-output`. It is only a preview: the first chunk can be missing, and `item/completed` carries the whole `aggregatedOutput`.
   - `item/completed` becomes `step-completed`.
+    - The step fails for status `failed` or `declined`, or a non-zero `exitCode`.
+    - A `webSearch` only has its query at this point.
+    - An item that completes without having started still shows.
+  - A command running when the turn is interrupted gets no `item/completed`.
+  - A `fileChange` reports a new or deleted file's content as plain text and an update as a diff hunk. Milagre turns added and removed content into `+` and `-` lines, in steps and approval cards alike.
   - `turn/completed` becomes `turn-completed`, `turn-failed` or `turn-cancelled`.
   - Unknown notifications are ignored.
 - **Approvals.** The server requests `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` become `permission-request`. The reply is `accept`, `acceptForSession` or `decline`, and `cancel` for requests still open when the turn is interrupted or ends.
@@ -224,16 +247,24 @@ The changes to `coordination.json` are additive, so older files load unchanged.
 
 - `AgentSession` gains `provider?: "codex" | "claude"` and `native_session_id?: string`.
 - Assistant `ChatMessage`s gain:
-  - `steps?: ChatStep[]`, with `ChatStep = { id, kind, title, status, detail? }`. Each step's `detail` is capped at 20 KB, with a truncation note.
+  - `steps?: ChatStep[]`, with `ChatStep = { id, kind, title, status, detail?, offset? }`, in the order the steps started.
+    - A saved `status` is `done` or `failed`. A step still running when its turn ends is saved as `done` if the turn completed, and `failed` if it failed or was cancelled.
+    - `offset` is the length of the reply's text when the step started, measured in the saved (trimmed) body. The step is shown at that point in the text.
+    - Each step's `detail` is capped at 20 KB, with a truncation note. Command output keeps its end, where results and errors are; diffs and other details keep their start.
+    - A reply with steps but no text saves an empty body.
   - `outcome?: "completed" | "failed" | "cancelled"`
-- Streaming state lives in memory. The finished assistant message (text plus steps) is saved when the turn ends. A turn still running when the last window closes or the app quits is interrupted; the user's message is already saved, but its partial reply is not.
+- Streaming state lives in memory. The finished assistant message (text plus steps) is saved when the turn ends. A turn still running when the last window closes or the app quits is interrupted; the user's message is already saved, but its partial reply and steps are not.
 
 ### Renderer
 
 - **Run state.** Each chat has its own run state, replacing the single `isSending`. Escape denies the open chat's pending approval, or dismisses its open question, and otherwise interrupts its turn.
-- **Steering.** Send stays enabled while a turn runs, and a message sent then steers the turn. The text streamed so far is saved as its own assistant message, then the new user message, and the reply continues below it. A message sent while a question is open dismisses the question first.
+- **Steering.** Send stays enabled while a turn runs, and a message sent then steers the turn. The text and finished steps streamed so far are saved as their own assistant message, then the new user message, and the reply continues below it. Steps still running continue at the top of the rest of the reply. A message sent while a question is open dismisses the question first.
 - **Reload.** Reloading the renderer interrupts every running turn, so no turn is left waiting on an approval card that no longer exists.
-- **Live message.** The live assistant message shows streamed text, then tool rows: an icon, a title such as "Ran `npm test`" or "Edited `App.tsx`", and a spinner or status. Clicking a row expands the output or diff.
+- **Live message.** The live assistant message shows streamed text with tool rows where they happened. Saved replies show their rows the same way.
+  - A row has an icon for its kind and a title such as "Ran `npm test`" or "Edited `App.tsx`".
+  - It ends with a spinner while the step runs, then a check or "Failed".
+  - A row whose step waits on the open approval card says "Waiting for approval". Both agents report a tool call before asking about it, so the row appears first.
+  - Clicking a row that has output or a diff expands it.
 - **Approval card.** The existing `ToolApproval` card appears inline when the open chat has a pending request. Its buttons are Allow once, Always allow in this chat, and Deny.
 - **Question card.** It takes the approval card's place when the open chat's turn waits on a question and no approval (see Questions).
 - **Removed.** The prompt regex (`requiresApproval`), the pre-run approval flow and the slash-command confirmation in Ask mode are removed.

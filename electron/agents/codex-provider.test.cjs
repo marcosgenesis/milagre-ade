@@ -328,16 +328,28 @@ test("a message sent while a turn is stopping starts the next turn", async (t) =
   assert.equal(messages.filter((message) => message.method === "turn/start").length, 2);
 });
 
+test("a message sent while Stop closes the session is handed back as sessionClosed", async (t) => {
+  const { session, events } = codex(t, { scenario: "stubborn", interruptGraceMs: 50 });
+  await session.startTurn(TURN);
+  const stopping = session.interrupt();
+  await assert.rejects(session.startTurn({ ...TURN, prompt: "Next" }), (error) => error.sessionClosed === true);
+  await stopping;
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
+  assert.equal(events.some((event) => event.type === "turn-failed"), false);
+  assert.equal(session.closed, true);
+});
+
 test("an approval requested after the turn was stopped is cancelled at once", async (t) => {
   const { session, events } = codex(t, { scenario: "late-approval" });
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await session.interrupt();
   await ended(events);
   let answer;
-  await waitUntil(() => {
-    void received(session).then((messages) => { answer = messages.find((message) => message.id === "srv-late"); });
-    return answer;
-  });
+  for (let attempt = 0; !answer; attempt += 1) {
+    assert.ok(attempt < 300, "Timed out waiting for the late approval's answer");
+    answer = (await received(session)).find((message) => message.id === "srv-late");
+    if (!answer) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.deepEqual(answer.result, { decision: "cancel" });
   assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
   assert.equal(session.permissions.size, 0);

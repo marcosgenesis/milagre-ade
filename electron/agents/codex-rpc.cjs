@@ -32,7 +32,7 @@ class CodexRpc extends EventEmitter {
     });
     child.stdin.on("error", () => {});
     child.on("error", (error) => this.handleExit({ code: null, signal: null, error }));
-    child.on("exit", (code, signal) => this.handleExit({ code, signal }));
+    child.on("close", (code, signal) => this.handleExit({ code, signal }));
   }
 
   handleLine(line) {

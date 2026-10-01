@@ -50,3 +50,40 @@ test("createWorktree falls back to a generic name and reports git errors", async
   assert.equal(created.branch, "milagre/chat-zz99");
   await assert.rejects(createWorktree({ projectPath: project, baseBranch: "missing", prompt: "x", root: worktreeRoot, suffix: "q1" }), /missing/);
 });
+
+// A project cloned from a remote whose main has since moved on; the local main is one commit behind.
+async function trailingClone(t) {
+  const { root, project: remote, git: remoteGit } = await fixture(t);
+  const project = path.join(root, "clone");
+  execFileSync("git", ["clone", "--quiet", remote, project]);
+  const git = (...args) => execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
+  await fs.writeFile(path.join(remote, "NEWS.md"), "shipped\n");
+  remoteGit("add", ".");
+  remoteGit("commit", "-m", "ship");
+  return { root, project, git, remote, remoteGit };
+}
+
+test("createWorktree starts a trailing branch from its freshly fetched upstream", async (t) => {
+  const { root, project, git, remoteGit } = await trailingClone(t);
+  const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "x", root: path.join(root, "worktrees"), suffix: "up1" });
+  assert.equal(git("rev-parse", created.branch).trim(), remoteGit("rev-parse", "main").trim());
+  assert.equal(await fs.readFile(path.join(created.path, "NEWS.md"), "utf8"), "shipped\n");
+  // The chat's branch doesn't track the branch it started from.
+  assert.throws(() => git("rev-parse", "--abbrev-ref", `${created.branch}@{upstream}`));
+});
+
+test("createWorktree keeps a branch's own unpushed commits", async (t) => {
+  const { root, project, git } = await trailingClone(t);
+  await fs.writeFile(path.join(project, "LOCAL.md"), "mine\n");
+  git("add", ".");
+  git("commit", "-m", "local");
+  const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "x", root: path.join(root, "worktrees"), suffix: "lo1" });
+  assert.equal(git("rev-parse", created.branch).trim(), git("rev-parse", "main").trim());
+});
+
+test("createWorktree starts from the local branch when the remote can't be reached", async (t) => {
+  const { root, project, git, remote } = await trailingClone(t);
+  await fs.rm(remote, { recursive: true, force: true });
+  const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "x", root: path.join(root, "worktrees"), suffix: "off1" });
+  assert.equal(git("rev-parse", created.branch).trim(), git("rev-parse", "main").trim());
+});

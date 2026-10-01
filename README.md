@@ -14,7 +14,7 @@ The current public alpha uses React and Electron. It is designed for a solo deve
 - Ask approval, Auto and Full permission modes.
 - Approval cards that show the exact command or file change an agent wants to make, with Allow once, Always allow in this chat, and Deny.
 - Question cards: when an agent asks you to choose, its options appear as a card. Tap one (or several, where the agent allows it), type your own answer, or dismiss the question; the agent carries on in the same turn.
-- Each command, file edit, read and search an agent runs shows as a row in its reply, such as "Ran `npm test`", with a spinner while it runs. Click a row for its output or diff. Saved replies keep their rows.
+- Each command, file edit, read and search an agent runs shows as a row in its reply, such as "Ran `npm test`", whose title shimmers while it runs. Click a row for its output or diff. Saved replies keep their rows.
 - Local coordination state under `.milagre/coordination.json`.
 - Concise agent output with access to raw details.
 

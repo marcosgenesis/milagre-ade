@@ -324,6 +324,15 @@ test("routes question answers to the chat's session and refuses malformed ones",
   assert.equal(created[0].replies.length, 2);
 });
 
+test("a question is sent right after the command output before it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok\n" });
+  created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
+  assert.deepEqual(sent.map((item) => item.event.type), ["step-output", "question-request"]);
+});
+
 test("a question is sent right after the text before it", async (t) => {
   const { manager, sent, created } = harness();
   t.after(() => manager.closeAll());

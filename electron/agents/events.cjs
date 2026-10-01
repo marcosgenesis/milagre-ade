@@ -54,7 +54,8 @@ function mapClaudeMessage(message, state) {
   }
   if (message.type === "assistant" && message.parent_tool_use_id == null) {
     for (const block of message.message?.content ?? []) {
-      if (block?.type !== "tool_use") continue;
+      // The question card already shows AskUserQuestion, so it gets no row (and its result is ignored).
+      if (block?.type !== "tool_use" || block.name === "AskUserQuestion") continue;
       // Tool calls waiting for their result, by tool_use id.
       state.tools ??= new Map();
       state.tools.set(block.id, block);

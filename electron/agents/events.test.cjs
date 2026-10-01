@@ -93,6 +93,13 @@ test("Claude: a tool call starts a step and its result ends it", () => {
   assert.deepEqual(mapClaudeMessage(toolResult("unknown", "x"), state), []);
 });
 
+test("Claude: the question tool is a card, not a step", () => {
+  const state = claudeState();
+  assert.deepEqual(mapClaudeMessage(toolUse("q1", "AskUserQuestion", { questions: [] }), state), []);
+  assert.deepEqual(mapClaudeMessage(toolResult("q1", "User answered"), state), []);
+  assert.equal(mapClaudeMessage(toolUse("t1", "Bash", { command: "pwd" }), state).length, 1);
+});
+
 test("Claude: a subagent's own tool calls are not steps", () => {
   const state = claudeState();
   assert.equal(mapClaudeMessage(toolUse("agent-1", "Agent", { description: "List files", prompt: "ls" }), state).length, 1);

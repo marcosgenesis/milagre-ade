@@ -400,3 +400,21 @@ test("a steer with only finished steps and no text still saves them", () => {
   const onlyRunning = fold([{ type: "step-started", step: npmTest }]);
   assert.equal(splitRunForSteer(onlyRunning.state, onlyRunning.runs, PROJECT, key(1)).changed, false);
 });
+
+test("an open approval and question survive a steer and keep their steps; the turn's end drops them with the run", () => {
+  const request = { ...approval("a"), stepId: "s1" };
+  const { runs, state } = fold([
+    { type: "text-delta", messageId: "t", text: "Testing." },
+    { type: "step-started", step: npmTest },
+    { type: "permission-request", ...request },
+    { type: "question-request", requestId: "q-1", questions: [{ id: "0", header: "", question: "Which?", options: [], multiSelect: false, allowOther: true, secret: false }] },
+  ]);
+  const split = splitRunForSteer(state, runs, PROJECT, key(1));
+  const run = split.runs[key(1)];
+  assert.equal(run.approvals[0].stepId, "s1");
+  assert.deepEqual(run.questions.map((question) => question.requestId), ["q-1"]);
+  assert.deepEqual(run.steps.map((step) => step.id), ["s1"]);
+  const ended = fold([{ type: "turn-cancelled" }], split.runs, split.state);
+  assert.equal(ended.runs[key(1)], undefined);
+  assert.equal(ended.state.messages.at(-1)?.steps?.[0].status, "failed");
+});

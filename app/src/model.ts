@@ -143,6 +143,24 @@ export interface ChatMessage {
   images?: ImageAttachment[];
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
+  /** The tool calls the agent made in this reply, in the order they started. */
+  steps?: ChatStep[];
+}
+
+export type StepKind = "shell" | "edit" | "read" | "search" | "other";
+
+/** One tool call in an agent's reply: a command, an edit, a read, a search or another tool. */
+export interface ChatStep {
+  id: string;
+  kind: StepKind;
+  /** What it did, e.g. "Ran `npm test`"; text between backticks is code. */
+  title: string;
+  /** Saved steps are done or failed; only a reply still streaming has running ones. */
+  status: "running" | "done" | "failed";
+  /** The command and its output, or a unified diff, capped at 20,000 characters. */
+  detail?: string;
+  /** Where the step sits in the reply: the length of the reply's text when it started. */
+  offset?: number;
 }
 
 export interface ImageAttachment {
@@ -169,6 +187,8 @@ export interface PermissionRequest {
   reason?: string;
   /** Whether "Always allow in this chat" can be offered. */
   allowForChat: boolean;
+  /** The tool step this request is about. */
+  stepId?: string;
 }
 
 export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
@@ -211,6 +231,9 @@ export type AgentEvent =
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
+  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail"> }
+  | { type: "step-output"; id: string; text: string }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | ({ type: "question-request" } & QuestionRequest)

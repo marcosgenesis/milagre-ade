@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
+import type { AgentEvent, ChatMessage, ChatStep, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
 export type SentAnswer = PermissionDecision | "answered" | "dismissed";
@@ -7,17 +7,26 @@ export type SentAnswer = PermissionDecision | "answered" | "dismissed";
 export interface AgentRun {
   text: string;
   model: string;
+  /** Tool steps in the order they started; each one's offset is where it sits in `text`. */
+  steps: ChatStep[];
   /** Approval requests the turn waits on, oldest first. */
   approvals: PermissionRequest[];
   /** Questions the turn waits on, oldest first. */
   questions: QuestionRequest[];
   /** What was sent for each approval or question (by request id) until the agent takes it. */
   answered: Record<string, SentAnswer>;
-  /** A steering message split the reply, so a turn that ends with no more text saves nothing more. */
+  /** A steering message split the reply, so a turn that ends with nothing more to show saves nothing more. */
   split?: boolean;
 }
 
 export type AgentRuns = Record<string, AgentRun>;
+
+const MAX_OUTPUT = 20_000;
+
+/** Command output keeps its end, where results and errors are (as the main process does). */
+export function capOutput(text: string): string {
+  return text.length > MAX_OUTPUT ? `… truncated\n${text.slice(-MAX_OUTPUT)}` : text;
+}
 
 /**
  * Names a chat for the agent host. Session ids are counters per project, so every project has
@@ -48,7 +57,32 @@ export function chatInProject(projectPath: string, key: string): boolean {
 }
 
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns {
-  return { ...runs, [chatId]: { text: "", model, approvals: [], questions: [], answered: {} } };
+  return { ...runs, [chatId]: { text: "", model, steps: [], approvals: [], questions: [], answered: {} } };
+}
+
+/** The run with one step changed, or null when it has no such step or `update` declines. */
+function updateStep(run: AgentRun, id: string, update: (step: ChatStep) => ChatStep | null): AgentRun | null {
+  const index = run.steps.findIndex((step) => step.id === id);
+  const next = index === -1 ? null : update(run.steps[index]);
+  return next ? { ...run, steps: run.steps.map((step, position) => (position === index ? next : step)) } : null;
+}
+
+/** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
+function endStep({ detail: _streamed, ...step }: ChatStep, end: { status: "done" | "failed"; title?: string; detail?: string }): ChatStep {
+  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.detail === undefined ? {} : { detail: end.detail }) };
+}
+
+/**
+ * Steps as saved with a reply: none left running, and offsets into the reply's trimmed text.
+ * A step still running when the turn ends is saved as `closeAs`.
+ */
+function savedSteps(text: string, steps: ChatStep[], closeAs: "done" | "failed"): { steps?: ChatStep[] } {
+  if (!steps.length) return {};
+  const lead = text.length - text.trimStart().length;
+  const length = text.trim().length;
+  return {
+    steps: steps.map((step) => ({ ...step, status: step.status === "running" ? closeAs : step.status, offset: Math.min(Math.max((step.offset ?? text.length) - lead, 0), length) })),
+  };
 }
 
 /** Records what the user sent for a chat's approval or question. Kept on the run, so another chat's request with the same id is untouched. */
@@ -135,21 +169,36 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       if (!run) return { state, runs, changed: false };
       return { state, runs: { ...runs, [chatId]: { ...run, text: run.text + event.text } }, changed: false };
     }
+    case "step-started": {
+      if (!run) return { state, runs, changed: false };
+      const step: ChatStep = { ...event.step, status: "running", offset: run.text.length };
+      return { state, runs: { ...runs, [chatId]: { ...run, steps: [...run.steps.filter((item) => item.id !== step.id), step] } }, changed: false };
+    }
+    case "step-output": {
+      const next = run && updateStep(run, event.id, (step) => (step.status === "running" ? { ...step, detail: capOutput((step.detail ?? "") + event.text) } : null));
+      return next ? { state, runs: { ...runs, [chatId]: next }, changed: false } : { state, runs, changed: false };
+    }
+    case "step-completed": {
+      const next = run && updateStep(run, event.id, (step) => endStep(step, event));
+      return next ? { state, runs: { ...runs, [chatId]: next }, changed: false } : { state, runs, changed: false };
+    }
     case "turn-completed":
     case "turn-cancelled":
     case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const { [chatId]: _finished, ...remaining } = runs;
-      // The reply so far was saved when a steering message split it; there is nothing left to say.
-      if (event.type === "turn-completed" && run.split && !run.text.trim()) return { state, runs: remaining, changed: false };
+      // The reply so far was saved when a steering message split it; there is nothing left to show.
+      if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length) return { state, runs: remaining, changed: false };
       const message: ChatMessage = {
         id: state.next_id,
         session_id: sessionId,
-        body: replyBody(run.text, event),
+        body: replyBody(run.text, event, run.steps.length > 0),
         context: null,
         role: "assistant",
         model: run.model,
         outcome: event.type === "turn-completed" ? "completed" : event.type === "turn-cancelled" ? "cancelled" : "failed",
+        // Codex sends no end for a command still running when a turn stops, so the turn's end closes it.
+        ...savedSteps(run.text, run.steps, event.type === "turn-completed" ? "done" : "failed"),
       };
       return { state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] }, runs: remaining, changed: true };
     }
@@ -159,26 +208,30 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
   }
 }
 
-function replyBody(text: string, event: AgentEvent) {
+function replyBody(text: string, event: AgentEvent, hasSteps: boolean) {
   const reply = text.trim();
   if (event.type === "turn-failed") return reply ? `${reply}\n\nAgent error: ${event.message}` : `Agent error: ${event.message}`;
   if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
-  return reply || "The agent finished without a reply.";
+  return reply || (hasSteps ? "" : "The agent finished without a reply.");
 }
 
 /**
  * Before a steering message joins a running turn, the reply streamed so far is saved as its own
  * message, so the chat reads in order: the reply so far, the new message, then the rest of the reply.
+ * Finished steps are saved with it; steps still running carry on at the start of the rest of the reply.
  */
 export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): { state: CoordinatorState; runs: AgentRuns; changed: boolean } {
   const sessionId = sessionIdFromKey(chatId);
   const run = runs[chatId];
-  const body = run?.text.trim();
-  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, changed: false };
-  const message: ChatMessage = { id: state.next_id, session_id: sessionId, body, context: null, role: "assistant", model: run.model };
+  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run) return { state, runs, changed: false };
+  const body = run.text.trim();
+  const finished = run.steps.filter((step) => step.status !== "running");
+  if (!body && !finished.length) return { state, runs, changed: false };
+  const message: ChatMessage = { id: state.next_id, session_id: sessionId, body, context: null, role: "assistant", model: run.model, ...savedSteps(run.text, finished, "done") };
+  const running = run.steps.filter((step) => step.status === "running").map((step) => ({ ...step, offset: 0 }));
   return {
     state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
-    runs: { ...runs, [chatId]: { ...run, text: "", split: true } },
+    runs: { ...runs, [chatId]: { ...run, text: "", steps: running, split: true } },
     changed: true,
   };
 }

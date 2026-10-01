@@ -14,7 +14,7 @@ import {
   Link01Icon,
   Message01Icon,
 } from "@hugeicons/core-free-icons";
-import type { AgentSession, ChatMessage as AppChatMessage, Isolation, ModelOption, PermissionMode } from "../model";
+import type { AgentSession, ChatMessage as AppChatMessage, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -77,6 +77,10 @@ interface ChatComposerProps {
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   isSending: boolean;
+  streamingText?: string;
+  /** The model the open chat's running turn uses; the picker may already show another. */
+  runModelName?: string;
+  lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   permissionMode: PermissionMode;
@@ -185,7 +189,7 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
               className="absolute top-[calc(100%+0.375rem)] w-[320px]"
               style={popoverStyle}
               onKeyDown={(event) => {
-                if (event.key === "Escape") close();
+                if (event.key === "Escape") { event.preventDefault(); close(); }
                 if (event.key === "Enter" && branchRows[0]) { branchRows[0].choose(); close(); }
               }}
             >
@@ -209,6 +213,9 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   isSending,
+  streamingText,
+  runModelName,
+  lockedProvider,
   selectedModel,
   onModelChange,
   permissionMode,
@@ -237,6 +244,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [tab, setTab] = useState("Worktrees");
   const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
+  const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     if (isNewChat) setScrolled(false);
@@ -253,7 +261,7 @@ export function ChatComposer({
         className="min-h-0 flex-1"
         viewportClassName="pt-4 pb-2"
         contentClassName="min-h-full"
-        autoScrollKey={`${messages.length}-${isSending}`}
+        autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         {tab === "Worktrees" ? (
@@ -269,9 +277,18 @@ export function ChatComposer({
               />
             ))}
 
+            {isSending && streamingText && (
+              <MessageSection
+                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText, context: null, role: "assistant" }}
+                session={sessions[String(messages.at(-1)?.session_id)]}
+                isUser={false}
+                modelName={workingModelName}
+                onRecommendationSelect={onRecommendationSelect}
+              />
+            )}
             {isSending && (
               <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={`Working with ${selectedModel.name}`} />
+                <ThinkingIndicator label={`Working with ${workingModelName}`} />
               </div>
             )}
           </div>
@@ -302,6 +319,7 @@ export function ChatComposer({
           onDraftChange={onDraftChange}
           onSend={onSend}
           isSending={isSending}
+          lockedProvider={lockedProvider}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           permissionMode={permissionMode}

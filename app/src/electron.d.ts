@@ -1,6 +1,6 @@
 export {};
 
-import type { AgentRequest, CoordinatorState, OpenProject, SkillCatalog, WorktreeRequest } from "./model";
+import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, SkillCatalog, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -15,8 +15,9 @@ declare global {
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
-      sendToAgent: (request: AgentRequest) => Promise<string>;
-      cancelAgent: () => Promise<boolean>;
+      startTurn: (request: AgentStartTurnRequest) => Promise<{ turnId: string | null }>;
+      interruptAgent: (chatId: string) => Promise<void>;
+      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;

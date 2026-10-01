@@ -10,7 +10,7 @@ The current public alpha uses React and Electron. It is designed for a solo deve
 
 - A React renderer inside an Electron desktop shell.
 - Project and worktree-oriented chat navigation.
-- Codex and Claude CLI process integration through Electron's main process.
+- One long-lived agent session per chat, run by Electron's main process: Claude through the Claude Agent SDK and Codex through `codex app-server`. Replies stream in, chats remember earlier turns after a restart, and Escape cancels a running turn.
 - Ask approval, Auto and Full permission modes.
 - Tool approval cards for file changes and other write operations.
 - Local coordination state under `.milagre/coordination.json`.

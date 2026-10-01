@@ -9,8 +9,13 @@ contextBridge.exposeInMainWorld("milagre", {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   saveProject: (projectPath, state) => ipcRenderer.invoke("project:save", projectPath, state),
-  sendToAgent: (request) => ipcRenderer.invoke("agent:send", request),
-  cancelAgent: () => ipcRenderer.invoke("agent:cancel"),
+  startTurn: (request) => ipcRenderer.invoke("agent:start-turn", request),
+  interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
+  onAgentEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("agent:event", listener);
+    return () => ipcRenderer.removeListener("agent:event", listener);
+  },
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   onUpdateState: (callback) => {

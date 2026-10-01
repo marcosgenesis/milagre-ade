@@ -83,6 +83,7 @@ interface PromptComposerProps {
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   isSending: boolean;
+  lockedProvider?: ModelProvider;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   permissionMode: PermissionMode;
@@ -98,12 +99,15 @@ const POPOVER_BOTTOM_INSET = 16;
 // Smallest room below a tall composer that still fits a usable list.
 const POPOVER_MIN_BELOW = 220;
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, selectedModel, onModelChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, isSending, lockedProvider, selectedModel, onModelChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const [provider, setProvider] = useState<ModelProvider>(selectedModel.provider);
+  const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
+  // The provider tab follows the open chat, and a locked chat always opens on its own provider.
+  useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
+  useEffect(() => { if (modelOpen) setProvider(lockedProvider ?? selectedModel.provider); }, [modelOpen]);
   const [query, setQuery] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const [active, setActive] = useState(0);
@@ -246,6 +250,19 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     inputRef.current?.focus();
   }
 
+  // Escape closes the slash/@ menu or an open picker, from the prompt or a picker's search field.
+  // Only then is it consumed: with nothing open it reaches the window and stops the running turn.
+  function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen)) return;
+    event.preventDefault();
+    setDismissed(true);
+    setPlusOpen(false);
+    setModelOpen(false);
+    setPermissionOpen(false);
+    setQuery("");
+    inputRef.current?.focus();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (menu && rows.length > 0) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -260,13 +277,6 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         return;
       }
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setDismissed(true);
-      setPlusOpen(false);
-      setModelOpen(false);
-      return;
-    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       onSend();
@@ -274,7 +284,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   }
 
   return (
-    <div data-promptbar className="w-full">
+    <div data-promptbar className="w-full" onKeyDown={handleEscape}>
       <div ref={popoverRootRef} className="relative">
         {menu && (
           <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
@@ -312,7 +322,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
               </div>
             }
           >

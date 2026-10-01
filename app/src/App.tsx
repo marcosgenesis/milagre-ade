@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ConnectionType,
   ChatMessage,
+  AgentSession,
   ImageAttachment,
   CoordinatorState,
   Isolation,
@@ -13,6 +14,8 @@ import {
   sessionForWorktree,
   sortedWorktrees,
 } from "./model";
+import { useAgentRuns } from "./components/useAgentRuns";
+import { chatKey, modelForChat } from "./lib/agent-runs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -50,7 +53,11 @@ function chatTitle(messages: ChatMessage[], fallback: string) {
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
   const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
+  const projectRef = useRef<OpenProject | null>(null);
+  projectRef.current = project;
   const [state, setState] = useState<CoordinatorState | null>(null);
+  const stateRef = useRef<CoordinatorState | null>(null);
+  stateRef.current = state;
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -65,7 +72,7 @@ function App() {
   const [approvalImages, setApprovalImages] = useState<ImageAttachment[]>([]);
   const [approvalPrompt, setApprovalPrompt] = useState<string | null>(null);
   const [approvalStatus, setApprovalStatus] = useState<ToolApprovalStatus>("pending");
-  const [isSending, setIsSending] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const approvalTimerRef = useRef<number | null>(null);
@@ -115,9 +122,26 @@ function App() {
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
 
+  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit);
+  const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
+  const isSending = preparing || Boolean(run);
+
+  // A chat stays on the agent it started with; the picker follows the open chat.
+  useEffect(() => {
+    if (!selectedSession?.provider) return;
+    const next = modelForChat(selectedModel, selectedSession.provider, messages, MODEL_CATALOG);
+    if (next.id !== selectedModel.id) setSelectedModel(next);
+  }, [selectedSession?.id, selectedSession?.provider]);
+
+  // Every state change goes through here, so turns finishing in two chats can't overwrite each other.
+  function commit(next: CoordinatorState) {
+    stateRef.current = next;
+    setState(next);
+    if (project) void window.milagre.saveProject(project.path, next);
+  }
+
   async function persist(nextState: CoordinatorState) {
-    setState(nextState);
-    if (project) await window.milagre.saveProject(project.path, nextState);
+    commit(nextState);
   }
 
   const chats = useMemo(() => {
@@ -152,33 +176,26 @@ function App() {
     setDraft("");
   }
 
-  // An open chat keeps its session. A new chat in "New worktree" isolation gets its own worktree
-  // before the first message goes out; a new local chat gets a session in the selected worktree.
+  // Where a message goes, without building state: an open chat keeps its session, a new local chat
+  // (session null) gets one from the latest state at commit time, and a new chat in "New worktree"
+  // isolation gets its own worktree first. Callers merge into the latest state, never a stale copy.
   async function resolveSendTarget(body: string) {
     if (!state || !project || !selectedWorktree) return null;
-    if (selectedSession) return { baseState: state, session: selectedSession, worktree: selectedWorktree };
-    if (isolation === "local") {
-      const idle = Object.values(state.sessions).find((session) => session.worktree_id === selectedWorktree.id && !state.messages.some((message) => message.session_id === session.id));
-      const session = idle ?? { id: state.next_id, worktree_id: selectedWorktree.id, agent_name: selectedWorktree.name, status: "Created" as const };
-      setSelectedSessionId(session.id);
-      return { baseState: idle ? state : { ...state, next_id: state.next_id + 1, sessions: { ...state.sessions, [session.id]: session } }, session, worktree: selectedWorktree };
-    }
+    if (selectedSession) return { session: selectedSession as AgentSession | null, worktree: selectedWorktree, createdNextId: undefined as number | undefined };
+    if (isolation === "local") return { session: null, worktree: selectedWorktree, createdNextId: undefined };
     const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: baseBranch ?? selectedWorktree.name, prompt: body });
     const worktree = created.project.state.worktrees[created.worktreeId];
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
-    setState(created.project.state);
-    setSelectedSessionId(session.id);
-    setSelectedWorktreeId(worktree.id);
     setIsolation("local");
     setBaseBranch(null);
     void window.milagre.listBranches(project.path).then(setBranches);
-    return { baseState: created.project.state, session, worktree };
+    return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
     if ((!body && !images.length) || !state || !selectedWorktree || !project || isSending || imageDraft.loading) return;
-    setIsSending(true);
+    setPreparing(true);
     setNewChatError(null);
 
     let target: Awaited<ReturnType<typeof resolveSendTarget>>;
@@ -187,77 +204,58 @@ function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setNewChatError(`Could not create the worktree: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "")}`);
-      setIsSending(false);
+      setPreparing(false);
       return;
     }
-    if (!target) {
-      setIsSending(false);
+    // Read the state only now: a turn in another chat may have finished while the target resolved.
+    // If another project was opened meanwhile, the latest state is that project's; drop the send.
+    const latest = stateRef.current;
+    if (!target || !latest || projectRef.current?.path !== project.path) {
+      setPreparing(false);
       return;
     }
-    const { baseState, session, worktree } = target;
+    const { worktree } = target;
+    let nextId = Math.max(latest.next_id, target.createdNextId ?? 0);
+    const worktrees = target.createdNextId !== undefined ? { ...latest.worktrees, [worktree.id]: worktree } : latest.worktrees;
+    let session = target.session;
+    if (!session) {
+      session = Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
+        ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" as const };
+    }
+    const chatSession = session;
 
+    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), MODEL_CATALOG);
     const userMessage = {
-      id: baseState.next_id,
-      session_id: session.id,
+      id: nextId++,
+      session_id: chatSession.id,
       body,
       images,
       context: null,
       role: "user" as const,
-      model: selectedModel.id,
+      model: model.id,
     };
-    const stateWithUserMessage: CoordinatorState = {
-      ...baseState,
-      next_id: baseState.next_id + 1,
-      messages: [...baseState.messages, userMessage],
-    };
+    commit({
+      ...latest,
+      next_id: nextId,
+      worktrees,
+      sessions: { ...latest.sessions, [chatSession.id]: { ...chatSession, provider: model.provider } },
+      messages: [...latest.messages, userMessage],
+    });
+    setSelectedSessionId(chatSession.id);
+    setSelectedWorktreeId(worktree.id);
     setDraft("");
     imageDraft.clear();
-
-    try {
-      await persist(stateWithUserMessage);
-      const response = await window.milagre.sendToAgent({
-        provider: selectedModel.provider,
-        model: selectedModel.id,
-        projectPath: worktree.path,
-        prompt: body || "Describe the attached images.",
-        images,
-        permissionMode: mode,
-      });
-      await persist({
-        ...stateWithUserMessage,
-        next_id: stateWithUserMessage.next_id + 1,
-        messages: [
-          ...stateWithUserMessage.messages,
-          {
-            id: stateWithUserMessage.next_id,
-            session_id: session.id,
-            body: response,
-            context: null,
-            role: "assistant",
-            model: selectedModel.id,
-          },
-        ],
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "The agent could not respond.";
-      await persist({
-        ...stateWithUserMessage,
-        next_id: stateWithUserMessage.next_id + 1,
-        messages: [
-          ...stateWithUserMessage.messages,
-          {
-            id: stateWithUserMessage.next_id,
-            session_id: session.id,
-            body: message === "Agent cancelled by user" ? "Agent run cancelled." : `Agent error: ${message}`,
-            context: null,
-            role: "assistant",
-            model: selectedModel.id,
-          },
-        ],
-      });
-    } finally {
-      setIsSending(false);
-    }
+    setPreparing(false);
+    await agentRuns.start({
+      chatId: chatKey(project.path, chatSession.id),
+      provider: model.provider,
+      model: model.id,
+      cwd: worktree.path,
+      permissionMode: mode,
+      prompt: body || "Describe the attached images.",
+      images,
+      resumeId: chatSession.native_session_id,
+    });
   }
 
   async function sendMessage() {
@@ -272,26 +270,30 @@ function App() {
     await executeSend(body, permissionMode);
   }
 
+  // Built from the latest state, so a turn that finished since the last render isn't lost.
   async function toggleSession(worktreeId: number) {
-    if (!state) return;
-    const session = sessionForWorktree(state, worktreeId);
+    const latest = stateRef.current;
+    if (!latest) return;
+    const session = sessionForWorktree(latest, worktreeId);
     if (!session) return;
     const nextStatus = session.status === "Running" ? "Stopped" : "Running";
     await persist({
-      ...state,
+      ...latest,
       sessions: {
-        ...state.sessions,
+        ...latest.sessions,
         [session.id]: { ...session, status: nextStatus },
       },
     });
   }
 
   async function cycleConnection() {
-    if (!state || !connection) return;
-    const nextKind = connectionTypes[(connectionTypes.indexOf(connection.kind) + 1) % connectionTypes.length];
+    const latest = stateRef.current;
+    const current = latest ? Object.values(latest.connections)[0] : undefined;
+    if (!latest || !current) return;
+    const nextKind = connectionTypes[(connectionTypes.indexOf(current.kind) + 1) % connectionTypes.length];
     await persist({
-      ...state,
-      connections: { ...state.connections, [connection.id]: { ...connection, kind: nextKind } },
+      ...latest,
+      connections: { ...latest.connections, [current.id]: { ...current, kind: nextKind } },
     });
   }
 
@@ -341,7 +343,8 @@ function App() {
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      // A menu, picker or search that Escape closed has already consumed it.
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (view === "settings") {
         event.preventDefault();
         setView("chat");
@@ -352,15 +355,15 @@ function App() {
         denyPending();
         return;
       }
-      if (isSending) {
+      if (run && project && selectedSession) {
         event.preventDefault();
-        void window.milagre.cancelAgent();
+        void agentRuns.interrupt(chatKey(project.path, selectedSession.id));
       }
     }
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [approvalPrompt, isSending, view]);
+  }, [approvalPrompt, run, project?.path, selectedSession?.id, view]);
 
   if (loading || !project || !state) {
     return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;
@@ -415,6 +418,9 @@ function App() {
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
             isSending={isSending}
+            streamingText={run?.text}
+            runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
+            lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
             permissionMode={permissionMode}

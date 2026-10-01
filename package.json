@@ -10,12 +10,13 @@
     "build": "tsc --noEmit && vite build",
     "start": "node scripts/launch-electron.cjs",
     "typecheck": "tsc --noEmit",
-    "test:agent": "node --test electron/*.test.cjs",
+    "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",
     "package:mac": "npm run build && electron-builder --mac dmg zip --publish never"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.286",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "electron-updater": "^6.8.9",
@@ -51,7 +52,8 @@
       "dist/**/*",
       "electron/**/*",
       "app/public/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "directories": {
       "output": "release"

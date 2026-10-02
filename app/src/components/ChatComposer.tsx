@@ -1,3 +1,5 @@
+import { SubagentTrack } from "./agents/SubagentTrack";
+import type { Subagent } from "../model";
 import { memo, useEffect, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -101,6 +103,8 @@ interface ChatComposerProps {
   streamingText?: string;
   /** The running turn's tool steps, where they happened in `streamingText`. */
   streamingSteps?: ChatStep[];
+  subagents?: Subagent[];
+  waitingForSubagents?: boolean;
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
   /** The model the open chat's running turn uses; the picker may already show another. */
@@ -252,6 +256,8 @@ export function ChatComposer({
   sendBlocked,
   streamingText,
   streamingSteps,
+  subagents = [],
+  waitingForSubagents = false,
   waitingStepIds,
   runModelName,
   lockedProvider,
@@ -372,7 +378,7 @@ export function ChatComposer({
             ) : null}
             {isSending && (
               <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={`Working with ${workingModelName}`} />
+                <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
               </div>
             )}
           </div>
@@ -392,6 +398,7 @@ export function ChatComposer({
           </div>
         )}
       </MessageScroller>}
+      <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} />
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}

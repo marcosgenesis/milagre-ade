@@ -830,6 +830,8 @@ function App() {
             sendBlocked={preparing}
             streamingText={run?.text}
             streamingSteps={run?.steps}
+            subagents={selectedSession?.subagents}
+            waitingForSubagents={run?.waitingForSubagents}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}

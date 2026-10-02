@@ -1,3 +1,4 @@
+const { active: activeSubagent } = require("./subagents.cjs");
 const { isTerminal } = require("./events.cjs");
 const { PERMISSION_MODES, USER_DECISIONS } = require("./permissions.cjs");
 const { validAnswers } = require("./questions.cjs");
@@ -88,6 +89,16 @@ class SessionManager {
       return;
     }
     this.flush(chatId);
+    if (event.type === "subagent-update") {
+      entry.activeChildren ??= new Set();
+      if (activeSubagent(event.agent)) {
+        entry.activeChildren.add(event.agent.id);
+        clearTimeout(entry.idleTimer);
+      } else {
+        entry.activeChildren.delete(event.agent.id);
+        if (!entry.session.turnActive) this.scheduleIdleClose(chatId);
+      }
+    }
     this.send(chatId, event);
     // A turn the provider started itself (a steer that missed the end of the last one) isn't covered by
     // startTurn's clear; the timer armed by the previous turn's end must not close it mid-run.
@@ -107,6 +118,7 @@ class SessionManager {
     const entry = this.sessions.get(chatId);
     if (!entry) return;
     clearTimeout(entry.idleTimer);
+    if (entry.activeChildren?.size) return;
     entry.idleTimer = setTimeout(() => {
       void this.serial(chatId, () => (this.sessions.get(chatId) === entry ? this.closeEntry(chatId, entry) : undefined)).catch(() => {});
     }, this.idleMs);

@@ -420,3 +420,15 @@ test("TLDR changes leave a running turn alone and apply once it finishes", async
   assert.equal(created.length, 2);
   assert.equal(created[1].options.tldrEnabled, false);
 });
+
+test('background children prevent idle eviction after the parent finishes', async t => {
+ const {manager,created}=harness({idleMs:15});
+ t.after(()=>manager.closeAll());
+ await manager.startTurn(request('1'));
+ created[0].emit({type:'subagent-update',agent:{id:'child',status:'running'}});
+ created[0].emit({type:'turn-completed'});
+ await new Promise(resolve=>setTimeout(resolve,40));
+ assert.equal(created[0].closed,false);
+ created[0].emit({type:'subagent-update',agent:{id:'child',status:'completed'}});
+ await waitUntil(()=>created[0].closed);
+});

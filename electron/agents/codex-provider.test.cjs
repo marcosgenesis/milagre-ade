@@ -598,3 +598,37 @@ test("TLDR can be disabled when starting or resuming Codex", async (t) => {
     assert.match(params.developerInstructions, /TLDR.*disabled/);
   }
 });
+
+test('reads child history without resuming it and keeps child completion separate from parent', async () => {
+ const events=[];
+ const session=new CodexSession({emit:e=>events.push(e)});
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
+ session.rpc={request:async(method,params)=>{
+  assert.equal(method,'thread/read');
+  assert.deepEqual(params,{threadId:'child',includeTurns:true});
+  return {thread:{id:'child',turns:[{id:'child-turn',status:'completed',items:[{type:'agentMessage',id:'answer',text:'Review finished'}]}]}};
+ }};
+ await session.refreshSubagents();
+ assert.equal(events.some(e=>e.type==='turn-completed'),false);
+ const child=events.filter(e=>e.type==='subagent-update').at(-1).agent;
+ assert.equal(child.status,'completed');
+ assert.equal(child.transcript[0].text,'Review finished');
+});
+
+test('child history falls back to paginated threads when full reads are rejected', async () => {
+ const events=[];
+ const session=new CodexSession({emit:e=>events.push(e)});
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
+ session.rpc={request:async(method,params)=>{
+  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('paginated history'),{rpcError:true});
+  if(method==='thread/read') return {thread:{id:'child',status:{type:'idle'}}};
+  assert.equal(method,'thread/turns/list');
+  assert.equal(params.itemsView,'full');
+  assert.equal(params.sortDirection,'desc');
+  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null};
+ }};
+ await session.refreshSubagents();
+ assert.equal(events.filter(e=>e.type==='subagent-update').at(-1)?.agent.transcript[0].text,'Paged result');
+});

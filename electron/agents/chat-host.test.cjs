@@ -50,7 +50,7 @@ function projectState(projectPath) {
 }
 
 // The main process's chat wiring with fake agents and two projects saved in memory, as main.cjs builds it.
-function harness({ failStart = null, focused = true } = {}) {
+function harness({ failStart = null, focused = true, handoverTools = { writeTranscript: async ({ sessionId }) => `/tmp/handovers/${sessionId}.md`, brief: async ({ transcriptPath }) => `BRIEF ${transcriptPath}` } } = {}) {
   const saved = new Map();
   const published = [];
   const broadcasts = [];
@@ -74,6 +74,7 @@ function harness({ failStart = null, focused = true } = {}) {
     publish: (chatId, event, state, seq) => published.push({ chatId, event, state, seq }),
     broadcast: (projectPath, state) => broadcasts.push({ projectPath, state }),
     isFocused: () => focused,
+    handoverTools,
   });
   const session = (cwd) => created.find((item) => item.options.cwd === cwd);
   return { host, manager, states, saved, published, broadcasts, created, session };
@@ -277,4 +278,88 @@ test("answers to a question are saved as the user's message after the reply so f
 
   await host.takeBack(chatId, messageId);
   assert.equal(saved.get(ALPHA).messages.some((item) => item.id === messageId), false);
+});
+
+async function chatWithReply(host, session, saved) {
+  const { sessionId } = await host.send(message(ALPHA, "fix the login redirect"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  session(ALPHA).emit({ type: "text-delta", messageId: "m1", text: "Done." });
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => saved.get(ALPHA)?.messages.length === 2);
+  return sessionId;
+}
+
+test("handover opens a linked chat on the other provider in the same worktree and sends it the brief", async (t) => {
+  const briefs = [];
+  const { host, manager, saved, session, created } = harness({ handoverTools: {
+    writeTranscript: async ({ sessionId, markdown }) => { assert.match(markdown, /fix the login redirect/); return `/tmp/handovers/${sessionId}.md`; },
+    brief: async (input) => { briefs.push(input); return "BRIEF"; },
+  } });
+  t.after(() => manager.closeAll());
+  const source = await chatWithReply(host, session, saved);
+
+  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "auto" });
+  assert.notEqual(target, source);
+  // Linked as soon as the call resolves. (Pending may already be cleared: this brief resolves at once.)
+  assert.equal(saved.get(ALPHA).sessions[source].handedOverTo, target);
+  const linked = saved.get(ALPHA).sessions[target];
+  assert.deepEqual({ worktree_id: linked.worktree_id, provider: linked.provider, handedOverFrom: linked.handedOverFrom }, { worktree_id: 1, provider: "codex", handedOverFrom: source });
+
+  await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[target].handoverPending, undefined);
+  assert.deepEqual(chatMessages(state, target), [{ role: "user", body: "BRIEF" }]);
+  assert.deepEqual(briefs.map(({ provider, lastUserMessage, cwd, transcriptPath }) => ({ provider, lastUserMessage, cwd, transcriptPath })), [{ provider: "claude", lastUserMessage: "fix the login redirect", cwd: ALPHA, transcriptPath: `/tmp/handovers/${source}.md` }]);
+  await waitUntil(() => created.some((item) => item.provider === "codex"));
+  assert.equal(created.find((item) => item.provider === "codex").options.cwd, ALPHA);
+});
+
+test("handover refuses while the source turn runs and for the same provider", async (t) => {
+  const { host, manager, session } = harness();
+  t.after(() => manager.closeAll());
+  const { sessionId } = await host.send(message(ALPHA, "long task"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  await waitUntil(() => host.runs[`${ALPHA}#${sessionId}`]);
+  await assert.rejects(host.handover({ projectPath: ALPHA, sessionId, provider: "codex", model: "gpt-6" }), /Stop the turn or wait for it to finish to hand over\./);
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => !host.runs[`${ALPHA}#${sessionId}`]);
+  await assert.rejects(host.handover({ projectPath: ALPHA, sessionId, provider: "claude", model: "claude-opus-5-5" }), /already runs on Claude/);
+});
+
+test("a second handover while the first is pending returns the same chat", async (t) => {
+  let release;
+  const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => { release = resolve; }) } });
+  t.after(() => manager.closeAll());
+  const source = await chatWithReply(host, session, saved);
+  const first = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  const second = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  assert.equal(second.sessionId, first.sessionId);
+  assert.equal(Object.values(saved.get(ALPHA).sessions).filter((item) => item.handedOverFrom === source).length, 1);
+  await waitUntil(() => release);
+  release("BRIEF");
+  await host.pendingHandovers.get(`${ALPHA}#${first.sessionId}`);
+});
+
+test("a handover that fails leaves a note with the transcript path and keeps the links", async (t) => {
+  const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async () => { throw new Error("disk full"); } } });
+  t.after(() => manager.closeAll());
+  const source = await chatWithReply(host, session, saved);
+  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[target].handoverPending, undefined);
+  assert.equal(state.sessions[source].handedOverTo, target);
+  assert.deepEqual(chatMessages(state, target), [{ role: "assistant", body: "Couldn't hand over: disk full. The transcript is at /tmp/t.md." }]);
+});
+
+test("a handover left pending by a quit is closed with a note on the next open", async (t) => {
+  const { host, manager, states, saved } = harness();
+  t.after(() => manager.closeAll());
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverPending: true } } }));
+  await host.recoverHandovers(ALPHA, saved.get(ALPHA));
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[7].handoverPending, undefined);
+  assert.deepEqual(chatMessages(state, 7), [{ role: "assistant", body: "Milagre closed before this handover finished. Hand over again from the original chat." }]);
 });

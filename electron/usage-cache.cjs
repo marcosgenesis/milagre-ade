@@ -19,7 +19,8 @@ function cleanLast(last) {
   if (Number.isNaN(Date.parse(last.updatedAt))) return null;
   const windows = last.windows.map(cleanWindow);
   if (windows.length === 0 || windows.includes(null)) return null;
-  return { windows, updatedAt: last.updatedAt };
+  const banked = Number.isInteger(last.bankedResets) && last.bankedResets > 0 ? { bankedResets: last.bankedResets } : {};
+  return { windows, updatedAt: last.updatedAt, ...banked };
 }
 
 function cleanBlocked(blocked) {
@@ -84,7 +85,9 @@ function cachedSnapshot(store, nowMs) {
     const { last } = store.get(provider);
     if (!last) continue;
     const windows = last.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > nowMs);
-    if (windows.length) providers.push({ provider, status: "ok", windows, updatedAt: last.updatedAt });
+    if (!windows.length) continue;
+    const banked = last.bankedResets ? { bankedResets: last.bankedResets } : {};
+    providers.push({ provider, status: "ok", windows, updatedAt: last.updatedAt, ...banked });
   }
   return { providers };
 }

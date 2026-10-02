@@ -23,6 +23,7 @@ const CLAUDE_RANK = { session: 0, weekly: 1 };
  * @property {string} updatedAt ISO time of the numbers; the original read time when they are last-known.
  * @property {string} [message]
  * @property {number} [retryAfterMs] On a 429 from readClaudeUsage: how long to leave the endpoint alone (5 to 30 minutes).
+ * @property {number} [bankedResets] Rate-limit resets the account has banked; absent when there are none.
  */
 function providerResult(provider, now, status, windows = [], message, extra = {}) {
   return { provider, status, windows, updatedAt: new Date(now()).toISOString(), ...(message ? { message } : {}), ...extra };
@@ -167,6 +168,11 @@ function codexWindows(rateLimits) {
     }));
 }
 
+// Only a positive whole count is worth showing; zero and anything malformed mean "no bank".
+function bankedResetsOf(count) {
+  return Number.isInteger(count) && count > 0 ? { bankedResets: count } : {};
+}
+
 function readCodexUsage(deps = {}) {
   const { spawnImpl = spawn, now = Date.now, timeoutMs = PROVIDER_TIMEOUT_MS } = deps;
   const done = (status, windows, message) => providerResult("codex", now, status, windows, message);
@@ -202,7 +208,10 @@ function readCodexUsage(deps = {}) {
         send({ id: 3, method: "account/rateLimits/read" });
       } else if (message.id === 3) {
         const windows = codexWindows(message.result?.rateLimits);
-        finish(windows.length ? done("ok", windows) : done("error", [], "Codex returned no usage windows."));
+        const banked = bankedResetsOf(message.result?.rateLimitResetCredits?.availableCount);
+        finish(windows.length
+          ? providerResult("codex", now, "ok", windows, undefined, banked)
+          : done("error", [], "Codex returned no usage windows."));
       }
     }
 
@@ -236,7 +245,7 @@ function readCodexUsage(deps = {}) {
 function withLastGood(result, last, nowMs) {
   if (result.status !== "error" || !last) return result;
   const windows = last.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > nowMs);
-  return windows.length ? { ...result, windows, updatedAt: last.updatedAt } : result;
+  return windows.length ? { ...result, windows, updatedAt: last.updatedAt, ...bankedResetsOf(last.bankedResets) } : result;
 }
 
 function createUsageReader(deps = {}) {

@@ -153,7 +153,7 @@ for (const [name, response, message] of FAILURES) {
 const RESETS_AT = 1791070247;
 const WEEKLY_ONLY = { primary: { usedPercent: 88, windowDurationMins: 10080, resetsAt: RESETS_AT }, secondary: null };
 
-function fakeCodex({ account = { type: "chatgpt", planType: "pro" }, rateLimits, chunked = false, reply = true } = {}) {
+function fakeCodex({ account = { type: "chatgpt", planType: "pro" }, rateLimits, resetCredits, chunked = false, reply = true } = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stdin = new EventEmitter();
@@ -183,7 +183,7 @@ function fakeCodex({ account = { type: "chatgpt", planType: "pro" }, rateLimits,
       if (!reply || message.id === undefined) continue;
       if (message.method === "initialize") emit({ id: message.id, result: { userAgent: "codex" } });
       if (message.method === "account/read") emit({ id: message.id, result: { account, requiresOpenaiAuth: true } });
-      if (message.method === "account/rateLimits/read") emit({ id: message.id, result: { rateLimits } });
+      if (message.method === "account/rateLimits/read") emit({ id: message.id, result: { rateLimits, ...(resetCredits ? { rateLimitResetCredits: resetCredits } : {}) } });
     }
     return true;
   };
@@ -217,6 +217,13 @@ test("reads Codex usage from the app server and stops it", async () => {
     windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: new Date(RESETS_AT * 1000).toISOString() }],
   });
   assert.equal(child.killed, true);
+});
+
+test("reports banked Codex resets only when there are some", async () => {
+  const banked = await readCodexUsage(codexDeps(fakeCodex({ rateLimits: WEEKLY_ONLY, resetCredits: { availableCount: 3, credits: [] } })).deps);
+  assert.equal(banked.bankedResets, 3);
+  const none = await readCodexUsage(codexDeps(fakeCodex({ rateLimits: WEEKLY_ONLY, resetCredits: { availableCount: 0, credits: [] } })).deps);
+  assert.equal("bankedResets" in none, false);
 });
 
 test("orders Codex windows shortest first and labels other durations", async () => {
@@ -516,4 +523,13 @@ test("cachedSnapshot builds ok providers from the store and drops expired window
   const snapshot = cachedSnapshot(store, Date.parse("2026-10-01T21:00:00Z"));
   assert.deepEqual(snapshot, { providers: [{ provider: "claude", status: "ok", windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" }], updatedAt: "2026-10-01T19:00:00.000Z" }] });
   assert.deepEqual(cachedSnapshot(createUsageStore(), NOW), { providers: [] });
+});
+
+test("the store keeps a banked reset count and drops zero or junk", () => {
+  const store = createUsageStore();
+  const windows = [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: null }];
+  store.setLast("codex", { windows, updatedAt: "2026-10-01T19:10:00.000Z", bankedResets: 2 });
+  assert.equal(cachedSnapshot(store, NOW).providers[0].bankedResets, 2);
+  store.setLast("codex", { windows, updatedAt: "2026-10-01T19:10:00.000Z", bankedResets: "lots" });
+  assert.equal("bankedResets" in cachedSnapshot(store, NOW).providers[0], false);
 });

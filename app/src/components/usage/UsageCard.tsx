@@ -93,6 +93,14 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
           ))}
         </div>
       )}
+
+      {/* Only when the account has some: a "0 left" row would read as something used up. */}
+      {usage.bankedResets ? (
+        <div className="flex items-center justify-between border-t border-line px-4 py-3 text-[12px] tabular-nums">
+          <span className="text-ink-2">Banked resets</span>
+          <span className="text-ink">{usage.bankedResets} left</span>
+        </div>
+      ) : null}
     </div>,
     document.body,
   );

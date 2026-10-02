@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModelProvider } from "../../model";
 import { useSettings } from "../../lib/settings";
-import { formatPercent, shownPercent, usageLabel, visibleProviders } from "./format";
+import { PROVIDER_NAMES, formatPercent, shownPercent, usageLabel, visibleProviders } from "./format";
 import { ProviderMark } from "./ProviderMark";
 import { UsageBar } from "./UsageBar";
 import { USAGE_CARD_WIDTH, UsageCard } from "./UsageCard";
@@ -98,7 +98,7 @@ export function SidebarUsage({ usage }: { usage: UsageState }) {
   if (providers.length === 0) return null;
 
   return (
-    <div className="sidebar-usage flex items-center justify-between gap-0.5">
+    <div className="sidebar-usage flex flex-col gap-0.5">
       {providers.map((item) => {
         const expanded = openCard?.provider === item.provider && Boolean(openUsage);
         return (
@@ -121,17 +121,22 @@ export function SidebarUsage({ usage }: { usage: UsageState }) {
               if (!(event.relatedTarget as Element | null)?.closest("[data-usage-card]")) scheduleHide();
             }}
             onClick={() => show(item.provider)}
-            className={`sidebar-usage-row relative flex h-8 min-w-0 items-center gap-1.5 rounded-[8px] px-2 text-[12px] tabular-nums text-ink-2 transition-[background-color,color,opacity] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""} ${item.status === "error" ? "opacity-60" : ""}`}
+            className={`sidebar-usage-row relative flex h-8 w-full min-w-0 items-center gap-2 rounded-[8px] px-2 text-[12px] tabular-nums text-ink-2 transition-[background-color,color,opacity] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""} ${item.status === "error" ? "opacity-60" : ""}`}
           >
             <span className="flex shrink-0 items-center justify-center"><ProviderMark provider={item.provider} size={13} /></span>
+            <span className="sidebar-copy min-w-0 truncate text-ink-2">{PROVIDER_NAMES[item.provider]}</span>
             {item.windows.length === 0 ? (
-              <span className="sidebar-copy text-ink-3">—</span>
+              <span className="sidebar-copy ml-auto text-ink-3">—</span>
             ) : (
-              <span className="sidebar-copy flex min-w-0 items-center gap-2">
+              <span className="sidebar-copy ml-auto flex shrink-0 items-center gap-3">
+                {/* Fixed-width columns keep each window aligned across providers; the meter shows how full it is. */}
                 {item.windows.slice(0, 2).map((entry) => (
-                  <span key={entry.id} className="flex items-center gap-[3px] whitespace-nowrap">
-                    <span>{formatPercent(shownPercent(entry.usedPercent, usageDisplay))}</span>
-                    <span className="text-ink-3">{entry.shortLabel}</span>
+                  <span key={entry.id} className="flex w-[52px] flex-col items-end gap-[3px]">
+                    <span className="flex items-baseline gap-[3px] whitespace-nowrap leading-none">
+                      <span className="text-ink">{formatPercent(shownPercent(entry.usedPercent, usageDisplay))}</span>
+                      <span className="text-ink-3">{entry.shortLabel}</span>
+                    </span>
+                    <UsageBar usedPercent={entry.usedPercent} display={usageDisplay} className="h-[2px] w-full" />
                   </span>
                 ))}
               </span>

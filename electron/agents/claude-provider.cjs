@@ -97,12 +97,12 @@ class ClaudeSession {
     }
   }
 
-  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false, replies }) {
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false, fastMode = false, replies }) {
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode);
+      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode, fastMode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
@@ -119,6 +119,10 @@ class ClaudeSession {
           await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode });
           this.effort = effort;
           this.ultracode = ultracode;
+        }
+        if (fastMode !== this.fastMode) {
+          await this.query.applyFlagSettings({ fastMode });
+          this.fastMode = fastMode;
         }
         await this.applyReplyStyle(replies);
       }
@@ -186,7 +190,7 @@ class ClaudeSession {
     this.emit({ type: "turn-started", turnId });
   }
 
-  async start(model, mode, effort, ultracode = false) {
+  async start(model, mode, effort, ultracode = false, fastMode = false) {
     const { query } = await this.loadSdk();
     if (this.closed) return;
     this.stderr = "";
@@ -196,6 +200,7 @@ class ClaudeSession {
     this.mode = mode;
     this.effort = effort;
     this.ultracode = ultracode;
+    this.fastMode = fastMode;
     this.outputStyle = null;
     this.query = query({
       prompt: this.inbox,
@@ -204,7 +209,7 @@ class ClaudeSession {
         model,
         permissionMode: mode,
         ...(effort ? { effort } : {}),
-        ...(ultracode ? { settings: { ultracode: true } } : {}),
+        settings: { fastMode, ...(ultracode ? { ultracode: true } : {}) },
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: this.command,

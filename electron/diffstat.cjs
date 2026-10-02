@@ -54,20 +54,24 @@ function sumNumstat(output) {
   return { added, removed };
 }
 
+/** Lines in an untracked file; 0 for an empty, binary, very large or unreadable one. */
+async function fileLineCount(fullPath) {
+  try {
+    const stat = await fs.stat(fullPath);
+    if (!stat.isFile() || stat.size === 0 || stat.size > UNTRACKED_SIZE_LIMIT) return 0;
+    const contents = await fs.readFile(fullPath);
+    if (contents.includes(0)) return 0;
+    const text = contents.toString("utf8");
+    return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+  } catch {
+    return 0;
+  }
+}
+
 async function untrackedLines(cwd) {
   const files = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z", ...PATHSPEC])).split("\0").filter(Boolean).slice(0, UNTRACKED_FILE_LIMIT);
   let lines = 0;
-  for (const file of files) {
-    try {
-      const fullPath = path.join(cwd, file);
-      const stat = await fs.stat(fullPath);
-      if (!stat.isFile() || stat.size === 0 || stat.size > UNTRACKED_SIZE_LIMIT) continue;
-      const contents = await fs.readFile(fullPath);
-      if (contents.includes(0)) continue;
-      const text = contents.toString("utf8");
-      lines += text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-    } catch {}
-  }
+  for (const file of files) lines += await fileLineCount(path.join(cwd, file));
   return lines;
 }
 
@@ -83,4 +87,4 @@ async function readDiffStat(cwd, base) {
   }
 }
 
-module.exports = { diffBase, readDiffStat };
+module.exports = { PATHSPEC, diffBase, fileLineCount, readDiffStat };

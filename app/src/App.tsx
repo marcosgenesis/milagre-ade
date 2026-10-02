@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   ConnectionType,
@@ -19,6 +19,7 @@ import {
   AgentModels,
   capabilityFor,
   effortFor,
+  supportsFastMode,
   createInitialState,
   sessionForWorktree,
   sortedWorktrees,
@@ -26,12 +27,15 @@ import {
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
-import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection } from "./lib/models";
+import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
+import { GitActionsDialog } from "./components/GitActionsDialog";
+import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
+import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -41,7 +45,7 @@ import { chatRevealPath } from "./lib/reveal";
 import { runningChat as chatToAskAbout, type SwitchTarget } from "./lib/project-list";
 import { createProjectSwitcher } from "./lib/project-switch";
 import type { SettingsSection } from "./components/Settings";
-import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
+import { getSettings, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
 import { renameWorktree } from "./lib/worktree-rename";
@@ -51,6 +55,7 @@ import type { UpdateState } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
+import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
@@ -75,11 +80,13 @@ function App() {
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   const [draft, setDraft] = useState("");
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(() => MODEL_CATALOG.find((model) => model.id === getSettings().defaultModelId) ?? MODEL_CATALOG[0]);
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
   const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
+  const [fastMode, setFastModeState] = useState(() => localStorage.getItem("milagre.fastMode") === "on");
+  const setFastMode = (on: boolean) => { setFastModeState(on); localStorage.setItem("milagre.fastMode", on ? "on" : "off"); };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const [reported, setReported] = useState<AgentModels | null>(null);
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
@@ -107,11 +114,11 @@ function App() {
     if (reported !== null) appliedDefault.current = true;
     setSelectedModel((current) => nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }));
   }, [models]);
-  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); };
+  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); updateSettings({ defaultModelId: model.id }); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
-  const [isolation, setIsolation] = useState<Isolation>("local");
+  const [isolation, setIsolation] = useState<Isolation>(() => loadChatPreferences(localStorage, "").isolation);
   const [branches, setBranches] = useState<string[]>([]);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -126,6 +133,7 @@ function App() {
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
   useApplyTheme();
 
   useEffect(() => {
@@ -145,7 +153,7 @@ function App() {
       setProject(current);
       const nextState = current.state ?? createInitialState(current.name, current.path);
       setState(nextState);
-      selectInitialChat(nextState);
+      selectInitialChat(nextState, current.path);
       setLoading(false);
     });
   }, []);
@@ -176,11 +184,28 @@ function App() {
   // The chat on screen; a turn that ends anywhere else leaves its chat unread.
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId);
-  useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const pullRequests = useWorktreePullRequests(project?.path ?? "", state);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake } = useSettings();
+  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode } = useSettings();
+
+  // Visiting an old chat can change its displayed model, but never the preference for new chats.
+  useEffect(() => {
+    if (selectedSessionId !== null) return;
+    setSelectedModel(resolveModel(models, defaultModelId, providerForId(defaultModelId)));
+    setPermissionMode(defaultPermissionMode);
+  }, [selectedSessionId, defaultModelId, defaultPermissionMode, models]);
+
+  const effectiveBaseBranch = baseBranch && branches.includes(baseBranch)
+    ? baseBranch : selectedWorktree?.name ?? branches[0] ?? "";
+
+  function restoreProjectChoices(nextState: CoordinatorState, path: string) {
+    const saved = loadChatPreferences(localStorage, path);
+    setSelectedWorktreeId(sortedWorktrees(nextState).find((tree) => tree.path === saved.worktreePath)?.id ?? sortedWorktrees(nextState)[0]?.id ?? null);
+    setBaseBranch(saved.baseBranch ?? null);
+  }
   const runningCount = Object.keys(agentRuns.runs).length;
   const previousRunningCount = useRef(runningCount);
 
@@ -196,6 +221,7 @@ function App() {
   // A running turn takes the new mode at once instead of at its next message.
   function changePermissionMode(mode: PermissionMode) {
     setPermissionMode(mode);
+    updateSettings({ defaultPermissionMode: mode });
     if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
   }
 
@@ -241,7 +267,8 @@ function App() {
       .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
-        const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant");
+        // The commit dialog's notes aren't replies: they don't hide a failed turn.
+        const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
@@ -251,11 +278,12 @@ function App() {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
+            pullRequest: worktree ? pullRequests[worktree.path] ?? undefined : undefined,
             failed: lastReply?.outcome === "failed",
           },
         };
       });
-  }, [state, waiting, running]);
+  }, [state, waiting, running, pullRequests]);
   // Switching projects asks first while a turn runs here (the project menu says which chat).
   const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
   const runningChatRef = useRef(runningChat);
@@ -330,6 +358,49 @@ function App() {
     return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!) };
   }
 
+  // "Commit and open PR…" opens the chat, with the dialog over it.
+  function openGitDialog(sessionId: number) {
+    const latest = stateRef.current;
+    const session = latest?.sessions[sessionId];
+    const worktree = session ? latest.worktrees[session.worktree_id] : undefined;
+    if (!latest || !session || !worktree) return;
+    const sessionMessages = latest.messages.filter((message) => message.session_id === sessionId);
+    openChat(sessionId);
+    setGitDialog({ sessionId, worktreeId: worktree.id, cwd: worktree.path, base: worktree.base, provider: session.provider, chat: gitChatContext(chatTitle(session, sessionMessages), sessionMessages) });
+  }
+
+  // What the dialog did goes on record as a short line in the chat. While the chat's turn runs, the
+  // line waits (by chat key) for the turn to end, so it lands after the reply instead of inside it.
+  const pendingGitNotes = useRef(new Map<string, string[]>());
+  const runsRef = useRef(agentRuns.runs);
+  runsRef.current = agentRuns.runs;
+
+  function appendGitNote(sessionId: number, body: string) {
+    const latest = stateRef.current;
+    if (!latest?.sessions[sessionId]) return;
+    const note: ChatMessage = { id: latest.next_id, session_id: sessionId, body, context: { kind: "git-action" }, role: "assistant" };
+    commit({ ...latest, next_id: latest.next_id + 1, messages: [...latest.messages, note] });
+  }
+
+  function recordGitNote(sessionId: number, body: string) {
+    const current = projectRef.current;
+    if (!current) return;
+    const key = chatKey(current.path, sessionId);
+    if (!runsRef.current[key]) return appendGitNote(sessionId, body);
+    pendingGitNotes.current.set(key, [...(pendingGitNotes.current.get(key) ?? []), body]);
+  }
+
+  useEffect(() => {
+    const current = project;
+    if (!current) return;
+    for (const [key, notes] of [...pendingGitNotes.current]) {
+      if (agentRuns.runs[key]) continue;
+      pendingGitNotes.current.delete(key);
+      // A note for a project that was left goes with it, like that project's unsaved replies.
+      if (chatInProject(current.path, key)) for (const note of notes) appendGitNote(sessionIdFromKey(key), note);
+    }
+  }, [agentRuns.runs, project?.path]);
+
   function revealChat(sessionId: number) {
     if (!project) return;
     void window.milagre.revealInFolder(chatRevealPath(stateRef.current, sessionId, project.path)).catch(() => {});
@@ -381,26 +452,31 @@ function App() {
   }), []);
 
   function startNewChat() {
+    if (stateRef.current && projectRef.current) restoreProjectChoices(stateRef.current, projectRef.current.path);
     setSelectedSessionId(null);
     setDraft("");
     setNewChatError(null);
     setView("chat");
   }
 
-  function selectInitialChat(nextState: CoordinatorState) {
+  function selectInitialChat(nextState: CoordinatorState, path: string) {
+    restoreProjectChoices(nextState, path);
     const sessionId = latestSessionId(nextState);
     setSelectedSessionId(sessionId);
-    setSelectedWorktreeId(sessionId !== null ? nextState.sessions[sessionId]?.worktree_id ?? null : sortedWorktrees(nextState)[0]?.id ?? null);
+    if (sessionId !== null) setSelectedWorktreeId(nextState.sessions[sessionId]?.worktree_id ?? null);
   }
 
   // Rendered at once, so an agent event that arrives meanwhile can't be saved against the wrong project.
   function adoptProject(nextProject: OpenProject) {
     const nextState = nextProject.state ?? createInitialState(nextProject.name, nextProject.path);
+    // The project's remembered worktree and base branch come back with it; nothing about the old project's chats
+    // carries over, the commit dialog included (it names a chat by id, and every project has a chat 2).
     flushSync(() => {
       setProject(nextProject);
       setState(nextState);
-      selectInitialChat(nextState);
+      selectInitialChat(nextState, nextProject.path);
       setDraft("");
+      setGitDialog(null);
     });
   }
 
@@ -445,12 +521,12 @@ function App() {
     if (!state || !project || !selectedWorktree) return null;
     if (selectedSession) return { session: selectedSession as AgentSession | null, worktree: selectedWorktree, createdNextId: undefined as number | undefined };
     if (isolation === "local") return { session: null, worktree: selectedWorktree, createdNextId: undefined };
-    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: baseBranch ?? selectedWorktree.name, prompt: body });
+    setBaseBranch(effectiveBaseBranch);
+    saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
+    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
     const worktree = created.project.state.worktrees[created.worktreeId];
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
-    setIsolation("local");
-    setBaseBranch(null);
     void window.milagre.listBranches(project.path).then(setBranches);
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
@@ -524,6 +600,7 @@ function App() {
       permissionMode: mode,
       effort: effortFor(capabilityFor(model, capabilities), effort),
       ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
+      fastMode: supportsFastMode(model) && fastMode,
       replies: getSettings().claudeReplies,
       prompt: body || "Describe the attached images.",
       images,
@@ -536,6 +613,12 @@ function App() {
     if ((!body && !imageDraft.images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
+
+  // Keep finished message cards out of the typing render path. Recommendations still use
+  // the current model and permission mode when clicked.
+  const recommendationRef = useRef<(option: string) => void>(() => {});
+  recommendationRef.current = (option) => { void executeSend(option, permissionMode); };
+  const sendRecommendation = useCallback((option: string) => recommendationRef.current(option), []);
 
   // Built from the latest state, so a turn that finished since the last render isn't lost.
   async function toggleSession(worktreeId: number) {
@@ -646,6 +729,7 @@ function App() {
           onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
           onReveal: (id) => revealChat(Number(id)),
           onOpenInEditor: (id) => openChatInEditor(Number(id)),
+          onCommit: (id) => openGitDialog(Number(id)),
           onArchiveCheck: (id) => checkArchive(Number(id)),
           onArchive: (id, mode, plan) => void archiveChat(Number(id), mode, plan),
         }}
@@ -695,6 +779,8 @@ function App() {
             onEffortChange={setEffort}
             ultracode={selectedCapability.ultracode && ultracode}
             onUltracodeChange={setUltracode}
+            fastMode={fastMode}
+            onFastModeChange={setFastMode}
             permissionMode={permissionMode}
             onPermissionModeChange={changePermissionMode}
             worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}
@@ -707,15 +793,18 @@ function App() {
             onToggleFirst={() => { if (firstWorktree) void toggleSession(firstWorktree.id); }}
             onToggleSecond={() => { if (secondWorktree) void toggleSession(secondWorktree.id); }}
             onCycleConnection={() => void cycleConnection()}
-            onRecommendationSelect={(option) => void executeSend(option, permissionMode)}
+            onRecommendationSelect={sendRecommendation}
             worktrees={worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path }))}
             selectedWorktreeId={selectedWorktree?.id}
-            onWorktreeChange={setSelectedWorktreeId}
+            onWorktreeChange={(id) => {
+              setSelectedWorktreeId(id);
+              saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
+            }}
             isolation={isolation}
-            onIsolationChange={(next) => { setIsolation(next); setNewChatError(null); }}
+            onIsolationChange={(next) => { setIsolation(next); saveChatPreferences(localStorage, project.path, { isolation: next }); setNewChatError(null); }}
             branches={branches}
-            baseBranch={baseBranch ?? selectedWorktree?.name ?? branches[0] ?? ""}
-            onBaseBranchChange={setBaseBranch}
+            baseBranch={effectiveBaseBranch}
+            onBaseBranchChange={(branch) => { setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
             newChatError={newChatError}
             approval={pendingApproval ? (
               <PermissionCard
@@ -739,6 +828,29 @@ function App() {
         </div>
       </main>
       </div>
+      {gitDialog && (
+        <GitActionsDialog
+          key={gitDialog.sessionId}
+          cwd={gitDialog.cwd}
+          base={gitDialog.base}
+          provider={gitDialog.provider}
+          chat={gitDialog.chat}
+          turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
+          onClose={() => setGitDialog(null)}
+          // The dialog's chat is the open one; a message sent while its turn runs steers it.
+          onSendToAgent={(text) => {
+            if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
+            else {
+              openChat(gitDialog.sessionId);
+              setDraft(text);
+            }
+          }}
+          onRan={(note) => {
+            recordGitNote(gitDialog.sessionId, note);
+            void worktreeDiffs.refresh([gitDialog.worktreeId]);
+          }}
+        />
+      )}
       <Notice />
     </DotBackground>
   );

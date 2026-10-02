@@ -167,7 +167,7 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   assert.equal(calls.options.model, "claude-opus-5-5");
   assert.equal(calls.options.permissionMode, "acceptEdits");
   assert.equal(calls.options.includePartialMessages, true);
-  assert.equal("settings" in calls.options, false);
+  assert.deepEqual(calls.options.settings, { fastMode: false });
   assert.deepEqual(calls.thinking, [[null, "summarized"]]);
   assert.equal(calls.options.allowDangerouslySkipPermissions, true);
   assert.equal(calls.options.pathToClaudeCodeExecutable, "/usr/local/bin/claude");
@@ -192,11 +192,23 @@ test("keeps one query across turns and applies model and mode changes", async (t
   assert.equal(events.filter((event) => event.type === "session-started").length, 1);
 });
 
+test("fast mode starts on and can be turned off in the same Claude session", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, fastMode: true });
+  await ended(events);
+  assert.deepEqual(calls.options.settings, { fastMode: true });
+
+  await session.startTurn({ ...TURN, fastMode: false });
+  await ended(events, 2);
+  assert.equal(calls.queries, 1);
+  assert.deepEqual(calls.flags, [{ fastMode: false }]);
+});
+
 test("Concise replies apply Claude Code's Concise output style before the first message, and Milagre's own prompt is unchanged", async (t) => {
   const { session, events, calls } = claude(t);
   await session.startTurn({ ...TURN, replies: "concise" });
   await ended(events);
-  assert.equal("settings" in calls.options, false);
+  assert.deepEqual(calls.options.settings, { fastMode: false });
   assert.deepEqual(calls.options.systemPrompt, { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS });
   assert.deepEqual(calls.flags, [{ outputStyle: "Concise" }]);
 });
@@ -205,7 +217,7 @@ test("Normal replies leave the output style alone", async (t) => {
   const { session, events, calls } = claude(t);
   await session.startTurn({ ...TURN, replies: "normal" });
   await ended(events);
-  assert.equal("settings" in calls.options, false);
+  assert.deepEqual(calls.options.settings, { fastMode: false });
   assert.deepEqual(calls.flags, []);
 });
 
@@ -213,7 +225,7 @@ test("Concise keeps ultracode in the query's settings", async (t) => {
   const { session, events, calls } = claude(t);
   await session.startTurn({ ...TURN, replies: "concise", ultracode: true });
   await ended(events);
-  assert.deepEqual(calls.options.settings, { ultracode: true });
+  assert.deepEqual(calls.options.settings, { fastMode: false, ultracode: true });
   assert.deepEqual(calls.flags, [{ outputStyle: "Concise" }]);
 });
 

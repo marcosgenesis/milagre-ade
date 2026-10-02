@@ -1,11 +1,14 @@
 export {};
 
 import type { AttentionNotice } from "./lib/attention";
+import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
+import type { ModelProvider } from "./model";
 import type { WorktreeRename } from "./lib/worktree-rename";
 import type { RecentProject } from "./lib/project-list";
 import type { AgentCliStatus, AgentModels, DiffStat, EditorInfo, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
+import type { PullRequest } from "./model";
 
 /** Which patterns apply to new worktrees, and the files they match in the main checkout. */
 export type FilesToCopy = { source: "worktreeinclude" | "setting" | "default"; worktreeInclude: string | null; matches: string[] };
@@ -40,8 +43,19 @@ declare global {
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
+      /** The current branch's open or merged PR, or null when none is available. */
+      readPullRequest: (worktreePath: string) => Promise<PullRequest | null>;
       /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
       revealInFolder: (folder: string) => Promise<void>;
+      /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
+      git: {
+        changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;
+        /** Never rejects for a model failure: `ok: false` carries the note the dialog shows. */
+        generate: (request: { cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext }) => Promise<GitTextResult>;
+        commit: (request: { cwd: string; message: string }) => Promise<GitCommitResult>;
+        push: (request: { cwd: string }) => Promise<GitPushResult>;
+        openPr: (request: { cwd: string; base?: string; title: string; body: string }) => Promise<GitPrResult>;
+      };
       /** Code editors found on this Mac, in the order the first becomes the default. */
       listEditors: () => Promise<EditorInfo[]>;
       /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Resolves to null, or a short error message. */

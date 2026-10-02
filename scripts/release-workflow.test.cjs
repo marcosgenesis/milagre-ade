@@ -6,12 +6,14 @@ const { spawnSync } = require('node:child_process')
 const { test } = require('node:test')
 const YAML = require('yaml')
 
-const workflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf8'))
+const releaseWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf8'))
+const publishWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-installers.yml'), 'utf8'))
 const credentials = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']
-const credentialStep = workflow.jobs.release.steps.find(step => step.name === 'Check Apple release credentials')
-const notarizeStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
-const verifyStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Verify macOS signatures, notarization and disk images')
-const authStep = workflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple notarization authentication')
+const credentialStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple release credentials')
+const notarizeStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
+const verifyStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Verify macOS signatures, notarization and disk images')
+const authStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple notarization authentication')
+const uploadStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Upload installers and publish the release')
 
 function runStep(step, cwd, overrides = {}) {
   const env = { ...process.env }
@@ -109,6 +111,32 @@ test('an accepted disk image is stapled', t => {
   assert.match(f.calls(), /xcrun stapler staple/)
 })
 
+test('merges to main only create a draft candidate, never a macOS build', () => {
+  assert.deepEqual(Object.keys(releaseWorkflow.jobs), ['release'])
+  assert.equal(releaseWorkflow.jobs.release['runs-on'], 'ubuntu-latest')
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../.releaserc.json'), 'utf8'))
+  const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github')
+  assert.equal(github?.[1]?.draftRelease, true)
+})
+
+test('a candidate is not published without the auto-updater metadata, and publishes with it', t => {
+  const f = fixture(t)
+  fs.writeFileSync(path.join(f.root, 'bin/gh'), '#!/bin/bash\nprintf \'gh %s\\n\' "$*" >> "$CALL_LOG"\n', { mode: 0o755 })
+  const env = { ...f.env, RELEASE_TAG: 'v9.9.9' }
+  const missing = runStep(uploadStep, f.root, env)
+  assert.notEqual(missing.status, 0)
+  assert.match(missing.stdout, /latest-mac\.yml/)
+  assert.doesNotMatch(f.calls(), /gh release/)
+  fs.writeFileSync(path.join(f.root, 'release/latest-mac.yml'), '')
+  fs.writeFileSync(path.join(f.root, 'release/Milagre-arm64-mac.zip'), '')
+  const result = runStep(uploadStep, f.root, env)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(f.calls(), /gh release upload v9\.9\.9 .*release\/latest-mac\.yml/)
+  assert.match(f.calls(), /release\/Milagre-arm64\.dmg/)
+  assert.match(f.calls(), /release\/Milagre-arm64-mac\.zip/)
+  assert.match(f.calls(), /gh release upload[\s\S]*gh release edit v9\.9\.9 --draft=false --latest/)
+})
+
 test('signature, ticket, Gatekeeper and disk image failures stop verification', t => {
   const f = fixture(t)
   for (const tool of ['codesign', 'xcrun', 'spctl', 'hdiutil']) {
@@ -156,7 +184,7 @@ test('release commands trim Apple credentials, preserve certificate passwords an
   })
   assert.equal(result.status, 7, result.stderr)
   assert.equal(result.stdout + result.stderr, '')
-  const build = workflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
+  const build = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
   assert.match(build.run, /^node scripts\/with-apple-credentials\.cjs npm run package:mac /)
   assert.match(notarizeStep.run, /^node scripts\/with-apple-credentials\.cjs bash -e -o pipefail/)
 })

@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, BubbleChatIcon, CodeIcon, Copy01Icon, FolderOpenIcon, GitBranchIcon, Search01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { filterCommands, type Command } from "../lib/commands";
 import { useShortcutHints } from "../lib/shortcut-hints";
+import { useScrollFade } from "../lib/use-scroll-fade";
 
 const icons = { add: Add01Icon, chat: BubbleChatIcon, folder: FolderOpenIcon, settings: Settings01Icon, git: GitBranchIcon, editor: CodeIcon, copy: Copy01Icon, unread: BubbleChatIcon };
 
@@ -18,6 +19,8 @@ export function CommandPalette({ commands, onClose, onError }: {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const executing = useRef(false);
+  const list = useRef<HTMLDivElement>(null);
+  useScrollFade(list);
   const listId = useId();
   const results = filterCommands(commands, query);
   const selected = results.find((command) => command.id === selectedId) ?? results[0];
@@ -81,7 +84,7 @@ export function CommandPalette({ commands, onClose, onError }: {
           className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3" />
         {showHints && <kbd data-shortcut-hint className="rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-3">esc</kbd>}
       </div>
-      <div id={listId} role="listbox" aria-label="Commands" className="min-h-0 overflow-y-auto overscroll-contain p-1.5">
+      <div ref={list} id={listId} role="listbox" aria-label="Commands" className="scroll-fade min-h-0 overflow-y-auto overscroll-contain p-1.5">
         {Array.from(new Set(results.map((command) => command.group))).map((group) => (
           <div key={group} role="group" aria-label={group} className="pb-1.5">
             <div aria-hidden="true" className="px-2.5 pb-1.5 pt-2.5 text-[11px] font-medium text-ink-3">{group}</div>

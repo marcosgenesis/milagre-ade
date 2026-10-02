@@ -115,7 +115,7 @@ function FileList({ changes }: { changes: Extract<GitChanges, { isRepo: true }> 
         <span>{changes.files.length} {changes.files.length === 1 ? "file" : "files"} changed</span>
         <span className="tabular-nums"><span className="text-green">+{formatLineCount(added)}</span> <span className="text-red">−{formatLineCount(removed)}</span></span>
       </div>
-      <ul className="max-h-36 overflow-y-auto py-1 [scrollbar-width:thin]">
+      <ul className="max-h-36 overflow-y-auto py-1">
         {changes.files.map((file) => (
           <li key={file.path} className="flex items-center gap-2 px-3 py-0.5 text-[12px]" title={file.path}>
             <span className={`w-3 shrink-0 font-mono font-semibold ${file.status === "added" ? "text-green" : file.status === "deleted" ? "text-red" : "text-orange"}`}>
@@ -417,7 +417,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain px-4 pb-4 pt-1 [scrollbar-width:thin]">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain px-4 pb-4 pt-1">
           {!changes && !readError && (
             <p className="flex items-center gap-2 py-6 text-[13px] text-ink-3"><Spinner /> Reading changes…</p>
           )}
@@ -483,7 +483,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
                   {failure.output || failure.message.includes("\n") ? (
                     <>
                       {failure.output && <p className="text-[12.5px] font-medium text-ink">{failure.message}</p>}
-                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-chip bg-surface px-2.5 py-2 font-mono text-[11.5px] leading-5 text-ink-2 [scrollbar-width:thin]">{failure.output ?? failure.message}</pre>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-chip bg-surface px-2.5 py-2 font-mono text-[11.5px] leading-5 text-ink-2">{failure.output ?? failure.message}</pre>
                     </>
                   ) : (
                     <p className="whitespace-pre-wrap break-words text-[12.5px] text-ink">{failure.message}</p>

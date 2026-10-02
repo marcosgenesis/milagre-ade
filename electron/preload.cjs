@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("milagre", {
   saveProject: (projectPath, state) => ipcRenderer.invoke("project:save", projectPath, state),
   startTurn: (request) => ipcRenderer.invoke("agent:start-turn", request),
   getModels: () => ipcRenderer.invoke("agent:models"),
+  getCliStatus: () => ipcRenderer.invoke("agent:cli-status"),
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers }),

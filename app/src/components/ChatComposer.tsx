@@ -14,7 +14,7 @@ import {
   Link01Icon,
   Message01Icon,
 } from "@hugeicons/core-free-icons";
-import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -119,6 +119,10 @@ interface ChatComposerProps {
   lockedProvider?: ModelProvider;
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
+  /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
+  cliStatus: AgentCliStatus | null;
+  /** The model picker was opened; the status is checked again. */
+  onModelPickerOpen: () => void;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -263,6 +267,8 @@ export function ChatComposer({
   runModelName,
   lockedProvider,
   models,
+  cliStatus,
+  onModelPickerOpen,
   selectedModel,
   onModelChange,
   capability,
@@ -376,6 +382,8 @@ export function ChatComposer({
           running={isSending}
           lockedProvider={lockedProvider}
           models={models}
+          cliStatus={cliStatus}
+          onModelPickerOpen={onModelPickerOpen}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           capability={capability}

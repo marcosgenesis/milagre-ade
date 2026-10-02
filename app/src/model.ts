@@ -103,6 +103,14 @@ export interface ReportedModel extends ModelCapability {
 /** Each agent's reported models; null when its CLI is missing, too old, or couldn't be asked. */
 export type AgentModels = Record<ModelProvider, ReportedModel[] | null>;
 
+/** How an agent's CLI stands, for the model picker (agent:cli-status). `message` is what a turn would fail with. */
+export type CliState = "ready" | "missing" | "outdated" | "logged-out" | "broken";
+export interface CliStatus {
+  state: CliState;
+  message?: string;
+}
+export type AgentCliStatus = Record<ModelProvider, CliStatus>;
+
 export interface Project {
   id: number;
   name: string;

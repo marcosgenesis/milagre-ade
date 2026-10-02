@@ -1,7 +1,7 @@
 export {};
 
 import type { AttentionNotice } from "./lib/attention";
-import type { AgentModels, DiffStat, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { AgentCliStatus, AgentModels, DiffStat, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -27,6 +27,8 @@ declare global {
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
       /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
       getModels: () => Promise<AgentModels>;
+      /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
+      getCliStatus: () => Promise<AgentCliStatus>;
       interruptAgent: (chatId: string) => Promise<void>;
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;

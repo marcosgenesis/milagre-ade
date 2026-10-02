@@ -1723,6 +1723,39 @@ git commit -m "docs: list the supported agent CLI versions" -m "Claude-Session: 
 
 ---
 
+### Task 10: Flag a CLI problem in the model picker
+
+Added after the plan was approved. The turn's own message (Tasks 3 and 4) stays as it is; the picker flags the same problem earlier.
+
+**Files:**
+- Create: `electron/agents/status.cjs`, `app/src/lib/cli-status.ts`
+- Modify: `electron/main.cjs`, `electron/preload.cjs`, `app/src/electron.d.ts`, `app/src/model.ts`, `app/src/App.tsx`, `app/src/components/ChatComposer.tsx`, `app/src/components/PromptComposer.tsx`
+- Test: `electron/agents/status.test.cjs`, `app/src/lib/cli-status.test.ts`
+
+**Interfaces:**
+- Consumes: `createCliCache` (Task 3), `loginMessage` (Task 2), `CodexRpc`.
+- Produces:
+  - IPC `agent:cli-status` → `{ claude: CliStatus, codex: CliStatus }`, with `CliStatus = { state: "ready" | "missing" | "outdated" | "logged-out" | "broken", message?: string }`. Preload `getCliStatus()`. `message` is exactly the Global Constraints copy for that case, and absent for `ready`.
+  - `createCliStatus({ cli, cwd, clientVersion, now?, ttlMs?, loggedOut? })` in `status.cjs`, with `claudeLoggedOut(command)` and `codexLoggedOut(command, { cwd, clientVersion })`.
+  - `cliTabLabel`, `cliNotice`, `messageParts` in `app/src/lib/cli-status.ts`.
+
+**Rules:**
+- `missing`, `outdated` and `broken` come from Task 3's check (no command; a command and a version; a command and no version).
+- Codex `logged-out`: a short-lived app-server answers `account/read { refreshToken: false }` with `account: null` and `requiresOpenaiAuth: true`. An error, or an app-server that won't start, counts as ready.
+- Claude `logged-out`: `claude auth status` (10 s timeout), its JSON read even when the exit code is 1. Recorded with Claude Code 2.1.287: an empty `CLAUDE_CONFIG_DIR` prints `{ "loggedIn": false, "authMethod": "none", … }` and exits 1; the default config prints `"loggedIn": true` and exits 0. Only an explicit `"loggedIn": false` counts. Any other failure or unreadable output is ready.
+- Never run login, logout or any other auth-changing command.
+- A `ready` status is kept for 5 minutes. A problem is never kept and is checked again on the next call. Everything waits for the login environment (through the CLI check).
+- The picker loads the status at startup, next to `agent:models`, and each time it opens. A non-ready provider tab shows "Not installed", "Update", "Log in" or "Not working" in `text-orange` instead of its model count, with `title` set to the message (the locked-provider `title` wins). The open tab shows the full message once above the model rows (`text-[12px] text-ink-2`, `bg-inset`, rounded, backtick spans as `<code>`). The models stay listed and selectable.
+
+- [ ] **Step 1:** Write `status.test.cjs` (each state; the 5-minute cache; a problem checked on every call; `claude auth status` failing in an unexpected way counts as ready; a Codex `account/read` error counts as ready) and `cli-status.test.ts` (the label mapping, the notice, the backtick spans). Run them and watch them fail.
+- [ ] **Step 2:** Implement `status.cjs` and `cli-status.ts`; wire `agent:cli-status`, `getCliStatus`, the `CliStatus` types, App's `cliStatus` state with `refreshCliStatus` and `ChatComposer` and `PromptComposer`'s `cliStatus` and `onModelPickerOpen` props.
+- [ ] **Step 3:** Run `node --test electron/agents/status.test.cjs app/src/lib/cli-status.test.ts` and `npm run typecheck`. Expected: PASS and clean.
+- [ ] **Step 4: Commit** with `feat: flag a missing, outdated or logged-out CLI in the model picker`.
+
+**Also changed on the way (main moved after this plan was written).** `electron/usage.cjs` (PR #31) starts `codex` from the app's `PATH`, so `createUsageReader` takes a `ready` promise and waits for the login environment before reading either provider; `main.cjs` passes the same `environmentReady` that the CLI check waits for, and defines it at the top of the file.
+
+---
+
 ### Task 9: Verify with the real CLIs
 
 **Files:** none committed. Scripts live in the session scratchpad.
@@ -1775,6 +1808,9 @@ Write `finder-launch.cjs` in the scratchpad. It spawns this branch's `node_modul
   - Settings → General → Default model lists the same models.
   - An old default model gives way. Through CDP, run `localStorage.setItem("milagre-settings", JSON.stringify({ theme: "light", defaultModelId: "gpt-6.1-sol", defaultPermissionMode: "full" }))` and reload. `gpt-6.1-sol` was the default before this branch, and codex-cli 0.158.0 rejects it.
     - Expected: the composer shows GPT-6-Astra, and a new Codex chat's "hi" gets a reply, not "The 'gpt-6.1-sol' model is not supported…".
+- [ ] **Step 5b: The picker flags a logged-out CLI (Task 10)**
+  - Relaunch like a Finder launch with `{ "CODEX_HOME": "<scratch>/empty-codex" }`, an empty folder. Open the model picker.
+  - Expected: the Codex tab reads "Log in" in orange instead of its count, and the notice "Codex isn't logged in. Run `codex login` in a terminal, then send your message again." sits above the models, which stay listed. The Claude tab still shows its count.
 - [ ] **Step 6: A missing CLI**
   - Relaunch with `{ "SHELL": "/bin/tcsh", "HOME": "<scratch>/empty-home" }`. No import, and no install folders under that home.
   - Codex chat, "hi". Expected: "Agent error: Milagre couldn't find Codex. Install it with `npm install -g @openai/codex`, then send your message again." Claude gives its missing message too, unless `/opt/homebrew/bin` or `/usr/local/bin` has one.

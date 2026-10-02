@@ -13,6 +13,7 @@ import {
   QuestionAnswers,
   PermissionMode,
   EffortLevel,
+  AgentCliStatus,
   AgentModels,
   capabilityFor,
   effortFor,
@@ -70,6 +71,11 @@ function App() {
   const [reported, setReported] = useState<AgentModels | null>(null);
   useEffect(() => { void window.milagre.getModels().then(setReported).catch(() => undefined); }, []);
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
+  // Whether each agent's CLI is missing, outdated, broken or logged out, for the model picker. Loaded at
+  // startup and again each time the picker opens, so a fix shows without a restart.
+  const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
+  const refreshCliStatus = () => { void window.milagre.getCliStatus().then(setCliStatus).catch(() => undefined); };
+  useEffect(refreshCliStatus, []);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // Until the user picks a model, the picker shows the default from Settings once the lists have it. A
   // model the agents don't offer gives way to its provider's recommended model.
@@ -531,6 +537,8 @@ function App() {
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             models={models}
+            cliStatus={cliStatus}
+            onModelPickerOpen={refreshCliStatus}
             selectedModel={selectedModel}
             onModelChange={chooseModel}
             capability={selectedCapability}

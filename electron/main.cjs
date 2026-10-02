@@ -13,6 +13,7 @@ const { CodexSession } = require("./agents/codex-provider.cjs");
 const { createCliCache } = require("./agents/cli.cjs");
 const { loadLoginEnvironment } = require("./agents/environment.cjs");
 const { createModelCache } = require("./agents/models.cjs");
+const { createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
@@ -163,6 +164,11 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
 
 const agentModels = createModelCache({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
 ipcMain.handle("agent:models", () => agentModels());
+
+// What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at
+// again after 5 minutes, a problem on every call.
+const agentCliStatus = createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
+ipcMain.handle("agent:cli-status", () => agentCliStatus());
 
 ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 

@@ -16,8 +16,9 @@ import {
   SecurityCheckIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
-import type { EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
+import { cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
@@ -88,6 +89,10 @@ interface PromptComposerProps {
   lockedProvider?: ModelProvider;
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
+  /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
+  cliStatus: AgentCliStatus | null;
+  /** The model picker was opened; the status is checked again. */
+  onModelPickerOpen: () => void;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -123,7 +128,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -138,7 +143,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
-  useEffect(() => { if (modelOpen) setProvider(lockedProvider ?? selectedModel.provider); }, [modelOpen]);
+  useEffect(() => { if (modelOpen) { setProvider(lockedProvider ?? selectedModel.provider); onModelPickerOpen(); } }, [modelOpen]);
   const [query, setQuery] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const [active, setActive] = useState(0);
@@ -172,6 +177,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     : menu === "slash"
       ? commands.filter((command) => `${command.name.slice(1)} ${command.desc}`.toLowerCase().includes(tokenQuery))
       : [];
+  const providerNotice = cliNotice(cliStatus?.[provider]);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0;
 
@@ -355,10 +361,11 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span></button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliNotice(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
               </div>
             }
           >
+            {providerNotice && <p role="status" className="mx-1 mb-1 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">{messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}</p>}
             {modelRows.map((model) => <PickerRow key={model.id} icon={<ProviderLogo provider={model.provider} size={14} />} label={model.name} description={model.description} selected={model.id === selectedModel.id} onClick={() => chooseModel(model)} />)}
           </PickerPanel>
         )}

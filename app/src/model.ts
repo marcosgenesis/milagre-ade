@@ -162,7 +162,11 @@ export interface AgentSession {
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
   subagents?: Subagent[];
-  /** A name the user gave the chat; otherwise it's named after its first message. */
+  /** Automatic title from the first message; a manual title takes precedence. */
+  generatedTitle?: string;
+  /** Persisted until background naming finishes, including across restarts. */
+  titlePending?: boolean;
+  /** A name the user gave the chat. */
   title?: string;
   /** A turn ended while the chat wasn't open, or the user marked it unread. */
   unread?: boolean;

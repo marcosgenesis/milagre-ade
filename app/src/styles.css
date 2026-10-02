@@ -1833,3 +1833,36 @@ code.step-shimmer {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* COMPONENT-SPECIFIC — StartupSplash: the logo assembles, then the sparkle twinkles until the workspace loads.
+ * Every intro keyframe ends on the finished logo, so the global reduced-motion rule lands on a static mark. */
+.startup-splash {
+  display: grid;
+  place-items: center;
+}
+.startup-splash svg { overflow: visible; }
+.startup-splash svg * { transform-box: fill-box; transform-origin: center; }
+.startup-splash-mark { fill: #0a0a0a; }
+.dark .startup-splash-mark { fill: #ffffff; }
+.startup-splash-leg { animation: splash-leg 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.startup-splash-leg-right { animation-delay: 60ms; }
+.startup-splash-star {
+  animation:
+    splash-star-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 140ms both,
+    splash-star-twinkle 2400ms cubic-bezier(0.65, 0, 0.35, 1) 800ms infinite;
+}
+
+@keyframes splash-leg {
+  from { opacity: 0; transform: translateY(18%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes splash-star-in {
+  from { opacity: 0; transform: scale(0) rotate(-90deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+/* the sparkle has four-fold symmetry, so a quarter turn loops seamlessly */
+@keyframes splash-star-twinkle {
+  0%, 55% { transform: scale(1) rotate(0deg); }
+  75% { transform: scale(0.82) rotate(45deg); }
+  100% { transform: scale(1) rotate(90deg); }
+}

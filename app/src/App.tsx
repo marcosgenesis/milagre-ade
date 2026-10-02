@@ -41,6 +41,7 @@ import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
+import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
@@ -788,8 +789,11 @@ function App() {
     return () => window.removeEventListener("keydown", jumpToChat);
   }, [chats, view]);
 
-  if (loading || !project || !state) {
-    return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;
+  // Fast loads would cut the startup animation off at the bare tile, so the splash stays until the icon is whole.
+  const [splashDone, setSplashDone] = useState(false);
+
+  if (loading || !project || !state || !splashDone) {
+    return <StartupSplash onIntroEnd={() => setSplashDone(true)} />;
   }
 
   const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";

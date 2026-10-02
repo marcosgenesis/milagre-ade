@@ -16,6 +16,8 @@ window.calls = [];
 window.escapes = 0;
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && !event.defaultPrevented) window.escapes++; });
 window.milagre = new Proxy({
+  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
+  getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: '/fixture', name: 'Milagre', state }),
   listRecentProjects: async () => [{ path: '/fixture', name: 'Milagre' }, { path: '/other', name: 'Website' }],
   listBranches: async () => ['main'],

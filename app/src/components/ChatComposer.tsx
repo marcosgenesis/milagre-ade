@@ -1,5 +1,6 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
-import type { AgentTask, Subagent } from "../model";
+import type { AgentPort, AgentTask, Subagent } from "../model";
+import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
@@ -176,6 +177,10 @@ interface ChatComposerProps {
   waitingForSubagents?: boolean;
   /** The running turn's to-do list, shown as a pill beside the subagents. */
   tasks?: AgentTask[];
+  /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
+  ports?: AgentPort[];
+  /** Stops the command listening on one of the chat's ports. */
+  onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
   /** The running turn is waiting on the user's answer to a question. */
@@ -329,6 +334,8 @@ export function ChatComposer({
   onArchiveSubagent,
   waitingForSubagents = false,
   tasks,
+  ports,
+  onStopPort,
   waitingStepIds,
   asking = false,
   runModelName,
@@ -438,6 +445,7 @@ export function ChatComposer({
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+        <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>

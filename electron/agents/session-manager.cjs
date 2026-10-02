@@ -22,8 +22,8 @@ function streamKey(event) {
 // session run one at a time per chat, and onSessionClosed(chatId) runs once a chat's session is gone. Events from a session that is no longer the chat's
 // current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
-  constructor({ createSession, send, onSessionClosed = () => {}, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
-    Object.assign(this, { createSession, send, onSessionClosed, idleMs, batchMs });
+  constructor({ createSession, send, onSessionClosed = () => {}, onTurnStarted = () => {}, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
+    Object.assign(this, { createSession, send, onSessionClosed, onTurnStarted, idleMs, batchMs });
     this.sessions = new Map();
     this.buffers = new Map();
     this.queues = new Map();
@@ -102,7 +102,10 @@ class SessionManager {
     this.send(chatId, event);
     // A turn the provider started itself (a steer that missed the end of the last one) isn't covered by
     // startTurn's clear; the timer armed by the previous turn's end must not close it mid-run.
-    if (event.type === "turn-started") clearTimeout(entry.idleTimer);
+    if (event.type === "turn-started") {
+      clearTimeout(entry.idleTimer);
+      this.onTurnStarted(chatId);
+    }
     if (isTerminal(event)) this.scheduleIdleClose(chatId);
   }
 
@@ -145,6 +148,13 @@ class SessionManager {
   async setPermissionMode(chatId, mode) {
     if (!PERMISSION_MODES.has(mode)) throw new Error(`Unknown permission mode: ${mode}`);
     await this.sessions.get(chatId)?.session.setPermissionMode(mode);
+  }
+
+  /** Each open chat's agent process and working directory, { pid, cwd } by chat id, for chats whose agent has started. */
+  processes() {
+    const result = new Map();
+    for (const [chatId, entry] of this.sessions) if (entry.session.pid) result.set(chatId, { pid: entry.session.pid, cwd: entry.cwd });
+    return result;
   }
 
   closeChat(chatId) {

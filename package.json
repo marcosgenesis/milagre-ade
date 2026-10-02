@@ -18,6 +18,7 @@
     "test:reply-thought": "node scripts/test-reply-thought.cjs",
     "test:image-generation": "node scripts/test-image-generation.cjs",
     "test:task-track": "node scripts/test-task-track.cjs",
+    "test:ports": "node scripts/test-ports.cjs",
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
     "test:diff-view": "node scripts/test-diff-view.cjs",

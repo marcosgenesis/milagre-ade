@@ -559,6 +559,11 @@ a:focus-visible .animated-underline::after {
   mask-image: linear-gradient(to bottom, black 35%, transparent);
 }
 
+/* The diff's sticky file headers sit at its top edge, so only the bottom fades. */
+.diff-scroll.scroll-fade[data-fade-top] {
+  --fade-top: 0px;
+}
+
 /* Agent replies rendered from Markdown: compact chat spacing, no document-sized headings. */
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
@@ -1889,4 +1894,18 @@ code.step-shimmer {
   0%, 55% { transform: scale(1) rotate(0deg); }
   75% { transform: scale(0.82) rotate(45deg); }
   100% { transform: scale(1) rotate(90deg); }
+}
+
+/* Diff view row tints; the word variants sit on top of the row tint for the changed words. */
+:root {
+  --diff-add: oklch(0.962 0.03 155);
+  --diff-add-word: oklch(0.89 0.08 155);
+  --diff-remove: oklch(0.962 0.025 20);
+  --diff-remove-word: oklch(0.89 0.07 20);
+}
+.dark {
+  --diff-add: oklch(0.705 0.154 153.814 / 0.12);
+  --diff-add-word: oklch(0.705 0.154 153.814 / 0.3);
+  --diff-remove: oklch(0.666 0.18 21.433 / 0.12);
+  --diff-remove-word: oklch(0.666 0.18 21.433 / 0.3);
 }

@@ -35,6 +35,12 @@ import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
+import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
+import { ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
+import { AnimatePresence } from "motion/react";
+import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "./components/changes/DiffView";
+import { useChanges } from "./components/changes/useChanges";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
@@ -202,6 +208,17 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const changes = useChanges({
+    cwd: selectedWorktree?.path,
+    base: selectedWorktree?.base,
+    chatId: project && selectedSession ? chatKey(project.path, selectedSession.id) : null,
+    available: view === "chat" && Boolean(selectedSession && selectedWorktree),
+  });
+  const diffPrefs = useDiffPreferences();
+  const diffShowing = changes.open && changes.tab === "diff";
+  const diffPresence = useDiffPresence(diffShowing);
+  const changesAvailableRef = useRef(false);
+  changesAvailableRef.current = view === "chat" && Boolean(selectedSession && selectedWorktree);
   const { pullRequests, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
@@ -730,6 +747,9 @@ function App() {
         if (event.key.toLowerCase() === "t") {
           event.preventDefault();
           toggleTheme();
+        } else if (event.key.toLowerCase() === "d" && changesAvailableRef.current) {
+          event.preventDefault();
+          changes.toggle();
         }
         return;
       }
@@ -840,6 +860,7 @@ function App() {
     <>
     <DotBackground key="app">
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
+      {changesAvailableRef.current && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
           <span>Milagre {update.version} está pronto para atualizar.</span>
@@ -896,9 +917,14 @@ function App() {
         </div>
       )}
 
-      <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+      <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+        <DiffBar open={diffShowing} onBack={() => changes.setTab("chat")} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
+        <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} />}
+        </AnimatePresence>
         {view === "settings" && <SettingsPanel section={settingsSection} projectPath={project.path} models={models} />}
-        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
+        {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out both" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
             key={project.path}
@@ -985,6 +1011,9 @@ function App() {
           </EditorLinks>
         </div>
       </main>
+      <ChangesPanelSlot open={changes.open}>
+        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh(true)} onSelectFile={changes.selectFile} />
+      </ChangesPanelSlot>
       </div>
       {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (

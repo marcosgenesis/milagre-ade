@@ -90,7 +90,8 @@ function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READ
       .then((result) => {
         entry.pending = false;
         entry.at = now();
-        if (result.state !== "ready") cache.delete(name);
+        // A lookup that finishes after invalidate() must not delete the newer entry that replaced it.
+        if (result.state !== "ready" && cache.get(name) === entry) cache.delete(name);
         return result;
       });
     cache.set(name, entry);

@@ -79,6 +79,8 @@ class ClaudeSession {
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
+    // Whether this turn's init announced a session id (session-started); see readMessages.
+    this.announcedId = false;
     this.cancelRequested = false;
     this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
     let markReady;
@@ -156,6 +158,7 @@ class ClaudeSession {
   beginImplicitTurn() {
     const turnId = randomUUID();
     this.turnActive = true;
+    this.announcedId = false;
     this.cancelRequested = false;
     Object.assign(this.state, { turnId, hasText: false });
     this.turnReady = Promise.resolve();
@@ -266,14 +269,16 @@ class ClaudeSession {
         // started by itself, for a steering message that came in just as the last turn ended.
         if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.beginImplicitTurn();
         for (const event of mapClaudeMessage(message, this.state)) {
+          if (event.type === "session-started") this.announcedId = true;
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
           else if (event.type === "turn-failed" && this.resumeGone(`${event.message}\n${message.errors ?? ""}\n${message.result ?? ""}`)) this.resumeFailed();
           else {
             // A logged-out Claude Code keeps answering "not logged in" until it is restarted, so the session
-            // closes and the next message starts a fresh process. The id this run announced belongs to a chat
-            // that never got an answer; the chat forgets it (one it resumed keeps its own).
-            if (event.login && !this.resumeId) this.emit({ type: "session-reset" });
+            // closes and the next message starts a fresh process. The chat forgets a session id only when this
+            // very turn's init created it: that chat never got an answer. An id from an earlier turn, or one the
+            // session resumed, is a real conversation and stays.
+            if (event.login && this.announcedId) this.emit({ type: "session-reset" });
             this.finishTurn(event);
             if (event.login) void this.close();
           }

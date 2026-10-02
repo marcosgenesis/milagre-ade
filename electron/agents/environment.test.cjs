@@ -135,15 +135,30 @@ test("falls back to the install folders when the shell gives nothing, and leaves
   assert.deepEqual(windows, { PATH: "C:\\Windows" });
 });
 
+// A stand-in for the timer: the test fires the timeout itself instead of racing a real one.
+function fakeTimers() {
+  const timers = [];
+  return {
+    setTimeoutImpl: (callback) => { const timer = { callback, cleared: false }; timers.push(timer); return timer; },
+    clearTimeoutImpl: (timer) => { timer.cleared = true; },
+    fire: () => timers.filter((timer) => !timer.cleared).forEach((timer) => timer.callback()),
+    timers,
+  };
+}
+
 test("a shell that hangs after printing the environment is still killed at the timeout", async () => {
   const { spawnImpl } = fakeShell((child, mark) => {
     child.stdout.write(`${mark}${envBlock({ PATH: "/opt/homebrew/bin:/usr/bin" })}${mark}`);
   });
   const killed = [];
-  const env = await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, timeoutMs: 30, killGroup: (pid) => killed.push(pid) });
+  const timers = fakeTimers();
+  const env = await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  // The environment is in, and the timer is still armed: the shell hasn't ended.
   assert.deepEqual(env, { PATH: "/opt/homebrew/bin:/usr/bin" });
+  assert.equal(timers.timers.length, 1);
+  assert.equal(timers.timers[0].cleared, false);
   assert.deepEqual(killed, []);
-  for (let wait = 0; wait < 100 && killed.length === 0; wait += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  timers.fire();
   assert.deepEqual(killed, [4242]);
 });
 
@@ -153,8 +168,12 @@ test("a shell that ends in time is not killed", async () => {
     child.emit("close", 0);
   });
   const killed = [];
-  await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, timeoutMs: 30, killGroup: (pid) => killed.push(pid) });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  const timers = fakeTimers();
+  await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  // Its end disarmed the timer, so a late firing does nothing.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(timers.timers[0].cleared, true);
+  timers.fire();
   assert.deepEqual(killed, []);
 });
 

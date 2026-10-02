@@ -688,3 +688,22 @@ test("after a login failure the next message starts a fresh process that resumes
   assert.equal(sdks[1].calls.options.resume, "session-1");
   assert.deepEqual(sent.at(-1), { type: "turn-completed" });
 });
+
+test("a login failure on a later turn keeps the chat's id, and only a fresh logged-out first turn resets it", async (t) => {
+  let turns = 0;
+  const script = async function* (context) {
+    turns += 1;
+    if (turns === 1) yield* scripts.reply(context);
+    else yield* loggedOut();
+  };
+  const { session, events } = claude(t, { script });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(events.filter((event) => event.type === "session-started").length, 1);
+  // The user logged out; Claude Code announces the same id again and answers "not logged in".
+  await session.startTurn(TURN);
+  await ended(events, 2);
+  await waitUntil(() => session.closed);
+  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
+});

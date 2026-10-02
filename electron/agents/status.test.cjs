@@ -179,3 +179,34 @@ test("invalidate forgets a ready status, so the next call looks again", async ()
   await check();
   assert.deepEqual(checked, { claude: 2, codex: 1 });
 });
+
+test("a lookup that finishes after invalidate doesn't delete the newer entry", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const check = createCliStatus({
+    cli: async (name) => {
+      calls += 1;
+      if (calls <= 2) {
+        await gate;
+        return { command: null, version: null, problem: "missing" };
+      }
+      return { command: `/bin/${name}`, version: "9.9.9" };
+    },
+    now: () => 1,
+    loggedOut: { claude: async () => false, codex: async () => false },
+  });
+  // Two lookups wait at the gate (calls 1 and 2) and will end with a problem.
+  const first = check();
+  await new Promise((resolve) => setImmediate(resolve));
+  check.invalidate("claude");
+  check.invalidate("codex");
+  // The next call starts newer lookups (calls 3 and 4), which are ready and kept.
+  const second = await check();
+  assert.equal(second.claude.state, "ready");
+  assert.equal(calls, 4);
+  release();
+  assert.equal((await first).claude.state, "missing");
+  await check();
+  assert.equal(calls, 4, "the newer, ready entry is still kept");
+});

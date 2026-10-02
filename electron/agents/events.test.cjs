@@ -101,7 +101,9 @@ test("a log line's timestamp, level and module are dropped, and a killed process
   assert.equal(lastLine(logged), "error=exec_command failed: UnknownProcessId { process_id: 52867 }");
   assert.equal(lastLine("WARN something odd"), "something odd");
   assert.equal(lastLine("Error: connect ECONNREFUSED"), "Error: connect ECONNREFUSED");
-  assert.equal(crashMessage("codex", logged, { signal: "SIGKILL" }), "Codex stopped unexpectedly: Codex exited with signal SIGKILL. Send your message again to continue this chat.");
+  assert.equal(crashMessage("codex", logged, { signal: "SIGKILL" }), "Codex stopped unexpectedly: error=exec_command failed: UnknownProcessId { process_id: 52867 }. Send your message again to continue this chat.");
+  // A log line with nothing after its prefix leaves nothing to say; the signal does.
+  assert.equal(crashMessage("codex", "2026-10-02T00:59:00Z ERROR ", { signal: "SIGKILL" }), "Codex stopped unexpectedly: Codex exited with signal SIGKILL. Send your message again to continue this chat.");
   assert.equal(crashMessage("codex", "", { signal: "SIGKILL" }), "Codex stopped unexpectedly: Codex exited with signal SIGKILL. Send your message again to continue this chat.");
   assert.equal(crashMessage("codex", logged), "Codex stopped unexpectedly: error=exec_command failed: UnknownProcessId { process_id: 52867 }. Send your message again to continue this chat.");
   assert.equal(crashMessage("codex", "boom: model unavailable", { signal: "SIGKILL" }), "Codex stopped unexpectedly: boom: model unavailable. Send your message again to continue this chat.");

@@ -35,7 +35,7 @@ const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
 
 // A tracing log line: "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=…". The prefix says
 // nothing a reader needs.
-const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|ERROR)\s+(?:[\w.-]+(?:::[\w.-]+)*:\s+)?/;
+const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|ERROR)(?:\s+|$)(?:[\w.-]+(?:::[\w.-]+)*:(?:\s+|$))?/;
 
 // The last non-empty line a CLI printed, without terminal colours and without a log line's timestamp, level
 // and module, and whether it was a log line.
@@ -68,10 +68,11 @@ function loginMessage(name) {
   return `${CLI_NAMES[name]} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
-// A process the OS killed leaves only log lines behind, which say nothing of why it stopped; then the signal does.
+// The reason is the last line, with a log line's prefix dropped. A process the OS killed with nothing left to
+// say gets its signal instead.
 function crashMessage(name, detail, { signal } = {}) {
-  const { line, logged } = readLastLine(detail);
-  const reason = signal && (logged || !line) ? `${CLI_NAMES[name]} exited with signal ${signal}` : line;
+  const { line } = readLastLine(detail);
+  const reason = signal && !line ? `${CLI_NAMES[name]} exited with signal ${signal}` : line;
   return `${CLI_NAMES[name]} stopped unexpectedly${reason ? `: ${withoutPeriod(reason)}` : ""}. Send your message again to continue this chat.`;
 }
 

@@ -43,7 +43,7 @@ function parseShellEnv(stdout, mark) {
 // Starts the login shell once. Resolves its environment as soon as the closing mark arrives, or null when
 // the shell can't be started, exits without printing it (an rc file that execs something else), or
 // outlives the timeout, in which case its whole process group is killed.
-function readLoginShellEnv({ shell, env = process.env, timeoutMs = SHELL_TIMEOUT_MS, spawnImpl = spawn, killGroup = (pid) => process.kill(-pid, "SIGKILL") } = {}) {
+function readLoginShellEnv({ shell, env = process.env, timeoutMs = SHELL_TIMEOUT_MS, spawnImpl = spawn, killGroup = (pid) => process.kill(-pid, "SIGKILL"), setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout } = {}) {
   if (!shell || !SHELLS.has(path.basename(shell))) return Promise.resolve(null);
   const mark = `__MILAGRE_ENV_${randomBytes(8).toString("hex")}__`;
   return new Promise((resolve) => {
@@ -63,14 +63,14 @@ function readLoginShellEnv({ shell, env = process.env, timeoutMs = SHELL_TIMEOUT
     };
     // The timer stays armed after the closing mark: a shell that hangs in an exit hook is killed with its
     // group at the timeout all the same. It only stops once the shell has ended.
-    const timer = setTimeout(() => {
+    const timer = setTimeoutImpl(() => {
       try {
         killGroup(child.pid);
       } catch {}
       settle(null);
     }, timeoutMs);
     timer.unref?.();
-    const ended = () => clearTimeout(timer);
+    const ended = () => clearTimeoutImpl(timer);
     child.stdout.setEncoding?.("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;

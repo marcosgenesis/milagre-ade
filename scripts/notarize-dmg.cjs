@@ -10,7 +10,7 @@ function request(operation, args) {
     if (result.status === 0) return result.stdout
     if (result.signal) throw new Error(`Apple ${operation} was interrupted.`)
     const output = (result.stderr || '') + (result.stdout || '')
-    if (/401|Invalid credentials/i.test(output)) throw new Error('Apple rejected the notarization credentials (HTTP 401).')
+    if (/HTTP(?: status code:|Error\(statusCode:)\s*(?:Optional\()?401\b|Invalid credentials/i.test(output)) throw new Error('Apple rejected the notarization credentials (HTTP 401).')
     if (attempt === 4 || !transient.test(output)) {
       throw new Error(`Apple ${operation} failed${transient.test(output) ? ' after four network attempts' : ''}.`)
     }

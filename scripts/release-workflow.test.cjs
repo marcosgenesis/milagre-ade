@@ -39,7 +39,7 @@ if [ "$1" = notarytool ]; then
   if [ "$2" = wait ] && [ -n "$NOTARY_WAIT_STATUS" ]; then NOTARY_STATUS="$NOTARY_WAIT_STATUS"; fi
   if [ "$2" = wait ] || [[ "$*" == *" --wait "* ]]; then
     if [ "$NETWORK_ALWAYS_FAIL" = 1 ]; then
-      echo 'Error Domain=NSURLErrorDomain Code=-1009 The Internet connection appears to be offline.' >&2
+      echo 'Error Domain=NSURLErrorDomain Code=-1009 The Internet connection appears to be offline. URL=/submissions/ab401def-1234-1234-1234-123456789abc' >&2
       exit 1
     fi
     if [ "$NETWORK_FAIL_ONCE" = 1 ] && [ ! -f "$NETWORK_STATE" ]; then

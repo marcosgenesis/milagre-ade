@@ -22,7 +22,7 @@ export function Notice() {
   const notice = useNotice();
   if (!notice) return null;
   return (
-    <div role="status" key={notice.id} className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-6">
+    <div role="status" key={notice.id} className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-6">
       <div className="rounded-control bg-surface px-3 py-2 text-[12.5px] font-medium text-ink shadow-card">{notice.text}</div>
     </div>
   );

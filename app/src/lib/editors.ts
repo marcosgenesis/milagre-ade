@@ -12,7 +12,7 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!requested) {
     requested = true;
-    window.milagre.listEditors().catch(() => [] as EditorInfo[]).then((editors) => {
+    (window.milagre?.listEditors() ?? Promise.resolve([])).catch(() => [] as EditorInfo[]).then((editors) => {
       found = editors;
       listeners.forEach((notify) => notify());
     });

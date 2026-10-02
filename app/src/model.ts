@@ -99,11 +99,21 @@ export interface Project {
   name: string;
 }
 
+export interface DiffStat {
+  added: number;
+  removed: number;
+}
+
 export interface Worktree {
   id: number;
   project_id: number;
   path: string;
+  /** The checked-out branch, or the folder name when HEAD is detached. */
   name: string;
+  /** The ref a worktree Milagre created started from; its changes are measured against it. */
+  base?: string;
+  /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
+  diff?: DiffStat;
 }
 
 export interface AgentSession {
@@ -115,6 +125,12 @@ export interface AgentSession {
   provider?: ModelProvider;
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
+  /** A name the user gave the chat; otherwise it's named after its first message. */
+  title?: string;
+  /** A turn ended while the chat wasn't open, or the user marked it unread. */
+  unread?: boolean;
+  /** Hidden from the chat list. */
+  archived?: boolean;
 }
 
 export interface Connection {

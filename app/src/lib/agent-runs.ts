@@ -45,6 +45,11 @@ export function chatsWaitingForUser(runs: AgentRuns, projectPath: string): Set<n
   return waiting;
 }
 
+/** Session ids of the project's chats with a turn running, so the sidebar can mark them. */
+export function chatsRunning(runs: AgentRuns, projectPath: string): Set<number> {
+  return new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+}
+
 /** The session id at the end of a chat key (after the last `#`), or NaN. */
 export function sessionIdFromKey(key: string): number {
   const match = /#(\d+)$/.exec(key);

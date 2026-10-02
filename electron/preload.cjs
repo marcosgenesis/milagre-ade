@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("milagre", {
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
+  readDiffStat: (worktreePath, base) => ipcRenderer.invoke("worktree:diffstat", worktreePath, base),
+  revealWorktree: (worktreePath) => ipcRenderer.invoke("worktree:reveal", worktreePath),
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   saveProject: (projectPath, state) => ipcRenderer.invoke("project:save", projectPath, state),
@@ -28,4 +30,10 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("update:state", listener);
   },
   readUsage: () => ipcRenderer.invoke("usage:read"),
+  notifyAttention: (notice) => ipcRenderer.invoke("notification:attention", notice),
+  onOpenChat: (callback) => {
+    const listener = (_event, chatId) => callback(chatId);
+    ipcRenderer.on("notification:open-chat", listener);
+    return () => ipcRenderer.removeListener("notification:open-chat", listener);
+  },
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, ChatStep, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
-import { applyAgentEvent, capOutput, chatInProject, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import { applyAgentEvent, capOutput, chatInProject, chatsRunning, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -244,6 +244,12 @@ test("chatsWaitingForUser lists only this project's chats with a pending approva
   const asking: AgentRuns = { [key(6)]: { ...run([]), questions: [question("q1")] }, [key(7)]: run([]) };
   assert.deepEqual([...chatsWaitingForUser(asking, PROJECT)], [6]);
   assert.equal(chatsWaitingForUser({}, PROJECT).size, 0);
+});
+
+test("chatsRunning lists only this project's chats with a run", () => {
+  const run = { text: "", model: "m", approvals: [], steps: [], questions: [], answered: {} };
+  const runs: AgentRuns = { [key(1)]: run, [key(4)]: run, [chatKey("/work/app#other", 2)]: run, [chatKey("/work/other", 3)]: run };
+  assert.deepEqual([...chatsRunning(runs, PROJECT)].sort(), [1, 4]);
 });
 
 const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });

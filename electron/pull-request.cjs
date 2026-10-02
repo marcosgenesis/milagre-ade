@@ -24,7 +24,10 @@ async function readPullRequest(cwd, exec = execFileAsync) {
     const readyToMerge = pr.state === "OPEN" && pr.isDraft === false && pr.reviewDecision === "APPROVED" && pr.mergeStateStatus === "CLEAN";
     const hasConflicts = pr.state === "OPEN" && pr.mergeStateStatus === "DIRTY";
     const conflictStatusKnown = typeof pr.mergeStateStatus === "string" && pr.mergeStateStatus !== "UNKNOWN";
-    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts, conflictStatusKnown };
+    // BEHIND only shows up when the base branch requires PRs to be up to date before merging.
+    const isBehind = pr.state === "OPEN" && pr.mergeStateStatus === "BEHIND";
+    const changesRequested = pr.state === "OPEN" && pr.reviewDecision === "CHANGES_REQUESTED";
+    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts, conflictStatusKnown, isBehind, changesRequested };
   } catch {
     // No PR, offline, or gh unavailable: this optional metadata never blocks a chat.
     return null;

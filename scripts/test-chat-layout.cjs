@@ -19,9 +19,9 @@ function Fixture() {
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState(MODEL_CATALOG[0]);
   const [fastMode, setFastMode] = useState(false);
-  const [hasConflicts, setHasConflicts] = useState(false);
+  const [prAction, setPrAction] = useState(null);
   const [sending, setSending] = useState(false);
-  window.setHasConflicts = setHasConflicts;
+  window.setPrAction = setPrAction;
   window.setSending = setSending;
   window.resolveClicks ??= 0;
   window.setMessageCount = setCount;
@@ -35,7 +35,7 @@ function Fixture() {
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], removeFile: noop, attachFiles: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false}
-      onResolveConflicts={hasConflicts ? () => window.resolveClicks++ : undefined}
+      pullRequestAction={prAction ? { ...prAction, onRun: () => window.resolveClicks++ } : undefined}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -51,9 +51,12 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
+  // A fresh profile, so a zoom level saved for 127.0.0.1 in the shared Electron profile can't change the layout.
+  app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-chat-layout-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
+  const consoleErrors = [];
+  window.webContents.on("console-message", (event) => { if (event.level === "error") { consoleErrors.push(event.message); console.error(event.message); } });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let attempt = 0; attempt < 200; attempt++) {
@@ -83,7 +86,7 @@ async function browserChecks() {
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
     assert.equal(await evaluate(`!!(${resolveButton})`), false);
-    await evaluate('window.setHasConflicts(true)');
+    await evaluate('window.setPrAction({ label: "Resolve conflicts", tone: "red" })');
     await waitFor(`!!(${resolveButton})`);
     assert.ok(await evaluate(`(${resolveButton}).getBoundingClientRect().bottom <= document.querySelector('[data-promptbar]').getBoundingClientRect().top`), "Conflict pill sits above the composer");
     await evaluate(`(${resolveButton}).click()`);
@@ -96,8 +99,20 @@ async function browserChecks() {
     await waitFor(`!(${resolveButton}).disabled`);
     await delay(250);
     await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-conflict-pill.png", image.toPNG()));
-    await evaluate('window.setHasConflicts(false)');
-    await waitFor(`!(${resolveButton})`);
+    const updateButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Update branch')`;
+    await evaluate('window.setPrAction({ label: "Update branch", tone: "orange" })');
+    await waitFor(`!!(${updateButton})`);
+    assert.ok(await evaluate(`(${updateButton}).className.includes("text-orange")`), "An outdated branch uses the orange pill");
+    await evaluate(`(${updateButton}).click()`);
+    assert.equal(await evaluate('window.resolveClicks'), 2);
+    await delay(250);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, "pill-update-branch.png"), image.toPNG()));
+    await evaluate('window.setPrAction({ label: "Address review", tone: "red" })');
+    await waitFor(`[...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Address review')`);
+    await delay(250);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, "pill-address-review.png"), image.toPNG()));
+    await evaluate('window.setPrAction(null)');
+    await waitFor(`!(${resolveButton}) && !(${updateButton})`);
     for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 18, ""]]) {
       window.setContentSize(800, height);
       await evaluate(`window.setMessageCount(${count})`);
@@ -149,9 +164,19 @@ async function browserChecks() {
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
     await evaluate('window.setModel("claude-sonnet-5-5")');
     await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    // A composer narrow enough that the empty prompt's placeholder wraps must not flip between layouts forever.
+    window.webContents.setZoomFactor(3);
+    await delay(250);
+    await evaluate('window.setDraft("x")');
+    await evaluate('window.setDraft("")');
+    await delay(500);
+    window.webContents.setZoomFactor(1);
+    await delay(250);
+    assert.ok(!consoleErrors.some((message) => message.includes("Maximum update depth")), "A narrow composer with an empty draft settles");
+    assert.equal(await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top'), compactTop, "The empty prompt is compact again");
     console.log("PASS: long chats open at the bottom before paint, including after reading older messages");
-    console.log("PASS: conflict pill placement, click action, disabled state, and removal");
-    console.log("PASS: fast mode appears only for supported Opus models and the prompt expands on wrapping");
+    console.log("PASS: PR action pill placement, click action, disabled state, tones, and removal");
+    console.log("PASS: fast mode appears only for supported Opus models, the prompt expands on wrapping, and a narrow empty prompt settles");
     console.log("PASS: message previews stay inside the conversation and above the prompt");
     app.exit(0);
   } catch (error) {

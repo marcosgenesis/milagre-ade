@@ -19,6 +19,7 @@
     "test:task-track": "node scripts/test-task-track.cjs",
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
+    "test:diff-view": "node scripts/test-diff-view.cjs",
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
     "test:sidebar-usage": "node scripts/test-sidebar-usage.cjs",
     "test:sidebar-resize": "node scripts/test-sidebar-resize.cjs",

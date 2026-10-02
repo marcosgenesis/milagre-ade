@@ -1,5 +1,6 @@
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("../shared/agent-runs.mjs");
 const { patchSession } = require("../shared/project-edits.mjs");
+const { chatTitle } = require("../shared/chats.mjs");
 const { renderTranscript, providerName } = require("./handover.cjs");
 
 /** The part of an IPC error the user should read. */
@@ -142,7 +143,7 @@ class ChatHost {
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title ? { titlePending: true } : {}) } },
+        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
         messages: [...next.messages, message],
       };
     });
@@ -190,7 +191,7 @@ class ChatHost {
         sessions: {
           ...latest.sessions,
           [sessionId]: { ...source, handedOverTo: target },
-          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true },
+          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId)) },
         },
       };
     });
@@ -216,7 +217,7 @@ class ChatHost {
       await this.settleHandover(projectPath, target);
     } catch (error) {
       await this.settleHandover(projectPath, target);
-      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error)}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
+      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
     }
   }
 

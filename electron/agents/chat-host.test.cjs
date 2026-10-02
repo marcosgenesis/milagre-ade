@@ -299,7 +299,7 @@ test("handover opens a linked chat on the other provider in the same worktree an
   t.after(() => manager.closeAll());
   const source = await chatWithReply(host, session, saved);
 
-  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "auto" });
+  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", replies: "concise" });
   assert.notEqual(target, source);
   // Linked as soon as the call resolves. (Pending may already be cleared: this brief resolves at once.)
   assert.equal(saved.get(ALPHA).sessions[source].handedOverTo, target);
@@ -313,6 +313,10 @@ test("handover opens a linked chat on the other provider in the same worktree an
   assert.deepEqual(briefs.map(({ provider, lastUserMessage, cwd, transcriptPath }) => ({ provider, lastUserMessage, cwd, transcriptPath })), [{ provider: "claude", lastUserMessage: "fix the login redirect", cwd: ALPHA, transcriptPath: `/tmp/handovers/${source}.md` }]);
   await waitUntil(() => created.some((item) => item.provider === "codex"));
   assert.equal(created.find((item) => item.provider === "codex").options.cwd, ALPHA);
+  const turn = created.find((item) => item.provider === "codex").turns[0];
+  assert.deepEqual({ effort: turn.effort, permissionMode: turn.permissionMode, replies: turn.replies }, { effort: "high", permissionMode: "auto", replies: "concise" });
+  assert.equal(state.sessions[target].generatedTitle, "fix the login redirect");
+  assert.equal(state.sessions[target].titlePending, undefined);
 });
 
 test("handover refuses while the source turn runs and for the same provider", async (t) => {
@@ -343,7 +347,7 @@ test("a second handover while the first is pending returns the same chat", async
 });
 
 test("a handover that fails leaves a note with the transcript path and keeps the links", async (t) => {
-  const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async () => { throw new Error("disk full"); } } });
+  const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async () => { throw new Error("disk full."); } } });
   t.after(() => manager.closeAll());
   const source = await chatWithReply(host, session, saved);
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });

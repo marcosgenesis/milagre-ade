@@ -207,7 +207,7 @@ function App() {
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
-  lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
+  lockedProviderRef.current = messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const latest = statesRef.current[projectOfKey(chatId)];
@@ -292,7 +292,7 @@ function App() {
     return Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ sessionMessages }) => sessionMessages.length > 0)
+      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || session.handoverPending)
       .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
@@ -607,7 +607,7 @@ function App() {
       });
       if (projectRef.current?.path !== project.path) return;
       setSelectedSessionId(sessionId);
-      chooseModel(target);
+      setSelectedModel(target);
     } catch (error) {
       setNotice(`Could not hand over: ${ipcError(error)}`);
     }
@@ -848,7 +848,7 @@ function App() {
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
-            lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
+            lockedProvider={messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined}
             onHandover={(provider) => void handover(provider)}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}

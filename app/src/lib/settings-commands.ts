@@ -19,6 +19,8 @@ export function settingsCommands(settings: AppSettings, update: (patch: Partial<
     choice("usageDisplay", "remaining", "Usage: Remaining", "plan limits left"),
     choice("showUsageInSidebar", true, "Sidebar usage: Show", "on enable plan limits"),
     choice("showUsageInSidebar", false, "Sidebar usage: Hide", "off disable plan limits"),
+    choice("chatOrder", "created", "Chat order: Newest chat first", "sidebar sort created date"),
+    choice("chatOrder", "recent", "Chat order: Latest message first", "sidebar sort recent activity"),
     choice("claudeReplies", "concise", "Claude replies: Concise", "short responses"),
     choice("claudeReplies", "normal", "Claude replies: Normal", "responses"),
     ...([

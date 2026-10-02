@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
 import type { PermissionMode } from "../model";
+import type { ChatOrder } from "./chat-list";
 
 export type ThemePreference = "system" | "light" | "dark";
 /** Whether plan usage reads as the share used or the share left. */
@@ -26,6 +27,8 @@ export interface AppSettings {
   claudeReplies: ClaudeReplies;
   /** Apply TLDR writing rules to both providers. */
   tldrEnabled: boolean;
+  /** Sidebar chats by start date, or with the latest message first. */
+  chatOrder: ChatOrder;
 }
 
 const STORAGE_KEY = "milagre-settings";
@@ -33,7 +36,8 @@ const LEGACY_THEME_KEY = "milagre-theme";
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
 const USAGE_DISPLAYS: UsageDisplay[] = ["used", "remaining"];
 const CLAUDE_REPLIES: ClaudeReplies[] = ["concise", "normal"];
-const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, notifyOnCompletion: true, showDockBadge: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true };
+const CHAT_ORDERS: ChatOrder[] = ["created", "recent"];
+const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, notifyOnCompletion: true, showDockBadge: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true, chatOrder: "created" };
 
 function load(): AppSettings {
   try {
@@ -55,6 +59,7 @@ function load(): AppSettings {
       editorId: typeof saved.editorId === "string" ? saved.editorId : DEFAULTS.editorId,
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
+      chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
     };
   } catch {
     return DEFAULTS;

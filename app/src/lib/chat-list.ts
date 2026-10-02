@@ -1,3 +1,4 @@
+import type { ChatMessage } from "../model";
 export { chatTitle } from "../../../electron/shared/chats.mjs";
 
 /** What the mark at the left of a chat row shows; the first that applies wins. */
@@ -9,6 +10,15 @@ export function chatMark({ asking = false, waiting, running, unread }: { asking?
   if (running) return "running";
   if (unread) return "unread";
   return "idle";
+}
+
+/** How the sidebar orders chats: by when they started, or by their latest message. Newest first either way. */
+export type ChatOrder = "created" | "recent";
+
+/** Chats newest first. Message ids only grow, so a chat's first message dates its start and its last one its latest activity. */
+export function orderChats<T extends { sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
+  const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
+  return [...chats].sort((a, b) => key(b) - key(a));
 }
 
 /** A line count in a few characters: 980, 2.1k, 14k, 2.1m. */

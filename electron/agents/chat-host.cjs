@@ -23,8 +23,8 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused });
+  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {} }) {
+    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat });
     this.runs = {};
     this.seq = 0;
     this.openChat = null;
@@ -127,6 +127,7 @@ class ChatHost {
       // A new chat takes the worktree's chat that has no messages yet, if there is one.
       session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
+      const firstMessage = !latest.messages.some(message => message.session_id === session.id);
       const chatId = chatKey(projectPath, session.id);
       const withSession = { ...latest, next_id: nextId, sessions: { ...latest.sessions, [session.id]: session } };
       // A running turn's reply so far is saved first, so it stays above the new message.
@@ -139,11 +140,12 @@ class ChatHost {
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider } },
+        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title ? { titlePending: true } : {}) } },
         messages: [...next.messages, message],
       };
     });
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
+    if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
     this.startTurn({
       chatId: target.chatId,
       provider,

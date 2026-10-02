@@ -173,6 +173,7 @@ async function generateGitText(input, { provider = "claude", models = {}, timeou
 function claudeModel({ getCommand, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   return async ({ system, prompt, signal }) => {
     const command = await getCommand();
+    signal?.throwIfAborted();
     if (!command) throw new Error("The Claude CLI isn't installed.");
     const { query } = await loadSdk();
     const abortController = new AbortController();
@@ -215,9 +216,10 @@ const OUTPUT_SCHEMA = {
 };
 
 /** One GPT-6 Luna turn in a short-lived, ephemeral, read-only `codex app-server` thread. */
-function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options), clientVersion = "0.0.0" }) {
+function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options), clientVersion = "0.0.0", outputSchema = OUTPUT_SCHEMA }) {
   return async ({ system, prompt, signal }) => {
     const command = await getCommand();
+    signal?.throwIfAborted();
     if (!command) throw new Error("Codex isn't installed.");
     const rpc = createRpc({ command, cwd: os.tmpdir() });
     let streamed = "";
@@ -250,7 +252,7 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
       await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
       rpc.notify("initialized");
       const { thread } = await rpc.request("thread/start", { model: CODEX_MODEL, cwd: os.tmpdir(), approvalPolicy: "never", sandbox: "read-only", baseInstructions: system, ephemeral: true });
-      await rpc.request("turn/start", { threadId: thread?.id, input: [{ type: "text", text: prompt, text_elements: [] }], outputSchema: OUTPUT_SCHEMA });
+      await rpc.request("turn/start", { threadId: thread?.id, input: [{ type: "text", text: prompt, text_elements: [] }], outputSchema });
       await finished;
       return final ?? streamed;
     } finally {

@@ -87,6 +87,8 @@ async function browserChecks() {
     await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))`);
     await waitFor('document.querySelector("[data-chat-hover-card]")?.textContent.includes("Ready to merge")');
     assert.ok(await evaluate('[...document.querySelectorAll("[role=tooltip]")].some(node => node.textContent === "Ready to merge · Pull request #10213")'));
+    // Capture the row and card with the pointer over the chat title, clear of the link tooltip.
+    await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.querySelector('[data-row]') }))`);
     await delay(200);
     await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-ready.png", image.toPNG()));
     await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);

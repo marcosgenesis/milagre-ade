@@ -22,6 +22,7 @@
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
     "test:sidebar-usage": "node scripts/test-sidebar-usage.cjs",
     "test:sidebar-resize": "node scripts/test-sidebar-resize.cjs",
+    "test:chat-order": "node scripts/test-chat-order.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
     "test:ui": "node --test \"app/src/**/*.test.ts\"",
     "release": "semantic-release",

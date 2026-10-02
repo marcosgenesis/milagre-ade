@@ -7,10 +7,12 @@ const ok = (content, extra = {}) => ({ type: "tool_result", tool_use_id: "t", co
 
 test("Claude: commands, reads and edits get a title and a kind", () => {
   assert.deepEqual(claudeStep("t1", "Bash", { command: "npm test", description: "Run tests" }), { id: "t1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" });
-  assert.deepEqual(claudeStep("t2", "Read", { file_path: "/repo/src/App.tsx" }), { id: "t2", kind: "read", title: "Read `App.tsx`" });
-  assert.deepEqual(claudeStep("t3", "Edit", { file_path: "/repo/src/App.tsx", old_string: "a", new_string: "b" }), { id: "t3", kind: "edit", title: "Edited `App.tsx`" });
-  assert.deepEqual(claudeStep("t4", "Write", { file_path: "/repo/notes.txt", content: "hi" }), { id: "t4", kind: "edit", title: "Wrote `notes.txt`" });
+  assert.deepEqual(claudeStep("t2", "Read", { file_path: "/repo/src/App.tsx" }), { id: "t2", kind: "read", title: "Read `App.tsx`", file: "/repo/src/App.tsx" });
+  assert.deepEqual(claudeStep("t3", "Edit", { file_path: "/repo/src/App.tsx", old_string: "a", new_string: "b" }), { id: "t3", kind: "edit", title: "Edited `App.tsx`", file: "/repo/src/App.tsx" });
+  assert.deepEqual(claudeStep("t4", "Write", { file_path: "/repo/notes.txt", content: "hi" }), { id: "t4", kind: "edit", title: "Wrote `notes.txt`", file: "/repo/notes.txt" });
   assert.equal(claudeStep("t5", "NotebookEdit", { notebook_path: "/repo/a.ipynb" }).title, "Edited `a.ipynb`");
+  assert.equal(claudeStep("t5", "NotebookEdit", { notebook_path: "/repo/a.ipynb" }).file, "/repo/a.ipynb");
+  assert.equal("file" in claudeStep("t6", "Read", {}), false);
   assert.deepEqual(claudeStep("t6", "Grep", { pattern: "greet", path: "src" }), { id: "t6", kind: "search", title: "Searched for `greet` in `src`" });
   assert.deepEqual(claudeStep("t7", "Glob", { pattern: "**/*.js" }), { id: "t7", kind: "search", title: "Found files matching `**/*.js`" });
   assert.deepEqual(claudeStep("t8", "WebSearch", { query: "IANA example domain" }), { id: "t8", kind: "search", title: "Searched the web for `IANA example domain`" });
@@ -88,7 +90,7 @@ test("Codex: commands show the command without the shell wrapper", () => {
 
 test("Codex: reads, searches and listings Codex recognised get their own kind", () => {
   const read = command({ command: "/bin/zsh -lc 'cat src/app.js'", commandActions: [{ type: "read", command: "cat src/app.js", name: "app.js", path: "/repo/src/app.js" }] });
-  assert.deepEqual(codexStep(read), { id: "exec-1", kind: "read", title: "Read `app.js`", detail: "$ cat src/app.js\n" });
+  assert.deepEqual(codexStep(read), { id: "exec-1", kind: "read", title: "Read `app.js`", detail: "$ cat src/app.js\n", file: "/repo/src/app.js" });
   assert.deepEqual(codexStepResult({ ...read, status: "completed", exitCode: 0, aggregatedOutput: "export function greet() {}\n" }), { id: "exec-1", status: "done" });
   assert.deepEqual(codexStepResult({ ...read, status: "failed", exitCode: 1, aggregatedOutput: "cat: src/app.js: No such file or directory\n" }), { id: "exec-1", status: "failed", detail: "$ cat src/app.js\ncat: src/app.js: No such file or directory\n" });
 
@@ -102,7 +104,7 @@ test("Codex: reads, searches and listings Codex recognised get their own kind", 
 
 test("Codex: file changes show what changed and the diff", () => {
   const created = { type: "fileChange", id: "exec-2", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "one\ntwo\n" }] };
-  assert.deepEqual(codexStep(created), { id: "exec-2", kind: "edit", title: "Created `notes.txt`" });
+  assert.deepEqual(codexStep(created), { id: "exec-2", kind: "edit", title: "Created `notes.txt`", file: "/repo/notes.txt" });
   assert.deepEqual(codexStepResult({ ...created, status: "completed" }), { id: "exec-2", status: "done", title: "Created `notes.txt`", detail: "--- /repo/notes.txt\n+one\n+two\n" });
   const edited = { type: "fileChange", id: "exec-3", status: "declined", changes: [{ path: "/repo/app.js", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-a\n+b\n" }, { path: "/repo/old.js", kind: { type: "delete" }, diff: "gone\n" }] };
   assert.deepEqual(codexStep(edited).title, "Edited 2 files");

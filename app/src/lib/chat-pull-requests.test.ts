@@ -6,7 +6,7 @@ import type { ChatStep } from "../model.ts";
 const url = (n: number) => `https://github.com/example/repo/pull/${n}`;
 const shell = (detail: string, status: "done" | "failed" = "done"): ChatStep => ({ id: detail, kind: "shell", title: "Ran", status, detail });
 const reply = (...steps: ChatStep[]) => ({ steps });
-const pr = (number: number, extra: Partial<{ state: "OPEN" | "MERGED"; hasConflicts: boolean; readyToMerge: boolean }> = {}) =>
+const pr = (number: number, extra: Partial<{ state: "OPEN" | "MERGED"; hasConflicts: boolean; readyToMerge: boolean; isBehind: boolean; changesRequested: boolean }> = {}) =>
   ({ number, url: url(number), title: `PR ${number}`, state: "OPEN" as const, readyToMerge: false, hasConflicts: false, ...extra });
 
 test("finds the URL gh prints after creating a PR", () => {
@@ -64,6 +64,6 @@ test("the chat's PRs keep creation order and include the branch PR once", () => 
 });
 
 test("the row shows PRs that need attention first, then the rest in order", () => {
-  const prs = [pr(84, { state: "MERGED" }), pr(88), pr(90, { hasConflicts: true }), pr(91, { readyToMerge: true })];
-  assert.deepEqual(rowPullRequests(prs).map((item) => item.number), [90, 88, 91, 84]);
+  const prs = [pr(84, { state: "MERGED" }), pr(88), pr(90, { hasConflicts: true }), pr(91, { readyToMerge: true }), pr(92, { isBehind: true }), pr(93, { changesRequested: true })];
+  assert.deepEqual(rowPullRequests(prs).map((item) => item.number), [90, 92, 93, 88, 91, 84]);
 });

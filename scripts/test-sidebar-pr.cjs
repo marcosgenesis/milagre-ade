@@ -29,9 +29,9 @@ function Fixture() {
   window.setCollapsed = setCollapsed;
   const [multi, setMulti] = useState([]);
   window.setMulti = setMulti;
-  const { pullRequests: prs, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests("/fixture", state);
-  window.dismissConflictAction = () => dismissConflictAction(prs["/fixture/worktree"]);
-  window.dismissedConflicts = dismissedConflicts;
+  const { pullRequests: prs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests("/fixture", state);
+  window.dismissBlockerAction = (blocker = "conflicts") => dismissBlockerAction(prs["/fixture/worktree"], blocker);
+  window.dismissedConflicts = dismissedBlockers;
   return <aside data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, paddingTop: 10 }}>
     <ChatRow item={{ id: "1", label: "Rename fixture", details: { pullRequests: prs["/fixture/worktree"] ? [prs["/fixture/worktree"]] : [] } }}
       active collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
@@ -48,6 +48,8 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   const { guardNavigation } = require("../electron/links.cjs");
+  // A fresh profile, so a zoom level saved for 127.0.0.1 in the shared Electron profile can't change the layout.
+  app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-sidebar-pr-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 600, height: 400, show: false, webPreferences: { backgroundThrottling: false } });
   const opened = [];
@@ -109,7 +111,7 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-red")'), true);
     assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("conflicts")'));
     await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-conflicts.png", image.toPNG()));
-    await evaluate('window.dismissConflictAction()');
+    await evaluate('window.dismissBlockerAction()');
     await waitFor('window.dismissedConflicts.includes(window.pr.url)');
     await evaluate('window.refreshPR()');
     await delay(100);
@@ -124,6 +126,22 @@ async function browserChecks() {
     assert.equal(await evaluate('window.dismissedConflicts.includes(window.pr.url)'), false, "A later conflict can offer the action again");
     await evaluate('window.pr = { ...window.pr, hasConflicts: false }; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
+    const shot = (name) => process.env.MILAGRE_SCREENSHOT_DIR && window.webContents.capturePage().then(image => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, name), image.toPNG()));
+    await evaluate('window.pr = { ...window.pr, isBehind: true }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").textContent.includes("Out of date")');
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-orange")'), true, "An outdated branch is orange");
+    assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("out of date")'));
+    await shot("sidebar-out-of-date.png");
+    await evaluate('window.dismissBlockerAction("behind")');
+    await waitFor('window.dismissedConflicts.includes("behind:" + window.pr.url)');
+    await evaluate('window.pr = { ...window.pr, changesRequested: true }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").textContent.includes("Needs changes")');
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-red")'), true, "Requested changes outrank an outdated branch");
+    assert.ok(await evaluate('window.dismissedConflicts.includes("behind:" + window.pr.url)'), "A new blocker leaves the other dismissal alone");
+    await shot("sidebar-changes-requested.png");
+    await evaluate('window.pr = { ...window.pr, isBehind: false, changesRequested: false }; window.refreshPR()');
+    await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Needs changes")');
+    await waitFor('!window.dismissedConflicts.includes("behind:" + window.pr.url)');
     assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color'), openColor);
     await evaluate('window.pr = { ...window.pr, state: "MERGED" }; window.refreshPR()');
     await waitFor('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("merged")');
@@ -170,7 +188,7 @@ async function browserChecks() {
     assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-chat-card-pr]")].map(link => link.textContent)'), [
       "#84 · Show the to-do pill",
       "#88 · Find text in the open chat",
-      "#90 · Run a setup command in new worktreesMerge conflicts",
+      "#90 · Run a setup command in new worktreesConflicts",
     ], "The card lists every PR in the order the chat made them");
     // Moving onto the card keeps it open past the grace period.
     await evaluate(`${thirdRow}.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.querySelector('[data-chat-hover-card]') }))`);
@@ -193,7 +211,7 @@ async function browserChecks() {
     await evaluate('window.setMulti([])');
     await waitFor('!document.querySelector("[data-chat-prs]")');
     console.log("PASS: several PRs: two chips, +N, card lists all and stays open for clicks");
-    console.log("PASS: PR lookup, red conflict state and recovery, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
+    console.log("PASS: PR lookup, red conflict state and recovery, out-of-date and changes-requested states, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
     app.exit(0);
   } catch (error) {
     console.error(error);

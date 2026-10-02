@@ -2,22 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CoordinatorState, PullRequest } from "../model";
 import { chatInProject, sessionIdFromKey } from "../lib/agent-runs";
 import { pullRequestRefs, type PullRequestRef } from "../lib/chat-pull-requests";
-import { updateConflictDismissals } from "../lib/conflict-action";
+import { type PullRequestBlocker, updateBlockerDismissals } from "../lib/pr-blockers";
 
-const DISMISSED_CONFLICTS = "milagre.dismissed-conflict-actions";
+// Conflict entries are bare PR URLs, so this key keeps its name from when conflicts were the only blocker.
+const DISMISSED_BLOCKERS = "milagre.dismissed-conflict-actions";
 
 /** PRs stay transient: refresh on opening a project, focus, turn completion, and while visible. */
 export function useWorktreePullRequests(projectPath: string, state: CoordinatorState | null) {
-  const [dismissedConflicts, setDismissedConflicts] = useState<string[]>(() => {
+  const [dismissedBlockers, setDismissedBlockers] = useState<string[]>(() => {
     try {
-      const saved: unknown = JSON.parse(localStorage.getItem(DISMISSED_CONFLICTS) ?? "[]");
+      const saved: unknown = JSON.parse(localStorage.getItem(DISMISSED_BLOCKERS) ?? "[]");
       return Array.isArray(saved) ? saved.filter((url): url is string => typeof url === "string") : [];
     } catch { return []; }
   });
   useEffect(() => {
-    try { localStorage.setItem(DISMISSED_CONFLICTS, JSON.stringify(dismissedConflicts)); } catch { /* Keep working in memory. */ }
-  }, [dismissedConflicts]);
-  const dismissConflictAction = (pr: PullRequest) => setDismissedConflicts((current) => updateConflictDismissals(current, pr, true));
+    try { localStorage.setItem(DISMISSED_BLOCKERS, JSON.stringify(dismissedBlockers)); } catch { /* Keep working in memory. */ }
+  }, [dismissedBlockers]);
+  const dismissBlockerAction = (pr: PullRequest, blocker: PullRequestBlocker) => setDismissedBlockers((current) => updateBlockerDismissals(current, pr, blocker));
   const stateRef = useRef(state);
   stateRef.current = state;
   const [snapshot, setSnapshot] = useState<{ projectPath: string; prs: Record<string, PullRequest | null> }>({ projectPath: "", prs: {} });
@@ -41,7 +42,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
         try {
           const pr = await window.milagre.readPullRequest(path).catch(() => null);
           if (!disposed) {
-            setDismissedConflicts((current) => updateConflictDismissals(current, pr));
+            setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
             setSnapshot((current) => ({
               projectPath,
               prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
@@ -127,7 +128,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
   return {
     pullRequests: snapshot.projectPath === projectPath ? snapshot.prs : {},
     chatPullRequests: chatSnapshot.projectPath === projectPath ? chatSnapshot.prs : {},
-    dismissedConflicts,
-    dismissConflictAction,
+    dismissedBlockers,
+    dismissBlockerAction,
   };
 }

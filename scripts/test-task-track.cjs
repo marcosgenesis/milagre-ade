@@ -71,8 +71,9 @@ async function browserChecks() {
     catch (error) { throw new Error(`${source}: ${error.message}`); }
   };
   const clickLabel = label => evaluate(`[...document.querySelectorAll("button")].find(button => button.getAttribute("aria-label") === ${JSON.stringify(label)}).click()`);
-  const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR ?? path.resolve(__dirname, "../docs/screenshots/task-track");
+  const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
+    if (!screenshotDir) return;
     await delay(300);
     const fs = require("node:fs");
     fs.mkdirSync(screenshotDir, { recursive: true });

@@ -1,9 +1,10 @@
 import type { AgentSession, ChatMessage, CoordinatorState, DiffStat } from "../model";
 
 /** What the mark at the left of a chat row shows; the first that applies wins. */
-export type ChatMark = "waiting" | "running" | "unread" | "idle";
+export type ChatMark = "question" | "waiting" | "running" | "unread" | "idle";
 
-export function chatMark({ waiting, running, unread }: { waiting: boolean; running: boolean; unread: boolean }): ChatMark {
+export function chatMark({ asking = false, waiting, running, unread }: { asking?: boolean; waiting: boolean; running: boolean; unread: boolean }): ChatMark {
+  if (asking) return "question";
   if (waiting) return "waiting";
   if (running) return "running";
   if (unread) return "unread";

@@ -49,6 +49,15 @@ export function chatsWaitingForUser(runs: AgentRuns, projectPath: string): Set<n
   return waiting;
 }
 
+/** Session ids of the project's chats whose next card is a question (approvals show first), so the sidebar can mark them apart. */
+export function chatsAskingUser(runs: AgentRuns, projectPath: string): Set<number> {
+  const asking = new Set<number>();
+  for (const [key, run] of Object.entries(runs)) {
+    if (run.approvals.length === 0 && run.questions.length > 0 && chatInProject(projectPath, key)) asking.add(sessionIdFromKey(key));
+  }
+  return asking;
+}
+
 /**
  * Session ids of the project's chats with a turn running, so the sidebar can mark them. Subagents
  * can outlive the turn that started them, so a chat with one still active counts too.

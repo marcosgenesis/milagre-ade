@@ -1,4 +1,5 @@
 import type { ChatStep, PullRequest } from "../model";
+import { pullRequestBlockers } from "./pr-blockers.ts";
 
 /**
  * A PR a chat created or merged: its URL, or a number gh looks up in the chat's repository.
@@ -60,8 +61,8 @@ export function chatPullRequests(refs: PullRequestRef[], found: Record<PullReque
   return prs;
 }
 
-/** The order the row shows them in: conflicts, then other open PRs, then merged ones. */
+/** The order the row shows them in: blocked PRs (conflicts, changes requested, out of date), other open PRs, then merged ones. */
 export function rowPullRequests(prs: PullRequest[]): PullRequest[] {
-  const rank = (pr: PullRequest) => (pr.state === "MERGED" ? 2 : pr.hasConflicts ? 0 : 1);
+  const rank = (pr: PullRequest) => (pr.state === "MERGED" ? 2 : pullRequestBlockers(pr).length ? 0 : 1);
   return prs.map((pr, index) => ({ pr, index })).sort((a, b) => rank(a.pr) - rank(b.pr) || a.index - b.index).map(({ pr }) => pr);
 }

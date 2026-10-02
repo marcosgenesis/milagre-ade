@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Archive02Icon,
+  BubbleChatIcon,
   CircleIcon,
   Copy01Icon,
   FileEditIcon,
@@ -15,6 +16,7 @@ import {
   LinkSquare02Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
+  ShieldAlertIcon,
   SourceCodeIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -25,6 +27,9 @@ import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { DiffStat, PullRequest } from "@/model";
+import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
+
+const toneClass = { red: "text-red", orange: "text-orange" } as const;
 
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -70,6 +75,7 @@ export type ChatRowActions = {
 const HIDE_ONLY: ArchivePlan = { milagreOwned: false, shared: false, status: null };
 
 const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
+  question: "Asking you",
   waiting: "Waiting for you",
   running: "Running",
   unread: "Unread",
@@ -90,14 +96,24 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
 
 /* ─────────────────────────────────────────────────────────
  * CHAT MARK
- * One slot left of the label. Waiting asks for you (accent with
- * a halo), running spins a ring, unread is a plain accent dot,
- * and an idle chat keeps a faint dot so labels stay aligned.
+ * One slot left of the label. A question shows a chat bubble,
+ * an approval a shield, running spins a ring, unread is a plain
+ * accent dot, and an idle chat keeps a faint dot so labels stay
+ * aligned.
  * ───────────────────────────────────────────────────────── */
+/** Marks that ask for you draw an icon, so a question and an approval read apart. The shield is orange like the approval card. */
+const MARK_ICON = {
+  question: { icon: BubbleChatIcon, tone: "text-accent" },
+  waiting: { icon: ShieldAlertIcon, tone: "text-orange" },
+} satisfies Partial<Record<ChatMark, { icon: HugeIconData; tone: string }>>;
+
+function MarkIcon({ mark }: { mark: keyof typeof MARK_ICON }) {
+  return <span className={`flex ${MARK_ICON[mark].tone}`}><HugeiconsIcon icon={MARK_ICON[mark].icon} size={13} strokeWidth={2} color="currentColor" /></span>;
+}
+
 function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?: boolean }) {
   const dot =
-    mark === "waiting" ? "size-2 bg-accent ring-[3px] ring-accent-tint"
-    : mark === "unread" ? "size-2 bg-accent"
+    mark === "unread" ? "size-2 bg-accent"
     : "size-1.5 bg-ink-3 opacity-40";
   return (
     <span className={`sidebar-copy mr-2 flex size-3 shrink-0 items-center justify-center ${topAligned ? "mt-1" : ""}`}>
@@ -105,9 +121,10 @@ function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?
         data-slot="chat-mark"
         data-mark={mark}
         {...(mark === "idle" ? { "aria-hidden": true } : { role: "img", "aria-label": MARK_LABEL[mark], title: MARK_LABEL[mark] })}
-        className={mark === "running" ? "flex" : `rounded-full ${dot}`}
+        className={mark === "running" ? "flex" : mark in MARK_ICON ? "flex" : `rounded-full ${dot}`}
       >
         {mark === "running" && <SpinnerRing size={12} />}
+        {mark in MARK_ICON && <MarkIcon mark={mark as keyof typeof MARK_ICON} />}
       </span>
     </span>
   );
@@ -290,22 +307,25 @@ export function ChatRow({
   );
 }
 
-/** Open conflicts are red, merged is purple, other open PRs are green. */
+/** Merged is purple, a blocked PR takes its first blocker's tone, other open PRs are green. */
 function prTone(pr: PullRequest) {
-  return pr.state === "MERGED" ? "text-purple-500" : pr.hasConflicts ? "text-red" : "text-green";
+  const blocker = pullRequestBlockers(pr)[0];
+  return pr.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : "text-green";
 }
 
 function prIcon(pr: PullRequest) {
-  return pr.state === "MERGED" ? GitMergeIcon : pr.readyToMerge && !pr.hasConflicts ? Tick02Icon : GitPullRequestIcon;
+  return pr.state === "MERGED" ? GitMergeIcon : isReadyToMerge(pr) ? Tick02Icon : GitPullRequestIcon;
 }
 
-/** One PR under the chat's title. Only a chat's single PR has room to spell out "Conflicts" or "Ready". */
+const isReadyToMerge = (pr: PullRequest) => pr.state === "OPEN" && pr.readyToMerge && pullRequestBlockers(pr).length === 0;
+
+/** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
-  const hasConflicts = pr.state === "OPEN" && pr.hasConflicts;
-  const readyToMerge = pr.state === "OPEN" && pr.readyToMerge && !hasConflicts;
+  const blocker = pullRequestBlockers(pr)[0];
+  const readyToMerge = isReadyToMerge(pr);
   return (
     <Tooltip
-      label={hasConflicts ? `Conflicts · Pull request #${pr.number}` : readyToMerge ? `Ready to merge · Pull request #${pr.number}` : `${pr.state === "MERGED" ? "Merged" : "Open"} pull request #${pr.number}`}
+      label={blocker ? `${BLOCKERS[blocker].long} · Pull request #${pr.number}` : readyToMerge ? `Ready to merge · Pull request #${pr.number}` : `${pr.state === "MERGED" ? "Merged" : "Open"} pull request #${pr.number}`}
       side="bottom"
       className="min-w-0"
     >
@@ -313,7 +333,7 @@ function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean 
         href={pr.url}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={`Open ${pr.state === "MERGED" ? "merged " : ""}pull request #${pr.number}${hasConflicts ? ", conflicts" : readyToMerge ? ", ready to merge" : ""}`}
+        aria-label={`Open ${pr.state === "MERGED" ? "merged " : ""}pull request #${pr.number}${blocker ? `, ${BLOCKERS[blocker].short.toLowerCase()}` : readyToMerge ? ", ready to merge" : ""}`}
         data-chat-pr
         className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         onClick={(event) => event.stopPropagation()}
@@ -325,7 +345,7 @@ function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean 
           <HugeIcon icon={LinkSquare02Icon} size={12} />
         </span>
         <span className="truncate">#{pr.number}</span>
-        {labelled && hasConflicts && <span className="shrink-0 text-red">Conflicts</span>}
+        {labelled && blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
         {labelled && readyToMerge && <span className="shrink-0 text-green">Ready</span>}
       </a>
     </Tooltip>
@@ -385,7 +405,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
 }) {
   const { details = {} } = item;
   const mark = item.mark ?? "idle";
-  const status = mark !== "idle" ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : "text-accent-ink" }
+  const status = mark !== "idle" ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : mark === "waiting" ? "text-orange" : "text-accent-ink" }
     : details.failed ? { label: "Last turn failed", tone: "text-red" }
     : null;
   return (
@@ -413,8 +433,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
         {details.pullRequests?.length ? (
           <div data-chat-card-prs className="-mx-1 flex max-h-[148px] flex-col gap-0.5 overflow-y-auto">
             {details.pullRequests.map((pr) => {
-              const hasConflicts = pr.state === "OPEN" && pr.hasConflicts;
-              const readyToMerge = pr.state === "OPEN" && pr.readyToMerge && !hasConflicts;
+              const blocker = pullRequestBlockers(pr)[0];
               return (
                 <a
                   key={pr.url}
@@ -427,8 +446,8 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
                 >
                   <span className={`flex size-4 shrink-0 items-center justify-center ${prTone(pr)}`}><HugeIcon icon={prIcon(pr)} size={14} /></span>
                   <span className="min-w-0 flex-1 truncate leading-snug"><span className="tabular-nums">#{pr.number}</span>{pr.title ? ` · ${pr.title}` : ""}</span>
-                  {hasConflicts && <span className="shrink-0 text-red">Merge conflicts</span>}
-                  {readyToMerge && <span className="shrink-0 text-green">Ready to merge</span>}
+                  {blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
+                  {isReadyToMerge(pr) && <span className="shrink-0 text-green">Ready to merge</span>}
                 </a>
               );
             })}
@@ -455,6 +474,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
 
 function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
   if (mark === "running") return <SpinnerRing size={12} />;
+  if (mark in MARK_ICON) return <MarkIcon mark={mark as keyof typeof MARK_ICON} />;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;
 }
 
@@ -494,7 +514,7 @@ function ChatMenu({
   const [plan, setPlan] = useState<ArchivePlan | "checking" | null>(null);
   const [top, setTop] = useState(position.y);
   const { details = {} } = item;
-  const running = item.mark === "running" || item.mark === "waiting";
+  const running = item.mark === "running" || item.mark === "waiting" || item.mark === "question";
 
   useLayoutEffect(() => {
     menuRef.current?.querySelector<HTMLElement>("[data-menu-row]")?.focus();

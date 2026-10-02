@@ -273,8 +273,8 @@ ipcMain.handle("notification:state", (_event, state) => notifier.sync(state));
 ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupported() ? notifier.notifyCompletion(notice) : false);
 ipcMain.handle("notification:attention", (_event, notice) => (Notification.isSupported() ? notifier.notify(notice) : false));
 
-// While any chat's turn runs the Mac stays awake (the screen can still sleep). On until the renderer
-// pushes the saved setting.
+// While any chat's turn or a new worktree's setup runs the Mac stays awake (the screen can still sleep).
+// On until the renderer pushes the saved setting.
 const keepAwake = new KeepAwake({ powerSaveBlocker });
 ipcMain.handle("app:set-keep-awake", (_event, enabled) => keepAwake.setEnabled(enabled === true));
 
@@ -300,7 +300,7 @@ const agents = new SessionManager({
   send: sendAgentEvent,
 });
 
-const worktreeSetups = new WorktreeSetups({ send: sendAgentEvent });
+const worktreeSetups = new WorktreeSetups({ send: sendAgentEvent, keepAwake });
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
@@ -332,7 +332,13 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
     sendAgentEvent(request.chatId, { type: "turn-cancelled" });
     return { turnId: null, steered: false };
   }
-  return agents.startTurn({ ...request, prompt: setup.note ? `${prompt}\n\n${setup.note}` : prompt, images, command: cli.command });
+  try {
+    return await agents.startTurn({ ...request, prompt: setup.note ? `${prompt}\n\n${setup.note}` : prompt, images, command: cli.command });
+  } catch (error) {
+    // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
+    keepAwake.turnNotStarted(request.chatId);
+    throw error;
+  }
 });
 
 // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again

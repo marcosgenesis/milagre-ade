@@ -26,9 +26,10 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { attentionNotice } from "./lib/attention";
+import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
@@ -203,8 +204,11 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
-  const { pullRequests, chatPullRequests: chatPrs, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
+  const pullRequestBlocker = selectedPullRequest
+    ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
+    : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -276,6 +280,7 @@ function App() {
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const asking = useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
@@ -291,7 +296,7 @@ function App() {
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
@@ -302,7 +307,7 @@ function App() {
           },
         };
       });
-  }, [state, waiting, running, pullRequests, chatPrs]);
+  }, [state, asking, waiting, running, pullRequests, chatPrs]);
   // Switching projects asks first while a turn runs here (the project menu says which chat).
   const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
   const runningChatRef = useRef(runningChat);
@@ -851,7 +856,7 @@ function App() {
   }
   commands.push(...chats.map((chat): Command => ({
     id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
-    detail: [chat.mark === "waiting" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
+    detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
     keywords: [chat.details.path, ...chat.details.pullRequests.flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
     run: () => openChat(Number(chat.id)),
   })));
@@ -932,10 +937,14 @@ function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
-            onResolveConflicts={selectedSession && selectedPullRequest?.state === "OPEN" && selectedPullRequest.hasConflicts && !dismissedConflicts.includes(selectedPullRequest.url)
-              ? () => {
-                dismissConflictAction(selectedPullRequest);
-                void executeSend("Resolve the merge conflicts in this branch against the pull request's base branch. Preserve the intended changes from both sides and run the relevant checks.", permissionMode, [], [], true);
+            pullRequestAction={selectedSession && selectedPullRequest && pullRequestBlocker
+              ? {
+                label: BLOCKERS[pullRequestBlocker].action,
+                tone: BLOCKERS[pullRequestBlocker].tone,
+                onRun: () => {
+                  dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
+                  void executeSend(blockerPrompt(pullRequestBlocker, selectedPullRequest), permissionMode, [], [], true);
+                },
               }
               : undefined}
             isSending={isSending}

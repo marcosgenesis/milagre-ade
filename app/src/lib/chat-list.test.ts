@@ -20,7 +20,8 @@ const state = (): CoordinatorState => ({
   conflicts: [],
 });
 
-test("chatMark: waiting beats running beats unread", () => {
+test("chatMark: a question beats waiting beats running beats unread", () => {
+  assert.equal(chatMark({ asking: true, waiting: true, running: true, unread: true }), "question");
   assert.equal(chatMark({ waiting: true, running: true, unread: true }), "waiting");
   assert.equal(chatMark({ waiting: false, running: true, unread: true }), "running");
   assert.equal(chatMark({ waiting: false, running: false, unread: true }), "unread");

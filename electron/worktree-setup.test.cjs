@@ -153,6 +153,18 @@ test("a skipped or unapproved command never runs; a typed one needs no approval"
   assert.deepEqual(ran, ["make c"]);
 });
 
+test("a worktree made through a symlink still runs its setup when the chat names its real path", async (t) => {
+  const real = await tempDir(t);
+  const link = path.join(await tempDir(t, "milagre-link-"), "worktrees");
+  await fs.symlink(real, link);
+  const ran = [];
+  const setups = new WorktreeSetups({ send: () => {}, trust: { isApproved: async () => false, approve: async () => {} }, run: async ({ cwd }) => (ran.push(cwd), { status: "done", exitCode: 0, output: "", durationMs: 1 }) });
+  await setups.prepare({ worktreePath: link, projectPath: "/p", resolved: { source: "repo", command: "npm ci" } });
+  assert.equal(await setups.decide(real, "run"), true);
+  await setups.beforeTurn("p#1", real);
+  assert.deepEqual(ran, [real]);
+});
+
 test("a failed setup lets the turn run with a note", async () => {
   const events = [];
   const setups = new WorktreeSetups({ send: (_chatId, event) => events.push(event), trust: { isApproved: async () => true, approve: async () => {} }, run: async ({ onOutput }) => {

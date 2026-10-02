@@ -1,6 +1,7 @@
 const { spawn } = require("node:child_process");
 const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
+const { realpathSync } = require("node:fs");
 const path = require("node:path");
 const { killTree } = require("./agents/process-tree.cjs");
 const { capOutput, code, formatDuration } = require("./agents/steps.cjs");
@@ -181,6 +182,16 @@ function setupCompleted(id, command, result, timeoutMs = SETUP_TIMEOUT_MS) {
  * The setup commands waiting for their worktree's first turn, and the ones running. `send(chatId, event)`
  * shows a run as a shell step at the start of the chat's reply, its output streamed in batches.
  */
+// Worktrees are keyed by their real path: git lists them resolved (/private/tmp, not /tmp), so the folder
+// createWorktree made and the chat's cwd only match once symlinks are followed.
+function worktreeKey(worktreePath) {
+  try {
+    return realpathSync(worktreePath);
+  } catch {
+    return path.resolve(worktreePath);
+  }
+}
+
 class WorktreeSetups {
   constructor({ send, trust, run = runSetupCommand, timeoutMs = SETUP_TIMEOUT_MS, batchMs = BATCH_MS }) {
     Object.assign(this, { send, trust, run, timeoutMs, batchMs });
@@ -192,25 +203,25 @@ class WorktreeSetups {
   async prepare({ worktreePath, projectPath, resolved }) {
     if (!resolved.command) return null;
     const approved = resolved.source === "setting" || (await this.trust.isApproved(projectPath, resolved.command));
-    this.pending.set(worktreePath, { projectPath, command: resolved.command, source: resolved.source, approved });
+    this.pending.set(worktreeKey(worktreePath), { projectPath, command: resolved.command, source: resolved.source, approved });
     return { command: resolved.command, source: resolved.source, approved };
   }
 
   /** The user's answer to the trust dialog. "run" remembers the command for the repository; "skip" drops it for this worktree. */
   async decide(worktreePath, decision) {
-    const entry = this.pending.get(worktreePath);
+    const entry = this.pending.get(worktreeKey(worktreePath));
     if (!entry) return false;
     if (decision === "run") {
       await this.trust.approve(entry.projectPath, entry.command);
       entry.approved = true;
     } else {
-      this.pending.delete(worktreePath);
+      this.pending.delete(worktreeKey(worktreePath));
     }
     return true;
   }
 
   forget(worktreePath) {
-    this.pending.delete(worktreePath);
+    this.pending.delete(worktreeKey(worktreePath));
   }
 
   /**
@@ -220,9 +231,10 @@ class WorktreeSetups {
   async beforeTurn(chatId, cwd) {
     const active = this.running.get(chatId);
     if (active) return { cancelled: (await active.done).status === "cancelled", note: "" };
-    const entry = this.pending.get(cwd);
+    const key = worktreeKey(cwd);
+    const entry = this.pending.get(key);
     if (!entry) return { cancelled: false, note: "" };
-    this.pending.delete(cwd);
+    this.pending.delete(key);
     if (!entry.approved) return { cancelled: false, note: "" };
     const result = await this.start(chatId, cwd, entry.command);
     return { cancelled: result.status === "cancelled", note: setupNote(entry.command, result, this.timeoutMs) };

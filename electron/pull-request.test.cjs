@@ -14,7 +14,7 @@ for (const state of ["OPEN", "MERGED"]) {
       assert.ok(options.timeout > 0);
       return { stdout: JSON.stringify([{ number: 10213, url, state, title }]) };
     };
-    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false });
+    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false });
   });
 }
 
@@ -46,7 +46,7 @@ test("uses the checked-out branch for fork PRs instead of its upstream base", as
     assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus"]);
     return { stdout: JSON.stringify([{ number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title }]) };
   };
-  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false });
+  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false });
 });
 
 for (const [name, overrides, ready] of [
@@ -66,5 +66,20 @@ for (const [name, overrides, ready] of [
     const pr = { number: 10213, url, title, state: "OPEN", isDraft: false, reviewDecision: "APPROVED", mergeStateStatus: "CLEAN", ...overrides };
     const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
     assert.equal(result.readyToMerge, ready);
+  });
+}
+
+for (const [state, mergeStateStatus, expected] of [
+  ["OPEN", "DIRTY", true],
+  ["OPEN", "CLEAN", false],
+  ["OPEN", "UNKNOWN", false],
+  ["OPEN", "BLOCKED", false],
+  ["MERGED", "DIRTY", false],
+]) {
+  test(`conflict status: ${state} / ${mergeStateStatus}`, async () => {
+    const pr = { number: 10213, url, title, state, mergeStateStatus };
+    const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
+    assert.equal(result.hasConflicts, expected);
+    assert.equal(result.conflictStatusKnown, mergeStateStatus !== "UNKNOWN");
   });
 }

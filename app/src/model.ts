@@ -132,6 +132,8 @@ export interface PullRequest {
   url: string;
   state: "OPEN" | "MERGED";
   readyToMerge: boolean;
+  hasConflicts: boolean;
+  conflictStatusKnown?: boolean;
 }
 
 export interface Worktree {

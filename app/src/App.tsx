@@ -202,7 +202,8 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
-  const pullRequests = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -601,7 +602,7 @@ function App() {
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
 
-  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files) {
+  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false) {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     // A switch is stopping this project's turns: a new one would start behind the stop. The draft stays.
     if (!switcher.canSend()) return;
@@ -660,8 +661,10 @@ function App() {
     });
     setSelectedSessionId(chatSession.id);
     setSelectedWorktreeId(worktree.id);
-    setDraft("");
-    imageDraft.clear();
+    if (!preserveComposer) {
+      setDraft("");
+      imageDraft.clear();
+    }
     setPreparing(false);
     await agentRuns.start({
       chatId: chatKey(project.path, chatSession.id),
@@ -905,6 +908,12 @@ function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
+            onResolveConflicts={selectedSession && selectedPullRequest?.state === "OPEN" && selectedPullRequest.hasConflicts && !dismissedConflicts.includes(selectedPullRequest.url)
+              ? () => {
+                dismissConflictAction(selectedPullRequest);
+                void executeSend("Resolve the merge conflicts in this branch against the pull request's base branch. Preserve the intended changes from both sides and run the relevant checks.", permissionMode, [], [], true);
+              }
+              : undefined}
             isSending={isSending}
             sendBlocked={preparing}
             streamingText={run?.text}

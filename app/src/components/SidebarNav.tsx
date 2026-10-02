@@ -245,11 +245,12 @@ function WorkspaceMenu({
     if ("go" in step) go(step.go);
     else setAsking(step.ask);
   };
-  // Keyboard focus moves to a neighbour before the row goes.
-  const forget = (path: string, row?: HTMLElement) => {
-    if (row && document.activeElement === row) {
+  // Focus inside the row (its own button, or the × just clicked) moves to a neighbour before the row goes,
+  // so the arrow keys keep working.
+  const forget = (path: string, item: HTMLElement | null) => {
+    if (item?.contains(document.activeElement)) {
       const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
-      const index = rows.indexOf(row);
+      const index = rows.findIndex((row) => item.contains(row));
       (rows[index + 1] ?? rows[index - 1])?.focus();
     }
     onForgetProject?.(path);
@@ -333,7 +334,7 @@ function WorkspaceMenu({
         {projects.map((row) => {
           const target: SwitchTarget = { kind: "project", path: row.path };
           return (
-            <div key={row.path} className="group/project relative">
+            <div key={row.path} data-project-item className="group/project relative">
               <button
                 data-menu-row
                 data-project-row={row.path}
@@ -345,7 +346,7 @@ function WorkspaceMenu({
                 onKeyDown={(event) => {
                   if (row.current || (event.key !== "Delete" && event.key !== "Backspace")) return;
                   event.preventDefault();
-                  forget(row.path, event.currentTarget);
+                  forget(row.path, event.currentTarget.closest("[data-project-item]"));
                 }}
                 className={`relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking(target) ? "bg-hover-2" : ""}`}
               >
@@ -362,7 +363,7 @@ function WorkspaceMenu({
                   data-forget-project={row.path}
                   aria-label={`Remove ${row.name} from the list`}
                   title="Remove from the list"
-                  onClick={() => forget(row.path)}
+                  onClick={(event) => forget(row.path, event.currentTarget.closest("[data-project-item]"))}
                   className="absolute right-1.5 top-2 z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 opacity-0 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink group-hover/project:opacity-100"
                 >
                   <IconCrossSmall size={14} />

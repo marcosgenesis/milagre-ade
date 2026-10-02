@@ -21,6 +21,18 @@ function fakeShell(script) {
   };
   return { spawnImpl, calls };
 }
+
+// A stand-in for the timer: the test fires the timeout itself instead of racing a real one.
+function fakeTimers() {
+  const timers = [];
+  return {
+    setTimeoutImpl: (callback) => { const timer = { callback, cleared: false }; timers.push(timer); return timer; },
+    clearTimeoutImpl: (timer) => { timer.cleared = true; },
+    fire: () => timers.filter((timer) => !timer.cleared).forEach((timer) => timer.callback()),
+    timers,
+  };
+}
+
 const envBlock = (vars) => Object.entries(vars).map(([key, value]) => `${key}=${value}\0`).join("");
 
 test("returns the first path which reports", async () => {
@@ -50,7 +62,10 @@ test("reads the login shell's environment between the marks, past whatever rc fi
 test("gives up on a shell that hangs, and kills its process group", async () => {
   const { spawnImpl } = fakeShell(() => {});
   const killed = [];
-  const env = await readLoginShellEnv({ shell: "/bin/bash", spawnImpl, timeoutMs: 20, killGroup: (pid) => killed.push(pid) });
+  const timers = fakeTimers();
+  const promise = readLoginShellEnv({ shell: "/bin/bash", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  timers.fire();
+  const env = await promise;
   assert.equal(env, null);
   assert.deepEqual(killed, [4242]);
 });
@@ -134,17 +149,6 @@ test("falls back to the install folders when the shell gives nothing, and leaves
   assert.deepEqual(await loadLoginEnvironment({ target: windows, platform: "win32", readShellEnv: async () => assert.fail("no shell on Windows") }), { source: "none" });
   assert.deepEqual(windows, { PATH: "C:\\Windows" });
 });
-
-// A stand-in for the timer: the test fires the timeout itself instead of racing a real one.
-function fakeTimers() {
-  const timers = [];
-  return {
-    setTimeoutImpl: (callback) => { const timer = { callback, cleared: false }; timers.push(timer); return timer; },
-    clearTimeoutImpl: (timer) => { timer.cleared = true; },
-    fire: () => timers.filter((timer) => !timer.cleared).forEach((timer) => timer.callback()),
-    timers,
-  };
-}
 
 test("a shell that hangs after printing the environment is still killed at the timeout", async () => {
   const { spawnImpl } = fakeShell((child, mark) => {

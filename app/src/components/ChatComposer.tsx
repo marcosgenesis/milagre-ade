@@ -32,6 +32,7 @@ import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
+import { extractOutdatedProvider } from "../lib/cli-status";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -60,6 +61,9 @@ const MessageSection = memo(function MessageSection({
   message,
   isUser,
   onRecommendationSelect,
+  onUpdateCli,
+  updatingCli,
+  cliStatus,
   streaming = false,
   asking = false,
   waitingStepIds = [],
@@ -67,6 +71,9 @@ const MessageSection = memo(function MessageSection({
   message: AppChatMessage;
   isUser: boolean;
   onRecommendationSelect: (option: string) => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
+  cliStatus?: AgentCliStatus | null;
   streaming?: boolean;
   /** The running turn is waiting on the user's answer to a question. */
   asking?: boolean;
@@ -74,6 +81,13 @@ const MessageSection = memo(function MessageSection({
   waitingStepIds?: string[];
 }) {
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
+  const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
+  const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
+  const showUpdateButton = Boolean(
+    outdatedProvider &&
+    onUpdateCli &&
+    (isCurrentlyOutdated || updatingCli === outdatedProvider)
+  );
   const steps = message.steps ?? [];
   return (
     <article
@@ -96,6 +110,25 @@ const MessageSection = memo(function MessageSection({
           </>
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
+        )}
+        {showUpdateButton && outdatedProvider && onUpdateCli && (
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={updatingCli === outdatedProvider}
+              onClick={() => onUpdateCli(outdatedProvider)}
+              className="flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+            >
+              {updatingCli === outdatedProvider ? (
+                <>
+                  <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                  <span>Updating {outdatedProvider === "codex" ? "Codex" : "Claude"}…</span>
+                </>
+              ) : (
+                <span>Update {outdatedProvider === "codex" ? "Codex" : "Claude"} now</span>
+              )}
+            </button>
+          </div>
         )}
       </div>
     </article>
@@ -140,6 +173,8 @@ interface ChatComposerProps {
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -162,6 +197,8 @@ interface ChatComposerProps {
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
   newChatError: string | null;
+  notice?: string | null;
+  onDismissNotice?: () => void;
 }
 
 const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon: IconData }> = [
@@ -283,6 +320,8 @@ export function ChatComposer({
   models,
   cliStatus,
   onModelPickerOpen,
+  onUpdateCli,
+  updatingCli,
   selectedModel,
   onModelChange,
   capability,
@@ -308,6 +347,8 @@ export function ChatComposer({
   findOpen = false,
   findSignal = 0,
   onFindClose,
+  notice,
+  onDismissNotice,
 }: ChatComposerProps) {
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
@@ -357,6 +398,9 @@ export function ChatComposer({
               message={message}
               isUser={message.role === "user"}
               onRecommendationSelect={onRecommendationSelect}
+              onUpdateCli={onUpdateCli}
+              updatingCli={updatingCli}
+              cliStatus={cliStatus}
             />
           ))}
 
@@ -384,6 +428,23 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
+        {notice && (
+          <div
+            role="status"
+            data-notice
+            className="mb-2 flex w-full items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay"
+            style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
+          >
+            <span className="min-w-0 flex-1 break-words">{notice}</span>
+            <button
+              type="button"
+              onClick={onDismissNotice}
+              className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {approval && <div className="mb-2 w-full">{approval}</div>}
         {!isNewChat && pullRequestAction && (
           <div className="mb-2 flex px-1">
@@ -412,6 +473,8 @@ export function ChatComposer({
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}
+          onUpdateCli={onUpdateCli}
+          updatingCli={updatingCli}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           capability={capability}

@@ -8,29 +8,101 @@
 //   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id
 //   { type: "step-started", step }          a tool call began: step = { id, kind, title, detail? } (see steps.cjs)
 //   { type: "step-output", id, text }       command output as it streams (Codex only), appended to the step
-//   { type: "step-completed", id, status, title?, detail? }
+//   { type: "step-completed", id, status, title?, detail?, durationMs? }
 //                                           the tool call ended; detail replaces anything streamed. A step still
 //                                           running when its turn ends gets no step-completed
+//                                           Thinking is a step too (kind "thinking"): its summary streams as
+//                                           step-output, and it ends with how long it took
 //   { type: "permission-request", ...request } and { type: "permission-resolved", requestId, decision }
 //                                           an approval the turn waits on (see permissions.cjs)
 //   { type: "question-request", ...request } and { type: "question-resolved", requestId, outcome }
 //                                           questions the turn waits on (see questions.cjs)
-//   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message }
+//   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message, notice?, login? }
+//                                           notice: the message is one Milagre wrote (a full sentence that names the CLI
+//                                           and the fix), shown as it is; other messages are the agent's own error text.
+//                                           login: the agent isn't logged in; its session is closed so the next message starts a fresh one
 // Exactly one of the last three ends every turn.
 
-const { claudeStep, claudeStepResult, codexStep, codexStepResult } = require("./steps.cjs");
+const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
 const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.";
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 
+// What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
+const CLI_NAMES = { claude: "Claude Code", codex: "Codex" };
+const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
+const UPDATE_COMMANDS = { claude: "claude update", codex: "codex update" };
+const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
+
+// A tracing log line: "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=…". The prefix says
+// nothing a reader needs.
+const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|ERROR)(?:\s+|$)(?:[\w.-]+(?:::[\w.-]+)*:(?:\s+|$))?/;
+
+// The last non-empty line a CLI printed, without terminal colours and without a log line's timestamp, level
+// and module, and whether it was a log line.
+function readLastLine(text) {
+  const raw = String(text ?? "").replace(/\x1b\[[0-9;]*m/g, "").split("\n").map((item) => item.trim()).filter(Boolean).at(-1) ?? "";
+  const logged = LOG_PREFIX.test(raw);
+  const line = logged ? raw.replace(LOG_PREFIX, "") : raw;
+  return { line: line.length > 300 ? `${line.slice(0, 299)}…` : line, logged };
+}
+
+// The last line a CLI printed, for an error message.
+const lastLine = (text) => readLastLine(text).line;
+
+const withoutPeriod = (text) => text.replace(/\.$/, "");
+
 function missingCliMessage(name) {
-  return `Couldn't find the ${name} CLI. Install it and make sure it's on your PATH, then try again.`;
+  return `Milagre couldn't find ${CLI_NAMES[name]}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
+}
+
+function cliTooOldMessage(name, version, minimum) {
+  return `Milagre needs ${CLI_NAMES[name]} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
+}
+
+function cliBrokenMessage(name, command, detail) {
+  const reason = lastLine(detail);
+  return `${CLI_NAMES[name]} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
+}
+
+function loginMessage(name) {
+  return `${CLI_NAMES[name]} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
+}
+
+// The reason is the last line, with a log line's prefix dropped. A process the OS killed with nothing left to
+// say gets its signal instead.
+function crashMessage(name, detail, { signal } = {}) {
+  const { line } = readLastLine(detail);
+  const reason = signal && !line ? `${CLI_NAMES[name]} exited with signal ${signal}` : line;
+  return `${CLI_NAMES[name]} stopped unexpectedly${reason ? `: ${withoutPeriod(reason)}` : ""}. Send your message again to continue this chat.`;
+}
+
+// Codex passes some API errors on as raw JSON: {"type":"error","status":400,"error":{"message":"…"}}.
+function codexErrorText(error) {
+  const message = error?.message || "Codex could not finish this turn.";
+  try {
+    return JSON.parse(message)?.error?.message || message;
+  } catch {
+    return message;
+  }
+}
+
+// A turn failure made of one of Milagre's own messages; the renderer shows it without an "Agent error:" prefix.
+const failedWith = (message, extra = {}) => ({ type: "turn-failed", message, notice: true, ...extra });
+
+// A turn Codex couldn't authenticate: codexErrorInfo is "unauthorized", or an HTTP failure with status 401.
+function codexUnauthorized(error) {
+  const info = error?.codexErrorInfo;
+  return info === "unauthorized" || (Boolean(info) && typeof info === "object" && Object.values(info).some((detail) => detail?.httpStatusCode === 401));
 }
 
 function isTerminal(event) {
   return TERMINAL_TYPES.has(event.type);
 }
+
+// The mapper's clock; tests set state.now.
+const now = (state) => (state.now ?? Date.now)();
 
 function textDelta(state, text) {
   state.hasText = true;
@@ -38,11 +110,15 @@ function textDelta(state, text) {
 }
 
 // Claude Agent SDK message -> events. Partial messages (includePartialMessages) carry the
-// streamed text. Each assistant message holds a finished content block: a tool_use block starts a
-// step, and the tool_result in a later user message ends it. Subagent messages (parent_tool_use_id
-// set) are not part of the reply: the Agent call that started them is the step.
+// streamed text and thinking: a thinking block is a step from its start to its stop. Each assistant
+// message holds a finished content block: a tool_use block starts a step, and the tool_result in a
+// later user message ends it. Subagent messages (parent_tool_use_id set) are not part of the reply:
+// the Agent call that started them is the step.
 function mapClaudeMessage(message, state) {
   const events = [];
+  // Claude Code answers a turn it can't authenticate with a reply of its own ("Not logged in · Please run
+  // /login") marked authentication_failed, then a failed result.
+  if (message.type === "assistant" && message.error === "authentication_failed") state.authFailed = true;
   if (message.type === "system" && message.subtype === "init" && message.session_id && message.session_id !== state.sessionId) {
     state.sessionId = message.session_id;
     events.push({ type: "session-started", nativeId: message.session_id });
@@ -51,6 +127,21 @@ function mapClaudeMessage(message, state) {
     const event = message.event ?? {};
     if (event.type === "content_block_start" && event.content_block?.type === "text" && state.hasText) events.push(textDelta(state, "\n\n"));
     if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) events.push(textDelta(state, event.delta.text));
+    if (event.type === "content_block_start" && (event.content_block?.type === "thinking" || event.content_block?.type === "redacted_thinking")) {
+      // The thinking block streaming now; ids count up for the provider's life, so they stay unique in a reply.
+      state.thinkingCount = (state.thinkingCount ?? 0) + 1;
+      state.thinking = { id: `thinking-${state.thinkingCount}`, index: event.index, text: "", startedAt: now(state) };
+      events.push({ type: "step-started", step: thinkingStep(state.thinking.id) });
+    }
+    const thinking = state.thinking;
+    if (thinking && event.index === thinking.index && event.type === "content_block_delta" && event.delta?.type === "thinking_delta" && event.delta.thinking) {
+      thinking.text += event.delta.thinking;
+      events.push({ type: "step-output", id: thinking.id, text: event.delta.thinking });
+    }
+    if (thinking && event.index === thinking.index && event.type === "content_block_stop") {
+      state.thinking = null;
+      events.push({ type: "step-completed", ...thinkingEnd(thinking.id, now(state) - thinking.startedAt, thinking.text) });
+    }
   }
   if (message.type === "assistant" && message.parent_tool_use_id == null) {
     for (const block of message.message?.content ?? []) {
@@ -74,7 +165,9 @@ function mapClaudeMessage(message, state) {
   }
   if (message.type === "result") {
     if (message.subtype === "success" && !message.is_error) events.push({ type: "turn-completed" });
+    else if (state.authFailed) events.push(failedWith(loginMessage("claude"), { login: true }));
     else events.push({ type: "turn-failed", message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn." });
+    state.authFailed = false;
   }
   return events;
 }
@@ -87,6 +180,7 @@ function mapCodexNotification(method, params, state) {
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
+    if (params.item.type === "reasoning") return codexReasoning(method, params.item, state);
     const step = codexStep(params.item);
     if (!step) return [];
     // Steps started and not yet completed, by item id.
@@ -100,6 +194,9 @@ function mapCodexNotification(method, params, state) {
     const started = state.steps.delete(step.id) ? [] : [{ type: "step-started", step }];
     return [...started, { type: "step-completed", ...codexStepResult(params.item) }];
   }
+  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  // A new summary part is a new paragraph.
+  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
   // The deltas are a preview: the first chunk can be missing, and item/completed carries the whole output.
   if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   if (method === "item/agentMessage/delta" && params.delta) {
@@ -117,10 +214,30 @@ function mapCodexNotification(method, params, state) {
     // A late completion for an earlier turn must not end the one running now.
     if (state.turnId && turn.id && turn.id !== state.turnId) return [];
     if (turn.status === "interrupted") return [{ type: "turn-cancelled" }];
-    if (turn.status === "failed") return [{ type: "turn-failed", message: turn.error?.message || "Codex could not finish this turn." }];
+    // A 401 means "log in" only where OpenAI auth is required (state.requiresOpenaiAuth, from account/read); on an
+    // API key or a custom provider it is that provider's own error.
+    if (turn.status === "failed") return [codexUnauthorized(turn.error) && state.requiresOpenaiAuth === true ? failedWith(loginMessage("codex"), { login: true }) : { type: "turn-failed", message: codexErrorText(turn.error) }];
     return [{ type: "turn-completed" }];
   }
   return [];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+// A reasoning item is a thinking step: its summary streams in, and item/completed carries all of it.
+function codexReasoning(method, item, state) {
+  const id = String(item.id);
+  state.steps ??= new Set();
+  state.thinkingStarts ??= new Map();
+  if (method === "item/started") {
+    if (state.steps.has(id)) return [];
+    state.steps.add(id);
+    state.thinkingStarts.set(id, now(state));
+    return [{ type: "step-started", step: thinkingStep(id) }];
+  }
+  const started = state.steps.delete(id) ? [] : [{ type: "step-started", step: thinkingStep(id) }];
+  const startedAt = state.thinkingStarts.get(id);
+  state.thinkingStarts.delete(id);
+  const summary = (item.summary ?? []).filter((part) => typeof part === "string" && part).join("\n\n");
+  return [...started, { type: "step-completed", ...thinkingEnd(id, startedAt === undefined ? undefined : now(state) - startedAt, summary) }];
+}
+
+module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, cliBrokenMessage, failedWith, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage };

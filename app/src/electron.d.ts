@@ -3,18 +3,42 @@ export {};
 import type { AttentionNotice } from "./lib/attention";
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
-import type { DiffStat, ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { WorktreeRename } from "./lib/worktree-rename";
+import type { AgentCliStatus, AgentModels, DiffStat, EditorInfo, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+
+import type { WorktreeStatus } from "./lib/archive";
+
+/** Which patterns apply to new worktrees, and the files they match in the main checkout. */
+export type FilesToCopy = { source: "worktreeinclude" | "setting" | "default"; worktreeInclude: string | null; matches: string[] };
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
 declare global {
   interface Window {
     milagre: {
+      getPathForFile: (file: File) => string;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number }>;
+      /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
+      getWorktreeRoots: () => Promise<string[]>;
+      /** What archiving would lose from a worktree. Rejects when git can't tell. */
+      getWorktreeStatus: (worktreePath: string, base: string) => Promise<WorktreeStatus>;
+      /**
+       * Removes a worktree Milagre made and its branch; `force` discards what it holds. Main closes the chat's agent
+       * and checks again against `seen`, the status the user saw. Rejects with git's message, or a message that
+       * says the worktree changed after it was checked.
+       */
+      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; branch: string | null; branchDeleted: boolean }>;
+      /** The project's saved "Files to copy" patterns, with what the effective patterns match now. */
+      readFilesToCopy: (projectPath: string) => Promise<FilesToCopy & { filesToCopy: string[] }>;
+      /** What patterns would match, without saving them. `.worktreeinclude` still wins. */
+      previewFilesToCopy: (projectPath: string, patterns: string[]) => Promise<FilesToCopy>;
+      saveFilesToCopy: (projectPath: string, patterns: string[]) => Promise<FilesToCopy & { filesToCopy: string[] }>;
+      /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
+      onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
       /** Opens the worktree's folder in Finder. */
@@ -28,6 +52,10 @@ declare global {
         push: (request: { cwd: string }) => Promise<GitPushResult>;
         openPr: (request: { cwd: string; base?: string; title: string; body: string }) => Promise<GitPrResult>;
       };
+      /** Code editors found on this Mac, in the order the first becomes the default. */
+      listEditors: () => Promise<EditorInfo[]>;
+      /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Resolves to null, or a short error message. */
+      openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<string | null>;
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
@@ -36,13 +64,19 @@ declare global {
       /** Sends the answers to a question card, or dismisses it (null). False when the question is gone. */
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null) => Promise<boolean>;
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
-      getModelCapabilities: () => Promise<ModelCapabilities>;
+      /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
+      getModels: () => Promise<AgentModels>;
+      /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
+      getCliStatus: () => Promise<AgentCliStatus>;
       interruptAgent: (chatId: string) => Promise<void>;
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
+      /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
+      setKeepAwake: (enabled: boolean) => Promise<void>;
+      getCachedUsage: () => Promise<UsageSnapshot>;
       /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
       notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */

@@ -69,6 +69,16 @@ test("streams text per chat and saves each finished reply once", () => {
   assert.equal(second.state.next_id, 12);
 });
 
+test("Milagre's own failure messages carry no \"Agent error:\" prefix, the agent's raw errors do", () => {
+  const run = (text: string) => ({ [key(1)]: { text, model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } });
+  const own = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.", notice: true, login: true });
+  assert.equal(own.state.messages[0].body, "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.");
+  const partial = applyAgentEvent(base(), run("Half"), PROJECT, key(1), { type: "turn-failed", message: "Codex stopped unexpectedly. Send your message again to continue this chat.", notice: true });
+  assert.equal(partial.state.messages[0].body, "Half\n\nCodex stopped unexpectedly. Send your message again to continue this chat.");
+  const raw = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "The model gpt-x is not supported." });
+  assert.equal(raw.state.messages[0].body, "Agent error: The model gpt-x is not supported.");
+});
+
 test("keeps partial text when a turn fails or is cancelled", () => {
   const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   const failed = applyAgentEvent(base(), runs, PROJECT, key(1), { type: "turn-failed", message: "Codex stopped: boom" });
@@ -320,6 +330,22 @@ test("a step that ends without a detail keeps none, and a new title replaces the
     { id: "r1", kind: "read", title: "Read `app.js`", status: "done", offset: 0 },
     { id: "w1", kind: "search", title: "Searched the web for `IANA`", status: "done", offset: 0 },
   ]);
+});
+
+test("thinking streams its summary and ends with how long it took", () => {
+  const { runs } = fold([
+    { type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } },
+    { type: "step-output", id: "th1", text: "Plan " },
+    { type: "step-output", id: "th1", text: "it." },
+  ]);
+  assert.equal(runs[key(1)].steps[0].detail, "Plan it.");
+  const ended = fold([{ type: "step-completed", id: "th1", status: "done", title: "Thought for 2s", detail: "Plan it.", durationMs: 2_100 }], runs).runs;
+  assert.deepEqual(ended[key(1)].steps, [{ id: "th1", kind: "thinking", title: "Thought for 2s", status: "done", offset: 0, detail: "Plan it.", durationMs: 2_100 }]);
+});
+
+test("thinking cut off by a cancelled turn is saved as done, not failed", () => {
+  const { state } = fold([{ type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } }, { type: "step-started", step: npmTest }, { type: "turn-cancelled" }]);
+  assert.deepEqual(state.messages.at(-1)?.steps?.map((step) => step.status), ["done", "failed"]);
 });
 
 test("streamed output keeps its last 20,000 characters", () => {

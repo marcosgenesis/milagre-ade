@@ -18,11 +18,11 @@ function streamKey(event) {
 // period, and are replaced when they crash or the chat changes provider or working directory.
 // Text deltas and command output are batched so fast streams don't flood IPC; a batch of output
 // keeps only the end the renderer would keep. Replacing and closing a chat's
-// session run one at a time per chat, and events from a session that is no longer the chat's
+// session run one at a time per chat, and onSessionClosed(chatId) runs once a chat's session is gone. Events from a session that is no longer the chat's
 // current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
-  constructor({ createSession, send, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
-    Object.assign(this, { createSession, send, idleMs, batchMs });
+  constructor({ createSession, send, onSessionClosed = () => {}, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
+    Object.assign(this, { createSession, send, onSessionClosed, idleMs, batchMs });
     this.sessions = new Map();
     this.buffers = new Map();
     this.queues = new Map();
@@ -31,7 +31,7 @@ class SessionManager {
   async startTurn(request) {
     const start = (entry) => {
       clearTimeout(entry.idleTimer);
-      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode });
+      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode, replies: request.replies });
     };
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
     try {
@@ -147,6 +147,7 @@ class SessionManager {
     if (this.sessions.get(chatId) !== entry) return;
     this.flush(chatId);
     this.sessions.delete(chatId);
+    this.onSessionClosed(chatId);
   }
 
   async closeAll() {

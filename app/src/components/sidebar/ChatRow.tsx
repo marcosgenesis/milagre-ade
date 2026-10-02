@@ -12,10 +12,13 @@ import {
   GitPullRequestIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
+  SourceCodeIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
+import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archive";
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
+import { useEditors } from "@/lib/editors";
 import type { DiffStat } from "@/model";
 
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -48,10 +51,16 @@ export type ChatRowActions = {
   onRename?: (id: string, title: string) => void;
   onMarkUnread?: (id: string, unread: boolean) => void;
   onReveal?: (id: string) => void;
+  onOpenInEditor?: (id: string) => void;
   /** Opens the chat with its "Commit and open PR" dialog. */
   onCommit?: (id: string) => void;
-  onArchive?: (id: string) => void;
+  /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
+  onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
+  onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => void;
 };
+
+/** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
+const HIDE_ONLY: ArchivePlan = { milagreOwned: false, shared: false, status: null };
 
 const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
   waiting: "Waiting for you",
@@ -61,7 +70,9 @@ const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
 
 const HOVER_CARD_DELAY = 500;
 const HOVER_CARD_WIDTH = 256;
-const MENU_WIDTH = 208;
+const MENU_WIDTH = 240;
+
+type MenuEntry = { key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean; archiveChoice?: boolean };
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
@@ -381,17 +392,36 @@ function ChatMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [archiveArmed, setArchiveArmed] = useState(false);
+  // What the confirm step offers: unknown until the worktree has been looked at.
+  const [plan, setPlan] = useState<ArchivePlan | "checking" | null>(null);
   const [top, setTop] = useState(position.y);
   const { details = {} } = item;
+  const running = item.mark === "running" || item.mark === "waiting";
 
+  useLayoutEffect(() => {
+    menuRef.current?.querySelector<HTMLElement>("[data-menu-row]")?.focus();
+  }, []);
+
+  // The confirm step can add items and a line, so the height is measured again with it.
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
     // Opens upwards when there isn't room below.
     const height = menu.getBoundingClientRect().height;
     setTop(position.y + height > window.innerHeight - 8 ? Math.max(8, position.y - height - 8) : position.y);
-    menu.querySelector<HTMLElement>("[data-menu-row]")?.focus();
-  }, [position.y]);
+    if (archiveArmed) menu.querySelector<HTMLElement>("[data-archive-choice]:not(:disabled)")?.focus();
+  }, [position.y, archiveArmed, plan]);
+
+  const armArchive = () => {
+    setArchiveArmed(true);
+    if (!actions.onArchiveCheck) {
+      setPlan(HIDE_ONLY);
+      return;
+    }
+    setPlan("checking");
+    // A worktree that can't be checked only hides the chat, as before.
+    actions.onArchiveCheck(item.id).then(setPlan, () => setPlan(HIDE_ONLY));
+  };
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -417,9 +447,25 @@ function ChatMenu({
     onClose();
     action();
   };
+  const { editor } = useEditors();
   const copy = (text: string) => run(() => void navigator.clipboard.writeText(text).catch(() => {}));
 
-  const items: Array<{ key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean } | "divider"> = [
+  const resolved = plan && plan !== "checking" ? plan : null;
+  const confirm = resolved ? archiveChoices({ plan: resolved, running }) : null;
+  const archiveItems: Array<MenuEntry> = !archiveArmed
+    ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: armArchive, disabled: !actions.onArchive }]
+    : confirm
+      ? confirm.choices.map((choice) => ({
+          key: `archive-${choice.mode}`,
+          label: choice.label,
+          icon: Archive02Icon,
+          onSelect: run(() => resolved && actions.onArchive?.(item.id, choice.mode, resolved)),
+          danger: choice.tone === "danger",
+          archiveChoice: true,
+        }))
+      : [{ key: "archive-checking", label: "Checking worktree…", icon: Archive02Icon, onSelect: () => {}, disabled: true, archiveChoice: true }];
+
+  const items: Array<MenuEntry | "divider"> = [
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },
     { key: "rename", label: "Rename chat", icon: PencilEdit02Icon, onSelect: run(onRename), disabled: !actions.onRename },
@@ -427,12 +473,11 @@ function ChatMenu({
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : { key: "unread", label: "Mark as unread", icon: CircleIcon, onSelect: run(() => actions.onMarkUnread?.(item.id, true)), disabled: !actions.onMarkUnread },
     { key: "reveal", label: IS_MAC ? "Open in Finder" : "Open in file manager", icon: FolderOpenIcon, onSelect: run(() => actions.onReveal?.(item.id)), disabled: !actions.onReveal || !details.path },
+    { key: "editor", label: editor ? `Open in ${editor.name}` : "No editor found", icon: SourceCodeIcon, onSelect: run(() => actions.onOpenInEditor?.(item.id)), disabled: !editor || !actions.onOpenInEditor || !details.path },
     // Every chat's folder came from `git worktree list`, so a chat with a folder is in a repository.
     { key: "commit", label: "Commit and open PR…", icon: GitPullRequestIcon, onSelect: run(() => actions.onCommit?.(item.id)), disabled: !actions.onCommit || !details.path },
     "divider",
-    archiveArmed
-      ? { key: "archive", label: item.mark === "running" || item.mark === "waiting" ? "Stop and archive" : "Confirm archive", icon: Archive02Icon, onSelect: run(() => actions.onArchive?.(item.id)), danger: true }
-      : { key: "archive", label: "Archive", icon: Archive02Icon, onSelect: () => setArchiveArmed(true), disabled: !actions.onArchive },
+    ...archiveItems,
   ];
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -473,16 +518,18 @@ function ChatMenu({
               type="button"
               disabled={entry.disabled}
               onClick={entry.onSelect}
-              className={`relative z-10 flex h-8 w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.danger ? "text-red" : "text-ink"}`}
+              {...(entry.archiveChoice ? { "data-archive-choice": true } : {})}
+              className={`relative z-10 flex w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.archiveChoice ? "min-h-8 py-1.5" : "h-8"} ${entry.danger ? "text-red" : "text-ink"}`}
             >
               <span className={`flex size-5 shrink-0 items-center justify-center ${entry.danger ? "text-red" : "text-ink-2"}`}>
                 <HugeIcon icon={entry.icon} size={16} />
               </span>
-              <span className="min-w-0 flex-1 truncate text-[13px]">{entry.label}</span>
+              <span className={`min-w-0 flex-1 text-[13px] ${entry.archiveChoice ? "leading-snug" : "truncate"}`}>{entry.label}</span>
             </button>
           ),
         )}
       </GlideMenu>
+      {confirm?.reason && <p data-archive-reason className="px-2 pb-1 pt-1.5 text-[12px] leading-snug text-ink-3">{confirm.reason}</p>}
     </div>,
     document.body,
   );

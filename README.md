@@ -25,9 +25,11 @@ The broader coordination graph, canvas and richer provider adapters are document
 - macOS
 - Node.js 24 or newer
 - npm
-- At least one supported local CLI agent, such as Codex CLI or Claude Code
+- At least one local CLI agent, logged in: Claude Code 2.1.286 or newer (`claude auth login`), or Codex CLI 0.158.0 or newer (`codex login`)
 
 Milagre runs agent commands locally. It does not provide model credentials or a hosted inference service.
+
+Milagre reads your login shell's environment at startup, so it finds the agents and gives them your `PATH` (`node`, `git`, `gh` and the rest) even when it's opened from Finder or the Dock. The model picker lists the models each installed CLI reports.
 
 ## Development
 

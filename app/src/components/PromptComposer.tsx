@@ -16,8 +16,9 @@ import {
   SecurityCheckIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
-import type { EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { effortCopy, MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { effortCopy, PERMISSION_MODES } from "../model";
+import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
@@ -86,6 +87,12 @@ interface PromptComposerProps {
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
   lockedProvider?: ModelProvider;
+  /** The models each agent offers, or the maintained list until it reports them. */
+  models: ModelOption[];
+  /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
+  cliStatus: AgentCliStatus | null;
+  /** The model picker was opened; the status is checked again. */
+  onModelPickerOpen: () => void;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -121,7 +128,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -136,7 +143,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
-  useEffect(() => { if (modelOpen) setProvider(lockedProvider ?? selectedModel.provider); }, [modelOpen]);
+  useEffect(() => { if (modelOpen) { setProvider(lockedProvider ?? selectedModel.provider); onModelPickerOpen(); } }, [modelOpen]);
   const [query, setQuery] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const [active, setActive] = useState(0);
@@ -170,7 +177,8 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     : menu === "slash"
       ? commands.filter((command) => `${command.name.slice(1)} ${command.desc}`.toLowerCase().includes(tokenQuery))
       : [];
-  const modelRows = MODEL_CATALOG.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
+  const providerNotice = cliNotice(cliStatus?.[provider]);
+  const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0;
 
   useEffect(() => {
@@ -353,10 +361,11 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
               </div>
             }
           >
+            {providerNotice && <p role="status" className="mx-1 mb-1 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">{messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}</p>}
             {modelRows.map((model) => <PickerRow key={model.id} icon={<ProviderLogo provider={model.provider} size={14} />} label={model.name} description={model.description} selected={model.id === selectedModel.id} onClick={() => chooseModel(model)} />)}
           </PickerPanel>
         )}
@@ -396,7 +405,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             {PERMISSION_MODES.map((mode) => (
               <PickerRow
                 key={mode.id}
-                icon={<span className={`flex shrink-0 ${mode.id === "full" ? "text-red" : mode.id === "auto" ? "text-green" : "text-accent-ink"}`}><Icon icon={SecurityCheckIcon} size={14} /></span>}
+                icon={<span className={`flex shrink-0 ${mode.id === "full" ? "text-ink" : mode.id === "auto" ? "text-green" : "text-accent-ink"}`}><Icon icon={SecurityCheckIcon} size={14} /></span>}
                 label={mode.name}
                 description={mode.description}
                 selected={permissionMode === mode.id}
@@ -411,7 +420,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         )}
 
         <div className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line bg-surface transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}>
-          {imageDraft.images.length > 0 && <div className="flex flex-wrap gap-2 px-1 pt-1" aria-label="Attached images">{imageDraft.images.map((image) => <div key={image.id} className="relative rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="h-20 w-24 rounded object-contain" /><button type="button" aria-label={`Remove image ${image.name}`} onClick={() => imageDraft.remove(image.id)} className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-xs"><Icon icon={Cancel01Icon} size={12} /></button></div>)}</div>}
+          {imageDraft.images.length > 0 && <div className="flex flex-wrap gap-2 px-1 pt-1" aria-label="Attached images">{imageDraft.images.map((image) => <div key={image.id} className="relative rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="size-20 rounded object-contain" /><button type="button" aria-label={`Remove image ${image.name}`} onClick={() => imageDraft.remove(image.id)} className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-xs"><Icon icon={Cancel01Icon} size={12} /></button></div>)}</div>}
           {imageDraft.loading && <div role="status" className="px-2 text-xs text-ink-3">Loading images…</div>}
           {imageDraft.error && <div role="alert" className="px-2 text-xs text-red">{imageDraft.error}</div>}
           {attachments.length > 0 && <div className="flex flex-wrap gap-1.5 px-0.5 pt-0.5">{attachments.map((file, index) => <span key={`${file}-${index}`} className="flex h-6.5 items-center gap-1.5 rounded-chip bg-field py-1 pr-1 pl-1.5 text-[11.5px] text-ink-2 shadow-hairline"><Icon icon={File02Icon} size={12} /><span className="max-w-36 truncate">{file}</span><button type="button" aria-label={`Remove ${file}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="flex size-5 items-center justify-center rounded-[5px] text-ink-3 hover:bg-line hover:text-ink"><Icon icon={Cancel01Icon} size={10} /></button></span>)}</div>}
@@ -423,7 +432,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}
             </div>
-            <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-red" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
+            <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
             <button type="button" aria-label={listening ? "Stop voice input" : "Start voice input"} aria-pressed={listening} onClick={toggleListening} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"} ${listening ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}><Icon icon={Mic01Icon} size={15} /></button>
             <button type="button" aria-label="Send" disabled={!canSend || sendBlocked || imageDraft.loading} onClick={onSend} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-6 row-start-2" : "col-start-6 row-start-1"}`} style={{ background: canSend && !sendBlocked ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>
           </div>

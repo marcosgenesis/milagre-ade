@@ -1,13 +1,18 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
 // the user, through canUseTool, before edits and commands its rules don't already allow.
 const CLAUDE_MODES = { ask: "default", auto: "acceptEdits", full: "bypassPermissions" };
+
+// Claude Code's built-in terse output style. Unlike text appended to the system prompt, which the SDK
+// records with a conversation and ignores on later turns and resumes, the style applies to new chats, to
+// resumed chats and to the running query, all through applyFlagSettings before the turn's message.
+const CONCISE_STYLE = "Concise";
 
 // Claude Code prints this when --resume names a session it no longer has.
 const MISSING_CONVERSATION = /No conversation found/i;
@@ -75,10 +80,12 @@ class ClaudeSession {
     if (this.closed) throw Object.assign(new Error("This Claude session is closed."), { sessionClosed: true });
     if (this.turnActive) return this.steer(request);
     if (!this.command) {
-      this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
+      this.emit(failedWith(missingCliMessage("claude")));
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
+    // Whether this turn's init announced a session id (session-started); see readMessages.
+    this.announcedId = false;
     this.cancelRequested = false;
     this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
     let markReady;
@@ -90,7 +97,7 @@ class ClaudeSession {
     }
   }
 
-  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false, replies }) {
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
@@ -113,6 +120,7 @@ class ClaudeSession {
           this.effort = effort;
           this.ultracode = ultracode;
         }
+        await this.applyReplyStyle(replies);
       }
     } catch (error) {
       this.finishTurn({ type: "turn-failed", message: error.message });
@@ -131,6 +139,20 @@ class ClaudeSession {
     this.inbox.push(userMessage(prompt, images));
     this.emit({ type: "turn-started", turnId });
     return { turnId, steered: false };
+  }
+
+  // Concise is Claude Code's flag-layer outputStyle; Normal clears it (null), which falls back to the style
+  // in the user's own Claude settings, exactly what the session would have without Milagre. A CLI that
+  // rejects the style costs only the style: it is dropped for this session, never retried, and the turn runs.
+  async applyReplyStyle(replies) {
+    const wanted = replies === "concise" && !this.styleFailed ? CONCISE_STYLE : null;
+    if (wanted === this.outputStyle) return;
+    try {
+      await this.query.applyFlagSettings({ outputStyle: wanted });
+      this.outputStyle = wanted;
+    } catch {
+      this.styleFailed = true;
+    }
   }
 
   // A message for the running turn goes straight into Claude Code's input. Claude Code picks it up at
@@ -156,6 +178,7 @@ class ClaudeSession {
   beginImplicitTurn() {
     const turnId = randomUUID();
     this.turnActive = true;
+    this.announcedId = false;
     this.cancelRequested = false;
     Object.assign(this.state, { turnId, hasText: false });
     this.turnReady = Promise.resolve();
@@ -173,6 +196,7 @@ class ClaudeSession {
     this.mode = mode;
     this.effort = effort;
     this.ultracode = ultracode;
+    this.outputStyle = null;
     this.query = query({
       prompt: this.inbox,
       options: {
@@ -198,6 +222,9 @@ class ClaudeSession {
       },
     });
     void this.readMessages(this.query);
+    // Thinking arrives as readable summaries rather than empty blocks, for the reply's thinking steps.
+    // Only the display changes (null keeps the model's own thinking budget), so it suits every model.
+    await this.query.setMaxThinkingTokens?.(null, "summarized").catch(() => {});
   }
 
   // Claude Code waits on this promise until the user answers in Milagre, the turn stops, or the SDK
@@ -266,10 +293,19 @@ class ClaudeSession {
         // started by itself, for a steering message that came in just as the last turn ended.
         if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.beginImplicitTurn();
         for (const event of mapClaudeMessage(message, this.state)) {
+          if (event.type === "session-started") this.announcedId = true;
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
           else if (event.type === "turn-failed" && this.resumeGone(`${event.message}\n${message.errors ?? ""}\n${message.result ?? ""}`)) this.resumeFailed();
-          else this.finishTurn(event);
+          else {
+            // A logged-out Claude Code keeps answering "not logged in" until it is restarted, so the session
+            // closes and the next message starts a fresh process. The chat forgets a session id only when this
+            // very turn's init created it: that chat never got an answer. An id from an earlier turn, or one the
+            // session resumed, is a real conversation and stays.
+            if (event.login && this.announcedId) this.emit({ type: "session-reset" });
+            this.finishTurn(event);
+            if (event.login) void this.close();
+          }
         }
       }
       this.handleEnd(query, null);
@@ -291,13 +327,13 @@ class ClaudeSession {
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
     else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
-    else this.finishTurn({ type: "turn-failed", message: error?.message || this.stderr.trim() || "Claude Code stopped unexpectedly." });
+    else this.finishTurn(failedWith(crashMessage("claude", error?.message || this.stderr)));
   }
 
   resumeFailed() {
     if (!this.turnActive) return;
     this.emit({ type: "session-reset" });
-    this.finishTurn({ type: "turn-failed", message: RESUME_FAILED_MESSAGE });
+    this.finishTurn(failedWith(RESUME_FAILED_MESSAGE));
     void this.close();
   }
 
@@ -308,8 +344,9 @@ class ClaudeSession {
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
     this.questions.cancelAll();
-    // Tool calls still waiting for a result never get one.
+    // Tool calls still waiting for a result never get one, nor does thinking that was cut off.
     this.state.tools?.clear();
+    this.state.thinking = null;
     this.emit(event);
     markEnded();
   }

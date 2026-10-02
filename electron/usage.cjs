@@ -2,6 +2,7 @@ const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { createUsageStore } = require("./usage-cache.cjs");
 
 const PROVIDER_TIMEOUT_MS = 10_000;
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -9,10 +10,32 @@ const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_EXPIRED = "Claude sign-in expired. Running any Claude agent refreshes it.";
 const SESSION = { id: "session", label: "Session", shortLabel: "5h" };
 const WEEKLY = { id: "weekly", label: "Weekly", shortLabel: "wk" };
+const RATE_LIMITED = "Claude is rate limiting usage checks.";
+const DEFAULT_RETRY_MS = 5 * 60_000;
+const MAX_RETRY_MS = 30 * 60_000;
 const CLAUDE_RANK = { session: 0, weekly: 1 };
 
-function providerResult(provider, now, status, windows = [], message) {
-  return { provider, status, windows, updatedAt: new Date(now()).toISOString(), ...(message ? { message } : {}) };
+/**
+ * @typedef {object} ProviderUsage
+ * @property {string} provider
+ * @property {"ok"|"error"|"unavailable"} status
+ * @property {object[]} windows
+ * @property {string} updatedAt ISO time of the numbers; the original read time when they are last-known.
+ * @property {string} [message]
+ * @property {number} [retryAfterMs] On a 429 from readClaudeUsage: how long to leave the endpoint alone (5 to 30 minutes).
+ */
+function providerResult(provider, now, status, windows = [], message, extra = {}) {
+  return { provider, status, windows, updatedAt: new Date(now()).toISOString(), ...(message ? { message } : {}), ...extra };
+}
+
+// Retry-After is delta-seconds or an HTTP date; anything unreadable or already past gets the default.
+function retryAfterMs(header, nowMs) {
+  const value = typeof header === "string" ? header.trim() : "";
+  let wait = Number.NaN;
+  if (/^\d+$/.test(value)) wait = Number(value) * 1000;
+  else if (value) wait = Date.parse(value) - nowMs;
+  if (!(wait > 0)) wait = DEFAULT_RETRY_MS;
+  return Math.min(wait, MAX_RETRY_MS);
 }
 
 function percentOrNull(value) {
@@ -108,7 +131,10 @@ async function readClaudeUsage(deps = {}) {
     return done("error", [], error?.name === "TimeoutError" ? "Claude usage timed out." : "Couldn't reach Claude.");
   }
   if (response.status === 401) return done("error", [], CLAUDE_EXPIRED);
-  if (response.status === 429) return done("error", [], "Claude is rate limiting usage checks. Try again in a minute.");
+  if (response.status === 429) {
+    const wait = retryAfterMs(response.headers?.get?.("retry-after"), now());
+    return providerResult("claude", now, "error", [], RATE_LIMITED, { retryAfterMs: wait });
+  }
   if (!response.ok) return done("error", [], `Claude usage failed (HTTP ${response.status}).`);
 
   let body;
@@ -206,14 +232,35 @@ function readCodexUsage(deps = {}) {
   });
 }
 
+// On an error, keep showing the last good numbers (minus windows that have since reset).
+function withLastGood(result, last, nowMs) {
+  if (result.status !== "error" || !last) return result;
+  const windows = last.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > nowMs);
+  return windows.length ? { ...result, windows, updatedAt: last.updatedAt } : result;
+}
+
 function createUsageReader(deps = {}) {
-  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now } = deps;
-  const safely = (provider, read) => Promise.resolve()
-    .then(() => read())
-    .catch(() => providerResult(provider, now, "error", [], "Couldn't read usage."));
+  // `ready` resolves once the login environment is applied: opened from Finder the app's PATH is bare until then,
+  // and the Codex lookup starts `codex` from it.
+  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now, store = createUsageStore(), ready = () => undefined } = deps;
+  const readProvider = async (provider, read) => {
+    const { blocked } = store.get(provider);
+    let result;
+    if (blocked && now() < blocked.until) {
+      result = providerResult(provider, now, "error", [], blocked.message);
+    } else {
+      result = await Promise.resolve()
+        .then(() => read())
+        .catch(() => providerResult(provider, now, "error", [], "Couldn't read usage."));
+      store.setBlocked(provider, result.retryAfterMs > 0 ? { until: now() + result.retryAfterMs, message: result.message } : null);
+      if (result.status === "ok") store.setLast(provider, result);
+    }
+    return withLastGood(result, store.get(provider).last, now());
+  };
   let inFlight = null;
   return function readUsage() {
-    inFlight ??= Promise.all([safely("claude", readClaude), safely("codex", readCodex)])
+    inFlight ??= Promise.resolve().then(ready).catch(() => {})
+      .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex)]))
       .then((providers) => ({ providers }))
       .finally(() => {
         inFlight = null;

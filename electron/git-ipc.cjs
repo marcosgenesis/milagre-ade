@@ -20,17 +20,24 @@ function chatContext(chat = {}) {
 /**
  * Handlers for the "Commit and open PR" dialog: git:changes, git:generate, git:commit, git:push and
  * git:open-pr. They only act in a chat's folder: one of `knownFolders()` (the open projects'
- * checkouts), and the top of its checkout (git-actions checks that). Commands run there with the
- * app's environment.
+ * checkouts), and the top of its checkout (git-actions checks that). Every call waits for `ready()`
+ * (the login shell's environment), so git and gh are found from a Finder launch; commands run in the
+ * folder with that environment. `cli(name)` is main's CLI check: `{ command, problem }`, the path the
+ * SDK and Codex start directly, without a shell.
  */
-function registerGitHandlers(ipcMain, { executable, clientVersion, env = process.env, actions = createGitActions({ env }), models, knownFolders } = {}) {
+function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVersion, env = process.env, actions = createGitActions({ env }), models, knownFolders } = {}) {
+  const command = (name) => async () => {
+    const status = await cli(name);
+    return status?.problem ? null : status?.command ?? null;
+  };
   const textModels = models ?? {
-    claude: claudeModel({ getCommand: () => executable("claude") }),
-    codex: codexModel({ getCommand: () => executable("codex"), clientVersion }),
+    claude: claudeModel({ getCommand: command("claude") }),
+    codex: codexModel({ getCommand: command("codex"), clientVersion }),
   };
 
   async function folder(cwd) {
     if (typeof cwd !== "string" || !path.isAbsolute(cwd)) throw new Error("The chat's folder must be an absolute path.");
+    await ready();
     if (knownFolders) {
       const real = await fs.realpath(cwd).catch(() => null);
       const known = await Promise.all((await knownFolders()).map((item) => fs.realpath(item).catch(() => null)));

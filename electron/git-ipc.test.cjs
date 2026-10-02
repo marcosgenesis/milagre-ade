@@ -21,7 +21,7 @@ function register(overrides = {}) {
   };
   const prompts = [];
   const models = { claude: async ({ prompt }) => { prompts.push(prompt); return '{"commitMessage":"fix: x","prTitle":"Fix x","prBody":"Fixes x."}'; }, codex: null };
-  registerGitHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, { executable: async () => null, actions, models, ...overrides });
+  registerGitHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, { cli: async () => ({ command: null, problem: "missing" }), actions, models, ...overrides });
   const invoke = (channel, ...args) => handlers.get(channel)({}, ...args);
   return { handlers, calls, invoke, prompts };
 }
@@ -54,6 +54,18 @@ test("the channels refuse a folder that isn't an absolute path", async () => {
   const { invoke } = register();
   await assert.rejects(async () => invoke("git:commit", { cwd: "relative/path", message: "x" }), /folder/);
   await assert.rejects(async () => invoke("git:changes", { cwd: 42 }), /folder/);
+});
+
+test("the channels wait for the login environment before running git or gh", async () => {
+  let release;
+  const ready = new Promise((resolve) => { release = resolve; });
+  const { calls, invoke } = register({ ready: () => ready });
+  const pending = invoke("git:push", { cwd: "/repo/wt" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0);
+  release();
+  await pending;
+  assert.deepEqual(calls, [{ name: "push", request: { cwd: "/repo/wt" } }]);
 });
 
 test("the channels only act in a chat's known folder", async (t) => {

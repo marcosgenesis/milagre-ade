@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { promisify } = require("node:util");
+const { copyFilesToWorktree } = require("./worktree-files.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -68,7 +69,7 @@ function slugify(text) {
     .replace(/-+$/, "");
 }
 
-async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEFAULT_WORKTREE_ROOT, suffix = Math.random().toString(36).slice(2, 6) }) {
+async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEFAULT_WORKTREE_ROOT, suffix = Math.random().toString(36).slice(2, 6), copyPatterns, copyLimits }) {
   const name = `${slugify(prompt) || "chat"}-${suffix}`;
   const branch = `milagre/${name}`;
   const worktreePath = path.join(root, path.basename(projectPath), name);
@@ -76,8 +77,27 @@ async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEF
   const start = await resolveBase(projectPath, baseBranch);
   // --no-track: the chat's branch must not push to, or pull from, the branch it started on.
   await git(projectPath, ["worktree", "add", "--no-track", "-b", branch, worktreePath, start]);
+  // Ignored files the project needs (env files) come along; a failed copy never fails the worktree.
+  const copy = await copyFilesToWorktree({ projectPath, worktreePath, setting: copyPatterns, limits: copyLimits });
   // `base` is what the chat's changes are measured against (see diffstat.cjs).
-  return { branch, path: worktreePath, base: start };
+  return { branch, path: worktreePath, base: start, ...(copy.copied.length || copy.notes.length ? { copy } : {}) };
 }
 
-module.exports = { createWorktree, listBranches, slugify };
+// Gives a chat's branch the name picked for it once the chat is already running (see worktree-name.cjs).
+// The folder keeps its first name: moving it would pull it out from under the agent. Resolves to the new
+// branch, or null when there is nothing to rename or git refuses (the branch is gone, or the name is taken).
+async function renameWorktreeBranch({ worktreePath, branch, slug }) {
+  const suffix = branch.match(/-([a-z0-9]+)$/)?.[1];
+  const name = slugify(slug);
+  if (!suffix || !name) return null;
+  const renamed = `milagre/${name}-${suffix}`;
+  if (renamed === branch) return null;
+  try {
+    await git(worktreePath, ["branch", "-m", branch, renamed]);
+    return renamed;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch, slugify };

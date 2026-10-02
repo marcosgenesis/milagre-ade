@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { cliMessage, cliNotice, cliTabLabel, messageParts } from "./cli-status.ts";
+
+test("a CLI with a problem gets a short tab label, and one that runs gets none", () => {
+  assert.equal(cliTabLabel({ state: "missing", message: "m" }), "Not installed");
+  assert.equal(cliTabLabel({ state: "outdated", message: "m" }), "Update");
+  assert.equal(cliTabLabel({ state: "logged-out", message: "m" }), "Log in");
+  assert.equal(cliTabLabel({ state: "broken", message: "m" }), "Not working");
+  assert.equal(cliTabLabel({ state: "ready" }), null);
+  assert.equal(cliTabLabel(null), null);
+  assert.equal(cliTabLabel(undefined), null);
+});
+
+test("the notice ends at the command, while the tooltip keeps the whole message", () => {
+  const message = "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.";
+  assert.equal(cliNotice({ state: "logged-out", message }), "Codex isn't logged in. Run `codex login` in a terminal.");
+  assert.equal(cliMessage({ state: "logged-out", message }), message);
+  assert.equal(cliNotice({ state: "outdated", message: "Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal, then send your message again." }), "Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal.");
+  assert.equal(cliNotice({ state: "broken", message: "Codex (/x/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal, then send your message again." }), "Codex (/x/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal.");
+  assert.equal(cliNotice({ state: "logged-out", message: "Codex isn't logged in." }), "Codex isn't logged in.");
+  assert.equal(cliMessage({ state: "ready" }), null);
+  assert.equal(cliNotice({ state: "ready" }), null);
+  assert.equal(cliNotice({ state: "missing" }), null);
+  assert.equal(cliNotice(null), null);
+});
+
+test("backtick spans become code", () => {
+  assert.deepEqual(messageParts("Run `codex login` in a terminal, then send your message again."), [
+    { text: "Run ", code: false },
+    { text: "codex login", code: true },
+    { text: " in a terminal, then send your message again.", code: false },
+  ]);
+  assert.deepEqual(messageParts("Install it with `curl -fsSL https://claude.ai/install.sh | bash`"), [
+    { text: "Install it with ", code: false },
+    { text: "curl -fsSL https://claude.ai/install.sh | bash", code: true },
+  ]);
+  assert.deepEqual(messageParts("No code here."), [{ text: "No code here.", code: false }]);
+});

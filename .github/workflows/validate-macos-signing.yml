@@ -1,77 +1,12 @@
-name: Release
-
+name: Validate macOS signing
 on:
   push:
-    branches: [main]
-
+    branches:
+      - codex/macos-signing
 permissions:
-  contents: write
-
-concurrency:
-  group: release
-  cancel-in-progress: false
-
+  contents: read
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.release.outputs.tag }}
-    steps:
-      - name: Check out repository history
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Build renderer
-        run: npm run build
-      - name: Test agent runner
-        run: npm run test:agent
-      - name: Test release safeguards
-        run: npm run test:release
-      - name: Check Apple release credentials
-        shell: bash
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          missing=0
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Missing GitHub Actions secret: $name"
-              missing=1
-            fi
-          done
-          exit "$missing"
-      - name: Create release and tag
-        run: npm run release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Find created release tag
-        id: release
-        shell: bash
-        run: |
-          tag="$(git tag --points-at HEAD --sort=-version:refname | grep '^v' | head -n 1 || true)"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          if [ -n "$tag" ]; then
-            echo "Release tag: $tag"
-          else
-            echo "No new release was created for this commit."
-          fi
-
-  package-macos:
-    needs: release
-    if: needs.release.outputs.tag != ''
+  verify-macos:
     strategy:
       fail-fast: false
       matrix:
@@ -83,10 +18,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
-      - name: Check out released commit
+      - name: Check out validation branch
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -121,13 +54,12 @@ jobs:
         run: npm ci
       - name: Build macOS installers
         env:
-          RELEASE_TAG: ${{ needs.release.outputs.tag }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node scripts/with-apple-credentials.cjs npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="${RELEASE_TAG#v}" --config.forceCodeSigning=true --config.dmg.sign=true
+        run: node scripts/with-apple-credentials.cjs npm run package:mac -- --${{ matrix.arch }} --config.extraMetadata.version="0.10.2-signing-check" --config.forceCodeSigning=true --config.dmg.sign=true
       - name: Notarize and staple disk images
         shell: bash
         env:
@@ -153,7 +85,12 @@ jobs:
             xcrun stapler validate "$dmg"
             hdiutil verify "$dmg"
           done
-      - name: Upload macOS installers to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ needs.release.outputs.tag }}" release/*.dmg release/*.zip --clobber
+      - name: Save verified installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-macos-${{ matrix.arch }}
+          path: |-
+            release/*.dmg
+            release/*.zip
+          retention-days: 3
+          compression-level: 0

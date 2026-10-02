@@ -29,17 +29,30 @@ function fixture(t) {
   fs.mkdirSync(path.join(root, 'release/mac-arm64/Milagre.app'), { recursive: true })
   fs.mkdirSync(path.join(root, 'bin'))
   fs.mkdirSync(path.join(root, 'scripts'))
-  fs.copyFileSync(path.join(__dirname, 'with-apple-credentials.cjs'), path.join(root, 'scripts/with-apple-credentials.cjs'))
+  for (const script of ['with-apple-credentials.cjs', 'notarize-dmg.cjs']) fs.copyFileSync(path.join(__dirname, script), path.join(root, 'scripts', script))
   fs.writeFileSync(path.join(root, 'release/Milagre-arm64.dmg'), '')
   const mock = `#!/bin/bash
-printf '%s %s %s\\n' "$(basename "$0")" "$1" "$2" >> "$CALL_LOG"
+printf '%s %s %s %s\\n' "$(basename "$0")" "$1" "$2" "$3" >> "$CALL_LOG"
 if [ "$(basename "$0")" = "$FAIL_TOOL" ]; then exit 1; fi
 if [ "$1" = notarytool ]; then
-  printf '{"id":"test-submission","status":"%s"}\\n' "$NOTARY_STATUS"
+  if [ "$2" = wait ] && [ -n "$WAIT_ERROR" ]; then echo "$WAIT_ERROR" >&2; exit 1; fi
+  if [ "$2" = wait ] && [ -n "$NOTARY_WAIT_STATUS" ]; then NOTARY_STATUS="$NOTARY_WAIT_STATUS"; fi
+  if [ "$2" = wait ] || [[ "$*" == *" --wait "* ]]; then
+    if [ "$NETWORK_ALWAYS_FAIL" = 1 ]; then
+      echo 'Error Domain=NSURLErrorDomain Code=-1009 The Internet connection appears to be offline.' >&2
+      exit 1
+    fi
+    if [ "$NETWORK_FAIL_ONCE" = 1 ] && [ ! -f "$NETWORK_STATE" ]; then
+      touch "$NETWORK_STATE"
+      echo 'Error Domain=NSURLErrorDomain Code=-1009 The Internet connection appears to be offline. No network route' >&2
+      exit 1
+    fi
+  fi
+  printf '{"id":"12345678-1234-1234-1234-123456789abc","status":"%s"}\\n' "$NOTARY_STATUS"
   exit "$NOTARY_EXIT"
 fi
 `
-  for (const tool of ['xcrun', 'codesign', 'spctl', 'hdiutil']) {
+  for (const tool of ['xcrun', 'codesign', 'spctl', 'hdiutil', 'sleep']) {
     fs.writeFileSync(path.join(root, 'bin', tool), mock, { mode: 0o755 })
   }
   const env = {
@@ -48,6 +61,11 @@ fi
     NOTARY_STATUS: 'Accepted',
     NOTARY_EXIT: '0',
     FAIL_TOOL: '',
+    NETWORK_STATE: path.join(root, 'network-state'),
+    NETWORK_FAIL_ONCE: '0',
+    NETWORK_ALWAYS_FAIL: '0',
+    WAIT_ERROR: '',
+    NOTARY_WAIT_STATUS: '',
     ...Object.fromEntries(credentials.map(name => [name, `test-secret-${name}`])),
   }
   return {
@@ -141,4 +159,46 @@ test('release commands trim Apple credentials, preserve certificate passwords an
   const build = workflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
   assert.match(build.run, /^node scripts\/with-apple-credentials\.cjs npm run package:mac /)
   assert.match(notarizeStep.run, /^node scripts\/with-apple-credentials\.cjs bash -e -o pipefail/)
+})
+
+
+test('a network drop while waiting resumes the same submission before stapling', t => {
+  const f = fixture(t)
+  const result = runStep(notarizeStep, f.root, { ...f.env, NETWORK_FAIL_ONCE: '1' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal((f.calls().match(/xcrun notarytool submit/g) || []).length, 1)
+  assert.equal((f.calls().match(/xcrun notarytool wait 12345678-1234-1234-1234-123456789abc/g) || []).length, 2)
+  assert.match(f.calls(), /xcrun stapler staple/)
+})
+
+
+test('persistent network failures stop after four waits without another upload', t => {
+  const f = fixture(t)
+  const result = runStep(notarizeStep, f.root, { ...f.env, NETWORK_ALWAYS_FAIL: '1' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /after four network attempts/)
+  assert.equal((f.calls().match(/xcrun notarytool submit/g) || []).length, 1)
+  assert.equal((f.calls().match(/xcrun notarytool wait/g) || []).length, 4)
+  assert.doesNotMatch(f.calls(), /stapler staple/)
+  assert.doesNotMatch(result.stdout + result.stderr, /test-secret-/)
+})
+
+
+test('a rejected DMG status after upload is never retried or stapled', t => {
+  const f = fixture(t)
+  const result = runStep(notarizeStep, f.root, { ...f.env, NOTARY_WAIT_STATUS: 'Invalid' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Apple notarization failed: Invalid/)
+  assert.equal((f.calls().match(/xcrun notarytool wait/g) || []).length, 1)
+  assert.doesNotMatch(f.calls(), /stapler staple|sleep/)
+})
+
+test('authentication failure during the wait stops immediately without logging credentials', t => {
+  const f = fixture(t)
+  const result = runStep(notarizeStep, f.root, { ...f.env, WAIT_ERROR: 'HTTP status code: 401. Invalid credentials. test-secret-APPLE_APP_SPECIFIC_PASSWORD' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Apple rejected the notarization credentials/)
+  assert.equal((f.calls().match(/xcrun notarytool wait/g) || []).length, 1)
+  assert.doesNotMatch(f.calls(), /stapler staple|sleep/)
+  assert.doesNotMatch(result.stdout + result.stderr, /test-secret-/)
 })

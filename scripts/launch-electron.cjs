@@ -47,6 +47,13 @@ async function prepareMacBundle() {
   run("plutil", ["-replace", "CFBundleIdentifier", "-string", "com.milagre.app", infoPlist]);
   run("plutil", ["-replace", "CFBundleIconFile", "-string", "Milagre.icns", infoPlist]);
   createMacIcon();
+  // Renaming the bundle breaks Electron's ad-hoc signature, and macOS drops notifications
+  // from an app whose signature doesn't verify, so sign it again when it changed.
+  try {
+    run("codesign", ["--verify", "--deep", appBundle]);
+  } catch {
+    run("codesign", ["--force", "--deep", "--sign", "-", appBundle]);
+  }
 }
 
 async function main() {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { archiveSubagent, detachSubagent } from "./subagents.ts";
+import { archiveSubagent, archiveFinishedSubagents } from "./subagents.ts";
 import { applyAgentEvent } from "./agent-runs.ts";
 import type { CoordinatorState, Subagent } from "../model";
 const child: Subagent = { id: "child", title: "Review auth", status: "running", startedAt: 1, updatedAt: 2, transcript: [{ id: "m", kind: "message", text: "Partial review" }] };
@@ -14,19 +14,14 @@ test("archiving a child preserves its output and survives later provider updates
  state = archiveSubagent(state, 1, "child", false);
  assert.equal(Boolean(state.sessions[1].subagents?.[0].archived), false);
 });
-test("unlink creates one read-only chat and continues to route child updates into it", () => {
- let { state, sessionId } = detachSubagent(base(), 1, "child");
- assert.equal(sessionId, 10);
- assert.equal(state.sessions[1].subagents?.[0].detachedSessionId, 10);
- assert.equal(state.sessions[10].subagentSource?.parentSessionId, 1);
- assert.equal(state.sessions[10].native_session_id, undefined);
- assert.equal(state.sessions[10].title, "Review auth");
- assert.equal(state.messages.find(m=>m.session_id===10)?.body, "Partial review");
- const again = detachSubagent(state, 1, "child");
- assert.equal(again.state, state);
- assert.equal(again.sessionId, 10);
- ({ state } = applyAgentEvent(state, {}, "/repo", "/repo#1", { type: "subagent-update", agent: { ...child, updatedAt: 3, status: "completed", transcript: [{ id: "m", kind: "message", text: "Review complete" }] } }));
- assert.equal(state.sessions[10].subagentSnapshot?.status, "completed");
- assert.equal(state.messages.find(m=>m.session_id===10)?.body, "Review complete");
- assert.equal(state.sessions[1].subagents?.[0].detachedSessionId, 10);
+test("archive finished hides only known terminal children and preserves their output", () => {
+ const state = base();
+ const statuses = ["initializing", "running", "waiting", "completed", "failed", "cancelled", "unknown"] as const;
+ state.sessions[1].subagents = statuses.map(status => ({ ...child, id: status, status }));
+ const next = archiveFinishedSubagents(state, 1);
+ assert.deepEqual(next.sessions[1].subagents?.filter(agent => agent.archived).map(agent => agent.id), ["completed", "failed", "cancelled"]);
+ assert.equal(next.sessions[1].subagents?.find(agent => agent.id === "failed")?.transcript[0].text, "Partial review");
+ assert.equal(next.sessions[1].subagents?.find(agent => agent.id === "unknown")?.archived, undefined);
+ assert.equal(archiveFinishedSubagents(next, 1), next);
+ assert.equal(archiveFinishedSubagents(state, 42), state);
 });

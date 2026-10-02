@@ -18,10 +18,8 @@ function Fixture() {
     {id:"tests",title:"Run tests",status:"failed",startedAt:Date.now()-40000,updatedAt:Date.now(),endedAt:Date.now(),transcript:[{id:"b",kind:"tool",text:"Tests failed"}]}
   ]);
   const [sending, setSending] = useState(true);
-  const [detached, setDetached] = useState(null);
-  window.returnToParent = () => setDetached(null);
-  const detach = id => { setDetached(children.find(child=>child.id===id)); setChildren(items=>items.map(child=>child.id===id ? {...child,detachedSessionId:10} : child)); };
   const archive = (id,archived) => setChildren(items=>items.map(child=>child.id===id ? {...child,archived} : child));
+  const archiveFinished = () => setChildren(items=>items.map(child=>["completed","failed","cancelled"].includes(child.status) ? {...child,archived:true} : child));
   window.setChildren = setChildren;
   window.finishChildren = () => {setChildren(items=>items.map(item=>({...item,status:"completed",endedAt:Date.now()})));setSending(false);};
   const [draft, setDraft] = useState("");
@@ -37,7 +35,7 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={detached ? [] : children} readOnlySubagent={detached} onDetachSubagent={detach} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -84,6 +82,7 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
     assert.equal(await evaluate('document.querySelectorAll("dialog[open], [aria-modal=true]").length'), 0);
     assert.equal(await evaluate('document.querySelectorAll("[data-subagent-row]").length'), 2);
+    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-track] > button").getBoundingClientRect().height <= 24'));
     const rowPosition = await evaluate('(() => {const r=document.querySelector("[data-subagent-row]").getBoundingClientRect();return {x:Math.round(r.right-38),y:Math.round(r.top+r.height/2)}})()');
     window.webContents.sendInputEvent({type:"mouseMove",...rowPosition});
     await screenshot("subagents-list");
@@ -118,20 +117,23 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-slot=subagent-popover]")');
     await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
     await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
-    await clickLabel('Unlink Review authentication');
-    await waitFor('!!document.querySelector("[data-slot=subagent-read-only]")');
-    assert.equal(await evaluate('document.querySelectorAll("textarea[aria-label=Prompt]").length'), 0);
-    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-read-only]").textContent.includes("Child-only finding")'));
-    await evaluate('window.returnToParent()');
-    await waitFor('!!document.querySelector("[data-slot=subagent-track]")');
-    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label^="Unlink"]').length`), 0);
+    await evaluate('document.querySelector("[data-subagent-archive-finished]").click()');
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===1');
-    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-popover]").textContent.includes("Review authentication")'), false);
+    assert.ok(await evaluate('document.querySelector("[data-subagent-archive-finished]").disabled'));
+    assert.ok(await evaluate('document.querySelector("[data-subagent-row]").textContent.includes("Review authentication")'));
     await evaluate('window.finishChildren()');
     await waitFor('!document.querySelector("[data-slot=subagent-track] > button svg")');
+    await waitFor('!document.querySelector("[data-subagent-archive-finished]").disabled');
+    await evaluate('document.querySelector("[data-subagent-archive-finished]").click()');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length===0');
+    await evaluate('document.querySelector("[data-subagent-archived-toggle]").click()');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length===2');
+    await clickLabel('Restore Review authentication');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length===1');
     await evaluate('window.setChildren([])');
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
-    console.log('PASS: anchored popover, activity indicator, archive/restore, unlink, read-only chat, focus, Escape, outside click, and narrow layout');
+    console.log('PASS: anchored popover, activity indicator, archive/restore, bulk archive, compact trigger, focus, Escape, outside click, and narrow layout');
     app.exit(0);
   } catch (error) {
     console.error(error);

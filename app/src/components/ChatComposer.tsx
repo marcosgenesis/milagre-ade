@@ -1,4 +1,4 @@
-import { SubagentTrack, SubagentTranscript } from "./agents/SubagentTrack";
+import { SubagentTrack } from "./agents/SubagentTrack";
 import type { Subagent } from "../model";
 import { memo, useEffect, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
@@ -104,8 +104,7 @@ interface ChatComposerProps {
   /** The running turn's tool steps, where they happened in `streamingText`. */
   streamingSteps?: ChatStep[];
   subagents?: Subagent[];
-  readOnlySubagent?: Subagent;
-  onDetachSubagent?: (id: string) => void;
+  onArchiveFinishedSubagents?: () => void;
   onArchiveSubagent?: (id: string, archived: boolean) => void;
   waitingForSubagents?: boolean;
   /** Steps of the running turn whose approval card is open. */
@@ -260,8 +259,7 @@ export function ChatComposer({
   streamingText,
   streamingSteps,
   subagents = [],
-  readOnlySubagent,
-  onDetachSubagent,
+  onArchiveFinishedSubagents,
   onArchiveSubagent,
   waitingForSubagents = false,
   waitingStepIds,
@@ -362,7 +360,7 @@ export function ChatComposer({
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
-        {readOnlySubagent ? <div data-slot="subagent-read-only" className="mx-auto w-full max-w-3xl px-3 pt-12 pb-4"><SubagentTranscript agent={readOnlySubagent} /></div> : tab === "Worktrees" ? (
+        {tab === "Worktrees" ? (
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
             {messages.map((message) => (
               <MessageSection
@@ -404,12 +402,12 @@ export function ChatComposer({
           </div>
         )}
       </MessageScroller>}
-      <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onDetach={onDetachSubagent} onArchive={onArchiveSubagent} />
+      <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {readOnlySubagent ? <p className="py-3 text-center text-[12px] text-ink-3">Read-only subagent. Work continues in its original session.</p> : <PromptComposer
+        <PromptComposer
           imageDraft={imageDraft}
           projectPath={projectPath}
           draft={draft}
@@ -433,7 +431,7 @@ export function ChatComposer({
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
-        />}
+        />
         {dropError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{dropError}</p>}
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>

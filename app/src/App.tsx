@@ -1,4 +1,4 @@
-import { archiveSubagent, detachSubagent, subagentActive } from "./lib/subagents";
+import { archiveSubagent, archiveFinishedSubagents } from "./lib/subagents";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -286,7 +286,7 @@ function App() {
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id) || Boolean(session.subagentSnapshot && subagentActive(session.subagentSnapshot)), unread: Boolean(session.unread) }),
+          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
@@ -324,13 +324,12 @@ function App() {
     commit(archiveSubagent(latest, parentId, id, archived));
   }
 
-  function unlinkChild(id: string) {
+  function archiveFinishedChildren() {
     const latest = stateRef.current;
     const parentId = selectedSessionRef.current;
     if (!latest || parentId === null) return;
-    const result = detachSubagent(latest, parentId, id);
-    if (result.state !== latest) commit(result.state);
-    if (result.sessionId !== undefined) openChat(result.sessionId);
+    const next = archiveFinishedSubagents(latest, parentId);
+    if (next !== latest) commit(next);
   }
 
   function openChat(sessionId: number) {
@@ -383,7 +382,6 @@ function App() {
   async function checkArchive(sessionId: number): Promise<ArchivePlan> {
     const latest = stateRef.current;
     const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
-    if (latest?.sessions[sessionId]?.subagentSource) return { milagreOwned: false, shared: true, status: null };
     if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots())) return { milagreOwned: false, shared: false, status: null };
     if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null };
     return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!) };
@@ -563,7 +561,6 @@ function App() {
   }
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
-    if (selectedSession?.subagentSource) return;
     if ((!body && !images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     // A switch is stopping this project's turns: a new one would start behind the stop. The draft stays.
     if (!switcher.canSend()) return;
@@ -850,8 +847,7 @@ function App() {
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={selectedSession?.subagents}
-            readOnlySubagent={selectedSession?.subagentSnapshot}
-            onDetachSubagent={unlinkChild}
+            onArchiveFinishedSubagents={archiveFinishedChildren}
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}

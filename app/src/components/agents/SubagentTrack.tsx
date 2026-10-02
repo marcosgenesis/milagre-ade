@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Archive02Icon, Cancel01Icon, Unlink01Icon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import type { ModelProvider, Subagent } from "../../model";
-import { subagentActive } from "../../lib/subagents";
+import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
@@ -32,11 +32,11 @@ export function SubagentTranscript({ agent }: { agent: Subagent }) {
   </div>;
 }
 
-/** A nonmodal list anchored above the composer. Archive/unlink affect views, not provider execution. */
-export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive }: {
+/** A nonmodal list anchored above the composer. Archiving affects views, not provider execution. */
+export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, onArchive }: {
   agents: Subagent[];
   provider?: ModelProvider;
-  onDetach?: (id: string) => void;
+  onArchiveFinished?: () => void;
   onArchive?: (id: string, archived: boolean) => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
@@ -46,10 +46,9 @@ export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive 
   const [selected, setSelected] = useState<string | null>(null);
   const [archived, setArchived] = useState(false);
   const [bounds, setBounds] = useState({ left: 12, bottom: 60, width: 420, maxHeight: 320 });
-  const linked = agents.filter(agent => !agent.detachedSessionId);
-  const visible = linked.filter(agent => !agent.archived);
-  const archivedCount = linked.length - visible.length;
-  const rows = linked.filter(agent => Boolean(agent.archived) === archived);
+  const visible = agents.filter(agent => !agent.archived);
+  const archivedCount = agents.length - visible.length;
+  const rows = agents.filter(agent => Boolean(agent.archived) === archived);
   const child = rows.find(agent => agent.id === selected);
   const close = () => { setOpened(false); trigger.current?.focus(); };
 
@@ -85,10 +84,10 @@ export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive 
     return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
   }, [opened]);
 
-  if (!linked.length) return null;
+  if (!agents.length) return null;
   const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
   return <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end px-3" data-slot="subagent-track">
-    <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2 hover:bg-hover focus-visible:outline-2">
+    <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface h-6 px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2">
       {visible.some(subagentActive) && <SpinnerRing size={12} />}
       Subagents <span className="tabular-nums">{visible.length}</span>
     </button>
@@ -110,6 +109,11 @@ export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive 
         </header>
         <div className="min-h-0 overflow-y-auto overscroll-contain"><SubagentTranscript agent={child} /></div>
       </> : <>
+        {!archived && <div className="mb-1 shrink-0 border-b border-line pb-1">
+          <button type="button" data-subagent-archive-finished disabled={!onArchiveFinished || !visible.some(subagentFinished)} onClick={onArchiveFinished} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-ink-2 hover:bg-hover focus-visible:outline-2 disabled:opacity-40 disabled:hover:bg-transparent">
+            <HugeiconsIcon icon={Archive02Icon} size={14} />Archive finished subagents
+          </button>
+        </div>}
         <ul className="min-h-0 overflow-y-auto overscroll-contain">
           {rows.map(agent => <li key={agent.id} data-subagent-row className="group flex items-center gap-1 rounded-md px-1 hover:bg-hover focus-within:bg-hover">
             <button type="button" data-subagent-open onClick={() => setSelected(agent.id)} title={`${agent.title} (${labels[agent.status]})`} className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-1 text-left text-[13px] focus-visible:outline-2">
@@ -117,12 +121,11 @@ export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive 
               <span className="truncate">{agent.title}</span>
             </button>
             <span className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-              {!archived && <Tooltip label="Unlink subagent"><button type="button" aria-label={`Unlink ${agent.title}`} disabled={!onDetach} onClick={() => { close(); onDetach?.(agent.id); }} className={actionClass}><HugeiconsIcon icon={Unlink01Icon} size={14} /></button></Tooltip>}
               <Tooltip label={archived ? "Restore subagent" : "Archive subagent"}><button type="button" aria-label={`${archived ? "Restore" : "Archive"} ${agent.title}`} disabled={!onArchive} onClick={() => onArchive?.(agent.id, !archived)} className={actionClass}><HugeiconsIcon icon={Archive02Icon} size={14} /></button></Tooltip>
             </span>
           </li>)}
         </ul>
-        {!rows.length && <p className="px-3 py-5 text-[12px] text-ink-3">{archived ? "No archived subagents." : "No linked subagents."}</p>}
+        {!rows.length && <p className="px-3 py-5 text-[12px] text-ink-3">{archived ? "No archived subagents." : "No subagents to show."}</p>}
         {(archivedCount > 0 || archived) && <button type="button" data-subagent-archived-toggle onClick={() => setArchived(!archived)} className="mt-1 border-t border-line px-2 py-2 text-left text-[11px] text-ink-3 hover:text-ink">{archived ? "Back to subagents" : `Archived (${archivedCount})`}</button>}
       </>}
     </div>, document.body)}

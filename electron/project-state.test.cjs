@@ -57,11 +57,3 @@ test('restored children without a live session retain output but do not claim to
  assert.equal(restored.sessions[1].subagents[1].status,'completed');
  assert.equal(restored.sessions[2].subagents[0].status,'running');
 });
-test('an unlinked read-only chat reflects its disconnected provider status on reload', () => {
- const {markDisconnectedSubagents}=require('./project-state.cjs');
- const agent={id:'child',status:'running',updatedAt:10,transcript:[],detachedSessionId:2};
- const state={sessions:{1:{subagents:[agent]},2:{subagentSource:{parentSessionId:1,subagentId:'child'},subagentSnapshot:agent}}};
- const result=markDisconnectedSubagents(state,new Set());
- assert.equal(result.sessions[2].subagentSnapshot.status,'unknown');
- assert.equal(result.sessions[2].subagentSnapshot.detachedSessionId,2);
-});

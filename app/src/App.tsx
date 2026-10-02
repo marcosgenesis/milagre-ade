@@ -43,7 +43,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { handoverModel } from "./lib/handover";
+import { handoverLinks, handoverModel } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
@@ -609,7 +609,7 @@ function App() {
       setSelectedSessionId(sessionId);
       chooseModel(target);
     } catch (error) {
-      setNewChatError(`Could not hand over: ${ipcError(error)}`);
+      setNotice(`Could not hand over: ${ipcError(error)}`);
     }
   }
 
@@ -837,7 +837,7 @@ function App() {
               }
               : undefined}
             isSending={isSending}
-            sendBlocked={preparing}
+            sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={selectedSession?.subagents}
@@ -850,6 +850,7 @@ function App() {
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             onHandover={(provider) => void handover(provider)}
+            handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}

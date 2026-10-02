@@ -1,4 +1,6 @@
 import type { ModelProvider } from "../model";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { providerLabel } from "../lib/handover";
 import { ProviderLogo } from "./ProviderLogo";
 
@@ -18,6 +20,25 @@ export function HandoverRow({ provider, blocked, onClick }: { provider: ModelPro
         <span className="text-xs font-semibold text-ink">Handover to {providerLabel(provider)}</span>
         <span className="truncate text-[11px] text-ink-3">New chat with this chat's context</span>
       </span>
+    </button>
+  );
+}
+
+export function HandoverLinkBar({ to, onOpen }: { to: { id: number; title: string; provider: ModelProvider }; onOpen: (id: number) => void }) {
+  return (
+    <button type="button" data-handover-to onClick={() => onOpen(to.id)} className="flex w-full items-center gap-2 rounded-control border border-line px-3 py-2 text-left text-[12px] text-ink-2 hover:bg-hover">
+      <ProviderLogo provider={to.provider} size={14} />
+      <span>Handed over to {providerLabel(to.provider)}</span>
+      <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={1.8} color="currentColor" />
+      <span className="min-w-0 truncate font-medium text-ink">{to.title}</span>
+    </button>
+  );
+}
+
+export function HandoverFromLabel({ from, onOpen }: { from: { id: number; title: string }; onOpen: (id: number) => void }) {
+  return (
+    <button type="button" data-handover-from onClick={() => onOpen(from.id)} className="self-end text-[11px] text-ink-3 hover:text-ink">
+      Handed over from <span className="font-medium">{from.title}</span>
     </button>
   );
 }

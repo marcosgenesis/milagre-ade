@@ -24,6 +24,8 @@ import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { HandoverFromLabel, HandoverLinkBar } from "./Handover";
+import type { HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -169,6 +171,7 @@ interface ChatComposerProps {
   lockedProvider?: ModelProvider;
   /** Hands this chat over to the other provider in a new chat. */
   onHandover?: (provider: ModelProvider) => void;
+  handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
   /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
@@ -320,6 +323,7 @@ export function ChatComposer({
   runModelName,
   lockedProvider,
   onHandover,
+  handover,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -356,7 +360,7 @@ export function ChatComposer({
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = messages.length === 0;
+  const isNewChat = messages.length === 0 && !handover?.pending;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -395,6 +399,7 @@ export function ChatComposer({
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
           {messages.map((message) => (
             <MessageSection
               key={message.id}
@@ -422,6 +427,12 @@ export function ChatComposer({
               <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
           )}
+          {handover?.pending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
+            </div>
+          )}
+          {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">

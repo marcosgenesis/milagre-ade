@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, WorktreeSetupSettings } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -197,7 +197,19 @@ function AppearanceSettings() {
   );
 }
 
-function AboutSettings() {
+function updateDescription(update: UpdateState | null): string {
+  switch (update?.status) {
+    case "checking": return "Checking for updates…";
+    case "up-to-date": return "Milagre is up to date.";
+    case "downloading": return `Downloading ${update.version ? `Milagre ${update.version}` : "update"}… ${Math.round(update.progress)}%`;
+    case "downloaded": return `${update.version ? `Milagre ${update.version}` : "The update"} is ready to install.`;
+    case "error": return "Couldn't check for updates. Try again.";
+    case "unavailable": return "Update checks are available in the installed app.";
+    default: return "Check for the latest Milagre release.";
+  }
+}
+
+function AboutSettings({ update }: { update: UpdateState | null }) {
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     void window.milagre.getAppVersion().then(setVersion);
@@ -207,6 +219,16 @@ function AboutSettings() {
   return (
     <Group title="Milagre">
       <Row label="Version"><span className="tabular-nums">{version ?? "…"}</span></Row>
+      <Row label="Updates" description={updateDescription(update)}>
+        <button
+          type="button"
+          disabled={update?.status === "checking" || update?.status === "downloading" || update?.status === "unavailable"}
+          onClick={() => void (update?.status === "downloaded" ? window.milagre.installUpdate() : window.milagre.checkForUpdates())}
+          className="rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50"
+        >
+          {update?.status === "downloaded" ? "Update and restart" : "Check for updates"}
+        </button>
+      </Row>
       {electron && <Row label="Runtime"><span className="tabular-nums">Electron {electron} · Chromium {chrome}</span></Row>}
       <Row label="License">MIT</Row>
     </Group>
@@ -418,7 +440,7 @@ function ProjectSettings({ projectPath }: { projectPath?: string }) {
   );
 }
 
-export function SettingsPanel({ section, projectPath, models }: { section: SettingsSection; projectPath?: string; models: ModelOption[] }) {
+export function SettingsPanel({ section, projectPath, models, update }: { section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <div className="h-full overflow-y-auto">
@@ -426,7 +448,7 @@ export function SettingsPanel({ section, projectPath, models }: { section: Setti
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "appearance" && <AppearanceSettings />}
-        {section === "about" && <AboutSettings />}
+        {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>
     </div>

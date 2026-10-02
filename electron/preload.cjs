@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("agent:event", listener);
   },
   getUpdateState: () => ipcRenderer.invoke("update:state"),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   onUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);

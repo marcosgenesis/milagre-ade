@@ -55,20 +55,31 @@ process.stderr.write("unknown command\\n");
 process.exit(1);
 `;
 
+// A logged-out gh, first on the tests' PATH: what a CI runner with gh installed looks like. The actions
+// are always given the fake's path (or a missing one), so this one must never answer.
+const DECOY_GH = `#!${process.execPath}
+process.stderr.write("You are not logged into any GitHub hosts. To log in, run: gh auth login\\n");
+process.exit(4);
+`;
+
 /**
  * A project on main with a local bare repo as origin, and a worktree on its own branch. Git reads no
- * global or system config, and PATH holds the fake gh and the system tools only, so the real gh is
- * out of reach.
+ * global or system config. The actions run the fake gh by its path (`gh: false` gives them a path where
+ * nothing is installed), never a gh found on PATH: PATH starts with a logged-out decoy and keeps the
+ * machine's own folders, so a gh installed there is within reach and still not used.
  */
 async function fixture(t, { origin = true, gh = true } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-actions-")));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const bin = path.join(root, "bin");
+  const decoy = path.join(root, "decoy");
   await fs.mkdir(bin);
+  await fs.mkdir(decoy);
   if (gh) await fs.writeFile(path.join(bin, "gh"), FAKE_GH, { mode: 0o755 });
+  await fs.writeFile(path.join(decoy, "gh"), DECOY_GH, { mode: 0o755 });
   const gitconfig = path.join(root, "gitconfig");
   await fs.writeFile(gitconfig, "[user]\n\tname = Milagre\n\temail = milagre@example.com\n[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n");
-  const env = { HOME: root, PATH: `${bin}:/usr/bin:/bin`, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true" };
+  const env = { HOME: root, PATH: `${decoy}:${process.env.PATH ?? ""}:/usr/bin:/bin`, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true" };
   const run = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }).trim();
   // A git command that is meant to fail (a conflicting merge, say).
   const fail = (cwd, ...args) => assert.throws(() => run(cwd, ...args));
@@ -97,7 +108,8 @@ async function fixture(t, { origin = true, gh = true } = {}) {
     }
   };
   const setGh = (state) => fs.writeFile(path.join(bin, "gh-state.json"), JSON.stringify(state));
-  return { root, project, worktree, bare, env, run, fail, ghCalls, setGh, actions: createGitActions({ env }) };
+  const ghPath = path.join(bin, "gh");
+  return { root, project, worktree, bare, env, run, fail, ghCalls, setGh, actions: createGitActions({ env, gh: ghPath }) };
 }
 
 /** A worktree whose branch and main both changed cart.js, so merging, picking or rebasing conflicts. */
@@ -410,12 +422,14 @@ test("without gh, opening a PR says how to install it", async (t) => {
 });
 
 test("when gh is signed out, opening a PR says to log in", async (t) => {
-  const { worktree, actions, setGh } = await fixture(t);
+  const { worktree, actions, setGh, ghCalls } = await fixture(t);
   await setGh({ loggedOut: true });
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.ghReady, false);
   assert.equal(changes.ghMessage, GH_LOGIN);
   assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-auth", message: GH_LOGIN });
+  // The fake answered both, not the logged-out gh on PATH.
+  assert.deepEqual((await ghCalls()).map((call) => call.args.slice(0, 2)), [["pr", "view"], ["pr", "create"]]);
 });
 
 test("openPr passes the base and title as --flag=value, the body on stdin, and lets gh find the head", async (t) => {

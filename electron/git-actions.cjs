@@ -69,7 +69,11 @@ function prNumber(url) {
 
 const excludeLiteral = (file) => `:(exclude,literal)${file}`;
 
-function createGitActions({ execFile = childProcess.execFile, env = process.env } = {}) {
+/**
+ * `gh` is the GitHub CLI to run: a name found on PATH (the app, after the login environment is in) or an
+ * absolute path. Tests pass their fake's path, so a gh installed on the machine is never the one run.
+ */
+function createGitActions({ execFile = childProcess.execFile, env = process.env, gh = "gh" } = {}) {
   // No prompt may wait on a terminal nobody sees: git and ssh fail instead of asking for credentials.
   const baseEnv = () => ({
     ...env,
@@ -224,7 +228,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
    * read as a PR number.
    */
   async function findPr(cwd) {
-    const result = await run("gh", ["pr", "view", "--json", "url,state"], { cwd, timeout: GH_TIMEOUT });
+    const result = await run(gh, ["pr", "view", "--json", "url,state"], { cwd, timeout: GH_TIMEOUT });
     if (result.missing) return { ghReady: false, ghMessage: GH_MISSING, pr: null };
     if (!result.ok && isAuthFailure(result)) return { ghReady: false, ghMessage: GH_LOGIN, pr: null };
     if (!result.ok && /no (open )?pull requests? found/i.test(result.stderr)) return { ghReady: true, ghMessage: null, pr: null };
@@ -240,7 +244,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
 
   /** The repository gh opens PRs against when there are several remotes, or null when none is set. */
   async function ghDefaultRepo(cwd) {
-    const result = await run("gh", ["repo", "set-default", "--view"], { cwd, timeout: GH_TIMEOUT });
+    const result = await run(gh, ["repo", "set-default", "--view"], { cwd, timeout: GH_TIMEOUT });
     const repo = result.ok ? result.stdout.trim().split("\n")[0]?.trim() : "";
     return repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : null;
   }
@@ -358,7 +362,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     if (branch === resolved.name) return { ok: false, kind: "on-base", message: `You're on ${resolved.name}. Open a PR from a worktree branch.` };
     const prTitle = String(title ?? "").trim();
     if (!prTitle) return { ok: false, kind: "error", message: "Add a PR title first." };
-    const result = await run("gh", ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
+    const result = await run(gh, ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
     if (result.missing) return { ok: false, kind: "gh-missing", message: GH_MISSING };
     if (!result.ok && isAuthFailure(result)) return { ok: false, kind: "gh-auth", message: GH_LOGIN };
     if (!result.ok) return { ok: false, kind: "error", message: capOutput(result.stderr || result.stdout) || "gh couldn't open the PR." };

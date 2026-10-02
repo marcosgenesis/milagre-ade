@@ -12,9 +12,22 @@
   transform: translateX(-50%);
 }
 .command-palette::backdrop {
+  opacity: 1;
+  transition: opacity 120ms cubic-bezier(0.16, 1, 0.3, 1);
   background: rgb(0 0 0 / 24%);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
+}
+.command-palette[data-closing]::backdrop {
+  opacity: 0;
+  transition-duration: 90ms;
+}
+@starting-style {
+  .command-palette[open]::backdrop { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .command-palette::backdrop,
+  .command-palette[data-closing]::backdrop { transition-duration: 60ms; }
 }
 
 /* GENERIC FOUNDATION — tokens, @theme, base rules, the primitive-*

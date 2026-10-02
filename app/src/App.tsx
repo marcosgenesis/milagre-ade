@@ -58,6 +58,7 @@ import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { CommandPalette } from "./components/CommandPalette";
+import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
 
@@ -780,11 +781,12 @@ function App() {
     { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
     { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => { if (runningChatRef.current) askInMenu({ kind: "open" }); else return openProject(); } },
     { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
-    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme dark light system", run: () => { setSettingsSection("appearance"); setView("settings"); } },
-    { id: "toggle-theme", label: "Toggle light and dark", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "theme appearance dark light mode", run: toggleTheme },
+    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
+    { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
     { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: project.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
   ];
   if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
+  commands.push(...settingsCommands(getSettings(), updateSettings));
   if (selectedSession && view === "chat") {
     const sessionId = selectedSession.id;
     commands.unshift(

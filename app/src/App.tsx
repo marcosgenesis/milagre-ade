@@ -36,6 +36,7 @@ import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
+import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
@@ -317,9 +318,8 @@ function App() {
   }
 
   function revealChat(sessionId: number) {
-    const latest = stateRef.current;
-    const worktree = latest?.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1];
-    if (worktree) void window.milagre.revealWorktree(worktree.path).catch(() => {});
+    if (!project) return;
+    void window.milagre.revealInFolder(chatRevealPath(stateRef.current, sessionId, project.path)).catch(() => {});
   }
 
   function openChatInEditor(sessionId: number) {
@@ -599,6 +599,8 @@ function App() {
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
+        projectPath={project.path}
+        onOpenProjectSettings={() => { setSettingsSection("project"); setView("settings"); }}
         usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
       />
       </div>

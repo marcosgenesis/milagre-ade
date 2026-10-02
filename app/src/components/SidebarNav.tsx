@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -8,7 +8,9 @@ import {
   ArrowDown01Icon,
   ArrowLeft01Icon,
   Cancel01Icon,
+  Copy01Icon,
   FolderAddIcon,
+  FolderOpenIcon,
   Search01Icon,
   Settings01Icon,
   SidebarLeft01Icon,
@@ -20,6 +22,7 @@ import {
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
+import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
@@ -30,6 +33,14 @@ type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 function HugeIcon({ icon, size = 16, className }: HugeIconProps & { icon: HugeIconData }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" className={className} />;
 }
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+const PROJECT_MENU_ICONS: Record<ProjectMenuKey, HugeIconData> = {
+  reveal: FolderOpenIcon,
+  "copy-path": Copy01Icon,
+  "copy-name": Copy01Icon,
+  settings: Settings01Icon,
+};
 
 const IconArrowBoxLeft = (props: HugeIconProps) => <HugeIcon icon={ArrowLeft01Icon} {...props} />;
 const IconCheckmark1Small = (props: HugeIconProps) => <HugeIcon icon={Tick02Icon} {...props} />;
@@ -74,6 +85,9 @@ type SidebarNavProps = {
   onNewChat?: () => void;
   onPick?: (id: string, label: string, prompt?: string) => void;
   onOpenSettings?: () => void;
+  /** The project folder, for the project menu's reveal and copy path. */
+  projectPath?: string;
+  onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
   chatActions?: ChatRowActions;
@@ -164,13 +178,49 @@ function WorkspaceMenu({
   position,
   onClose,
   workspace,
+  projectPath,
+  onOpenProjectSettings,
 }: {
   position: { top: number; left: number };
   onClose: () => void;
   workspace: { name: string; monogram: string; image?: string | null };
+  projectPath?: string;
+  onOpenProjectSettings?: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    menuRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
+  }, []);
+
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
+    const index = rows.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      rows[(index + step + rows.length) % rows.length]?.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+    }
+  };
+
+  const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
+  const projectActions: Record<ProjectMenuKey, { run: () => void; disabled: boolean }> = {
+    reveal: { run: () => void window.milagre?.revealInFolder(projectPath ?? "").catch(() => {}), disabled: !projectPath },
+    "copy-path": { run: () => copy(projectPath ?? ""), disabled: !projectPath },
+    "copy-name": { run: () => copy(workspace.name), disabled: false },
+    settings: { run: () => onOpenProjectSettings?.(), disabled: !onOpenProjectSettings },
+  };
+
   return createPortal(
     <div
+      ref={menuRef}
+      role="menu"
+      aria-label={`${workspace.name} actions`}
+      onKeyDown={moveFocus}
       data-workspace-menu
       className="fixed z-50 w-64 rounded-[14px] bg-surface p-1.5 shadow-overlay"
       style={{
@@ -180,9 +230,29 @@ function WorkspaceMenu({
         transformOrigin: "top left",
       }}
     >
-      <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
+      <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
+        {projectMenuActions(IS_MAC).map((item) => (
+          <button
+            key={item.key}
+            data-menu-row
+            data-project-action={item.key}
+            role="menuitem"
+            type="button"
+            disabled={projectActions[item.key].disabled}
+            onClick={() => {
+              onClose();
+              projectActions[item.key].run();
+            }}
+            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} /></span>
+            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
+          </button>
+        ))}
+        <div className="my-1 h-px bg-line" />
         <button
           data-menu-row
+          role="menuitem"
           type="button"
           onClick={onClose}
           className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
@@ -202,9 +272,10 @@ function WorkspaceMenu({
           <button
             key={item.label}
             data-menu-row
+            role="menuitem"
             type="button"
             onClick={onClose}
-            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
+            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
           >
             <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">{item.icon}</span>
             <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
@@ -213,9 +284,10 @@ function WorkspaceMenu({
         <div className="my-1 h-px bg-line" />
         <button
           data-menu-row
+          role="menuitem"
           type="button"
           onClick={onClose}
-          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
+          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconArrowBoxLeft size={16} /></span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Sign out</span>
@@ -237,6 +309,8 @@ export default function SidebarNav({
   onNewChat,
   onPick,
   onOpenSettings,
+  projectPath,
+  onOpenProjectSettings,
   recents = DEFAULT_RECENTS,
   chatActions = {},
   usage,
@@ -354,7 +428,7 @@ export default function SidebarNav({
             </span>
           </button>
 
-          {workspaceOpen && <WorkspaceMenu position={workspacePosition} workspace={workspace} onClose={() => setWorkspaceOpen(false)} />}
+          {workspaceOpen && <WorkspaceMenu position={workspacePosition} workspace={workspace} projectPath={projectPath} onOpenProjectSettings={onOpenProjectSettings} onClose={() => setWorkspaceOpen(false)} />}
 
         </div>
 

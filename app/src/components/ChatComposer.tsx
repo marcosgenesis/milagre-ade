@@ -12,9 +12,8 @@ import {
   GitForkIcon,
   LaptopIcon,
   Link01Icon,
-  Message01Icon,
 } from "@hugeicons/core-free-icons";
-import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { EffortLevel, ModelCapability, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -22,10 +21,10 @@ import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { parseRecommendation, RecommendationCard } from "./agents/recommendation-card";
-import { StepRow } from "./agents/StepRow";
+import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
-import { replyParts } from "../lib/reply-parts";
+import { replyActivity } from "../lib/reply-parts";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -33,34 +32,26 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-function StepGroup({ steps, waitingStepIds }: { steps: ChatStep[]; waitingStepIds: string[] }) {
-  return <div className="-mx-1.5 my-1 flex flex-col">{steps.map((step) => <StepRow key={step.id} step={step} waiting={waitingStepIds.includes(step.id)} />)}</div>;
-}
-
-/** A reply's text with its tool steps where they happened. */
+/** A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer. */
 function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; waitingStepIds: string[] }) {
+  const { activity, answer } = replyActivity(body, steps);
   return (
     <>
-      {replyParts(body, steps).map((part, index) => (part.type === "text"
-        ? <Markdown key={index} text={streaming ? closeOpenMarkdown(part.text) : part.text} />
-        : <StepGroup key={index} steps={part.steps} waitingStepIds={waitingStepIds} />))}
+      <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
+      {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
     </>
   );
 }
 
 function MessageSection({
   message,
-  session,
   isUser,
-  modelName,
   onRecommendationSelect,
   streaming = false,
   waitingStepIds = [],
 }: {
   message: AppChatMessage;
-  session?: AgentSession;
   isUser: boolean;
-  modelName: string;
   onRecommendationSelect: (option: string) => void;
   streaming?: boolean;
   /** Steps whose approval card is open. */
@@ -76,18 +67,13 @@ function MessageSection({
       className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,filter,transform] duration-300 ${isUser ? "items-end pl-12" : ""}`}
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
-      <div className={`flex items-center gap-1 text-[12px] leading-[1.3] ${isUser ? "justify-end" : ""}`}>
-        {!isUser && <span className="flex size-5 items-center justify-center rounded-chip bg-inset text-ink-2"><Icon icon={Message01Icon} size={12} /></span>}
-        <span className="font-medium text-ink">{isUser ? "You" : session?.agent_name ?? "Agent"}</span>
-        <span className="text-ink-2">{isUser ? modelName : "Context aware"}</span>
-      </div>
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name}><img src={image.dataUrl} alt={image.name} className="max-h-60 max-w-full rounded-lg object-contain" /></a>)}</div>}
+        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="h-20 w-24 rounded object-contain" /></a>)}</div>}
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
           <>
-            {steps.length > 0 && <StepGroup steps={steps} waitingStepIds={waitingStepIds} />}
+            <ActivityBlock entries={steps.map((step) => ({ type: "step", step }))} streaming={streaming} waitingStepIds={waitingStepIds} />
             <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
           </>
         ) : (
@@ -102,7 +88,6 @@ interface ChatComposerProps {
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
-  sessions: Record<string, AgentSession>;
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
@@ -249,7 +234,6 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messages,
-  sessions,
   draft,
   onDraftChange,
   onSend,
@@ -319,9 +303,7 @@ export function ChatComposer({
               <MessageSection
                 key={message.id}
                 message={message}
-                session={sessions[String(message.session_id)]}
                 isUser={message.role === "user"}
-                modelName={message.model ?? selectedModel.name}
                 onRecommendationSelect={onRecommendationSelect}
               />
             ))}
@@ -329,9 +311,7 @@ export function ChatComposer({
             {isSending && (streamingText || streamingSteps?.length) ? (
               <MessageSection
                 message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-                session={sessions[String(messages.at(-1)?.session_id)]}
                 isUser={false}
-                modelName={workingModelName}
                 onRecommendationSelect={onRecommendationSelect}
                 streaming
                 waitingStepIds={waitingStepIds}

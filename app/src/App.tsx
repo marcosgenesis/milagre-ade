@@ -424,7 +424,6 @@ function App() {
           <ChatComposer
             key={project.path}
             messages={messages}
-            sessions={state.sessions}
             imageDraft={imageDraft}
             projectPath={selectedWorktree?.path ?? project.path}
             draft={draft}

@@ -1,5 +1,6 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
-import type { Subagent } from "../model";
+import type { AgentTask, Subagent } from "../model";
+import { TaskTrack } from "./agents/TaskTrack";
 import { memo, useEffect, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -117,6 +118,8 @@ interface ChatComposerProps {
   onArchiveFinishedSubagents?: () => void;
   onArchiveSubagent?: (id: string, archived: boolean) => void;
   waitingForSubagents?: boolean;
+  /** The running turn's to-do list, shown as a pill beside the subagents. */
+  tasks?: AgentTask[];
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
   /** The running turn is waiting on the user's answer to a question. */
@@ -275,6 +278,7 @@ export function ChatComposer({
   onArchiveFinishedSubagents,
   onArchiveSubagent,
   waitingForSubagents = false,
+  tasks,
   waitingStepIds,
   asking = false,
   runModelName,
@@ -395,7 +399,10 @@ export function ChatComposer({
           </div>
         )}
       </MessageScroller>}
-      <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
+      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+        <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+        <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
+      </div>
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}

@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatMessage, ChatStep, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
+import type { AgentEvent, AgentTask, ChatMessage, ChatStep, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
 export type SentAnswer = PermissionDecision | "answered" | "dismissed";
@@ -18,6 +18,8 @@ export interface AgentRun {
   /** A steering message split the reply, so a turn that ends with nothing more to show saves nothing more. */
   split?: boolean;
   waitingForSubagents?: boolean;
+  /** The agent's to-do list as it last reported it; gone with the run when the turn ends. */
+  tasks?: AgentTask[];
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -148,6 +150,11 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     }
     case "subagents-waiting":
       return run ? { state, runs: { ...runs, [chatId]: { ...run, waitingForSubagents: event.waiting } }, changed: false } : { state, runs, changed: false };
+    case "tasks-updated": {
+      if (!run) return { state, runs, changed: false };
+      const { tasks: _cleared, ...rest } = run;
+      return { state, runs: { ...runs, [chatId]: event.tasks.length ? { ...rest, tasks: event.tasks } : rest }, changed: false };
+    }
 
     case "session-started": {
       if (session.native_session_id === event.nativeId) return { state, runs, changed: false };

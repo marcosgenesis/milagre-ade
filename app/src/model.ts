@@ -66,33 +66,42 @@ export interface ModelOption {
   recommended?: boolean;
 }
 
+/**
+ * The maintained list: what codex-cli 0.158.0 and Claude Code 2.1.287 report, recommended model first.
+ * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
+ * CLI is missing, too old or couldn't be asked.
+ */
 export const MODEL_CATALOG: ModelOption[] = [
-  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "codex", description: "Latest workhorse model for coding and everyday work", recommended: true },
-  { id: "gpt-6-astra", name: "GPT-6 Astra", provider: "codex", description: "Frontier intelligence for the most demanding work" },
-  { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "codex", description: "Previous generation workhorse model" },
-  { id: "gpt-6-luna", name: "GPT-6 Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
-  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", provider: "codex", description: "Older generation workhorse model" },
-  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", provider: "codex", description: "Balanced intelligence and cost" },
-  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", provider: "codex", description: "Fast, cost-sensitive model" },
-  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", provider: "codex", description: "Optimized for agentic coding" },
-  { id: "gpt-5.1-codex-max", name: "GPT-5.1 Codex Max", provider: "codex", description: "Long-horizon coding and agent work" },
-  { id: "gpt-5-codex", name: "GPT-5 Codex", provider: "codex", description: "Coding-focused reasoning model" },
-  { id: "gpt-5-codex-mini", name: "GPT-5 Codex Mini", provider: "codex", description: "Smaller and faster coding model" },
-  { id: "gpt-5", name: "GPT-5", provider: "codex", description: "General-purpose reasoning model" },
-  { id: "gpt-5-mini", name: "GPT-5 mini", provider: "codex", description: "Fast model for well-defined tasks" },
-  { id: "gpt-4.1", name: "GPT-4.1", provider: "codex", description: "Strong non-reasoning model" },
-  { id: "claude-fable-5", name: "Claude Fable 5", provider: "claude", description: "High-capability general and agentic work", recommended: true },
-  { id: "claude-opus-5-5", name: "Claude Opus 5.5", provider: "claude", description: "Advanced reasoning and agentic coding" },
-  { id: "claude-opus-5", name: "Claude Opus 5", provider: "claude", description: "Most capable Claude model" },
-  { id: "claude-opus-4-8", name: "Claude Opus 4.8", provider: "claude", description: "Advanced reasoning and coding" },
-  { id: "claude-opus-4-7", name: "Claude Opus 4.7", provider: "claude", description: "Deep analysis and agentic coding" },
-  { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "claude", description: "Complex professional work" },
-  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "claude", description: "Balanced reasoning, coding, and speed" },
-  { id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "claude", description: "High-performance reasoning and efficiency" },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "claude", description: "Balanced quality and speed" },
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "claude", description: "Reliable coding and analysis" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "claude", description: "Fast and efficient" },
+  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work", recommended: true },
+  { id: "gpt-6-sol", name: "GPT-6-Sol", provider: "codex", description: "Previous generation workhorse model" },
+  { id: "gpt-6-luna", name: "GPT-6-Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
+  { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", provider: "codex", description: "Older generation workhorse model" },
+  { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", provider: "codex", description: "Older balanced model for straightforward work" },
+  { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", provider: "codex", description: "Older fast and efficient model" },
+  { id: "gpt-5.5", name: "GPT-5.5", provider: "codex", description: "Legacy coding model" },
+  { id: "claude-opus-5-5", name: "Opus 5.5", provider: "claude", description: "For complex work and everyday tasks", recommended: true },
+  { id: "claude-fable-5-1", name: "Fable 5.1", provider: "claude", description: "For your toughest challenges" },
+  { id: "claude-sonnet-5-5", name: "Sonnet 5.5", provider: "claude", description: "Most efficient for simpler tasks" },
+  { id: "claude-haiku-4-5", name: "Haiku 4.5", provider: "claude", description: "Fastest for quick answers" },
+  { id: "claude-sonnet-5", name: "Sonnet 5", provider: "claude", description: "Efficient for routine tasks" },
+  { id: "claude-opus-5", name: "Opus 5", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-fable-5", name: "Fable 5", provider: "claude", description: "Most capable for your hardest and longest-running tasks" },
+  { id: "claude-opus-4-8", name: "Opus 4.8", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-opus-4-7", name: "Opus 4.7", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-opus-4-6", name: "Opus 4.6", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-sonnet-4-6", name: "Sonnet 4.6", provider: "claude", description: "Efficient for routine tasks" },
 ];
+
+/** A model as its agent's CLI reports it (agent:models), with what it accepts. */
+export interface ReportedModel extends ModelCapability {
+  id: string;
+  name: string;
+  description: string;
+  recommended: boolean;
+}
+
+/** Each agent's reported models; null when its CLI is missing, too old, or couldn't be asked. */
+export type AgentModels = Record<ModelProvider, ReportedModel[] | null>;
 
 export interface Project {
   id: number;

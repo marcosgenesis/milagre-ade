@@ -1752,6 +1752,8 @@ Added after the plan was approved. The turn's own message (Tasks 3 and 4) stays 
 - [ ] **Step 3:** Run `node --test electron/agents/status.test.cjs app/src/lib/cli-status.test.ts` and `npm run typecheck`. Expected: PASS and clean.
 - [ ] **Step 4: Commit** with `feat: flag a missing, outdated or logged-out CLI in the model picker`.
 
+**Found in the real run (Task 9, Step 2).** A logged-out Claude Code answers `supportedModels()` with only its four aliases, named "Opus", "Fable", "Sonnet" and "Haiku", and the model lookup is kept for the whole run. `cliWhenLoggedIn(cli, status)` in `status.cjs` wraps the CLI check for the model lookup so a logged-out Claude counts as a CLI with a problem: its lookup is skipped, the maintained list stands in, and it is asked again once the login is done. Codex lists its models the same way logged in or out, so it isn't wrapped. The picker's `refreshCliStatus` asks for the model lists again each time it opens (the main process keeps good lists for the run), and App loads both at startup through it.
+
 **Also changed on the way (main moved after this plan was written).** `electron/usage.cjs` (PR #31) starts `codex` from the app's `PATH`, so `createUsageReader` takes a `ready` promise and waits for the login environment before reading either provider; `main.cjs` passes the same `environmentReady` that the CLI check waits for, and defines it at the top of the file.
 
 ---

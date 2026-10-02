@@ -86,7 +86,7 @@ test("keeps partial text when a turn fails or is cancelled", () => {
   assert.equal(failed.state.messages[0].outcome, "failed");
 
   const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
-  assert.equal(cancelled.state.messages[0].body, "Agent run cancelled.");
+  assert.equal(cancelled.state.messages[0].body, "What should I work on instead?");
   assert.equal(cancelled.state.messages[0].outcome, "cancelled");
 });
 
@@ -235,7 +235,7 @@ test("a turn that completes with no text after a steer split saves no reply", ()
   assert.equal(done.state, split.state);
   assert.equal(done.changed, false);
   const cancelled = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-cancelled" });
-  assert.equal(cancelled.state.messages.at(-1)?.body, "Agent run cancelled.");
+  assert.equal(cancelled.state.messages.at(-1)?.body, "What should I work on instead?");
   const more = applyAgentEvent(split.state, { [key(1)]: { ...split.runs[key(1)], text: "Rest" } }, PROJECT, key(1), { type: "turn-completed" });
   assert.equal(more.state.messages.at(-1)?.body, "Rest");
 });
@@ -386,7 +386,7 @@ test("a finished reply saves its steps where they happened in the trimmed text",
 test("a step still running when the turn ends is saved as done or failed with the turn", () => {
   const running = fold([{ type: "text-delta", messageId: "t", text: "Testing." }, { type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "ok 1\n" }]).runs;
   const cancelled = fold([{ type: "turn-cancelled" }], running).state.messages.at(-1);
-  assert.equal(cancelled?.body, "Testing.\n\nAgent run cancelled.");
+  assert.equal(cancelled?.body, "Testing.\n\nWhat should I work on instead?");
   assert.deepEqual(cancelled?.steps, [{ ...npmTest, status: "failed", offset: 8, detail: "$ npm test\nok 1\n" }]);
   assert.equal(fold([{ type: "turn-failed", message: "boom" }], running).state.messages.at(-1)?.steps?.[0].status, "failed");
   assert.equal(fold([{ type: "turn-completed" }], running).state.messages.at(-1)?.steps?.[0].status, "done");

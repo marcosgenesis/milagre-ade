@@ -220,7 +220,7 @@ class ChatHost {
     }
   }
 
-  /** Clears the target chat's pending mark. */
+  /** Clears the target chat's pending mark. Resolves true when it was still set. */
   async settleHandover(projectPath, target) {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const session = latest.sessions[target];
@@ -229,13 +229,15 @@ class ChatHost {
       return { ...latest, sessions: { ...latest.sessions, [target]: rest } };
     });
     if (changed) this.broadcast(projectPath, state);
+    return Boolean(changed);
   }
 
   /** A handover still marked pending when its project opens was cut off by a quit: it gets a note instead. */
   async recoverHandovers(projectPath, state) {
     for (const session of Object.values(state.sessions)) {
       if (!session.handoverPending || this.pendingHandovers.has(chatKey(projectPath, session.id))) continue;
-      await this.settleHandover(projectPath, session.id);
+      // The state passed in can be stale: a handover that finished since has nothing left to recover.
+      if (!(await this.settleHandover(projectPath, session.id))) continue;
       await this.addNote(chatKey(projectPath, session.id), { body: "Milagre closed before this handover finished. Hand over again from the original chat.", context: "handover" });
     }
   }

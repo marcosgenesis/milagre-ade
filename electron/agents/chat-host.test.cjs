@@ -364,6 +364,15 @@ test("a handover left pending by a quit is closed with a note on the next open",
   assert.deepEqual(chatMessages(state, 7), [{ role: "assistant", body: "Milagre closed before this handover finished. Hand over again from the original chat." }]);
 });
 
+test("recovery from a stale state adds no note to a handover that has since finished", async (t) => {
+  const { host, manager, states, saved } = harness();
+  t.after(() => manager.closeAll());
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3 } } }));
+  const stale = { ...saved.get(ALPHA), sessions: { 7: { ...saved.get(ALPHA).sessions[7], handoverPending: true } } };
+  await host.recoverHandovers(ALPHA, stale);
+  assert.deepEqual(chatMessages(saved.get(ALPHA), 7), []);
+});
+
 test("a new chat sent while a handover is pending doesn't land in the handover chat", async (t) => {
   let release;
   const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => { release = resolve; }) } });

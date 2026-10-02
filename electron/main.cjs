@@ -25,7 +25,7 @@ const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
 const { createProjectSettings } = require("./project-settings.cjs");
-const { WorktreeSetups, createSetupTrust, resolveSetupCommand } = require("./worktree-setup.cjs");
+const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { readPullRequest } = require("./pull-request.cjs");
@@ -192,8 +192,6 @@ ipcMain.handle("worktree-setup:save", async (_event, projectPath, command) => {
   await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
   return readSetupCommand(projectPath);
 });
-// The trust dialog's answer for a worktree that was just made: "run" or "skip".
-ipcMain.handle("worktree-setup:decide", (_event, worktreePath, decision) => worktreeSetups.decide(worktreePath, decision === "run" ? "run" : "skip"));
 
 // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
 // picks one, so the chat never waits on it.
@@ -214,9 +212,9 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
   const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
   if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
-  // The setup command runs before the chat's first turn (see agent:start-turn), once the renderer has asked about it if it must.
+  // The setup command runs before the chat's first turn (see agent:start-turn).
   const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);
-  const setup = await worktreeSetups.prepare({ worktreePath: created.path, projectPath, resolved });
+  await worktreeSetups.prepare({ worktreePath: created.path, projectPath, resolved });
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
   if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
@@ -224,7 +222,7 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
   void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
-  return { project, worktreeId: worktree.id, ...(setup ? { setup } : {}), ...(resolved.note ? { setupNote: resolved.note } : {}) };
+  return { project, worktreeId: worktree.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
 ipcMain.handle("worktree:pull-request", async (_event, worktreePath) => {
@@ -298,7 +296,7 @@ const agents = new SessionManager({
   send: sendAgentEvent,
 });
 
-const worktreeSetups = new WorktreeSetups({ send: sendAgentEvent, trust: createSetupTrust(path.join(app.getPath("userData"), "worktree-setup-trust.json")) });
+const worktreeSetups = new WorktreeSetups({ send: sendAgentEvent });
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });

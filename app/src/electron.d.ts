@@ -19,9 +19,6 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
-/** The setup command a new worktree will run before its first turn; a repo command needs the user's approval first. */
-export type WorktreeSetupPlan = { command: string; source: "repo" | "setting"; approved: boolean };
-
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
 declare global {
@@ -33,8 +30,8 @@ declare global {
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
-      /** `setup`: the command the worktree runs before its first turn. `setupNote`: why the repo's setup file was ignored. */
-      createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setup?: WorktreeSetupPlan; setupNote?: string }>;
+      /** `setupNote`: why the repo's setup file was ignored. */
+      createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
       /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
       getWorktreeRoots: () => Promise<string[]>;
       /** What archiving would lose from a worktree. Rejects when git can't tell. */
@@ -53,8 +50,6 @@ declare global {
       readWorktreeSetup: (projectPath: string) => Promise<WorktreeSetupSettings>;
       /** Saves the project's setup command; an empty one removes it. `.milagre/worktree.json` still wins. */
       saveWorktreeSetup: (projectPath: string, command: string) => Promise<WorktreeSetupSettings>;
-      /** The answer to the trust dialog for a new worktree: "run" remembers the command for the repo, "skip" drops it for this worktree. */
-      decideWorktreeSetup: (worktreePath: string, decision: "run" | "skip") => Promise<boolean>;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */

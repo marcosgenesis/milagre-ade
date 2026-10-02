@@ -36,8 +36,6 @@ import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { GitActionsDialog } from "./components/GitActionsDialog";
-import { WorktreeSetupDialog } from "./components/WorktreeSetupDialog";
-import type { WorktreeSetupPlan } from "./electron";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { usePastedImages } from "./components/usePastedImages";
@@ -143,8 +141,6 @@ function App() {
   const [newChatError, setNewChatError] = useState<string | null>(null);
   // A short message about something that happened off to the side (a worktree that wouldn't go).
   const [notice, setNotice] = useState<string | null>(null);
-  // A new worktree's setup command from the repo, waiting on the user's Run or Skip.
-  const [setupTrust, setSetupTrust] = useState<{ plan: WorktreeSetupPlan; projectName: string; decide: (decision: "run" | "skip") => void } | null>(null);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 12_000);
@@ -603,13 +599,6 @@ function App() {
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
-    // A command the user didn't type runs only once they approve it; main runs it before the first turn.
-    const setup = created.setup;
-    if (setup && !setup.approved) {
-      const decision = await new Promise<"run" | "skip">((decide) => setSetupTrust({ plan: setup, projectName: project.name, decide }));
-      setSetupTrust(null);
-      await window.milagre.decideWorktreeSetup(worktree.path, decision).catch(() => setNotice("Couldn't save your answer, so the setup command won't run."));
-    }
     void window.milagre.listBranches(project.path).then(setBranches);
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
@@ -1022,7 +1011,6 @@ function App() {
           }}
         />
       )}
-      {setupTrust && <WorktreeSetupDialog plan={setupTrust.plan} projectName={setupTrust.projectName} onDecide={setupTrust.decide} />}
       <Notice />
     </DotBackground>
     {splashOverlay(true)}

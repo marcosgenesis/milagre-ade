@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { WorktreeSetups, createSetupTrust, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, trustKey } = require("./worktree-setup.cjs");
+const { WorktreeSetups, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote } = require("./worktree-setup.cjs");
 const { createWorktree } = require("./worktrees.cjs");
 
 async function tempDir(t, prefix = "milagre-setup-") {
@@ -48,23 +48,6 @@ test("an invalid repo file is ignored with a note", async (t) => {
   assert.deepEqual(await resolveSetupCommand(project, ""), { source: "none", command: null, note: ".milagre/worktree.json isn't valid JSON, so Milagre ignored it." });
   await writeRepoFile(project, JSON.stringify({ setup: ["npm", "ci"] }));
   assert.match((await resolveSetupCommand(project, "")).note, /"setup" in \.milagre\/worktree\.json must be a string/);
-});
-
-test("approval is remembered per repository and exact command", async (t) => {
-  const dir = await tempDir(t);
-  assert.notEqual(trustKey("/work/shop", "npm ci"), trustKey("/work/shop", "npm ci && rm -rf ~"));
-  assert.notEqual(trustKey("/work/shop", "npm ci"), trustKey("/work/blog", "npm ci"));
-  assert.equal(trustKey("/work/shop", "npm ci"), trustKey("/work/shop/", "npm ci"));
-  const file = path.join(dir, "nested", "trust.json");
-  const trust = createSetupTrust(file);
-  assert.equal(await trust.isApproved("/work/shop", "npm ci"), false);
-  await trust.approve("/work/shop", "npm ci");
-  const reopened = createSetupTrust(file);
-  assert.equal(await reopened.isApproved("/work/shop", "npm ci"), true);
-  assert.equal(await reopened.isApproved("/work/shop", "npm ci --force"), false);
-  assert.equal(await reopened.isApproved("/work/blog", "npm ci"), false);
-  await fs.writeFile(file, "{broken");
-  assert.equal(await reopened.isApproved("/work/shop", "npm ci"), false);
 });
 
 test("the note for the agent names the command, why it failed, and the last 40 lines", () => {
@@ -114,11 +97,8 @@ test("a timeout stops the command and everything it started", async (t) => {
 test("cancelling a chat's setup stops the tree and the turn reports it", async (t) => {
   const dir = await tempDir(t);
   const events = [];
-  const approvals = [];
-  const setups = new WorktreeSetups({ send: (chatId, event) => events.push({ chatId, event }), trust: { isApproved: async () => false, approve: async (...args) => approvals.push(args) }, batchMs: 5 });
-  assert.deepEqual(await setups.prepare({ worktreePath: dir, projectPath: "/work/shop", resolved: { source: "repo", command: "sleep 30 & echo $! > child.pid; wait" } }), { command: "sleep 30 & echo $! > child.pid; wait", source: "repo", approved: false });
-  assert.equal(await setups.decide(dir, "run"), true);
-  assert.deepEqual(approvals, [["/work/shop", "sleep 30 & echo $! > child.pid; wait"]]);
+  const setups = new WorktreeSetups({ send: (chatId, event) => events.push({ chatId, event }), batchMs: 5 });
+  assert.deepEqual(await setups.prepare({ worktreePath: dir, projectPath: "/work/shop", resolved: { source: "repo", command: "sleep 30 & echo $! > child.pid; wait" } }), { command: "sleep 30 & echo $! > child.pid; wait", source: "repo" });
   const turn = setups.beforeTurn("chat#1", dir);
   // A second message while it runs waits for the same run.
   const steer = setups.beforeTurn("chat#1", dir);
@@ -138,19 +118,16 @@ test("cancelling a chat's setup stops the tree and the turn reports it", async (
   assert.deepEqual(await setups.beforeTurn("chat#1", dir), { cancelled: false, note: "" });
 });
 
-test("a skipped or unapproved command never runs; a typed one needs no approval", async (t) => {
+test("a project with no command runs nothing; a repo or typed command always runs", async () => {
   const ran = [];
-  const setups = new WorktreeSetups({ send: () => {}, trust: { isApproved: async () => false, approve: async () => {} }, run: async ({ command }) => (ran.push(command), { status: "done", exitCode: 0, output: "", durationMs: 1 }) });
-  await setups.prepare({ worktreePath: "/w/a", projectPath: "/p", resolved: { source: "repo", command: "make a" } });
-  assert.equal(await setups.decide("/w/a", "skip"), true);
+  const setups = new WorktreeSetups({ send: () => {}, run: async ({ command }) => (ran.push(command), { status: "done", exitCode: 0, output: "", durationMs: 1 }) });
+  assert.deepEqual(await setups.prepare({ worktreePath: "/w/a", projectPath: "/p", resolved: { source: "repo", command: "make a" } }), { command: "make a", source: "repo" });
   assert.deepEqual(await setups.beforeTurn("p#1", "/w/a"), { cancelled: false, note: "" });
-  await setups.prepare({ worktreePath: "/w/b", projectPath: "/p", resolved: { source: "repo", command: "make b" } });
+  assert.deepEqual(await setups.prepare({ worktreePath: "/w/b", projectPath: "/p", resolved: { source: "setting", command: "make b" } }), { command: "make b", source: "setting" });
   assert.deepEqual(await setups.beforeTurn("p#2", "/w/b"), { cancelled: false, note: "" });
-  assert.deepEqual(await setups.prepare({ worktreePath: "/w/c", projectPath: "/p", resolved: { source: "setting", command: "make c" } }), { command: "make c", source: "setting", approved: true });
+  assert.equal(await setups.prepare({ worktreePath: "/w/c", projectPath: "/p", resolved: { source: "none", command: null } }), null);
   assert.deepEqual(await setups.beforeTurn("p#3", "/w/c"), { cancelled: false, note: "" });
-  assert.equal(await setups.prepare({ worktreePath: "/w/d", projectPath: "/p", resolved: { source: "none", command: null } }), null);
-  assert.equal(await setups.decide("/w/d", "run"), false);
-  assert.deepEqual(ran, ["make c"]);
+  assert.deepEqual(ran, ["make a", "make b"]);
 });
 
 test("a worktree made through a symlink still runs its setup when the chat names its real path", async (t) => {
@@ -158,16 +135,15 @@ test("a worktree made through a symlink still runs its setup when the chat names
   const link = path.join(await tempDir(t, "milagre-link-"), "worktrees");
   await fs.symlink(real, link);
   const ran = [];
-  const setups = new WorktreeSetups({ send: () => {}, trust: { isApproved: async () => false, approve: async () => {} }, run: async ({ cwd }) => (ran.push(cwd), { status: "done", exitCode: 0, output: "", durationMs: 1 }) });
+  const setups = new WorktreeSetups({ send: () => {}, run: async ({ cwd }) => (ran.push(cwd), { status: "done", exitCode: 0, output: "", durationMs: 1 }) });
   await setups.prepare({ worktreePath: link, projectPath: "/p", resolved: { source: "repo", command: "npm ci" } });
-  assert.equal(await setups.decide(real, "run"), true);
   await setups.beforeTurn("p#1", real);
   assert.deepEqual(ran, [real]);
 });
 
 test("a failed setup lets the turn run with a note", async () => {
   const events = [];
-  const setups = new WorktreeSetups({ send: (_chatId, event) => events.push(event), trust: { isApproved: async () => true, approve: async () => {} }, run: async ({ onOutput }) => {
+  const setups = new WorktreeSetups({ send: (_chatId, event) => events.push(event), run: async ({ onOutput }) => {
     onOutput("npm ERR! missing lockfile\n");
     return { status: "failed", exitCode: 1, signal: null, output: "npm ERR! missing lockfile\n", durationMs: 900 };
   }, batchMs: 1 });
@@ -187,15 +163,11 @@ test("a new worktree's setup command runs inside the worktree", async (t) => {
   git("commit", "-m", "init");
   const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "Set things up", root: path.join(root, "worktrees"), suffix: "st01" });
   const events = [];
-  const setups = new WorktreeSetups({ send: (_chatId, event) => events.push(event), trust: createSetupTrust(path.join(root, "trust.json")) });
+  const setups = new WorktreeSetups({ send: (_chatId, event) => events.push(event) });
   const plan = await setups.prepare({ worktreePath: created.path, projectPath: project, resolved: await resolveSetupCommand(project, "") });
-  assert.deepEqual(plan, { command: `node -e "require('fs').writeFileSync('ok','1')"`, source: "repo", approved: false });
-  await setups.decide(created.path, "run");
+  assert.deepEqual(plan, { command: `node -e "require('fs').writeFileSync('ok','1')"`, source: "repo" });
   assert.deepEqual(await setups.beforeTurn(`${project}#1`, created.path), { cancelled: false, note: "" });
   assert.equal(await fs.readFile(path.join(created.path, "ok"), "utf8"), "1");
   await assert.rejects(fs.access(path.join(project, "ok")));
   assert.equal(events.at(-1).status, "done");
-  // The next worktree of this repo doesn't ask again for the same command.
-  const again = await setups.prepare({ worktreePath: `${created.path}-2`, projectPath: project, resolved: await resolveSetupCommand(project, "") });
-  assert.equal(again.approved, true);
 });

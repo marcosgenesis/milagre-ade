@@ -1,5 +1,5 @@
 const { spawn } = require("node:child_process");
-const { createHash, randomUUID } = require("node:crypto");
+const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const { realpathSync } = require("node:fs");
 const path = require("node:path");
@@ -8,8 +8,7 @@ const { capOutput, code, formatDuration } = require("./agents/steps.cjs");
 
 // A command a new worktree runs once, before its chat's first turn (`npm ci`, `uv sync`): the project's
 // setting, or `setup` in .milagre/worktree.json at the repo root, which wins like .worktreeinclude does
-// for the files to copy. A repo's command runs code the user didn't write, so it runs only once they
-// approve that exact command for that repository; one they typed in Settings is approved by typing it.
+// for the files to copy. The command runs in every new worktree, whichever of the two it comes from.
 
 const SETUP_FILE = ".milagre/worktree.json";
 const SETUP_TIMEOUT_MS = 10 * 60 * 1000;
@@ -45,41 +44,6 @@ async function resolveSetupCommand(projectPath, setting) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.setup === undefined) return fallback();
   if (typeof parsed.setup !== "string") return fallback(`"setup" in ${SETUP_FILE} must be a string, so Milagre ignored it.`);
   return { source: "repo", command: parsed.setup.trim() || null };
-}
-
-/** What an approval is remembered by: the repository and the exact command, so a changed command asks again. */
-function trustKey(projectPath, command) {
-  return createHash("sha256").update(JSON.stringify([path.resolve(projectPath), command])).digest("hex");
-}
-
-/** Approved repo commands, kept in Milagre's data folder. A file that can't be read approves nothing. */
-function createSetupTrust(file) {
-  let queue = Promise.resolve();
-  async function read() {
-    try {
-      const parsed = JSON.parse(await fs.readFile(file, "utf8"));
-      return parsed && typeof parsed.approved === "object" && parsed.approved ? parsed : { approved: {} };
-    } catch {
-      return { approved: {} };
-    }
-  }
-  return {
-    async isApproved(projectPath, command) {
-      return Object.hasOwn((await read()).approved, trustKey(projectPath, command));
-    },
-    approve(projectPath, command) {
-      const save = queue.catch(() => {}).then(async () => {
-        const data = await read();
-        data.approved[trustKey(projectPath, command)] = Date.now();
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        const temporary = `${file}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, JSON.stringify(data, null, 2));
-        await fs.rename(temporary, file);
-      });
-      queue = save;
-      return save;
-    },
-  };
 }
 
 function loginShell(env) {
@@ -193,31 +157,17 @@ function worktreeKey(worktreePath) {
 }
 
 class WorktreeSetups {
-  constructor({ send, trust, run = runSetupCommand, timeoutMs = SETUP_TIMEOUT_MS, batchMs = BATCH_MS }) {
-    Object.assign(this, { send, trust, run, timeoutMs, batchMs });
+  constructor({ send, run = runSetupCommand, timeoutMs = SETUP_TIMEOUT_MS, batchMs = BATCH_MS }) {
+    Object.assign(this, { send, run, timeoutMs, batchMs });
     this.pending = new Map();
     this.running = new Map();
   }
 
-  /** Records what a new worktree runs before its first turn. Resolves to what the renderer asks about, or null. */
+  /** Records what a new worktree runs before its first turn. Resolves to { command, source }, or null when there is none. */
   async prepare({ worktreePath, projectPath, resolved }) {
     if (!resolved.command) return null;
-    const approved = resolved.source === "setting" || (await this.trust.isApproved(projectPath, resolved.command));
-    this.pending.set(worktreeKey(worktreePath), { projectPath, command: resolved.command, source: resolved.source, approved });
-    return { command: resolved.command, source: resolved.source, approved };
-  }
-
-  /** The user's answer to the trust dialog. "run" remembers the command for the repository; "skip" drops it for this worktree. */
-  async decide(worktreePath, decision) {
-    const entry = this.pending.get(worktreeKey(worktreePath));
-    if (!entry) return false;
-    if (decision === "run") {
-      await this.trust.approve(entry.projectPath, entry.command);
-      entry.approved = true;
-    } else {
-      this.pending.delete(worktreeKey(worktreePath));
-    }
-    return true;
+    this.pending.set(worktreeKey(worktreePath), { projectPath, command: resolved.command, source: resolved.source });
+    return { command: resolved.command, source: resolved.source };
   }
 
   forget(worktreePath) {
@@ -225,8 +175,8 @@ class WorktreeSetups {
   }
 
   /**
-   * Runs the worktree's approved setup before the chat's first turn and resolves to { cancelled, note }.
-   * A message sent while it runs waits for the same run. A command nobody approved never runs.
+   * Runs the worktree's setup before the chat's first turn and resolves to { cancelled, note }.
+   * A message sent while it runs waits for the same run.
    */
   async beforeTurn(chatId, cwd) {
     const active = this.running.get(chatId);
@@ -235,7 +185,6 @@ class WorktreeSetups {
     const entry = this.pending.get(key);
     if (!entry) return { cancelled: false, note: "" };
     this.pending.delete(key);
-    if (!entry.approved) return { cancelled: false, note: "" };
     const result = await this.start(chatId, cwd, entry.command);
     return { cancelled: result.status === "cancelled", note: setupNote(entry.command, result, this.timeoutMs) };
   }
@@ -283,4 +232,4 @@ class WorktreeSetups {
   }
 }
 
-module.exports = { SETUP_FILE, SETUP_TIMEOUT_MS, WorktreeSetups, createSetupTrust, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, setupStarted, trustKey };
+module.exports = { SETUP_FILE, SETUP_TIMEOUT_MS, WorktreeSetups, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, setupStarted };

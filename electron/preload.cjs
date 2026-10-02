@@ -1,11 +1,17 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("milagre", {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
+  onWorktreeRenamed: (callback) => {
+    const listener = (_event, rename) => callback(rename);
+    ipcRenderer.on("worktree:renamed", listener);
+    return () => ipcRenderer.removeListener("worktree:renamed", listener);
+  },
   readDiffStat: (worktreePath, base) => ipcRenderer.invoke("worktree:diffstat", worktreePath, base),
   revealWorktree: (worktreePath) => ipcRenderer.invoke("worktree:reveal", worktreePath),
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
@@ -31,6 +37,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("update:state", listener);
   },
   readUsage: () => ipcRenderer.invoke("usage:read"),
+  getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
   notifyAttention: (notice) => ipcRenderer.invoke("notification:attention", notice),
   onOpenChat: (callback) => {
     const listener = (_event, chatId) => callback(chatId);

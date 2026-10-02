@@ -169,6 +169,38 @@ test("Claude: a subagent's own tool calls are not steps", () => {
   ]);
 });
 
+const block = (event) => ({ type: "stream_event", parent_tool_use_id: null, event });
+const clock = (state, ...times) => Object.assign(state, { now: () => times.shift() });
+
+test("Claude: a thinking block streams as a thinking step that ends with how long it took", () => {
+  const state = clock(claudeState(), 1_000, 5_200);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }), state), [
+    { type: "step-started", step: { id: "thinking-1", kind: "thinking", title: "Thinking" } },
+  ]);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Check the " } }), state), [{ type: "step-output", id: "thinking-1", text: "Check the " }]);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "tests." } }), state), [{ type: "step-output", id: "thinking-1", text: "tests." }]);
+  // A text block that follows starts the reply: no separator before it.
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_stop", index: 0 }), state), [
+    { type: "step-completed", id: "thinking-1", status: "done", title: "Thought for 4s", detail: "Check the tests.", durationMs: 4_200 },
+  ]);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_start", index: 1, content_block: { type: "text" } }), state), []);
+});
+
+test("Claude: hidden thinking still shows how long it took, and each block gets its own step", () => {
+  const state = clock(claudeState(), 0, 400, 1_000, 61_500);
+  mapClaudeMessage(block({ type: "content_block_start", index: 0, content_block: { type: "redacted_thinking" } }), state);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_stop", index: 0 }), state), [{ type: "step-completed", id: "thinking-1", status: "done", title: "Thought for 1s", durationMs: 400 }]);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }), state)[0].step.id, "thinking-2");
+  // The stop of another block (a tool call's input, say) doesn't end the thinking.
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_stop", index: 3 }), state), []);
+  assert.deepEqual(mapClaudeMessage(block({ type: "content_block_stop", index: 0 }), state), [{ type: "step-completed", id: "thinking-2", status: "done", title: "Thought for 1m 1s", durationMs: 60_500 }]);
+});
+
+test("Claude: a subagent's thinking is not part of the reply", () => {
+  const state = claudeState();
+  assert.deepEqual(mapClaudeMessage({ ...block({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }), parent_tool_use_id: "agent-1" }, state), []);
+});
+
 test("Claude: text, thinking and plain user messages are not steps", () => {
   const state = claudeState();
   assert.deepEqual(mapClaudeMessage({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Hi" }, { type: "thinking", thinking: "" }] } }, state), []);
@@ -195,7 +227,7 @@ test("Codex: a command streams its output and ends with the whole of it", () => 
 test("Codex: items that aren't tool calls, or belong to another turn, are not steps", () => {
   const state = { ...codexState(), turnId: "t-2" };
   assert.deepEqual(itemEvent("item/started", { type: "agentMessage", id: "msg-1", text: "" }, state, { turnId: "t-2" }), []);
-  assert.deepEqual(itemEvent("item/started", { type: "reasoning", id: "rs-1" }, state, { turnId: "t-2" }), []);
+  assert.deepEqual(itemEvent("item/started", { type: "plan", id: "plan-1" }, state, { turnId: "t-2" }), []);
   assert.deepEqual(itemEvent("item/started", shell(), state), []);
   assert.deepEqual(itemEvent("item/started", shell(), state, { threadId: "thread-9", turnId: "t-2" }), []);
 });
@@ -206,5 +238,29 @@ test("Codex: an item that completes without having started still shows", () => {
   assert.deepEqual(itemEvent("item/completed", search, state), [
     { type: "step-started", step: { id: "ws-1", kind: "search", title: "Searched the web for `IANA`" } },
     { type: "step-completed", id: "ws-1", status: "done", title: "Searched the web for `IANA`" },
+  ]);
+});
+
+const reasoning = (overrides = {}) => ({ type: "reasoning", id: "rs-1", summary: [], content: [], ...overrides });
+const reasoningEvent = (method, params, state) => mapCodexNotification(method, { threadId: "thread-1", turnId: "t-1", itemId: "rs-1", ...params }, state);
+
+test("Codex: reasoning streams its summary as a thinking step that ends with how long it took", () => {
+  const state = clock({ ...codexState(), turnId: "t-1" }, 2_000, 4_900);
+  assert.deepEqual(itemEvent("item/started", reasoning(), state), [{ type: "step-started", step: { id: "rs-1", kind: "thinking", title: "Thinking" } }]);
+  assert.deepEqual(reasoningEvent("item/reasoning/summaryPartAdded", { summaryIndex: 0 }, state), []);
+  assert.deepEqual(reasoningEvent("item/reasoning/summaryTextDelta", { delta: "Plan the fix.", summaryIndex: 0 }, state), [{ type: "step-output", id: "rs-1", text: "Plan the fix." }]);
+  assert.deepEqual(reasoningEvent("item/reasoning/summaryPartAdded", { summaryIndex: 1 }, state), [{ type: "step-output", id: "rs-1", text: "\n\n" }]);
+  assert.deepEqual(itemEvent("item/completed", reasoning({ summary: ["Plan the fix.", "Run the tests."] }), state), [
+    { type: "step-completed", id: "rs-1", status: "done", title: "Thought for 3s", detail: "Plan the fix.\n\nRun the tests.", durationMs: 2_900 },
+  ]);
+  // Deltas for reasoning that isn't running are dropped.
+  assert.deepEqual(reasoningEvent("item/reasoning/summaryTextDelta", { delta: "late", summaryIndex: 0 }, state), []);
+});
+
+test("Codex: reasoning without a summary, or that only completes, still shows", () => {
+  const state = clock({ ...codexState(), turnId: "t-1" }, 0);
+  assert.deepEqual(itemEvent("item/completed", reasoning({ id: "rs-2" }), state), [
+    { type: "step-started", step: { id: "rs-2", kind: "thinking", title: "Thinking" } },
+    { type: "step-completed", id: "rs-2", status: "done", title: "Thought" },
   ]);
 });

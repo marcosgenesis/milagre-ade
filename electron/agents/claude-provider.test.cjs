@@ -118,7 +118,7 @@ const scripts = {
 // Scripts get the query options (for canUseTool), an abort signal that interrupt() trips, a gate
 // the test opens with calls.release(), and next() to read a message sent while they run.
 function fakeSdk(script) {
-  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], interrupts: 0, release: () => {} };
+  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], thinking: [], interrupts: 0, release: () => {} };
   const query = ({ prompt, options }) => {
     calls.queries += 1;
     calls.options = options;
@@ -139,6 +139,7 @@ function fakeSdk(script) {
       interrupt: async () => { calls.interrupts += 1; controller.abort(); markInterrupted(); },
       setModel: async (model) => { calls.models.push(model); },
       setPermissionMode: async (mode) => { calls.modes.push(mode); },
+      setMaxThinkingTokens: async (...args) => { calls.thinking.push(args); },
     });
   };
   return { calls, loadSdk: async () => ({ query }) };
@@ -165,6 +166,8 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   assert.equal(calls.options.model, "claude-opus-5-5");
   assert.equal(calls.options.permissionMode, "acceptEdits");
   assert.equal(calls.options.includePartialMessages, true);
+  assert.equal("settings" in calls.options, false);
+  assert.deepEqual(calls.thinking, [[null, "summarized"]]);
   assert.equal(calls.options.allowDangerouslySkipPermissions, true);
   assert.equal(calls.options.pathToClaudeCodeExecutable, "/usr/local/bin/claude");
   assert.deepEqual(calls.options.settingSources, ["user", "project", "local"]);

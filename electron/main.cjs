@@ -17,12 +17,14 @@ const { createModelCache } = require("./agents/models.cjs");
 const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
-const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
+const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createUsageReader } = require("./usage.cjs");
+const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +35,8 @@ let updateState = { status: "idle", version: null, progress: 0 };
 const environmentReady = loadLoginEnvironment().then(({ source }) => {
   if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
 }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
-const readUsage = createUsageReader({ ready: () => environmentReady });
+const usageStore = createUsageStore({ file: path.join(app.getPath("userData"), "usage-cache.json") });
+const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
 
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };
@@ -101,7 +104,18 @@ ipcMain.handle("project:image", async (_event, projectPath) => {
 });
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
-ipcMain.handle("worktree:create", async (_event, request) => {
+// A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
+// picks one, so the chat never waits on it.
+async function nameWorktree(sender, projectPath, created, prompt) {
+  // The CLI check waits for the login environment and resolves the path the SDK starts directly (no shell). A
+  // missing or broken Claude has no command, and the name stays the prompt's first words.
+  const cli = await agentCli("claude");
+  const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, timeoutMs: 15_000 });
+  const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
+  if (name && !sender.isDestroyed()) sender.send("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
+}
+
+ipcMain.handle("worktree:create", async (event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
@@ -109,6 +123,7 @@ ipcMain.handle("worktree:create", async (_event, request) => {
   const worktree = { ...listed, base: created.base };
   project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
+  void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
   return { project, worktreeId: worktree.id };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
@@ -163,6 +178,7 @@ const agents = new SessionManager({
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
 
 ipcMain.handle("usage:read", () => readUsage());
+ipcMain.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);

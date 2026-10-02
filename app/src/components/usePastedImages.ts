@@ -3,6 +3,12 @@ import type { ClipboardEvent } from "react";
 import type { ImageAttachment } from "../model";
 
 const TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_IMAGES = 4;
+
+export function isAttachableImage(file: File): boolean {
+  return TYPES.has(file.type) && file.size <= MAX_IMAGE_BYTES;
+}
 
 function readImage(file: File): Promise<ImageAttachment> {
   return new Promise((resolve, reject) => {
@@ -33,15 +39,13 @@ export function usePastedImages(scope: string) {
     return () => { generation.current++; };
   }, [scope]);
 
-  async function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(event.clipboardData.items).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+  async function addFiles(files: File[]) {
     if (!files.length) return;
-    event.preventDefault();
     setError("");
-    if (reading.current) { setError("Wait for the current image to finish loading, then paste again."); return; }
+    if (reading.current) { setError("Wait for the current image to finish loading, then try again."); return; }
     if (files.some((file) => !TYPES.has(file.type))) { setError("Use PNG, JPEG, WebP, or GIF images."); return; }
-    if (files.some((file) => file.size > 5 * 1024 * 1024)) { setError("Each image must be 5 MB or smaller."); return; }
-    if (images.length + files.length > 4) { setError("Attach up to 4 images per message."); return; }
+    if (files.some((file) => file.size > MAX_IMAGE_BYTES)) { setError("Each image must be 5 MB or smaller."); return; }
+    if (images.length + files.length > MAX_IMAGES) { setError("Attach up to 4 images per message."); return; }
     const current = generation.current;
     reading.current = true;
     setLoading(true);
@@ -55,7 +59,14 @@ export function usePastedImages(scope: string) {
     }
   }
 
-  return { images, loading, error, onPaste, clear, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
+  async function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.items).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+    if (!files.length) return;
+    event.preventDefault();
+    await addFiles(files);
+  }
+
+  return { images, loading, error, onPaste, addFiles, clear, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
 }
 
 export type ImageDraft = ReturnType<typeof usePastedImages>;

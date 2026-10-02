@@ -238,7 +238,7 @@ When an agent asks the user to choose, the turn waits on a question card instead
   - Answers are not saved in the chat; the agent's reply carries on from them.
 - **Escape.** Escape denies an open approval first, otherwise dismisses an open question, otherwise interrupts the turn. In the card's text field, Escape first clears a typed answer.
 - **Instructions.** `MILAGRE_INSTRUCTIONS` ends with: "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list."
-- **Recommendation cards stay as they are.** They turn a numbered list in a finished reply into tappable options that send a new message.
+- **Recommendation cards are for short questions only.** A card appears only when a finished reply ends with a short question followed by 2–6 short answers; the rest of the reply renders as Markdown above it, and picking an answer sends it as a new message.
   - They remain the path for agents that ask in their reply: a Codex without the question tool, or a model that prefers text.
   - Question cards answer a tool call in the middle of a turn. The two share no code, and neither replaces the other.
 

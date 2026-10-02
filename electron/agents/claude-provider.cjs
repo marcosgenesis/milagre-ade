@@ -201,6 +201,9 @@ class ClaudeSession {
       },
     });
     void this.readMessages(this.query);
+    // Thinking arrives as readable summaries rather than empty blocks, for the reply's thinking steps.
+    // Only the display changes (null keeps the model's own thinking budget), so it suits every model.
+    await this.query.setMaxThinkingTokens?.(null, "summarized").catch(() => {});
   }
 
   // Claude Code waits on this promise until the user answers in Milagre, the turn stops, or the SDK
@@ -320,8 +323,9 @@ class ClaudeSession {
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
     this.questions.cancelAll();
-    // Tool calls still waiting for a result never get one.
+    // Tool calls still waiting for a result never get one, nor does thinking that was cut off.
     this.state.tools?.clear();
+    this.state.thinking = null;
     this.emit(event);
     markEnded();
   }

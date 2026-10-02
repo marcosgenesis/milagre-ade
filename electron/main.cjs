@@ -72,7 +72,11 @@ async function discoverWorktrees(projectPath) {
   }
 }
 
+// Projects opened in this run: the commit dialog only acts in their checkouts.
+const openedProjects = new Set();
+
 async function readProject(projectPath) {
+  openedProjects.add(projectPath);
   const name = path.basename(projectPath) || "Untitled project";
   let storedState = null;
   try {
@@ -157,7 +161,11 @@ function executable(name) {
 ipcMain.handle("usage:read", () => readUsage());
 
 // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder.
-registerGitHandlers(ipcMain, { executable, clientVersion: app.getVersion() });
+registerGitHandlers(ipcMain, {
+  executable,
+  clientVersion: app.getVersion(),
+  knownFolders: async () => (await Promise.all([...openedProjects].map(discoverWorktrees))).flat().map((worktree) => worktree.path),
+});
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);

@@ -27,7 +27,7 @@ const RULES = `Write the commit message and pull request text for this change. R
 - commitMessage: a subject line of at most 72 characters in the style of the recent commit subjects (for example "type: summary" when they use conventional commits). Add a blank line and a short body only when the subject can't carry the change alone.
 - prTitle: one line, like the commit subject.
 - prBody: short. One summary paragraph or a few bullets on what changed and why. End with a line starting "How was it verified?" only if tests were run in the chat (see <tests_run>), saying which. No headings, no AI or "Generated with" footer, no co-author line.
-- Plain, short English. Describe what the diff below changes, not the conversation. The recent commit subjects show the style only: don't repeat them.`;
+- Plain, short English. Describe what <diff> changes, not the conversation. The recent commit subjects show the style only: never reuse one.`;
 
 function cap(text, limit) {
   const value = String(text ?? "").trim();
@@ -38,8 +38,8 @@ function section(name, body) {
   return `<${name}>\n${body}\n</${name}>`;
 }
 
-/** The user turn for the model: the rules, the chat, the tests run, the repo's style and the diff. */
-function buildGitTextPrompt({ diff = "", chatTitle = "", firstMessage = "", recentMessages = [], testCommands = [], recentSubjects = [], branchCommits = [], branch, base, hasChanges = true }) {
+/** The user turn for the model: the rules, the chat, the tests run, the repo's style, a stat and the diff. */
+function buildGitTextPrompt({ diff = "", stat = "", omitted = [], chatTitle = "", firstMessage = "", recentMessages = [], testCommands = [], recentSubjects = [], branchCommits = [], branch, base, hasChanges = true }) {
   const fullDiff = String(diff ?? "");
   const shownDiff = fullDiff.length > DIFF_LIMIT
     ? `${fullDiff.slice(0, DIFF_LIMIT)}\n[The diff is cut off here: ${(fullDiff.length - DIFF_LIMIT).toLocaleString("en-US")} more characters are not shown.]`
@@ -57,10 +57,29 @@ function buildGitTextPrompt({ diff = "", chatTitle = "", firstMessage = "", rece
     section("recent_commit_subjects", recentSubjects.length ? recentSubjects.join("\n") : "(none)"),
   ];
   if (branch && base) parts.push(section("branch", `${branch} into ${base}`));
-  if (branchCommits.length) parts.push(section("branch_commits", branchCommits.join("\n")));
+  if (branchCommits.length) {
+    const label = hasChanges ? "Already committed; the new commit covers only <diff>:\n" : "";
+    parts.push(section("branch_commits", `${label}${branchCommits.join("\n")}`));
+  }
   if (!hasChanges) parts.push("There is nothing left to commit: the diff below is the branch's committed work, for the pull request. Still fill commitMessage.");
+  if (stat) parts.push(section("diff_stat", stat));
+  if (omitted.length) {
+    parts.push(section("not_shown", omitted.map(({ path, reason }) => `${path} (${reason === "lockfile" ? "lockfile" : "looks like a secret"}; contents not shown)`).join("\n")));
+  }
   parts.push(section("diff", shownDiff || "(empty)"));
   return parts.join("\n\n");
+}
+
+const subjectOf = (message) => String(message ?? "").trim().split("\n")[0].trim().toLowerCase();
+
+/** Whether a generated message's subject repeats one already in the repo or on the branch. */
+function repeatsSubject(message, { recentSubjects = [], branchCommits = [] } = {}) {
+  const subject = subjectOf(message);
+  return Boolean(subject) && [...recentSubjects, ...branchCommits].some((earlier) => subjectOf(earlier) === subject);
+}
+
+function repeatNote(message) {
+  return `Your commitMessage subject, "${String(message).trim().split("\n")[0]}", repeats an earlier commit. Write a new subject that says only what <diff> changes.`;
 }
 
 // Agents add these on their own; the brief is "no AI footer".
@@ -119,21 +138,33 @@ async function withTimeout(task, timeoutMs) {
 }
 
 /**
- * Writes the dialog's text with the chat's own agent, else the other one. Each gets `timeoutMs`. Never
- * throws: when neither answers, the result carries the note the dialog shows.
+ * Writes the dialog's text with the chat's own agent, else the other one. Each gets `timeoutMs`. A
+ * commit subject that repeats an earlier one is asked for again, once; if it still repeats, the
+ * commit message comes back empty (`repeated: true`) and the dialog shows its note there. Never
+ * throws: when neither agent answers, the result carries the note.
  */
 async function generateGitText(input, { provider = "claude", models = {}, timeoutMs = TIMEOUT_MS } = {}) {
   const prompt = buildGitTextPrompt(input);
   const order = provider === "codex" ? ["codex", "claude"] : ["claude", "codex"];
+  const ask = (call, text) => withTimeout((signal) => call({ system: SYSTEM, prompt: text, signal }), timeoutMs);
   for (const name of order) {
     const call = models[name];
     if (!call) continue;
+    let parsed;
     try {
-      const parsed = parseGitText(await withTimeout((signal) => call({ system: SYSTEM, prompt, signal }), timeoutMs));
-      if (parsed) return { ok: true, provider: name, ...parsed };
+      parsed = parseGitText(await ask(call, prompt));
     } catch {
       // Not installed, signed out, offline or too slow: the other agent may still answer.
+      continue;
     }
+    if (!parsed) continue;
+    // With nothing to commit, the commit message isn't used.
+    if (input.hasChanges === false || !repeatsSubject(parsed.commitMessage, input)) return { ok: true, provider: name, ...parsed };
+    const again = await ask(call, `${prompt}\n\n${repeatNote(parsed.commitMessage)}`).then(parseGitText, () => null);
+    if (again?.commitMessage && !repeatsSubject(again.commitMessage, input)) {
+      return { ok: true, provider: name, commitMessage: again.commitMessage, prTitle: again.prTitle || parsed.prTitle, prBody: again.prBody || parsed.prBody };
+    }
+    return { ok: true, provider: name, commitMessage: "", prTitle: parsed.prTitle, prBody: parsed.prBody, repeated: true };
   }
   return { ok: false, message: GENERATION_FAILED };
 }
@@ -229,4 +260,4 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
   };
 }
 
-module.exports = { CLAUDE_MODEL, CODEX_MODEL, DIFF_LIMIT, GENERATION_FAILED, SYSTEM, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText };
+module.exports = { CLAUDE_MODEL, CODEX_MODEL, DIFF_LIMIT, GENERATION_FAILED, SYSTEM, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText, repeatsSubject };

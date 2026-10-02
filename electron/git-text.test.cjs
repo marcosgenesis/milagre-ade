@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
-const { DIFF_LIMIT, GENERATION_FAILED, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText } = require("./git-text.cjs");
+const { DIFF_LIMIT, GENERATION_FAILED, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText, repeatsSubject } = require("./git-text.cjs");
 
 const INPUT = {
   diff: "diff --git a/cart.js b/cart.js\n-old\n+new\n",
@@ -55,6 +55,61 @@ test("with nothing left to commit, the prompt describes the branch's commits", (
   const prompt = buildGitTextPrompt({ ...INPUT, hasChanges: false, branchCommits: ["feat: add checkout", "fix: typo"] });
   assert.match(prompt, /feat: add checkout\nfix: typo/);
   assert.match(prompt, /nothing left to commit/i);
+  assert.doesNotMatch(prompt, /Already committed/);
+});
+
+test("the branch's commits are marked as already committed, and a stat comes before the diff", () => {
+  const prompt = buildGitTextPrompt({
+    ...INPUT,
+    branchCommits: ["feat: add checkout"],
+    stat: " cart.js | 2 +-\n checkout.js (new file, 3 lines)",
+    omitted: [{ path: ".env.local", reason: "secret" }, { path: "package-lock.json", reason: "lockfile" }],
+  });
+  assert.match(prompt, /<branch_commits>\nAlready committed; the new commit covers only <diff>:\nfeat: add checkout\n<\/branch_commits>/);
+  assert.match(prompt, /<diff_stat>\n cart\.js \| 2 \+-\n checkout\.js \(new file, 3 lines\)\n<\/diff_stat>/);
+  assert.ok(prompt.indexOf("<diff_stat>") < prompt.lastIndexOf("\n<diff>\n"));
+  assert.match(prompt, /\.env\.local \(looks like a secret; contents not shown\)\npackage-lock\.json \(lockfile; contents not shown\)/);
+});
+
+test("repeatsSubject compares the subject line with recent and branch subjects, ignoring case", () => {
+  const context = { recentSubjects: ["feat: add checkout page"], branchCommits: ["fix: round to cents"] };
+  assert.equal(repeatsSubject("Feat: Add checkout page\n\nMore.", context), true);
+  assert.equal(repeatsSubject("fix: round to cents", context), true);
+  assert.equal(repeatsSubject("fix: flag an empty cart", context), false);
+  assert.equal(repeatsSubject("", context), false);
+});
+
+test("generateGitText asks again once when the subject repeats an earlier commit", async () => {
+  const prompts = [];
+  const replies = [
+    JSON.stringify({ commitMessage: "feat: add usage bars", prTitle: "feat: add usage bars", prBody: "Body one." }),
+    JSON.stringify({ commitMessage: "fix: apply discounts to the cart total", prTitle: "fix: apply discounts", prBody: "Body two." }),
+  ];
+  const model = async ({ prompt }) => {
+    prompts.push(prompt);
+    return replies.shift();
+  };
+  const result = await generateGitText(INPUT, { provider: "claude", models: { claude: model } });
+  assert.deepEqual(result, { ok: true, provider: "claude", commitMessage: "fix: apply discounts to the cart total", prTitle: "fix: apply discounts", prBody: "Body two." });
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /"feat: add usage bars", repeats an earlier commit/);
+});
+
+test("generateGitText leaves the commit message empty when the subject still repeats", async () => {
+  const repeated = JSON.stringify({ commitMessage: "FEAT: add usage bars", prTitle: "Add usage bars", prBody: "Body." });
+  let calls = 0;
+  const model = async () => {
+    calls++;
+    return repeated;
+  };
+  const result = await generateGitText(INPUT, { provider: "claude", models: { claude: model } });
+  assert.deepEqual(result, { ok: true, provider: "claude", commitMessage: "", prTitle: "Add usage bars", prBody: "Body.", repeated: true });
+  assert.equal(calls, 2);
+  // With nothing to commit the subject isn't used, so it isn't asked for again.
+  calls = 0;
+  const pushOnly = await generateGitText({ ...INPUT, hasChanges: false }, { provider: "claude", models: { claude: model } });
+  assert.equal(pushOnly.commitMessage, "FEAT: add usage bars");
+  assert.equal(calls, 1);
 });
 
 test("parseGitText reads plain or fenced JSON, and fills missing fields with empty text", () => {

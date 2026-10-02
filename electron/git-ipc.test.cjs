@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { registerGitHandlers } = require("./git-ipc.cjs");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { NOT_A_CHAT_FOLDER, registerGitHandlers } = require("./git-ipc.cjs");
 
 function register(overrides = {}) {
   const handlers = new Map();
@@ -51,4 +54,22 @@ test("the channels refuse a folder that isn't an absolute path", async () => {
   const { invoke } = register();
   await assert.rejects(async () => invoke("git:commit", { cwd: "relative/path", message: "x" }), /folder/);
   await assert.rejects(async () => invoke("git:changes", { cwd: 42 }), /folder/);
+});
+
+test("the channels only act in a chat's known folder", async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-ipc-")));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const chat = path.join(root, "chat");
+  const elsewhere = path.join(root, "elsewhere");
+  await fs.mkdir(chat);
+  await fs.mkdir(elsewhere);
+  const { calls, invoke } = register({ knownFolders: async () => [chat] });
+  // The same folder through a symlinked path is still the chat's.
+  await fs.symlink(chat, path.join(root, "link"));
+  await invoke("git:commit", { cwd: path.join(root, "link"), message: "fix: x" });
+  assert.equal(calls.length, 1);
+  for (const channel of ["git:changes", "git:generate", "git:commit", "git:push", "git:open-pr"]) {
+    await assert.rejects(async () => invoke(channel, { cwd: elsewhere, message: "x", title: "x", body: "" }), new RegExp(NOT_A_CHAT_FOLDER));
+  }
+  assert.equal(calls.length, 1);
 });

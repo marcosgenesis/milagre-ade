@@ -21,7 +21,7 @@ import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
-import { useScrollFade } from "../lib/use-scroll-fade";
+import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
@@ -386,8 +386,6 @@ export default function SidebarNav({
   const autoCollapsed = useRef(collapsed);
   const [expandedWidth, setExpandedWidth] = useState(readSidebarWidth);
   const [resizing, setResizing] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useScrollFade(scrollRef);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
@@ -592,7 +590,7 @@ export default function SidebarNav({
 
         </div>
 
-        <div ref={scrollRef} className="sidebar-scroll scroll-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <ScrollArea className="sidebar-scroll flex-1 overflow-x-hidden">
           {onOpenCommands && (
             <Tooltip label="Search commands, chats, and projects" className="mx-2 mb-3 w-[calc(100%-16px)]" side="bottom" shortcut={`${shortcutModifier}K`}>
               <button type="button" aria-label="Command palette" aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} onClick={onOpenCommands}
@@ -630,7 +628,7 @@ export default function SidebarNav({
               />
             ))}
           </GlideGroup>
-        </div>
+        </ScrollArea>
 
         {usage && (
           <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>

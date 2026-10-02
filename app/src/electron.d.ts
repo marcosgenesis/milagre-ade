@@ -19,7 +19,7 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
-export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
+export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
 
 declare global {
   interface Window {
@@ -56,6 +56,8 @@ declare global {
       refreshDiffs: (projectPath: string, worktreeIds: number[]) => Promise<void>;
       /** The current branch's open or merged PR, or null when none is available. */
       readPullRequest: (worktreePath: string) => Promise<PullRequest | null>;
+      /** PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */
+      readPullRequests: (worktreePath: string, refs: string[]) => Promise<Array<PullRequest | null>>;
       /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
       revealInFolder: (folder: string) => Promise<void>;
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
@@ -107,6 +109,7 @@ declare global {
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
+      checkForUpdates: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;

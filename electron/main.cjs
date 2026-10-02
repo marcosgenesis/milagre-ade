@@ -31,7 +31,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { readPullRequest } = require("./pull-request.cjs");
+const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
 const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
@@ -52,6 +52,7 @@ const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
+let updateCheck = null;
 // Opened from Finder or the Dock, the app has launchd's bare PATH. The login shell's environment is read
 // once, in the background: windows open without waiting, and the first agent (and the usage lookup) waits for it.
 const environmentReady = loadLoginEnvironment().then(({ source }) => {
@@ -65,23 +66,28 @@ function publishUpdateState(nextState) {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send("update:state", updateState);
   }
+  return updateState;
 }
 
-async function checkForUpdates() {
-  if (!app.isPackaged) return;
+function checkForUpdates() {
+  if (!app.isPackaged) return Promise.resolve(publishUpdateState({ status: "unavailable" }));
+  if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
+  if (updateCheck) return updateCheck;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-  publishUpdateState({ status: "checking" });
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    if (!result?.updateInfo) publishUpdateState({ status: "up-to-date" });
-  } catch (error) {
-    console.warn("Milagre update check failed:", error.message);
-    publishUpdateState({ status: "error" });
-  }
+  publishUpdateState({ status: "checking", version: null, progress: 0 });
+  updateCheck = autoUpdater.checkForUpdates().then(
+    () => updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState,
+    (error) => {
+      console.warn("Milagre update check failed:", error.message);
+      return publishUpdateState({ status: "error" });
+    },
+  ).finally(() => { updateCheck = null; });
+  return updateCheck;
 }
 
 ipcMain.handle("update:state", () => updateState);
+ipcMain.handle("update:check", () => checkForUpdates());
 ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
 
 async function discoverWorktrees(projectPath) {
@@ -277,6 +283,10 @@ ipcMain.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {
 ipcMain.handle("worktree:pull-request", async (_event, worktreePath) => {
   await environmentReady;
   return readPullRequest(worktreePath);
+});
+ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
+  await environmentReady;
+  return readPullRequests(worktreePath, refs);
 });
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
@@ -540,8 +550,10 @@ app.whenReady().then(async () => {
     void readOpenChat().catch(() => {});
   });
   autoUpdater.on("update-available", (info) => publishUpdateState({ status: "downloading", version: info.version }));
+  autoUpdater.on("update-not-available", () => publishUpdateState({ status: "up-to-date" }));
   autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", progress: progress.percent }));
   autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, progress: 100 }));
+  autoUpdater.on("error", () => publishUpdateState({ status: "error" }));
   await checkForUpdates();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,7 +1,7 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
 import type { AgentTask, Subagent } from "../model";
 import { TaskTrack } from "./agents/TaskTrack";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -18,6 +18,7 @@ import {
   Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { FindBar } from "./FindBar";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
@@ -27,6 +28,7 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
+import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
@@ -43,10 +45,11 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
-  const { activity, answer } = replyActivity(body, steps);
+  const { setup, activity, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
+      {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
       {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
@@ -101,6 +104,10 @@ const MessageSection = memo(function MessageSection({
 });
 
 interface ChatComposerProps {
+  /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
+  findOpen?: boolean;
+  findSignal?: number;
+  onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
@@ -318,7 +325,11 @@ export function ChatComposer({
   baseBranch,
   onBaseBranchChange,
   newChatError,
+  findOpen = false,
+  findSignal = 0,
+  onFindClose,
 }: ChatComposerProps) {
+  const root = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState("Worktrees");
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
@@ -339,19 +350,23 @@ export function ChatComposer({
 
   return (
     <div
+      ref={root}
       className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
       onDrop={handleFileDrop}
     >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
+      {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
       {!isNewChat && <MessageScroller
+        key={messages[0]?.session_id ?? "new"}
         navigation="rail"
         followOutput
         smooth
         busy={isSending}
         className="min-h-0 flex-1"
-        viewportClassName="pt-4 pb-2"
+        // The find bar floats over the top of the chat, so the first message moves below it while it is open.
+        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-2`}
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}

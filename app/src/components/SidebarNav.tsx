@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -116,6 +116,18 @@ const SIDEBAR_MOTION = {
   copyOffset: 8,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
+
+// Dragging the sidebar's right edge widens it between these bounds; the width survives restarts.
+const SIDEBAR_MIN_WIDTH = SIDEBAR_MOTION.expandedWidth;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_WIDTH_KEY = "milagre.sidebarWidth";
+
+const clampSidebarWidth = (width: number) => Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+
+function readSidebarWidth() {
+  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_MIN_WIDTH;
+}
 
 // Narrower than this, the sidebar collapses on its own so the chat keeps its room. It can still be expanded.
 const AUTO_COLLAPSE_QUERY = "(max-width: 1024px)";
@@ -437,6 +449,8 @@ export default function SidebarNav({
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
   const autoCollapsed = useRef(collapsed);
+  const [expandedWidth, setExpandedWidth] = useState(readSidebarWidth);
+  const [resizing, setResizing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollFade(scrollRef);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
@@ -537,6 +551,49 @@ export default function SidebarNav({
     return () => window.removeEventListener("keydown", handleToggle);
   }, [collapsed]);
 
+  const saveWidth = (width: number) => {
+    const next = clampSidebarWidth(width);
+    setExpandedWidth(next);
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+  };
+
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = expandedWidth;
+    let latest = startWidth;
+    setResizing(true);
+    document.body.style.cursor = "col-resize";
+    const move = (moveEvent: PointerEvent) => {
+      latest = clampSidebarWidth(startWidth + moveEvent.clientX - startX);
+      setExpandedWidth(latest);
+    };
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      document.body.style.cursor = "";
+      setResizing(false);
+      saveWidth(latest);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  };
+
+  const resizeWithKeys = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowLeft") saveWidth(expandedWidth - step);
+    else if (event.key === "ArrowRight") saveWidth(expandedWidth + step);
+    else if (event.key === "Home") saveWidth(SIDEBAR_MIN_WIDTH);
+    else if (event.key === "End") saveWidth(SIDEBAR_MAX_WIDTH);
+    else return;
+    event.preventDefault();
+  };
+
   return (
     <div className={`relative flex min-h-0 shrink-0 flex-col ${fill ? "h-full" : "h-[600px]"} ${className}`}>
       <Tooltip
@@ -562,9 +619,10 @@ export default function SidebarNav({
         aria-label="Workspace navigation"
         className="relative flex min-h-0 shrink-0 overflow-hidden rounded-window bg-surface shadow-card transition-[width]"
         style={{
-          width: collapsed ? SIDEBAR_MOTION.collapsedWidth : SIDEBAR_MOTION.expandedWidth,
+          width: collapsed ? SIDEBAR_MOTION.collapsedWidth : expandedWidth,
           flex: "1 1 0%",
-          transitionDuration: `${SIDEBAR_MOTION.duration}ms`,
+          // Following the pointer while dragging; the eased width transition would make the edge lag behind it.
+          transitionDuration: resizing ? "0ms" : `${SIDEBAR_MOTION.duration}ms`,
           transitionTimingFunction: SIDEBAR_MOTION.easing,
           "--sidebar-copy-duration": `${SIDEBAR_MOTION.copyDuration}ms`,
           "--sidebar-copy-offset": `${SIDEBAR_MOTION.copyOffset}px`,
@@ -672,6 +730,24 @@ export default function SidebarNav({
         </div>
       </div>
       </aside>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-valuenow={expandedWidth}
+          tabIndex={0}
+          title="Drag to resize, double-click to reset"
+          onPointerDown={startResize}
+          onDoubleClick={() => saveWidth(SIDEBAR_MIN_WIDTH)}
+          onKeyDown={resizeWithKeys}
+          className="group absolute bottom-0 right-[-6px] top-0 z-10 flex w-3 cursor-col-resize justify-center outline-none [-webkit-app-region:no-drag]"
+        >
+          <span className={`my-3 w-0.5 rounded-full transition-colors duration-150 group-hover:bg-line-strong group-focus-visible:bg-accent ${resizing ? "bg-line-strong" : "bg-transparent"}`} />
+        </div>
+      )}
     </div>
   );
 }

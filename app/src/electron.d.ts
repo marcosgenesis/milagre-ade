@@ -13,6 +13,12 @@ import type { PullRequest } from "./model";
 /** Which patterns apply to new worktrees, and the files they match in the main checkout. */
 export type FilesToCopy = { source: "worktreeinclude" | "setting" | "default"; worktreeInclude: string | null; matches: string[] };
 
+/** Where the setup command new worktrees run comes from: the repo's .milagre/worktree.json, the project's setting, or nowhere. */
+export type WorktreeSetupSource = "repo" | "setting" | "none";
+
+/** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
+export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
+
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
 declare global {
@@ -24,7 +30,8 @@ declare global {
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
-      createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number }>;
+      /** `setupNote`: why the repo's setup file was ignored. */
+      createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
       /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
       getWorktreeRoots: () => Promise<string[]>;
       /** What archiving would lose from a worktree. Rejects when git can't tell. */
@@ -40,6 +47,9 @@ declare global {
       /** What patterns would match, without saving them. `.worktreeinclude` still wins. */
       previewFilesToCopy: (projectPath: string, patterns: string[]) => Promise<FilesToCopy>;
       saveFilesToCopy: (projectPath: string, patterns: string[]) => Promise<FilesToCopy & { filesToCopy: string[] }>;
+      readWorktreeSetup: (projectPath: string) => Promise<WorktreeSetupSettings>;
+      /** Saves the project's setup command; an empty one removes it. `.milagre/worktree.json` still wins. */
+      saveWorktreeSetup: (projectPath: string, command: string) => Promise<WorktreeSetupSettings>;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */

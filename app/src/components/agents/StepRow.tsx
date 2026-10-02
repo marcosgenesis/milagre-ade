@@ -11,9 +11,9 @@ import { Markdown } from "../markdown/Markdown";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
-const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon };
+const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon, setup: CommandLineIcon };
 // Commands show as a terminal session ("$ command", then output), edits as diffs.
-const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", edit: "diff" };
+const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", setup: "console", edit: "diff" };
 
 function Icon({ icon, size = 14 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
@@ -58,6 +58,7 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
           : span.code
           ? <code key={index} className={`rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink ${shimmer ? "step-shimmer" : ""}`}>{span.text}</code>
           : <span key={index} className={shimmer ? "step-shimmer" : undefined}>{span.text}</span>))}
+        {step.note && <span className="ml-1.5 text-[11.5px] text-ink-3">· {step.note}</span>}
       </span>
       {state && <span className="sr-only">{state}</span>}
       {waiting ? (

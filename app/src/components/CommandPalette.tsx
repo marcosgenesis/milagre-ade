@@ -6,7 +6,7 @@ import { filterCommands, type Command } from "../lib/commands";
 import { useShortcutHints } from "../lib/shortcut-hints";
 import { useScrollFade } from "../lib/use-scroll-fade";
 
-const icons = { add: Add01Icon, chat: BubbleChatIcon, folder: FolderOpenIcon, settings: Settings01Icon, git: GitBranchIcon, editor: CodeIcon, copy: Copy01Icon, unread: BubbleChatIcon };
+const icons = { add: Add01Icon, chat: BubbleChatIcon, folder: FolderOpenIcon, settings: Settings01Icon, git: GitBranchIcon, editor: CodeIcon, copy: Copy01Icon, unread: BubbleChatIcon, search: Search01Icon };
 
 export function CommandPalette({ commands, onClose, onError }: {
   commands: Command[];

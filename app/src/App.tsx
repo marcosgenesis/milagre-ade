@@ -598,6 +598,7 @@ function App() {
     const worktree = created.project.state.worktrees[created.worktreeId];
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
+    if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(setBranches);
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
@@ -722,6 +723,18 @@ function App() {
     });
   }
 
+  // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findSignal, setFindSignal] = useState(0);
+  const findRef = useRef({ open: false, canOpen: false });
+  findRef.current = { open: findOpen, canOpen: view === "chat" && messages.length > 0 };
+  function openFind() {
+    if (!findRef.current.canOpen) return;
+    setFindOpen(true);
+    setFindSignal((current) => current + 1);
+  }
+  useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
+
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"], dialog[open]')) return;
@@ -733,7 +746,11 @@ function App() {
         }
         return;
       }
-      if (event.key.toLowerCase() === "k") {
+      if (event.key.toLowerCase() === "f") {
+        if (!findRef.current.canOpen) return;
+        event.preventDefault();
+        openFind();
+      } else if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandPaletteOpen(true);
       } else if (event.key === ",") {
@@ -758,6 +775,11 @@ function App() {
     function handleEscape(event: KeyboardEvent) {
       // A menu, picker or search that Escape closed has already consumed it.
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (findRef.current.open) {
+        event.preventDefault();
+        setFindOpen(false);
+        return;
+      }
       if (view === "settings") {
         event.preventDefault();
         setView("chat");
@@ -821,6 +843,7 @@ function App() {
       { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
       { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
       { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+      ...(messages.length ? [{ id: "find", label: "Find in chat", group: "Current chat", icon: "search" as const, shortcut: `${modifier}F`, keywords: "search text messages", run: openFind }] : []),
       { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
     );
     if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
@@ -964,6 +987,9 @@ function App() {
             baseBranch={effectiveBaseBranch}
             onBaseBranchChange={(branch) => { setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
             newChatError={newChatError}
+            findOpen={findOpen}
+            findSignal={findSignal}
+            onFindClose={() => setFindOpen(false)}
             approval={pendingApproval ? (
               <PermissionCard
                 key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}

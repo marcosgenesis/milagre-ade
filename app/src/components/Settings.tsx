@@ -179,7 +179,7 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <Group title="Theme">
-      <Row label="Theme" description="System follows your macOS appearance">
+      <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
         <Select<ThemePreference>
           label="Theme"
           value={settings.theme}

@@ -45,7 +45,7 @@ import { chatRevealPath } from "./lib/reveal";
 import { runningChat as chatToAskAbout, type SwitchTarget } from "./lib/project-list";
 import { createProjectSwitcher } from "./lib/project-switch";
 import type { SettingsSection } from "./components/Settings";
-import { getSettings, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
+import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
 import { renameWorktree } from "./lib/worktree-rename";
@@ -664,7 +664,14 @@ function App() {
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"], dialog[open]')) return;
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.shiftKey) {
+        if (event.key.toLowerCase() === "t") {
+          event.preventDefault();
+          toggleTheme();
+        }
+        return;
+      }
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandPaletteOpen(true);
@@ -734,6 +741,7 @@ function App() {
     { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => { if (runningChatRef.current) askInMenu({ kind: "open" }); else return openProject(); } },
     { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
     { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme dark light system", run: () => { setSettingsSection("appearance"); setView("settings"); } },
+    { id: "toggle-theme", label: "Toggle light and dark", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "theme appearance dark light mode", run: toggleTheme },
     { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: project.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
   ];
   if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });

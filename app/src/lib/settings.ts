@@ -96,6 +96,13 @@ export function useResolvedTheme(): "light" | "dark" {
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
 
+/** ⌘⇧T: flips to the opposite of what's on screen, pinning light or dark even from System. */
+export function toggleTheme() {
+  const { theme } = getSettings();
+  const dark = theme === "system" ? darkQuery.matches : theme === "dark";
+  updateSettings({ theme: dark ? "light" : "dark" });
+}
+
 export function useApplyTheme() {
   const theme = useResolvedTheme();
   useEffect(() => {

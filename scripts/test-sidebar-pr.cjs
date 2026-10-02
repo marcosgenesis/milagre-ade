@@ -1,0 +1,144 @@
+// Browser integration check using the app's existing Electron/Vite dependencies.
+const assert = require("node:assert/strict");
+const path = require("node:path");
+const { setTimeout: delay } = require("node:timers/promises");
+
+const fixture = `
+import React, { useState } from "react";
+import { createRoot } from "react-dom/client";
+import { ChatRow } from "/src/components/sidebar/ChatRow";
+import { useWorktreePullRequests } from "/src/components/useWorktreePullRequests";
+import { chatKey } from "/src/lib/agent-runs";
+import "/src/styles.css";
+const listeners = new Set();
+window.pr = { number: 10213, title: "Show pull requests in the chat sidebar", url: "https://github.com/example/project/pull/10213", state: "OPEN" };
+window.picks = 0;
+window.reads = [];
+window.milagre = {
+  readPullRequest: async path => { window.reads.push(path); return window.pr; },
+  onAgentEvent: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+};
+window.refreshPR = () => listeners.forEach(listener => listener({ chatId: chatKey("/fixture", 1), event: { type: "turn-completed" } }));
+const state = {
+  sessions: { 1: { id: 1, worktree_id: 1 }, 2: { id: 2, worktree_id: 1 } },
+  worktrees: { 1: { id: 1, path: "/fixture/worktree" } },
+  messages: [{ session_id: 1 }, { session_id: 2 }],
+};
+function Fixture() {
+  const [collapsed, setCollapsed] = useState(false);
+  window.setCollapsed = setCollapsed;
+  const prs = useWorktreePullRequests("/fixture", state);
+  return <aside data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, paddingTop: 10 }}>
+    <ChatRow item={{ id: "1", label: "Rename fixture", details: { pullRequest: prs["/fixture/worktree"] } }}
+      active collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
+    <ChatRow item={{ id: "2", label: "Chat without a PR" }}
+      active={false} collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
+  </aside>;
+}
+document.documentElement.classList.add("dark");
+createRoot(document.getElementById("root")).render(<Fixture />);
+`;
+
+async function browserChecks() {
+  const { app, BrowserWindow } = require("electron");
+  const { guardNavigation } = require("../electron/links.cjs");
+  await app.whenReady();
+  const window = new BrowserWindow({ width: 360, height: 240, show: false, webPreferences: { backgroundThrottling: false } });
+  const opened = [];
+  guardNavigation(window.webContents, { appUrl: process.argv[2], openExternal: url => opened.push(url) });
+  const evaluate = source => window.webContents.executeJavaScript(source);
+  async function waitFor(source) {
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
+    throw new Error(`Timed out: ${source}`);
+  }
+  try {
+    await window.loadURL(process.argv[2]);
+    await waitFor('!!document.querySelector("[data-chat-pr]")');
+    assert.deepEqual(await evaluate('window.reads'), ["/fixture/worktree"], "Chats sharing a worktree use one PR lookup");
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr]").textContent'), "#10213");
+    assert.equal(await evaluate('document.querySelectorAll("[data-chat-pr]").length'), 1);
+    assert.equal(await evaluate('!!document.querySelector("button a")'), false, "Link is not nested in a button");
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr]").hasAttribute("title")'), false, "PR link does not use a native tooltip");
+    await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))`);
+    await waitFor('!!document.querySelector("[data-chat-hover-card]")');
+    assert.ok(await evaluate('document.querySelector("[data-chat-hover-card]").textContent.includes("Show pull requests in the chat sidebar")'), "Hover card includes the actual PR title");
+    assert.ok(await evaluate('[...document.querySelectorAll("[role=tooltip]")].some(node => node.textContent === "Open pull request #10213")'), "Shared tooltip shows PR status and number");
+    await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+    const openColor = await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color');
+    const geometry = await evaluate(`(() => {
+      const row = document.querySelector('[data-row]').getBoundingClientRect();
+      const label = document.querySelector('[data-row] > span:last-child').getBoundingClientRect();
+      const link = document.querySelector('[data-chat-pr]').getBoundingClientRect();
+      return { rowBottom: row.bottom, labelBottom: label.bottom, linkTop: link.top, linkBottom: link.bottom, labelLeft: label.left, linkLeft: link.left };
+    })()`);
+    assert.ok(geometry.linkTop >= geometry.labelBottom, "PR link is below the title");
+    assert.ok(geometry.linkBottom <= geometry.rowBottom, "PR link fits inside row");
+    assert.equal(geometry.linkLeft, geometry.labelLeft, "PR link aligns with title");
+    await evaluate('document.querySelector("[data-chat-pr]").click()');
+    await delay(150);
+    assert.deepEqual(opened, ["https://github.com/example/project/pull/10213"]);
+    assert.equal(await evaluate('window.picks'), 0, "Opening a PR does not select the chat");
+    await evaluate('window.pr = { ...window.pr, state: "MERGED" }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("merged")');
+    const mergedColor = await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color');
+    assert.notEqual(openColor, mergedColor);
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-purple-500")'), true);
+    await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr.png", image.toPNG()));
+    await evaluate('window.setCollapsed(true)');
+    await waitFor('!document.querySelector("[data-chat-pr]")');
+    assert.equal(await evaluate('document.querySelector("[data-row]").getBoundingClientRect().height'), 32);
+    assert.equal(await evaluate(`(() => {
+      const row = document.querySelector('[data-row]').getBoundingClientRect();
+      const initials = document.querySelector('.sidebar-chat-initials').getBoundingClientRect();
+      return (initials.left + initials.right) / 2 === (row.left + row.right) / 2;
+    })()`), true, "Collapsed chat initials remain centered");
+    await evaluate('window.setCollapsed(false); window.pr = null; window.refreshPR()');
+    await waitFor('!document.querySelector("[data-chat-pr]") && document.querySelector("aside").dataset.sidebarCollapsed === "false"');
+    assert.equal(await evaluate('document.querySelector("[data-row]").getBoundingClientRect().height'), 32);
+    console.log("PASS: PR lookup, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
+}
+
+async function main() {
+  const { createServer } = await import("vite");
+  const { spawn } = require("node:child_process");
+  const server = await createServer({
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [{
+      name: "sidebar-pr-fixture",
+      resolveId(id) { if (id === "/__sidebar_pr_fixture.tsx") return id; },
+      load(id) { if (id === "/__sidebar_pr_fixture.tsx") return fixture; },
+      configureServer(server) {
+        server.middlewares.use(async (request, response, next) => {
+          if (request.url !== "/__sidebar_pr__") return next();
+          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__sidebar_pr_fixture.tsx"></script></body></html>');
+          response.setHeader("Content-Type", "text/html");
+          response.end(html);
+        });
+      },
+    }],
+  });
+  try {
+    await server.listen();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__sidebar_pr__`], { env, stdio: "inherit" });
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", code => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
+}
+(process.versions.electron ? browserChecks() : main()).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

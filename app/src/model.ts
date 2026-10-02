@@ -126,6 +126,13 @@ export interface DiffStat {
   removed: number;
 }
 
+export interface PullRequest {
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "MERGED";
+}
+
 export interface Worktree {
   id: number;
   project_id: number;

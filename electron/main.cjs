@@ -27,6 +27,7 @@ const { previewFilesToCopy } = require("./worktree-files.cjs");
 const { createProjectSettings } = require("./project-settings.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
+const { readPullRequest } = require("./pull-request.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
@@ -192,6 +193,10 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   return { project, worktreeId: worktree.id };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
+ipcMain.handle("worktree:pull-request", async (_event, worktreePath) => {
+  await environmentReady;
+  return readPullRequest(worktreePath);
+});
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 

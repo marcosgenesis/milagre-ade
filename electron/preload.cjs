@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld("milagre", {
   refreshDiffs: (projectPath, worktreeIds) => ipcRenderer.invoke("worktree:refresh-diffs", projectPath, worktreeIds),
   readPullRequest: (worktreePath) => ipcRenderer.invoke("worktree:pull-request", worktreePath),
   revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
+  copyImage: (file) => ipcRenderer.invoke("image:copy", file),
+  saveImage: (file) => ipcRenderer.invoke("image:save", file),
+  showImageMenu: (file) => ipcRenderer.invoke("image:menu", file),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),
     generate: (request) => ipcRenderer.invoke("git:generate", request),

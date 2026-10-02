@@ -1,6 +1,7 @@
 // Run with node scripts/test-image-generation.cjs. Checks that an image Codex generates shows in the
 // reply as its own surface, outside the folded activity: generating while the step runs, the image
-// once it is saved and loaded, and a failed step row (no surface) when it fails. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
+// once it is saved and loaded with copy and download buttons and a right-click menu, and a failed step
+// row (no surface) when it fails. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -13,6 +14,8 @@ import { ChatComposer } from "/src/components/ChatComposer";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
+window.imageCalls = [];
+window.milagre = { listEditors: async () => [], copyImage: async (file) => { window.imageCalls.push(["copy", file]); }, saveImage: async (file) => { window.imageCalls.push(["save", file]); return null; }, showImageMenu: async (file) => { window.imageCalls.push(["menu", file]); } };
 const PROMPT = "A quiet mountain landscape at sunset, soft dusk light over layered ridges";
 const thought = { id: "t1", kind: "thinking", title: "Thought for 3s", status: "done", detail: "Generating the image the user asked for.", durationMs: 3000, offset: 0 };
 const image = (status, extra = {}) => ({ id: "ig_1", kind: "image", title: status === "running" ? "Generating an image" : "Generated an image", status, offset: 0, ...extra });
@@ -79,13 +82,25 @@ async function browserChecks() {
     assert.ok(done.loaded, "the saved image loads through milagre-media");
     assert.doesNotMatch(done.text, /Image ready|Generating image/, "no status line under the image");
     assert.match(done.text, /\d+ × \d+/, "shows the image's real resolution");
-    assert.match(done.text, /mountain landscape/, "shows the prompt it was made from");
+    assert.doesNotMatch(done.text, /mountain landscape/, "the prompt isn't repeated under the image");
+    assert.match(await evaluate(`${surface}.querySelector("[role=img]").getAttribute("aria-label")`), /mountain landscape/, "the prompt is the image's label");
     await screenshot("complete");
+    // Hovering shows the buttons; each acts on the saved file, and so does the right-click menu.
+    const box = await evaluate(`(() => { const r = ${surface}.querySelector("[role=img]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+    window.webContents.sendInputEvent({ type: "mouseMove", x: box.x, y: box.y });
+    await waitFor('getComputedStyle(document.querySelector("[aria-label=\'Copy image\']").parentElement.parentElement).opacity === "1"');
+    await screenshot("hover-actions");
+    await evaluate('document.querySelector("[aria-label=\'Copy image\']").click()');
+    await waitFor('!!document.querySelector("[aria-label=Copied]")');
+    await evaluate('document.querySelector("[aria-label=\'Download image\']").click()');
+    await evaluate(`${surface}.parentElement.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`);
+    await waitFor("window.imageCalls.length === 3");
+    assert.deepEqual(await evaluate("window.imageCalls"), [["copy", PHOTO], ["save", PHOTO], ["menu", PHOTO]]);
     await evaluate('window.setFixture("failed")');
     await waitFor(`!${surface} && !!document.querySelector("[data-slot=step][data-status=failed]")`);
     assert.match(await evaluate('document.querySelector("[data-slot=step][data-status=failed]").textContent'), /Couldn't generate an image.*image limit reached/);
     await screenshot("failed");
-    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution and prompt, or a failed step row with the reason and no image surface");
+    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution, copy and download buttons and a right-click menu (the prompt only as its label), or a failed step row with the reason and no image surface");
     app.exit(0);
   } catch (error) {
     console.error(error);

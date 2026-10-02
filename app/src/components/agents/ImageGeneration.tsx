@@ -25,6 +25,8 @@ export interface ImageGenerationProps {
   statusText?: string;
   showStatus?: boolean;
   onRetry?: () => void;
+  /** Controls over the completed media, e.g. copy and download; shown on hover or keyboard focus. */
+  actions?: ReactNode;
   className?: string;
   mediaClassName?: string;
   statusClassName?: string;
@@ -211,6 +213,7 @@ export function ImageGeneration({
   statusText,
   showStatus = true,
   onRetry,
+  actions,
   className,
   mediaClassName,
   statusClassName,
@@ -224,7 +227,8 @@ export function ImageGeneration({
   return (
     <div data-slot="image-generation" data-state={status} aria-busy={active} className={cx("w-full", className)}>
       <div className={cx("w-full", size === "compact" && "mx-auto max-w-52")}>
-        <div role="img" aria-label={resolvedLabel} style={{ aspectRatio }} className="relative isolate w-full overflow-hidden rounded-xl bg-field">
+        <div style={{ aspectRatio }} className="group/media relative isolate w-full overflow-hidden rounded-xl bg-field">
+          <div role="img" aria-label={resolvedLabel} className="absolute inset-0" />
           <motion.div
             aria-hidden={children ? undefined : true}
             initial={false}
@@ -249,6 +253,10 @@ export function ImageGeneration({
               </motion.div>
             ) : null}
           </AnimatePresence>
+
+          {status === "complete" && actions ? (
+            <div className="absolute right-2 bottom-2 z-10 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/media:opacity-100 focus-within:opacity-100">{actions}</div>
+          ) : null}
 
           {resolution ? (
             <span className="absolute top-2 right-2 z-10 rounded-full bg-surface/75 px-2 py-0.5 font-mono text-[10px] tabular-nums text-ink-2">{resolution}</span>

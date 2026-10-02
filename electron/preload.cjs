@@ -27,4 +27,10 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("update:state", listener);
   },
   readUsage: () => ipcRenderer.invoke("usage:read"),
+  notifyAttention: (notice) => ipcRenderer.invoke("notification:attention", notice),
+  onOpenChat: (callback) => {
+    const listener = (_event, chatId) => callback(chatId);
+    ipcRenderer.on("notification:open-chat", listener);
+    return () => ipcRenderer.removeListener("notification:open-chat", listener);
+  },
 });

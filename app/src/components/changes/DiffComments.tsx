@@ -22,7 +22,7 @@ function Rise({ children, className, ...rest }: { children: ReactNode; className
  * body's visible width (a container query unit) instead of as wide as the longest line.
  */
 export function CommentSlot({ children }: { children: ReactNode }) {
-  return <div data-diff-comment-slot className="sticky left-0 flex w-[100cqw] flex-col gap-2 border-y border-line bg-surface px-3 py-2 font-sans text-[12.5px] leading-[18px] whitespace-normal">{children}</div>;
+  return <div data-diff-comment-slot className="sticky left-0 flex w-[100cqw] flex-col gap-2 bg-surface px-3 py-2 font-sans text-[12.5px] leading-[18px] whitespace-normal">{children}</div>;
 }
 
 const iconButton = "flex size-6 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink";

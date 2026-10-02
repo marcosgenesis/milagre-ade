@@ -117,6 +117,8 @@ interface ChatComposerProps {
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
+  /** The models the picker offers (see mergeModels). */
+  models: ModelOption[];
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -260,6 +262,7 @@ export function ChatComposer({
   waitingStepIds,
   runModelName,
   lockedProvider,
+  models,
   selectedModel,
   onModelChange,
   capability,
@@ -372,6 +375,7 @@ export function ChatComposer({
           sendBlocked={sendBlocked}
           running={isSending}
           lockedProvider={lockedProvider}
+          models={models}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           capability={capability}

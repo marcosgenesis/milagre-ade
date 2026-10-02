@@ -10,8 +10,9 @@ const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
-const { createCapabilityCache } = require("./agents/capabilities.cjs");
-const { resolveExecutable } = require("./agents/environment.cjs");
+const { createCliCache } = require("./agents/cli.cjs");
+const { loadLoginEnvironment } = require("./agents/environment.cjs");
+const { createModelCache } = require("./agents/models.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
@@ -25,7 +26,12 @@ const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
-const readUsage = createUsageReader();
+// Opened from Finder or the Dock, the app has launchd's bare PATH. The login shell's environment is read
+// once, in the background: windows open without waiting, and the first agent (and the usage lookup) waits for it.
+const environmentReady = loadLoginEnvironment().then(({ source }) => {
+  if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
+}, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
+const readUsage = createUsageReader({ ready: () => environmentReady });
 
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };
@@ -141,29 +147,22 @@ const agents = new SessionManager({
   },
 });
 
-// CLI paths are looked up once per run; a missing CLI is looked up again next time.
-const executables = new Map();
-function executable(name) {
-  if (!executables.has(name)) {
-    executables.set(name, resolveExecutable(name).then((found) => {
-      if (!found) executables.delete(name);
-      return found;
-    }));
-  }
-  return executables.get(name);
-}
+// Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
+const agentCli = createCliCache({ ready: () => environmentReady });
 
 ipcMain.handle("usage:read", () => readUsage());
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);
   const prompt = await expandSkillPrompt(request.cwd, request.prompt);
-  const command = await executable(request.provider === "codex" ? "codex" : "claude");
-  return agents.startTurn({ ...request, prompt, images, command });
+  const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
+  // The renderer shows a start refused here as the turn's failure.
+  if (cli.problem) throw new Error(cli.problem);
+  return agents.startTurn({ ...request, prompt, images, command: cli.command });
 });
 
-const modelCapabilities = createCapabilityCache({ executable, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
-ipcMain.handle("agent:capabilities", () => modelCapabilities());
+const agentModels = createModelCache({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
+ipcMain.handle("agent:models", () => agentModels());
 
 ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 

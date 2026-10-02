@@ -207,13 +207,16 @@ function readCodexUsage(deps = {}) {
 }
 
 function createUsageReader(deps = {}) {
-  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now } = deps;
+  // `ready` resolves once the login environment is applied: opened from Finder the app's PATH is bare until then,
+  // and the Codex lookup starts `codex` from it.
+  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now, ready = () => undefined } = deps;
   const safely = (provider, read) => Promise.resolve()
     .then(() => read())
     .catch(() => providerResult(provider, now, "error", [], "Couldn't read usage."));
   let inFlight = null;
   return function readUsage() {
-    inFlight ??= Promise.all([safely("claude", readClaude), safely("codex", readCodex)])
+    inFlight ??= Promise.resolve().then(ready).catch(() => {})
+      .then(() => Promise.all([safely("claude", readClaude), safely("codex", readCodex)]))
       .then((providers) => ({ providers }))
       .finally(() => {
         inFlight = null;

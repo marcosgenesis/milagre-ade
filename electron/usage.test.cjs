@@ -308,6 +308,24 @@ test("shares one in-flight read between concurrent callers", async () => {
   assert.deepEqual([claudeReads, codexReads], [2, 2]);
 });
 
+test("waits for the login environment before reading either provider", async () => {
+  const updatedAt = new Date(NOW).toISOString();
+  const environment = deferred();
+  const order = [];
+  const readUsage = createUsageReader({
+    now: () => NOW,
+    ready: () => environment.promise.then(() => order.push("environment")),
+    readClaude: async () => { order.push("claude"); return { provider: "claude", status: "ok", windows: [], updatedAt }; },
+    readCodex: async () => { order.push("codex"); return { provider: "codex", status: "ok", windows: [], updatedAt }; },
+  });
+  const pending = readUsage();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, []);
+  environment.resolve();
+  await pending;
+  assert.deepEqual(order, ["environment", "claude", "codex"]);
+});
+
 test("turns a reader crash into an error for that provider only", async () => {
   const updatedAt = new Date(NOW).toISOString();
   const readUsage = createUsageReader({

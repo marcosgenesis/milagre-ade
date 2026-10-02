@@ -13,7 +13,7 @@ import {
   QuestionAnswers,
   PermissionMode,
   EffortLevel,
-  ModelCapabilities,
+  AgentModels,
   capabilityFor,
   effortFor,
   createInitialState,
@@ -23,6 +23,7 @@ import {
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
+import { capabilitiesFrom, mergeModels, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
@@ -65,8 +66,22 @@ function App() {
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
   const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
-  const [capabilities, setCapabilities] = useState<ModelCapabilities | null>(null);
-  useEffect(() => { void window.milagre.getModelCapabilities().then(setCapabilities).catch(() => undefined); }, []);
+  // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
+  const [reported, setReported] = useState<AgentModels | null>(null);
+  useEffect(() => { void window.milagre.getModels().then(setReported).catch(() => undefined); }, []);
+  const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
+  const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
+  // Until the user picks a model, the picker shows the default from Settings once the lists have it. A
+  // model the agents don't offer gives way to its provider's recommended model.
+  const pickedModel = useRef(false);
+  useEffect(() => {
+    setSelectedModel((current) => {
+      const { defaultModelId } = getSettings();
+      const wanted = !pickedModel.current && models.some((model) => model.id === defaultModelId) ? defaultModelId : current.id;
+      return resolveModel(models, wanted, current.provider);
+    });
+  }, [models]);
+  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
@@ -165,7 +180,7 @@ function App() {
   // A chat stays on the agent it started with; the picker follows the open chat.
   useEffect(() => {
     if (!selectedSession?.provider) return;
-    const next = modelForChat(selectedModel, selectedSession.provider, messages, MODEL_CATALOG);
+    const next = modelForChat(selectedModel, selectedSession.provider, messages, models);
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
@@ -341,7 +356,7 @@ function App() {
     }
     const chatSession = session;
 
-    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), MODEL_CATALOG);
+    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), models);
     const userMessage = {
       id: nextId++,
       session_id: chatSession.id,
@@ -497,7 +512,7 @@ function App() {
       )}
 
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        {view === "settings" && <SettingsPanel section={settingsSection} />}
+        {view === "settings" && <SettingsPanel section={settingsSection} models={models} />}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
           <ChatComposer
             key={project.path}
@@ -513,10 +528,11 @@ function App() {
             streamingText={run?.text}
             streamingSteps={run?.steps}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
-            runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
+            runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
+            models={models}
             selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            onModelChange={chooseModel}
             capability={selectedCapability}
             effort={effortFor(selectedCapability, effort)}
             onEffortChange={setEffort}

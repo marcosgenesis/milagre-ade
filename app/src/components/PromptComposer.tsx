@@ -17,7 +17,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import type { EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { effortCopy, MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import { effortCopy, PERMISSION_MODES } from "../model";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
@@ -86,6 +86,8 @@ interface PromptComposerProps {
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
   lockedProvider?: ModelProvider;
+  /** The models each agent offers, or the maintained list until it reports them. */
+  models: ModelOption[];
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -121,7 +123,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -170,7 +172,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     : menu === "slash"
       ? commands.filter((command) => `${command.name.slice(1)} ${command.desc}`.toLowerCase().includes(tokenQuery))
       : [];
-  const modelRows = MODEL_CATALOG.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
+  const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0;
 
   useEffect(() => {
@@ -353,7 +355,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span></button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}<span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span></button>)}
               </div>
             }
           >

@@ -1,9 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { CoordinatorState, PullRequest } from "../model";
 import { chatInProject, sessionIdFromKey } from "../lib/agent-runs";
+import { updateConflictDismissals } from "../lib/conflict-action";
+
+const DISMISSED_CONFLICTS = "milagre.dismissed-conflict-actions";
 
 /** PRs stay transient: refresh on opening a project, focus, turn completion, and while visible. */
 export function useWorktreePullRequests(projectPath: string, state: CoordinatorState | null) {
+  const [dismissedConflicts, setDismissedConflicts] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(DISMISSED_CONFLICTS) ?? "[]");
+      return Array.isArray(saved) ? saved.filter((url): url is string => typeof url === "string") : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(DISMISSED_CONFLICTS, JSON.stringify(dismissedConflicts)); } catch { /* Keep working in memory. */ }
+  }, [dismissedConflicts]);
+  const dismissConflictAction = (pr: PullRequest) => setDismissedConflicts((current) => updateConflictDismissals(current, pr, true));
   const stateRef = useRef(state);
   stateRef.current = state;
   const [snapshot, setSnapshot] = useState<{ projectPath: string; prs: Record<string, PullRequest | null> }>({ projectPath: "", prs: {} });
@@ -26,10 +39,13 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
         pending.add(path);
         try {
           const pr = await window.milagre.readPullRequest(path).catch(() => null);
-          if (!disposed) setSnapshot((current) => ({
-            projectPath,
-            prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
-          }));
+          if (!disposed) {
+            setDismissedConflicts((current) => updateConflictDismissals(current, pr));
+            setSnapshot((current) => ({
+              projectPath,
+              prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
+            }));
+          }
         } finally {
           pending.delete(path);
         }
@@ -56,5 +72,5 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     };
   }, [projectPath, pathsKey]);
 
-  return snapshot.projectPath === projectPath ? snapshot.prs : {};
+  return { pullRequests: snapshot.projectPath === projectPath ? snapshot.prs : {}, dismissedConflicts, dismissConflictAction };
 }

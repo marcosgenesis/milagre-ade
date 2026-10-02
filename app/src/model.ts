@@ -133,6 +133,7 @@ export interface PullRequest {
   state: "OPEN" | "MERGED";
   readyToMerge: boolean;
   hasConflicts: boolean;
+  conflictStatusKnown?: boolean;
 }
 
 export interface Worktree {

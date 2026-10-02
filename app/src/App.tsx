@@ -199,7 +199,8 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
-  const pullRequests = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -876,8 +877,11 @@ function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
-            onResolveConflicts={selectedSession && selectedWorktree && pullRequests[selectedWorktree.path]?.state === "OPEN" && pullRequests[selectedWorktree.path]?.hasConflicts
-              ? () => { void executeSend("Resolve the merge conflicts in this branch against the pull request's base branch. Preserve the intended changes from both sides and run the relevant checks.", permissionMode, [], [], true); }
+            onResolveConflicts={selectedSession && selectedPullRequest?.state === "OPEN" && selectedPullRequest.hasConflicts && !dismissedConflicts.includes(selectedPullRequest.url)
+              ? () => {
+                dismissConflictAction(selectedPullRequest);
+                void executeSend("Resolve the merge conflicts in this branch against the pull request's base branch. Preserve the intended changes from both sides and run the relevant checks.", permissionMode, [], [], true);
+              }
               : undefined}
             isSending={isSending}
             sendBlocked={preparing}

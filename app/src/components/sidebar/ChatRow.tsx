@@ -150,7 +150,8 @@ export function ChatRow({
 }) {
   const mark = item.mark ?? "idle";
   const pullRequest = !collapsed ? item.details?.pullRequest : undefined;
-  const readyToMerge = pullRequest?.state === "OPEN" && pullRequest.readyToMerge;
+  const hasConflicts = pullRequest?.state === "OPEN" && pullRequest.hasConflicts;
+  const readyToMerge = pullRequest?.state === "OPEN" && pullRequest.readyToMerge && !hasConflicts;
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -243,7 +244,7 @@ export function ChatRow({
 
       {pullRequest && !renaming && (
         <Tooltip
-          label={readyToMerge ? `Ready to merge · Pull request #${pullRequest.number}` : `${pullRequest.state === "MERGED" ? "Merged" : "Open"} pull request #${pullRequest.number}`}
+          label={hasConflicts ? `Conflicts · Pull request #${pullRequest.number}` : readyToMerge ? `Ready to merge · Pull request #${pullRequest.number}` : `${pullRequest.state === "MERGED" ? "Merged" : "Open"} pull request #${pullRequest.number}`}
           side="bottom"
           className="sidebar-copy absolute bottom-1 left-9 z-20 max-w-[calc(100%-72px)]"
         >
@@ -251,18 +252,19 @@ export function ChatRow({
             href={pullRequest.url}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`Open ${pullRequest.state === "MERGED" ? "merged " : ""}pull request #${pullRequest.number}${readyToMerge ? ", ready to merge" : ""}`}
+            aria-label={`Open ${pullRequest.state === "MERGED" ? "merged " : ""}pull request #${pullRequest.number}${hasConflicts ? ", conflicts" : readyToMerge ? ", ready to merge" : ""}`}
             data-chat-pr
             className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
             onClick={(event) => event.stopPropagation()}
           >
-            <span aria-hidden className={`inline-flex group-hover/pr:hidden group-focus-visible/pr:hidden ${pullRequest.state === "MERGED" ? "text-purple-500" : "text-green"}`}>
+            <span aria-hidden className={`inline-flex group-hover/pr:hidden group-focus-visible/pr:hidden ${pullRequest.state === "MERGED" ? "text-purple-500" : hasConflicts ? "text-red" : "text-green"}`}>
               <HugeIcon icon={pullRequest.state === "MERGED" ? GitMergeIcon : readyToMerge ? Tick02Icon : GitPullRequestIcon} size={12} />
             </span>
             <span aria-hidden className="hidden group-hover/pr:inline-flex group-focus-visible/pr:inline-flex">
               <HugeIcon icon={LinkSquare02Icon} size={12} />
             </span>
             <span className="truncate">#{pullRequest.number}</span>
+            {hasConflicts && <span className="shrink-0 text-red">Conflicts</span>}
             {readyToMerge && <span className="shrink-0 text-green">Ready</span>}
           </a>
         </Tooltip>
@@ -376,11 +378,16 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
           </CardLine>
         )}
         {details.pullRequest && (
-          <CardLine icon={<span className={details.pullRequest.state === "MERGED" ? "text-purple-500" : "text-green"}><HugeIcon icon={details.pullRequest.state === "MERGED" ? GitMergeIcon : GitPullRequestIcon} size={14} /></span>}>
+          <CardLine icon={<span className={details.pullRequest.state === "MERGED" ? "text-purple-500" : details.pullRequest.hasConflicts ? "text-red" : "text-green"}><HugeIcon icon={details.pullRequest.state === "MERGED" ? GitMergeIcon : GitPullRequestIcon} size={14} /></span>}>
             <span className="min-w-0 truncate leading-snug">#{details.pullRequest.number}{details.pullRequest.title ? ` · ${details.pullRequest.title}` : ""}</span>
           </CardLine>
         )}
-        {details.pullRequest?.state === "OPEN" && details.pullRequest.readyToMerge && (
+        {details.pullRequest?.state === "OPEN" && details.pullRequest.hasConflicts && (
+          <CardLine icon={<span className="text-red"><HugeIcon icon={GitPullRequestIcon} size={14} /></span>}>
+            <span className="text-red">Merge conflicts</span>
+          </CardLine>
+        )}
+        {details.pullRequest?.state === "OPEN" && details.pullRequest.readyToMerge && !details.pullRequest.hasConflicts && (
           <CardLine icon={<span className="text-green"><HugeIcon icon={Tick02Icon} size={14} /></span>}>
             <span className="text-green">Ready to merge</span>
           </CardLine>

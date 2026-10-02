@@ -16,6 +16,11 @@ function Fixture() {
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState(MODEL_CATALOG[0]);
   const [fastMode, setFastMode] = useState(false);
+  const [hasConflicts, setHasConflicts] = useState(false);
+  const [sending, setSending] = useState(false);
+  window.setHasConflicts = setHasConflicts;
+  window.setSending = setSending;
+  window.resolveClicks ??= 0;
   window.setMessageCount = setCount;
   window.setDraft = setDraft;
   window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
@@ -25,8 +30,9 @@ function Fixture() {
   }));
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
-      imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false} sendBlocked={false}
+      imageDraft={{ images: [], files: [], removeFile: noop, attachFiles: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false}
+      onResolveConflicts={hasConflicts ? () => window.resolveClicks++ : undefined}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -44,6 +50,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
+  window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let attempt = 0; attempt < 200; attempt++) {
@@ -55,6 +62,23 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
+    const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
+    assert.equal(await evaluate(`!!(${resolveButton})`), false);
+    await evaluate('window.setHasConflicts(true)');
+    await waitFor(`!!(${resolveButton})`);
+    assert.ok(await evaluate(`(${resolveButton}).getBoundingClientRect().bottom <= document.querySelector('[data-promptbar]').getBoundingClientRect().top`), "Conflict pill sits above the composer");
+    await evaluate(`(${resolveButton}).click()`);
+    assert.equal(await evaluate('window.resolveClicks'), 1);
+    await evaluate('window.setSending(true)');
+    await waitFor(`(${resolveButton}).disabled`);
+    await evaluate(`(${resolveButton}).click()`);
+    assert.equal(await evaluate('window.resolveClicks'), 1, "A running turn disables the conflict action");
+    await evaluate('window.setSending(false)');
+    await waitFor(`!(${resolveButton}).disabled`);
+    await delay(250);
+    await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-conflict-pill.png", image.toPNG()));
+    await evaluate('window.setHasConflicts(false)');
+    await waitFor(`!(${resolveButton})`);
     for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 18, ""]]) {
       window.setContentSize(800, height);
       await evaluate(`window.setMessageCount(${count})`);
@@ -106,6 +130,7 @@ async function browserChecks() {
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
     await evaluate('window.setModel("claude-sonnet-5-5")');
     await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    console.log("PASS: conflict pill placement, click action, disabled state, and removal");
     console.log("PASS: fast mode appears only for supported Opus models and the prompt expands on wrapping");
     console.log("PASS: message previews stay inside the conversation and above the prompt");
     app.exit(0);

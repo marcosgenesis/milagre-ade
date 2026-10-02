@@ -22,7 +22,8 @@ async function readPullRequest(cwd, exec = execFileAsync) {
     // CLEAN means GitHub reports the PR mergeable with passing commit status. Unknown or blocked
     // states must never advertise readiness, even if a reviewer has already approved.
     const readyToMerge = pr.state === "OPEN" && pr.isDraft === false && pr.reviewDecision === "APPROVED" && pr.mergeStateStatus === "CLEAN";
-    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge };
+    const hasConflicts = pr.state === "OPEN" && pr.mergeStateStatus === "DIRTY";
+    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts };
   } catch {
     // No PR, offline, or gh unavailable: this optional metadata never blocks a chat.
     return null;

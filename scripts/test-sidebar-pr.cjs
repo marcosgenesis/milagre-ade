@@ -94,6 +94,14 @@ async function browserChecks() {
     await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
     await evaluate('window.pr = { ...window.pr, readyToMerge: false }; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Ready")');
+    await evaluate('window.pr = { ...window.pr, hasConflicts: true }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-red")'), true);
+    assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("conflicts")'));
+    await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-conflicts.png", image.toPNG()));
+    await evaluate('window.pr = { ...window.pr, hasConflicts: false }; window.refreshPR()');
+    await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color'), openColor);
     await evaluate('window.pr = { ...window.pr, state: "MERGED" }; window.refreshPR()');
     await waitFor('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("merged")');
     const mergedColor = await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color');
@@ -111,7 +119,7 @@ async function browserChecks() {
     await evaluate('window.setCollapsed(false); window.pr = null; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]") && document.querySelector("aside").dataset.sidebarCollapsed === "false"');
     assert.equal(await evaluate('document.querySelector("[data-row]").getBoundingClientRect().height'), 32);
-    console.log("PASS: PR lookup, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
+    console.log("PASS: PR lookup, red conflict state and recovery, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
     app.exit(0);
   } catch (error) {
     console.error(error);

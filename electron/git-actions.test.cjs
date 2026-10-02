@@ -4,13 +4,15 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { GH_LOGIN, GH_MISSING, NO_ORIGIN, createGitActions } = require("./git-actions.cjs");
+const { CONFLICTS, DETACHED_COMMIT, GH_LOGIN, GH_MISSING, NOT_REPO, NOT_TOP, NO_ORIGIN, createGitActions, looksSecret } = require("./git-actions.cjs");
 
 // A stand-in for the GitHub CLI: it records each call (arguments, stdin, folder) and answers
-// `gh pr view` and `gh pr create` from a state file beside it. Never the real gh.
+// `gh pr view`, `gh pr create` and `gh repo set-default --view` from a state file beside it. Like gh,
+// it takes the current branch when none is named. Never the real gh.
 const FAKE_GH = `#!${process.execPath}
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const stateFile = path.join(__dirname, "gh-state.json");
 const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {};
 const args = process.argv.slice(2);
@@ -20,11 +22,17 @@ if (state.loggedOut) {
   process.stderr.write("To get started with GitHub CLI, please run:  gh auth login\\n");
   process.exit(4);
 }
+const branch = () => execFileSync("git", ["symbolic-ref", "--short", "HEAD"], { encoding: "utf8" }).trim();
 const prs = state.prs || {};
+if (args[0] === "repo" && args[1] === "set-default") {
+  if (state.defaultRepo) process.stdout.write(state.defaultRepo + "\\n");
+  else process.stderr.write("no default repository has been set\\n");
+  process.exit(0);
+}
 if (args[0] === "pr" && args[1] === "view") {
-  const pr = prs[args[2]];
+  const pr = prs[branch()];
   if (!pr) {
-    process.stderr.write('no pull requests found for branch "' + args[2] + '"\\n');
+    process.stderr.write('no pull requests found for branch "' + branch() + '"\\n');
     process.exit(1);
   }
   process.stdout.write(JSON.stringify({ url: pr.url, state: pr.state }) + "\\n");
@@ -36,10 +44,10 @@ if (args[0] === "pr" && args[1] === "create") {
     process.exit(1);
   }
   const number = state.nextNumber || 12;
-  const url = "https://github.com/example/shop/pull/" + number;
-  prs[args[args.indexOf("--head") + 1]] = { url, state: "OPEN" };
+  const url = "https://github.com/" + (state.defaultRepo || "example/shop") + "/pull/" + number;
+  prs[branch()] = { url, state: "OPEN" };
   fs.writeFileSync(stateFile, JSON.stringify({ ...state, prs, nextNumber: number + 1 }));
-  process.stderr.write("Creating pull request in example/shop\\n");
+  process.stderr.write("Creating pull request\\n");
   process.stdout.write(url + "\\n");
   process.exit(0);
 }
@@ -59,9 +67,11 @@ async function fixture(t, { origin = true, gh = true } = {}) {
   await fs.mkdir(bin);
   if (gh) await fs.writeFile(path.join(bin, "gh"), FAKE_GH, { mode: 0o755 });
   const gitconfig = path.join(root, "gitconfig");
-  await fs.writeFile(gitconfig, "[user]\n\tname = Milagre\n\temail = milagre@example.com\n[init]\n\tdefaultBranch = main\n");
-  const env = { HOME: root, PATH: `${bin}:/usr/bin:/bin`, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" };
+  await fs.writeFile(gitconfig, "[user]\n\tname = Milagre\n\temail = milagre@example.com\n[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n");
+  const env = { HOME: root, PATH: `${bin}:/usr/bin:/bin`, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true" };
   const run = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  // A git command that is meant to fail (a conflicting merge, say).
+  const fail = (cwd, ...args) => assert.throws(() => run(cwd, ...args));
 
   const project = path.join(root, "shop");
   await fs.mkdir(project);
@@ -87,7 +97,17 @@ async function fixture(t, { origin = true, gh = true } = {}) {
     }
   };
   const setGh = (state) => fs.writeFile(path.join(bin, "gh-state.json"), JSON.stringify(state));
-  return { root, project, worktree, bare, env, run, ghCalls, setGh, actions: createGitActions({ env }) };
+  return { root, project, worktree, bare, env, run, fail, ghCalls, setGh, actions: createGitActions({ env }) };
+}
+
+/** A worktree whose branch and main both changed cart.js, so merging, picking or rebasing conflicts. */
+async function conflicting(fixtureValue) {
+  const { project, worktree, run } = fixtureValue;
+  await fs.writeFile(path.join(project, "cart.js"), "export const cart = ['main'];\n");
+  run(project, "commit", "-am", "fix: main's cart");
+  await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = ['branch'];\n");
+  run(worktree, "commit", "-am", "fix: the branch's cart");
+  return fixtureValue;
 }
 
 test("readChanges lists staged, unstaged and untracked files with their line counts", async (t) => {
@@ -111,15 +131,26 @@ test("readChanges lists staged, unstaged and untracked files with their line cou
     { path: "checkout.js", status: "added", added: 3, removed: 0 },
   ]);
   assert.equal(changes.hasOrigin, true);
+  assert.equal(changes.remotes, 1);
+  assert.equal(changes.prRepo, null);
   assert.equal(changes.onBase, false);
   assert.equal(changes.unpushed, 0);
+  assert.equal(changes.commitBlocked, null);
 });
 
-test("readChanges says when a folder is not a repository", async (t) => {
-  const { root, actions } = await fixture(t);
+test("readChanges refuses a folder that isn't a repository or isn't the top of its checkout", async (t) => {
+  const { root, worktree, actions } = await fixture(t);
   const plain = path.join(root, "plain");
   await fs.mkdir(plain);
-  assert.deepEqual(await actions.readChanges({ cwd: plain }), { isRepo: false });
+  assert.deepEqual(await actions.readChanges({ cwd: plain }), { isRepo: false, message: NOT_REPO });
+  const inside = path.join(worktree, "src");
+  await fs.mkdir(inside);
+  await fs.writeFile(path.join(inside, "a.js"), "a\n");
+  assert.deepEqual(await actions.readChanges({ cwd: inside }), { isRepo: false, message: NOT_TOP });
+  // Nothing is committed into the enclosing checkout.
+  assert.deepEqual(await actions.commit({ cwd: inside, message: "feat: a" }), { ok: false, kind: "error", message: NOT_TOP });
+  assert.deepEqual(await actions.push({ cwd: inside }), { ok: false, kind: "error", message: NOT_TOP });
+  assert.deepEqual(await actions.openPr({ cwd: inside, title: "a", body: "" }), { ok: false, kind: "error", message: NOT_TOP });
 });
 
 test("commit stages everything and takes the message from stdin", async (t) => {
@@ -137,6 +168,17 @@ test("commit stages everything and takes the message from stdin", async (t) => {
   assert.equal(run(worktree, "log", "-1", "--format=%B"), message);
   assert.deepEqual(run(worktree, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), ["cart.js", "checkout.js"]);
   // Only Milagre's state is left over.
+  assert.equal(run(worktree, "status", "--porcelain", "--untracked-files=all"), "?? .milagre/coordination.json");
+});
+
+test("commit leaves out a .milagre path that was staged before", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  await fs.mkdir(path.join(worktree, ".milagre"));
+  await fs.writeFile(path.join(worktree, ".milagre", "coordination.json"), "{}\n");
+  run(worktree, "add", ".milagre/coordination.json");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+  assert.equal((await actions.commit({ cwd: worktree, message: "feat: checkout" })).ok, true);
+  assert.deepEqual(run(worktree, "show", "--name-only", "--format=", "HEAD").split("\n"), ["checkout.js"]);
   assert.equal(run(worktree, "status", "--porcelain", "--untracked-files=all"), "?? .milagre/coordination.json");
 });
 
@@ -163,6 +205,112 @@ test("commit surfaces a failing hook with its output, and makes no commit", asyn
   assert.equal(run(worktree, "rev-parse", "HEAD"), head);
 });
 
+test("a signing failure is reported as git says it, not as a hook failure", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  const hooks = run(worktree, "rev-parse", "--git-path", "hooks");
+  await fs.mkdir(path.resolve(worktree, hooks), { recursive: true });
+  await fs.writeFile(path.resolve(worktree, hooks, "pre-commit"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  run(worktree, "config", "commit.gpgsign", "true");
+  run(worktree, "config", "gpg.program", "/usr/bin/false");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+
+  const result = await actions.commit({ cwd: worktree, message: "feat: checkout" });
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "signing");
+  assert.match(result.message, /gpg failed/);
+  assert.equal(result.output, undefined);
+});
+
+for (const [operation, start] of [
+  ["merge", ({ worktree, fail }) => fail(worktree, "merge", "main")],
+  ["cherry-pick", ({ worktree, fail }) => fail(worktree, "cherry-pick", "main")],
+  ["rebase", ({ worktree, fail }) => fail(worktree, "rebase", "main")],
+  ["rebase (apply)", ({ worktree, fail }) => fail(worktree, "rebase", "--apply", "main")],
+]) {
+  test(`nothing is committed while a ${operation} is in progress`, async (t) => {
+    const setup = await conflicting(await fixture(t));
+    const { worktree, run, actions } = setup;
+    start(setup);
+    const head = run(worktree, "rev-parse", "HEAD");
+    const reason = `A ${operation.replace(" (apply)", "")} is in progress. Finish or abort it, then commit.`;
+    assert.equal((await actions.readChanges({ cwd: worktree, base: "main" })).commitBlocked, reason);
+    assert.deepEqual(await actions.commit({ cwd: worktree, message: "fix: merge" }), { ok: false, kind: "blocked", message: reason });
+    assert.equal(run(worktree, "rev-parse", "HEAD"), head);
+    // The conflict is still a conflict: nothing marked it resolved.
+    assert.notEqual(run(worktree, "ls-files", "-u"), "");
+  });
+}
+
+test("nothing is committed while a revert is in progress", async (t) => {
+  const { worktree, run, fail, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = [1];\n");
+  run(worktree, "commit", "-am", "feat: one");
+  await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = [2];\n");
+  run(worktree, "commit", "-am", "feat: two");
+  fail(worktree, "revert", "HEAD~1");
+  const reason = "A revert is in progress. Finish or abort it, then commit.";
+  assert.equal((await actions.readChanges({ cwd: worktree, base: "main" })).commitBlocked, reason);
+  assert.deepEqual(await actions.commit({ cwd: worktree, message: "revert" }), { ok: false, kind: "blocked", message: reason });
+});
+
+test("unresolved conflicts without an operation (a stash that didn't apply) block the commit", async (t) => {
+  const { worktree, run, fail, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = ['stashed'];\n");
+  run(worktree, "stash");
+  await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = ['committed'];\n");
+  run(worktree, "commit", "-am", "fix: cart");
+  fail(worktree, "stash", "pop");
+  assert.equal((await actions.readChanges({ cwd: worktree, base: "main" })).commitBlocked, CONFLICTS);
+  assert.deepEqual(await actions.commit({ cwd: worktree, message: "fix" }), { ok: false, kind: "blocked", message: CONFLICTS });
+});
+
+test("nothing is committed on a detached HEAD", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  run(worktree, "checkout", "--detach");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+  const changes = await actions.readChanges({ cwd: worktree, base: "main" });
+  assert.equal(changes.branch, null);
+  assert.deepEqual(await actions.commit({ cwd: worktree, message: "feat: checkout" }), { ok: false, kind: "blocked", message: DETACHED_COMMIT });
+  assert.equal(run(worktree, "status", "--porcelain"), "?? checkout.js");
+});
+
+test("looksSecret matches env files, keys and credentials, but not example env files", () => {
+  for (const file of [".env", ".env.local", "config/.env.production", "deploy.pem", "server.key", "AuthKey_ABC.p8", "id_rsa", "id_ed25519.pub", "aws-credentials.json", "client_secret.json", "Secrets.yml"]) assert.equal(looksSecret(file), true, file);
+  for (const file of ["cart.js", ".env.example", "keyboard.ts", "README.md", "package-lock.json"]) assert.equal(looksSecret(file), false, file);
+});
+
+test("readChanges flags secret-looking files", async (t) => {
+  const { worktree, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, ".env.local"), "API_KEY=sk-live-123\n");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+  const { files } = await actions.readChanges({ cwd: worktree, base: "main" });
+  assert.deepEqual(files, [
+    { path: ".env.local", status: "added", added: 1, removed: 0, secret: true },
+    { path: "checkout.js", status: "added", added: 1, removed: 0 },
+  ]);
+});
+
+test("commit refuses secret-looking files and puts the index back as it was", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "README.md"), "shop\nstaged by hand\n");
+  run(worktree, "add", "README.md");
+  await fs.writeFile(path.join(worktree, ".env.local"), "API_KEY=sk-live-123\n");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+  const head = run(worktree, "rev-parse", "HEAD");
+
+  const result = await actions.commit({ cwd: worktree, message: "feat: checkout" });
+  assert.deepEqual(result, { ok: false, kind: "secrets", message: "These look like secrets and would be committed: .env.local. Add them to .gitignore, or commit them yourself if you mean to." });
+  assert.equal(run(worktree, "rev-parse", "HEAD"), head);
+  // What the user staged stays staged; what Milagre staged doesn't.
+  assert.equal(run(worktree, "diff", "--cached", "--name-only"), "README.md");
+  assert.deepEqual(run(worktree, "status", "--porcelain", "--untracked-files=all").split("\n"), ["M  README.md", "?? .env.local", "?? checkout.js"]);
+
+  // Once it's ignored, the rest commits.
+  await fs.writeFile(path.join(worktree, ".gitignore"), ".env.local\n");
+  assert.equal((await actions.commit({ cwd: worktree, message: "feat: checkout" })).ok, true);
+  assert.deepEqual(run(worktree, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), [".gitignore", "README.md", "checkout.js"]);
+});
+
 test("push publishes the branch and sets its upstream", async (t) => {
   const { worktree, bare, run, actions } = await fixture(t);
   await fs.writeFile(path.join(worktree, "checkout.js"), "export function checkout() {}\n");
@@ -174,18 +322,22 @@ test("push publishes the branch and sets its upstream", async (t) => {
   assert.equal(run(worktree, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/milagre/checkout-page");
 });
 
+async function divergeRemote({ root, bare, run }, branch) {
+  const other = path.join(root, `other-${branch.replace(/\W/g, "")}`);
+  run(root, "clone", "--branch", branch, bare, other);
+  await fs.writeFile(path.join(other, "checkout.js"), "theirs\n");
+  run(other, "commit", "-am", "feat: their change");
+  run(other, "push", "origin", `refs/heads/${branch}:refs/heads/${branch}`);
+  return run(bare, "rev-parse", `refs/heads/${branch}`);
+}
+
 test("push reports a rejected push without forcing it", async (t) => {
-  const { root, worktree, bare, run, actions } = await fixture(t);
+  const setup = await fixture(t);
+  const { worktree, bare, run, actions } = setup;
   await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
   await actions.commit({ cwd: worktree, message: "feat: checkout v1" });
   assert.equal((await actions.push({ cwd: worktree })).ok, true);
-  // Someone else pushes to the same branch.
-  const other = path.join(root, "other");
-  run(root, "clone", "--branch", "milagre/checkout-page", bare, other);
-  await fs.writeFile(path.join(other, "checkout.js"), "theirs\n");
-  run(other, "commit", "-am", "feat: their change");
-  run(other, "push", "origin", "milagre/checkout-page");
-  const theirs = run(bare, "rev-parse", "refs/heads/milagre/checkout-page");
+  const theirs = await divergeRemote(setup, "milagre/checkout-page");
   await fs.writeFile(path.join(worktree, "checkout.js"), "mine\n");
   await actions.commit({ cwd: worktree, message: "feat: my change" });
 
@@ -195,6 +347,21 @@ test("push reports a rejected push without forcing it", async (t) => {
   assert.match(result.message, /rejected/);
   assert.match(result.hint, /pull|rebase/i);
   assert.equal(run(bare, "rev-parse", "refs/heads/milagre/checkout-page"), theirs);
+});
+
+test("a branch named +x is pushed, never force-pushed", async (t) => {
+  const setup = await fixture(t);
+  const { worktree, bare, run, actions } = setup;
+  run(worktree, "checkout", "-b", "+x");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+  await actions.commit({ cwd: worktree, message: "feat: checkout v1" });
+  assert.deepEqual(await actions.push({ cwd: worktree }), { ok: true, branch: "+x", remote: "origin" });
+  assert.equal(run(worktree, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/+x");
+  const theirs = await divergeRemote(setup, "+x");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "mine\n");
+  await actions.commit({ cwd: worktree, message: "feat: my change" });
+  assert.equal((await actions.push({ cwd: worktree })).kind, "rejected");
+  assert.equal(run(bare, "rev-parse", "refs/heads/+x"), theirs);
 });
 
 test("a repo without origin can commit but not push or open a PR", async (t) => {
@@ -226,19 +393,19 @@ test("when gh is signed out, opening a PR says to log in", async (t) => {
   assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-auth", message: GH_LOGIN });
 });
 
-test("openPr passes the base, head and title, and the body on stdin", async (t) => {
+test("openPr passes the base and title as --flag=value, the body on stdin, and lets gh find the head", async (t) => {
   const { worktree, actions, ghCalls } = await fixture(t);
   await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
   await actions.commit({ cwd: worktree, message: "feat: checkout" });
   await actions.push({ cwd: worktree });
   const body = "Adds the checkout page.\n\n- Reads the cart total";
 
-  // A base recorded as the remote-tracking ref still names the remote's branch.
-  const result = await actions.openPr({ cwd: worktree, base: "origin/main", title: "feat: add the checkout page", body });
+  // A base recorded as the remote-tracking ref still names the remote's branch; a title starting
+  // with a dash stays a title.
+  const result = await actions.openPr({ cwd: worktree, base: "origin/main", title: "--feat: add the checkout page", body });
   assert.deepEqual(result, { ok: true, url: "https://github.com/example/shop/pull/12", number: 12 });
-  const calls = await ghCalls();
-  assert.deepEqual(calls.at(-1), {
-    args: ["pr", "create", "--base", "main", "--head", "milagre/checkout-page", "--title", "feat: add the checkout page", "--body-file", "-"],
+  assert.deepEqual((await ghCalls()).at(-1), {
+    args: ["pr", "create", "--base=main", "--title=--feat: add the checkout page", "--body-file", "-"],
     stdin: body,
     cwd: worktree,
   });
@@ -253,13 +420,13 @@ test("openPr shows gh's own message for any other failure", async (t) => {
   assert.match(result.message, /No commits between main and milagre\/checkout-page/);
 });
 
-test("readChanges finds the branch's open PR", async (t) => {
+test("readChanges finds the current branch's open PR without naming the branch", async (t) => {
   const { worktree, actions, setGh, ghCalls } = await fixture(t);
   await setGh({ prs: { "milagre/checkout-page": { url: "https://github.com/example/shop/pull/7", state: "OPEN" } } });
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.ghReady, true);
   assert.deepEqual(changes.pr, { number: 7, url: "https://github.com/example/shop/pull/7", state: "OPEN" });
-  assert.deepEqual((await ghCalls()).at(-1).args, ["pr", "view", "milagre/checkout-page", "--json", "url,state"]);
+  assert.deepEqual((await ghCalls()).at(-1), { args: ["pr", "view", "--json", "url,state"], stdin: "", cwd: worktree });
 
   // A merged or closed PR isn't open: a new one can be opened.
   await setGh({ prs: { "milagre/checkout-page": { url: "https://github.com/example/shop/pull/7", state: "MERGED" } } });
@@ -268,6 +435,28 @@ test("readChanges finds the branch's open PR", async (t) => {
   const none = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(none.ghReady, true);
   assert.equal(none.pr, null);
+});
+
+test("in a fork with an upstream remote, the PR goes where gh's default repo says", async (t) => {
+  const { root, worktree, run, actions, setGh, ghCalls } = await fixture(t);
+  const upstream = path.join(root, "upstream.git");
+  run(root, "init", "--bare", "-b", "main", upstream);
+  run(worktree, "remote", "add", "upstream", upstream);
+  await setGh({ defaultRepo: "acme/shop" });
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+
+  const changes = await actions.readChanges({ cwd: worktree, base: "main" });
+  assert.equal(changes.remotes, 2);
+  assert.equal(changes.prRepo, "acme/shop");
+  await actions.commit({ cwd: worktree, message: "feat: checkout" });
+  await actions.push({ cwd: worktree });
+  const result = await actions.openPr({ cwd: worktree, base: "main", title: "feat: checkout", body: "" });
+  assert.deepEqual(result, { ok: true, url: "https://github.com/acme/shop/pull/12", number: 12 });
+  assert.equal((await ghCalls()).at(-1).args.some((arg) => arg.startsWith("--head")), false);
+
+  // No default repo set: the dialog says how to choose one.
+  await setGh({});
+  assert.equal((await actions.readChanges({ cwd: worktree, base: "main" })).prRepo, null);
 });
 
 test("readChanges counts commits waiting to be pushed when nothing is left to commit", async (t) => {
@@ -303,7 +492,7 @@ test("the main checkout on its base branch can't open a PR", async (t) => {
   assert.equal(result.kind, "on-base");
 });
 
-test("readTextContext gives the diff, untracked files included, and the repo's recent subjects", async (t) => {
+test("readTextContext gives a stat, the diff with untracked files, and the repo's recent subjects", async (t) => {
   const { worktree, run, actions } = await fixture(t);
   for (let index = 1; index <= 16; index++) run(worktree, "commit", "--allow-empty", "-m", `chore: step ${index}`);
   await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = [3];\n");
@@ -312,6 +501,9 @@ test("readTextContext gives the diff, untracked files included, and the repo's r
   const context = await actions.readTextContext({ cwd: worktree, base: "main" });
   assert.match(context.diff, /-export const cart = \[\];\n\+export const cart = \[3\];/);
   assert.match(context.diff, /\+export function checkout\(\) \{\}/);
+  assert.match(context.stat, /cart\.js \| 2 \+-/);
+  assert.match(context.stat, /checkout\.js \(new file, 1 lines\)/);
+  assert.deepEqual(context.omitted, []);
   assert.equal(context.recentSubjects.length, 15);
   assert.equal(context.recentSubjects[0], "chore: step 16");
   assert.equal(context.branchCommits.length, 16);
@@ -322,5 +514,36 @@ test("readTextContext gives the diff, untracked files included, and the repo's r
   await actions.commit({ cwd: worktree, message: "feat: checkout" });
   const committed = await actions.readTextContext({ cwd: worktree, base: "main" });
   assert.match(committed.diff, /\+export function checkout\(\) \{\}/);
+  assert.match(committed.stat, /checkout\.js/);
   assert.equal(committed.hasChanges, false);
+});
+
+test("readTextContext names secret-looking files and lockfiles but never shows their contents", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "package-lock.json"), '{"lockfileVersion": 3}\n');
+  await fs.writeFile(path.join(worktree, "deploy.pem"), "-----BEGIN PRIVATE KEY-----\nMIIEvQ\n");
+  run(worktree, "add", "package-lock.json", "deploy.pem");
+  run(worktree, "commit", "-m", "chore: lock");
+  await fs.writeFile(path.join(worktree, "package-lock.json"), '{"lockfileVersion": 3, "LOCK-CONTENT": true}\n');
+  await fs.writeFile(path.join(worktree, "deploy.pem"), "-----BEGIN PRIVATE KEY-----\nTRACKED-KEY-CONTENT\n");
+  await fs.writeFile(path.join(worktree, ".env.local"), "API_KEY=UNTRACKED-SECRET-CONTENT\n");
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+
+  const context = await actions.readTextContext({ cwd: worktree, base: "main" });
+  for (const hidden of ["LOCK-CONTENT", "TRACKED-KEY-CONTENT", "UNTRACKED-SECRET-CONTENT"]) assert.ok(!context.diff.includes(hidden), hidden);
+  assert.match(context.diff, /\+v1/);
+  assert.deepEqual(context.omitted, [
+    { path: ".env.local", reason: "secret" },
+    { path: "deploy.pem", reason: "secret" },
+    { path: "package-lock.json", reason: "lockfile" },
+  ]);
+});
+
+test("readTextContext reads no more of a large untracked file than the diff can hold", async (t) => {
+  const { worktree, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "big.txt"), `${"x".repeat(99)}\n`.repeat(2000));
+  await fs.writeFile(path.join(worktree, "small.txt"), "small\n");
+  const context = await actions.readTextContext({ cwd: worktree, base: "main" });
+  assert.ok(context.diff.length < 41_000, String(context.diff.length));
+  assert.match(context.diff, /\[big\.txt is cut off here\.\]/);
 });

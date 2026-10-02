@@ -12,6 +12,10 @@ const GH_MISSING = "Install the GitHub CLI (`brew install gh`) to open PRs.";
 const GH_LOGIN = "Run `gh auth login` in a terminal.";
 const PUSH_REJECTED_HINT = "The remote branch has commits you don't have. Pull or rebase, then push again.";
 const DETACHED = "Check out a branch to push.";
+const DETACHED_COMMIT = "Check out a branch to commit.";
+const NOT_REPO = "This chat's folder isn't a git repository.";
+const NOT_TOP = "This folder isn't the top of a git checkout.";
+const CONFLICTS = "Some files have unresolved conflicts. Resolve them, then commit.";
 
 const OUTPUT_LIMIT = 6000;
 const FILE_LIMIT = 300;
@@ -26,6 +30,30 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const HOOKS = ["pre-commit", "prepare-commit-msg", "commit-msg"];
 // Git's own reasons a commit can fail; anything else with a commit hook installed is the hook's.
 const GIT_COMMIT_ERRORS = /Please tell me who you are|Author identity unknown|nothing to commit|empty commit message|unable to auto-detect email|could not lock|index\.lock/i;
+// A signing key that can't sign (gpg, ssh) is not something the agent can fix.
+const SIGNING_ERRORS = /gpg failed|signing/i;
+// What git leaves behind while a merge, rebase, cherry-pick or revert waits to be finished.
+const OPERATIONS = [
+  ["MERGE_HEAD", "merge"],
+  ["CHERRY_PICK_HEAD", "cherry-pick"],
+  ["REVERT_HEAD", "revert"],
+  ["rebase-merge", "rebase"],
+  ["rebase-apply", "rebase"],
+];
+const LOCKFILES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "cargo.lock", "poetry.lock", "gemfile.lock", "composer.lock"]);
+// Example files are meant to be committed.
+const ENV_TEMPLATES = /^\.env\.(example|sample|template)$/;
+
+/** Paths whose contents never go to a model, and that are never committed from the dialog. */
+function looksSecret(file) {
+  const name = path.posix.basename(String(file)).toLowerCase();
+  if (name.startsWith(".env")) return !ENV_TEMPLATES.test(name);
+  return /\.(pem|key|p8)$/.test(name) || /^id_(rsa|ed25519)/.test(name) || name.includes("credential") || name.includes("secret");
+}
+
+function isLockfile(file) {
+  return LOCKFILES.has(path.posix.basename(String(file)).toLowerCase());
+}
 
 /** Keeps the end of long output, where tools print what went wrong. */
 function capOutput(text, limit = OUTPUT_LIMIT) {
@@ -37,6 +65,8 @@ function prNumber(url) {
   const match = /\/pull\/(\d+)/.exec(url ?? "");
   return match ? Number(match[1]) : null;
 }
+
+const excludeLiteral = (file) => `:(exclude,literal)${file}`;
 
 function createGitActions({ execFile = childProcess.execFile, env = process.env } = {}) {
   // No prompt may wait on a terminal nobody sees: git and ssh fail instead of asking for credentials.
@@ -77,9 +107,28 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     const result = await git(cwd, args);
     return result.ok ? result.stdout.trim() : null;
   };
+  const gitList = async (cwd, args) => {
+    const result = await git(cwd, args);
+    return result.ok ? result.stdout.split("\0").filter(Boolean) : [];
+  };
+
+  /**
+   * The folder must be the top of a checkout: a chat's worktree or project, never a folder inside
+   * one, so a commit can't land in an enclosing repository.
+   */
+  async function checkTop(cwd) {
+    const top = await gitOut(cwd, ["rev-parse", "--show-toplevel"]);
+    if (!top) return { ok: false, message: NOT_REPO };
+    const [realTop, realCwd] = await Promise.all([fs.realpath(top).catch(() => top), fs.realpath(cwd).catch(() => cwd)]);
+    return realTop === realCwd ? { ok: true } : { ok: false, message: NOT_TOP };
+  }
 
   async function currentBranch(cwd) {
     return gitOut(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  }
+
+  async function remotes(cwd) {
+    return ((await gitOut(cwd, ["remote"])) ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
   }
 
   async function hasOrigin(cwd) {
@@ -88,6 +137,26 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
 
   async function refExists(cwd, ref) {
     return (await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).ok;
+  }
+
+  async function gitPathExists(cwd, name) {
+    const found = await gitOut(cwd, ["rev-parse", "--git-path", name]);
+    if (!found) return false;
+    try {
+      await fs.access(path.resolve(cwd, found));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Why nothing may be committed now: a merge, rebase, cherry-pick or revert to finish, or conflicts. */
+  async function operationInProgress(cwd) {
+    for (const [name, operation] of OPERATIONS) {
+      if (await gitPathExists(cwd, name)) return `A ${operation} is in progress. Finish or abort it, then commit.`;
+    }
+    const unmerged = await gitOut(cwd, ["ls-files", "-u"]);
+    return unmerged ? CONFLICTS : null;
   }
 
   /**
@@ -123,33 +192,38 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     return countCommits(cwd, ["HEAD", "--not", "--remotes=origin"]);
   }
 
+  /** Staged, unstaged and untracked files with their line counts, in git's byte order. */
   async function changedFiles(cwd) {
     const status = await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", ...PATHSPEC]);
     if (!status.ok) return [];
     const entries = status.stdout.split("\0").filter(Boolean).slice(0, FILE_LIMIT).map((entry) => ({ code: entry.slice(0, 2), path: entry.slice(3) }));
     const head = (await refExists(cwd, "HEAD")) ? "HEAD" : EMPTY_TREE;
-    const numstat = await git(cwd, ["diff", "--numstat", "-z", "--no-renames", head, ...PATHSPEC]);
     const counts = new Map();
-    for (const record of numstat.ok ? numstat.stdout.split("\0") : []) {
+    for (const record of await gitList(cwd, ["diff", "--numstat", "-z", "--no-renames", head, ...PATHSPEC])) {
       const [added, removed, file] = record.split("\t");
       if (file) counts.set(file, { added: /^\d+$/.test(added) ? Number(added) : 0, removed: /^\d+$/.test(removed) ? Number(removed) : 0 });
     }
     const files = [];
     for (const { code, path: file } of entries) {
-      if (code === "??") {
-        files.push({ path: file, status: "added", added: await fileLineCount(path.join(cwd, file)), removed: 0 });
-        continue;
-      }
-      const status = code.includes("D") ? "deleted" : code.includes("A") ? "added" : "modified";
-      files.push({ path: file, status, ...(counts.get(file) ?? { added: 0, removed: 0 }) });
+      const untracked = code === "??";
+      const status = untracked || code.includes("A") ? "added" : code.includes("D") ? "deleted" : "modified";
+      const lines = untracked ? { added: await fileLineCount(path.join(cwd, file)), removed: 0 } : counts.get(file) ?? { added: 0, removed: 0 };
+      files.push({ path: file, status, ...lines, untracked });
     }
-    // Byte order, as git lists paths.
     return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
-  /** The branch's PR and whether gh can open one: `{ ghReady, ghMessage, pr }`. */
-  async function findPr(cwd, branch) {
-    const result = await run("gh", ["pr", "view", branch, "--json", "url,state"], { cwd, timeout: GH_TIMEOUT });
+  function isAuthFailure(result) {
+    return result.code === 4 || /gh auth login|not logged in|authentication required/i.test(result.stderr);
+  }
+
+  /**
+   * The current branch's PR and whether gh can open one: `{ ghReady, ghMessage, pr }`. No branch is
+   * named, so gh looks up the branch it would push (fork-aware), and a numeric branch name isn't
+   * read as a PR number.
+   */
+  async function findPr(cwd) {
+    const result = await run("gh", ["pr", "view", "--json", "url,state"], { cwd, timeout: GH_TIMEOUT });
     if (result.missing) return { ghReady: false, ghMessage: GH_MISSING, pr: null };
     if (!result.ok && isAuthFailure(result)) return { ghReady: false, ghMessage: GH_LOGIN, pr: null };
     if (!result.ok && /no (open )?pull requests? found/i.test(result.stderr)) return { ghReady: true, ghMessage: null, pr: null };
@@ -163,30 +237,37 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     }
   }
 
-  function isAuthFailure(result) {
-    return result.code === 4 || /gh auth login|not logged in|authentication required/i.test(result.stderr);
+  /** The repository gh opens PRs against when there are several remotes, or null when none is set. */
+  async function ghDefaultRepo(cwd) {
+    const result = await run("gh", ["repo", "set-default", "--view"], { cwd, timeout: GH_TIMEOUT });
+    const repo = result.ok ? result.stdout.trim().split("\n")[0]?.trim() : "";
+    return repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : null;
   }
 
-  /** What the dialog shows about a chat's folder; `{ isRepo: false }` outside a repository. */
+  /** What the dialog shows about a chat's folder; `{ isRepo: false, message }` when it can't be used. */
   async function readChanges({ cwd, base }) {
-    const top = await gitOut(cwd, ["rev-parse", "--show-toplevel"]);
-    if (!top) return { isRepo: false };
-    const [branch, files, origin, unpushed, resolved] = await Promise.all([currentBranch(cwd), changedFiles(cwd), hasOrigin(cwd), unpushedCount(cwd), resolveBase(cwd, base)]);
+    const top = await checkTop(cwd);
+    if (!top.ok) return { isRepo: false, message: top.message };
+    const [branch, files, remoteNames, unpushed, resolved, blocked] = await Promise.all([currentBranch(cwd), changedFiles(cwd), remotes(cwd), unpushedCount(cwd), resolveBase(cwd, base), operationInProgress(cwd)]);
+    const origin = remoteNames.includes("origin");
     const onBase = branch === resolved.name;
     const ahead = resolved.ref ? await countCommits(cwd, [`${resolved.ref}..HEAD`]) : 0;
     // gh is only asked when a PR could come of it.
-    const gh = origin && branch && !onBase ? await findPr(cwd, branch) : { ghReady: false, ghMessage: null, pr: null };
+    const gh = origin && branch && !onBase ? await findPr(cwd) : { ghReady: false, ghMessage: null, pr: null };
+    const prRepo = gh.ghReady && remoteNames.length > 1 ? await ghDefaultRepo(cwd) : null;
     return {
       isRepo: true,
-      path: top,
       branch,
       base: resolved.name,
-      files,
+      files: files.map(({ path: file, status, added, removed }) => ({ path: file, status, added, removed, ...(looksSecret(file) ? { secret: true } : {}) })),
       hasChanges: files.length > 0,
       unpushed,
       ahead,
       hasOrigin: origin,
+      remotes: remoteNames.length,
+      prRepo,
       onBase,
+      commitBlocked: blocked,
       ...gh,
     };
   }
@@ -205,17 +286,41 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     return false;
   }
 
-  /** `git add -A`, then `git commit -F -` with the message on stdin. Hooks run; nothing is skipped. */
+  /**
+   * `git add -A`, then `git commit -F -` with the message on stdin. Hooks run; nothing is skipped. It
+   * refuses mid-merge (or rebase, cherry-pick, revert), on a detached HEAD, and when a secret-looking
+   * file would be committed, putting the index back as it was.
+   */
   async function commit({ cwd, message }) {
+    const top = await checkTop(cwd);
+    if (!top.ok) return { ok: false, kind: "error", message: top.message };
     const text = String(message ?? "").trim();
     if (!text) return { ok: false, kind: "error", message: "Write a commit message first." };
+    // A rebase also detaches HEAD; its own reason says more.
+    const blocked = await operationInProgress(cwd);
+    if (blocked) return { ok: false, kind: "blocked", message: blocked };
+    if (!(await currentBranch(cwd))) return { ok: false, kind: "blocked", message: DETACHED_COMMIT };
+    const hasHead = await refExists(cwd, "HEAD");
+    // The index as the user left it, to go back to if the commit is refused.
+    const before = await gitOut(cwd, ["write-tree"]);
     const added = await git(cwd, ["add", "-A", ...PATHSPEC], { timeout: COMMIT_TIMEOUT });
     if (!added.ok) return { ok: false, kind: "error", message: capOutput(added.stderr || added.stdout) };
+    // A .milagre path staged earlier (by an agent, say) isn't the chat's work either.
+    await git(cwd, hasHead ? ["reset", "-q", "--", ".milagre"] : ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".milagre"]);
+    const secrets = (await gitList(cwd, ["diff", "--cached", "--name-only", "-z", "--diff-filter=AM"])).filter(looksSecret);
+    if (secrets.length) {
+      if (before) {
+        await git(cwd, ["read-tree", before]);
+        await git(cwd, ["update-index", "-q", "--refresh"]);
+      }
+      return { ok: false, kind: "secrets", message: `These look like secrets and would be committed: ${secrets.join(", ")}. Add them to .gitignore, or commit them yourself if you mean to.` };
+    }
     if ((await git(cwd, ["diff", "--cached", "--quiet"])).ok) return { ok: false, kind: "nothing", message: "There's nothing to commit." };
     const committed = await git(cwd, ["commit", "-F", "-"], { input: `${text}\n`, timeout: COMMIT_TIMEOUT });
     if (!committed.ok) {
       const output = capOutput([committed.stdout, committed.stderr].filter((part) => part.trim()).join("\n"));
       if (committed.timedOut) return { ok: false, kind: "error", message: "The commit took too long and was stopped.", output };
+      if (SIGNING_ERRORS.test(output)) return { ok: false, kind: "signing", message: output };
       if (await hookFailed(cwd, output)) return { ok: false, kind: "hook", message: "The commit failed in a git hook.", output };
       return { ok: false, kind: "error", message: output || "The commit failed." };
     }
@@ -223,20 +328,27 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     return { ok: true, sha, shortSha };
   }
 
-  /** `git push -u origin <branch>`. Never forced. */
+  /**
+   * Pushes the current branch to the same name on origin and sets it as the upstream. Never forced: the
+   * refspec is spelled out, so a branch named "+x" can't turn into a force push.
+   */
   async function push({ cwd }) {
+    const top = await checkTop(cwd);
+    if (!top.ok) return { ok: false, kind: "error", message: top.message };
     if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN };
     const branch = await currentBranch(cwd);
     if (!branch) return { ok: false, kind: "error", message: DETACHED };
-    const result = await git(cwd, ["push", "-u", "origin", branch], { timeout: PUSH_TIMEOUT });
+    const result = await git(cwd, ["push", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { timeout: PUSH_TIMEOUT });
     if (result.ok) return { ok: true, branch, remote: "origin" };
     const output = capOutput(result.stderr || result.stdout);
     if (/\[rejected\]|non-fast-forward|fetch first|\(stale info\)/i.test(output)) return { ok: false, kind: "rejected", message: output, hint: PUSH_REJECTED_HINT };
     return { ok: false, kind: "error", message: result.timedOut ? "The push took too long and was stopped." : output || "The push failed." };
   }
 
-  /** `gh pr create` from the current branch into the base, with the body on stdin. */
+  /** `gh pr create` into the base, with the body on stdin. gh works out the head, forks included. */
   async function openPr({ cwd, base, title, body }) {
+    const top = await checkTop(cwd);
+    if (!top.ok) return { ok: false, kind: "error", message: top.message };
     if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN };
     const branch = await currentBranch(cwd);
     if (!branch) return { ok: false, kind: "error", message: DETACHED };
@@ -244,7 +356,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     if (branch === resolved.name) return { ok: false, kind: "on-base", message: `You're on ${resolved.name}. Open a PR from a worktree branch.` };
     const prTitle = String(title ?? "").trim();
     if (!prTitle) return { ok: false, kind: "error", message: "Add a PR title first." };
-    const result = await run("gh", ["pr", "create", "--base", resolved.name, "--head", branch, "--title", prTitle, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
+    const result = await run("gh", ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
     if (result.missing) return { ok: false, kind: "gh-missing", message: GH_MISSING };
     if (!result.ok && isAuthFailure(result)) return { ok: false, kind: "gh-auth", message: GH_LOGIN };
     if (!result.ok) return { ok: false, kind: "error", message: capOutput(result.stderr || result.stdout) || "gh couldn't open the PR." };
@@ -253,43 +365,70 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     return { ok: true, url, number: prNumber(url) };
   }
 
-  async function untrackedDiff(cwd, budget) {
-    const listed = await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z", ...PATHSPEC]);
-    let diff = "";
-    for (const file of (listed.ok ? listed.stdout.split("\0").filter(Boolean) : []).slice(0, FILE_LIMIT)) {
-      if (diff.length >= budget) break;
-      // --no-index exits 1 when the files differ, which they always do here.
-      const result = await git(cwd, ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file]);
-      diff += result.stdout;
+  /** At most `limit` bytes of an untracked file, as a new-file diff; null for anything but a text file. */
+  async function newFileDiff(cwd, file, limit) {
+    const fullPath = path.join(cwd, file);
+    try {
+      const stat = await fs.lstat(fullPath);
+      if (!stat.isFile()) return null;
+      const handle = await fs.open(fullPath, "r");
+      try {
+        const length = Math.max(0, Math.min(stat.size, limit));
+        const buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, 0);
+        if (buffer.includes(0)) return null;
+        const lines = buffer.toString("utf8").split("\n");
+        if (lines.at(-1) === "") lines.pop();
+        const cut = stat.size > length ? `\n[${file} is cut off here.]` : "";
+        return `diff --git a/${file} b/${file}\nnew file\n--- /dev/null\n+++ b/${file}\n${lines.map((line) => `+${line}`).join("\n")}${cut}\n`;
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return null;
     }
-    return diff;
   }
 
   /**
-   * What the commit message and PR text are written from: the uncommitted diff (or, with nothing to
-   * commit, the branch's diff against its base), the branch's commits, and the repo's recent subjects.
+   * What the commit message and PR text are written from: a `git diff --stat`, the uncommitted diff
+   * (or, with nothing to commit, the branch's diff against its base), the branch's commits and the
+   * repo's recent subjects. Secret-looking files and lockfiles are named, never shown.
    */
   async function readTextContext({ cwd, base }) {
+    const top = await checkTop(cwd);
+    if (!top.ok) throw new Error(top.message);
     const [branch, resolved, files] = await Promise.all([currentBranch(cwd), resolveBase(cwd, base), changedFiles(cwd)]);
     const hasChanges = files.length > 0;
     const hasHead = await refExists(cwd, "HEAD");
+    const range = hasChanges ? [hasHead ? "HEAD" : EMPTY_TREE] : resolved.ref ? [`${resolved.ref}...HEAD`] : null;
+    const paths = hasChanges ? files.map((file) => file.path) : range ? await gitList(cwd, ["diff", "--name-only", "-z", ...range, ...PATHSPEC]) : [];
+    const omitted = paths.filter((file) => looksSecret(file) || isLockfile(file)).map((file) => ({ path: file, reason: looksSecret(file) ? "secret" : "lockfile" }));
+    const hidden = new Set(omitted.map((item) => item.path));
     let diff = "";
+    let stat = "";
+    if (range) {
+      diff = (await git(cwd, ["diff", "--no-color", "--no-ext-diff", ...range, ...PATHSPEC, ...[...hidden].map(excludeLiteral)])).stdout;
+      stat = ((await gitOut(cwd, ["diff", "--stat=120", "--no-color", ...range, ...PATHSPEC])) ?? "").trim();
+    }
     if (hasChanges) {
-      const tracked = await git(cwd, ["diff", "--no-color", "--no-ext-diff", hasHead ? "HEAD" : EMPTY_TREE, ...PATHSPEC]);
-      diff = tracked.stdout;
-      if (diff.length < DIFF_LIMIT) diff += await untrackedDiff(cwd, DIFF_LIMIT - diff.length);
-    } else if (resolved.ref) {
-      diff = (await git(cwd, ["diff", "--no-color", "--no-ext-diff", `${resolved.ref}...HEAD`, ...PATHSPEC])).stdout;
+      const untracked = files.filter((file) => file.untracked);
+      if (untracked.length) stat = [stat, ...untracked.map((file) => ` ${file.path} (new file, ${file.added} lines)`)].filter(Boolean).join("\n");
+      for (const file of untracked) {
+        if (hidden.has(file.path)) continue;
+        const budget = DIFF_LIMIT - diff.length;
+        if (budget <= 0) break;
+        diff += (await newFileDiff(cwd, file.path, budget)) ?? "";
+      }
     }
     const lines = async (args) => ((await gitOut(cwd, args)) ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
     const [recentSubjects, branchCommits] = await Promise.all([
       hasHead ? lines(["log", "-n", "15", "--format=%s"]) : [],
       hasHead && resolved.ref && branch !== resolved.name ? lines(["log", "-n", "20", "--format=%s", `${resolved.ref}..HEAD`]) : [],
     ]);
-    return { diff, recentSubjects, branchCommits, branch, base: resolved.name, hasChanges };
+    return { diff, stat, omitted, recentSubjects, branchCommits, branch, base: resolved.name, hasChanges };
   }
 
-  return { readChanges, commit, push, openPr, readTextContext };
+  return { readChanges, commit, push, openPr, readTextContext, checkTop };
 }
 
-module.exports = { DETACHED, GH_LOGIN, GH_MISSING, NO_ORIGIN, PUSH_REJECTED_HINT, capOutput, createGitActions };
+module.exports = { CONFLICTS, DETACHED, DETACHED_COMMIT, GH_LOGIN, GH_MISSING, NOT_REPO, NOT_TOP, NO_ORIGIN, PUSH_REJECTED_HINT, createGitActions, isLockfile, looksSecret };

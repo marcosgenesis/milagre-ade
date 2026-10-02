@@ -19,6 +19,15 @@ export function chatTitle(session: AgentSession, messages: ChatMessage[]): strin
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
 
+/** How the sidebar orders chats: by when they started, or by their latest message. Newest first either way. */
+export type ChatOrder = "created" | "recent";
+
+/** Chats newest first. Message ids only grow, so a chat's first message dates its start and its last one its latest activity. */
+export function orderChats<T extends { sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
+  const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
+  return [...chats].sort((a, b) => key(b) - key(a));
+}
+
 type SessionPatch = Partial<Pick<AgentSession, "title" | "unread" | "archived">>;
 
 /** The state with one session changed; a field patched to undefined, false or "" is removed. Unchanged state is returned as is. */

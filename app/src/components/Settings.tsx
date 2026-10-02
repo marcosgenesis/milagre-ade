@@ -9,6 +9,7 @@ import type { ModelOption, PermissionMode } from "../model";
 import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
@@ -143,6 +144,16 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
+    </Group>
+    <Group title="Sidebar">
+      <Row label="Chat order" description="Newest chat first keeps chats in place as replies arrive">
+        <Select<ChatOrder>
+          label="Chat order"
+          value={settings.chatOrder}
+          onChange={(chatOrder) => updateSettings({ chatOrder })}
+          options={[{ value: "created", label: "Newest chat first" }, { value: "recent", label: "Latest message first" }]}
+        />
       </Row>
     </Group>
     <Group title="Editor">

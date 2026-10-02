@@ -922,6 +922,7 @@ function App() {
             onArchiveFinishedSubagents={archiveFinishedChildren}
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}
+            tasks={run?.tasks}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}

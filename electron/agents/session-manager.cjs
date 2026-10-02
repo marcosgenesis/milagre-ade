@@ -147,10 +147,6 @@ class SessionManager {
     await this.sessions.get(chatId)?.session.setPermissionMode(mode);
   }
 
-  async interruptAll() {
-    await Promise.all([...this.sessions.values()].map((entry) => entry.session.interrupt()));
-  }
-
   closeChat(chatId) {
     return this.serial(chatId, () => this.closeEntry(chatId, this.sessions.get(chatId)));
   }

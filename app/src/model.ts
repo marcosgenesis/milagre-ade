@@ -134,6 +134,10 @@ export interface PullRequest {
   readyToMerge: boolean;
   hasConflicts: boolean;
   conflictStatusKnown?: boolean;
+  /** The base branch requires PRs to be up to date and this one isn't. */
+  isBehind?: boolean;
+  /** A reviewer requested changes, so the PR can't merge until they're addressed. */
+  changesRequested?: boolean;
 }
 
 export interface Worktree {
@@ -197,9 +201,9 @@ export interface ChatMessage {
   steps?: ChatStep[];
 }
 
-export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking";
+export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup";
 
-/** One tool call in an agent's reply (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
+/** One tool call in an agent's reply (a `setup` step is the worktree's setup command, which Milagre ran, not the agent) (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
 export interface ChatStep {
   id: string;
   kind: StepKind;
@@ -211,6 +215,8 @@ export interface ChatStep {
   detail?: string;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. */
   file?: string;
+  /** Muted text after the title, e.g. "3s" or "exited with code 1 after 4s". */
+  note?: string;
   /** How long a thinking step took. */
   durationMs?: number;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
@@ -305,6 +311,10 @@ export interface AgentTask {
 }
 
 export type AgentEvent =
+  /** Milagre's own event: the user's message was saved, so a turn starts, or a running one is steered and its reply split. */
+  | { type: "message-sent"; model: string }
+  /** Milagre's own event: the user's answers to a question were saved as their message, after the reply so far. */
+  | { type: "answers-sent" }
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
@@ -314,7 +324,7 @@ export type AgentEvent =
   | { type: "text-delta"; messageId: string | null; text: string }
   | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }
-  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; note?: string; detail?: string; durationMs?: number }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | ({ type: "question-request" } & QuestionRequest)
@@ -324,12 +334,21 @@ export type AgentEvent =
   /** `notice`: a message Milagre wrote (it names the CLI and the fix), shown as it is; otherwise it is the agent's own error. */
   | { type: "turn-failed"; message: string; notice?: boolean; login?: boolean };
 
-export interface AgentStartTurnRequest {
-  /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */
-  chatId: string;
+/** A message for a chat. The main process saves it, then starts or steers the chat's turn. */
+export interface ChatSendRequest {
+  projectPath: string;
+  /** The chat to send to, or null for a new chat in the worktree. */
+  sessionId: number | null;
+  worktreeId: number;
+  /** The message as the chat shows it. */
+  body: string;
+  images: ImageAttachment[];
+  /** Paths of the files attached to the message. */
+  files: string[];
+  /** What the agent is sent: the body with the attached files listed. */
+  prompt: string;
   provider: ModelProvider;
   model: string;
-  cwd: string;
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
@@ -339,9 +358,6 @@ export interface AgentStartTurnRequest {
   replies?: "concise" | "normal";
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
-  prompt: string;
-  images: ImageAttachment[];
-  resumeId?: string;
 }
 
 /** A code editor found on this Mac. */
@@ -374,25 +390,7 @@ export interface CoordinatorState {
 export interface OpenProject {
   path: string;
   name: string;
-  state: CoordinatorState | null;
-}
-
-export function createInitialState(projectName: string, projectPath: string): CoordinatorState {
-  const projectId = 1;
-  return {
-    next_id: 1,
-    projects: { [projectId]: { id: projectId, name: projectName } },
-    worktrees: {},
-    sessions: {},
-    connections: {},
-    events: [],
-    messages: [],
-    approvals: [],
-    tasks: {},
-    artifacts: {},
-    outputs: [],
-    conflicts: [],
-  };
+  state: CoordinatorState;
 }
 
 export function sortedWorktrees(state: CoordinatorState) {

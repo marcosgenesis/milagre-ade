@@ -14,7 +14,7 @@ for (const state of ["OPEN", "MERGED"]) {
       assert.ok(options.timeout > 0);
       return { stdout: JSON.stringify([{ number: 10213, url, state, title }]) };
     };
-    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false });
+    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
   });
 }
 
@@ -46,7 +46,7 @@ test("uses the checked-out branch for fork PRs instead of its upstream base", as
     assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus"]);
     return { stdout: JSON.stringify([{ number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title }]) };
   };
-  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false });
+  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
 });
 
 for (const [name, overrides, ready] of [
@@ -81,5 +81,20 @@ for (const [state, mergeStateStatus, expected] of [
     const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
     assert.equal(result.hasConflicts, expected);
     assert.equal(result.conflictStatusKnown, mergeStateStatus !== "UNKNOWN");
+  });
+}
+
+for (const [name, overrides, behind, changesRequested] of [
+  ["outdated branch", { mergeStateStatus: "BEHIND" }, true, false],
+  ["changes requested", { reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BLOCKED" }, false, true],
+  ["both", { reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BEHIND" }, true, true],
+  ["clean and approved", {}, false, false],
+  ["merged", { state: "MERGED", reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BEHIND" }, false, false],
+]) {
+  test(`blocking status: ${name}`, async () => {
+    const pr = { number: 10213, url, title, state: "OPEN", isDraft: false, reviewDecision: "APPROVED", mergeStateStatus: "CLEAN", ...overrides };
+    const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
+    assert.equal(result.isBehind, behind);
+    assert.equal(result.changesRequested, changesRequested);
   });
 }

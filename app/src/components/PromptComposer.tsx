@@ -60,6 +60,8 @@ interface PromptComposerProps {
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -97,7 +99,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -183,7 +185,9 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         }
       }
     } else if (!needsFullWidth && !expanded) {
-      needsFullWidth = contentHeight > 28;
+      // An empty draft never expands: the expanded branch collapses it again, so a placeholder that wraps
+      // in a narrow composer would flip the layout forever.
+      needsFullWidth = draft.length > 0 && contentHeight > 28;
     }
     if (needsFullWidth !== expanded) setExpanded(needsFullWidth);
   }, [draft, expanded, selectedModel.name, effortLabel, fastMode, alwaysExpanded]);
@@ -329,7 +333,32 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
               </div>
             }
           >
-            {providerNotice && <p role="status" className="mx-1 mb-1 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">{messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}</p>}
+            {providerNotice && (
+              <div role="status" className="mx-1 mb-1 flex flex-col gap-2 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">
+                <p className="leading-snug">
+                  {messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}
+                </p>
+                {cliStatus?.[provider]?.state === "outdated" && onUpdateCli && (
+                  <div className="flex items-center justify-end pt-0.5">
+                    <button
+                      type="button"
+                      disabled={updatingCli === provider}
+                      onClick={() => onUpdateCli(provider)}
+                      className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {updatingCli === provider ? (
+                        <>
+                          <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                          <span>Updating…</span>
+                        </>
+                      ) : (
+                        <span>Update {provider === "codex" ? "Codex" : "Claude"}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {modelRows.map((model) => <PickerRow key={model.id} icon={<ProviderLogo provider={model.provider} size={14} />} label={model.name} description={model.description} selected={model.id === selectedModel.id} onClick={() => chooseModel(model)} />)}
           </PickerPanel>
         )}
@@ -391,7 +420,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
           <div className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
-            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px]"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
+            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px] placeholder-shown:whitespace-nowrap placeholder:truncate"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}

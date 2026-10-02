@@ -1,5 +1,5 @@
 import type { CoordinatorState, Worktree } from "../model";
-import { removeFailureNotice, withoutWorktree, worktreeShared } from "./archive.ts";
+import { removeFailureNotice, worktreeShared } from "./archive.ts";
 import type { ArchiveMode, ArchivePlan, WorktreeStatus } from "./archive.ts";
 
 export type RemoveOptions = { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus };
@@ -19,8 +19,8 @@ export type ArchiveDeps = {
   restore: () => void;
   /** Removes the worktree; main closes the chat's agent and checks again against `seen`. */
   remove: (worktree: Worktree, options: RemoveOptions) => Promise<unknown>;
-  /** The state after the worktree is gone, and the chats that went with it. */
-  applyRemoval: (next: CoordinatorState, removed: { worktreeId: number; sessionIds: number[] }) => void;
+  /** The worktree is gone, with these chats; the main process has dropped them from the project's state. */
+  applyRemoval: (removed: { worktreeId: number; sessionIds: number[] }) => void;
   refreshBranches: () => void;
   notify: (message: string) => void;
 };
@@ -50,10 +50,9 @@ export async function archiveChat(deps: ArchiveDeps, sessionId: number, mode: Ar
     deps.notify(removeFailureNotice(error));
     return "kept";
   }
-  // The window moved to another project meanwhile: that project's state isn't ours to change.
+  // The window moved to another project meanwhile: its selection isn't in that project any more.
   if (deps.currentProjectPath() !== deps.projectPath) return "removed";
-  const next = deps.getState();
-  if (next) deps.applyRemoval(withoutWorktree(next, removing.id), { worktreeId: removing.id, sessionIds });
+  deps.applyRemoval({ worktreeId: removing.id, sessionIds });
   deps.refreshBranches();
   return "removed";
 }

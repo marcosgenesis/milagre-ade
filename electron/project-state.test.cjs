@@ -48,6 +48,13 @@ test("chats of a removed worktree are dropped and new worktrees get fresh ids", 
   assert.equal(new Set(Object.values(state.sessions).map((session) => session.worktree_id)).size, 2);
 });
 
+test("a state that already matches git's worktrees is returned as is", () => {
+  const discovered = [{ path: "/repo", name: "main" }];
+  const state = reconcileState(null, "repo", discovered);
+  assert.equal(reconcileState(state, "repo", discovered), state);
+  assert.notEqual(reconcileState(state, "repo", [...discovered, { path: "/repo-wt", name: "feature" }]), state);
+});
+
 test('restored children without a live session retain output but do not claim to be running', () => {
  const { markDisconnectedSubagents } = require('./project-state.cjs');
  const state={sessions:{1:{subagents:[{id:'c',status:'running',updatedAt:10,transcript:[{text:'partial'}]},{id:'d',status:'completed'}]},2:{subagents:[{id:'live',status:'running'}]}}};
@@ -56,4 +63,10 @@ test('restored children without a live session retain output but do not claim to
  assert.equal(restored.sessions[1].subagents[0].transcript[0].text,'partial');
  assert.equal(restored.sessions[1].subagents[1].status,'completed');
  assert.equal(restored.sessions[2].subagents[0].status,'running');
+});
+
+test("a state with no running subagent to mark is returned as is", () => {
+  const { markDisconnectedSubagents } = require("./project-state.cjs");
+  const state = { sessions: { 1: { id: 1, subagents: [{ id: "d", status: "completed" }] }, 2: { id: 2 } } };
+  assert.equal(markDisconnectedSubagents(state, new Set()), state);
 });

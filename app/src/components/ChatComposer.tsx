@@ -1,7 +1,7 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
 import type { AgentTask, Subagent } from "../model";
 import { TaskTrack } from "./agents/TaskTrack";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -15,9 +15,9 @@ import {
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
-  Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { FindBar } from "./FindBar";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
@@ -27,10 +27,12 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
+import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
+import { extractOutdatedProvider } from "../lib/cli-status";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -43,10 +45,11 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
-  const { activity, answer } = replyActivity(body, steps);
+  const { setup, activity, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
+      {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
       {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
@@ -58,6 +61,9 @@ const MessageSection = memo(function MessageSection({
   message,
   isUser,
   onRecommendationSelect,
+  onUpdateCli,
+  updatingCli,
+  cliStatus,
   streaming = false,
   asking = false,
   waitingStepIds = [],
@@ -65,6 +71,9 @@ const MessageSection = memo(function MessageSection({
   message: AppChatMessage;
   isUser: boolean;
   onRecommendationSelect: (option: string) => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
+  cliStatus?: AgentCliStatus | null;
   streaming?: boolean;
   /** The running turn is waiting on the user's answer to a question. */
   asking?: boolean;
@@ -72,6 +81,13 @@ const MessageSection = memo(function MessageSection({
   waitingStepIds?: string[];
 }) {
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
+  const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
+  const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
+  const showUpdateButton = Boolean(
+    outdatedProvider &&
+    onUpdateCli &&
+    (isCurrentlyOutdated || updatingCli === outdatedProvider)
+  );
   const steps = message.steps ?? [];
   return (
     <article
@@ -95,19 +111,43 @@ const MessageSection = memo(function MessageSection({
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
         )}
+        {showUpdateButton && outdatedProvider && onUpdateCli && (
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={updatingCli === outdatedProvider}
+              onClick={() => onUpdateCli(outdatedProvider)}
+              className="flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+            >
+              {updatingCli === outdatedProvider ? (
+                <>
+                  <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                  <span>Updating {outdatedProvider === "codex" ? "Codex" : "Claude"}…</span>
+                </>
+              ) : (
+                <span>Update {outdatedProvider === "codex" ? "Codex" : "Claude"} now</span>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </article>
   );
 });
 
 interface ChatComposerProps {
+  /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
+  findOpen?: boolean;
+  findSignal?: number;
+  onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
-  onResolveConflicts?: () => void;
+  /** One-click fix for whatever blocks the chat's PR from merging (conflicts, an outdated branch, requested changes). */
+  pullRequestAction?: { label: string; tone: "red" | "orange"; onRun: () => void };
   isSending: boolean;
   /** Sending is briefly blocked while a message is being prepared; a running turn doesn't block it. */
   sendBlocked: boolean;
@@ -133,6 +173,8 @@ interface ChatComposerProps {
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -144,16 +186,6 @@ interface ChatComposerProps {
   onFastModeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
-  worktreeSummary: string;
-  connectionSummary: string;
-  eventsCount: number;
-  firstWorktreeName: string;
-  secondWorktreeName?: string;
-  firstAgentRunning: boolean;
-  secondAgentRunning: boolean;
-  onToggleFirst: () => void;
-  onToggleSecond: () => void;
-  onCycleConnection: () => void;
   onRecommendationSelect: (option: string) => void;
   approval?: ReactNode;
   worktrees: Array<{ id: number; name: string; path: string }>;
@@ -165,6 +197,8 @@ interface ChatComposerProps {
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
   newChatError: string | null;
+  notice?: string | null;
+  onDismissNotice?: () => void;
 }
 
 const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon: IconData }> = [
@@ -269,7 +303,7 @@ export function ChatComposer({
   draft,
   onDraftChange,
   onSend,
-  onResolveConflicts,
+  pullRequestAction,
   isSending,
   sendBlocked,
   streamingText,
@@ -286,6 +320,8 @@ export function ChatComposer({
   models,
   cliStatus,
   onModelPickerOpen,
+  onUpdateCli,
+  updatingCli,
   selectedModel,
   onModelChange,
   capability,
@@ -297,16 +333,6 @@ export function ChatComposer({
   onFastModeChange,
   permissionMode,
   onPermissionModeChange,
-  worktreeSummary,
-  connectionSummary,
-  eventsCount,
-  firstWorktreeName,
-  secondWorktreeName,
-  firstAgentRunning,
-  secondAgentRunning,
-  onToggleFirst,
-  onToggleSecond,
-  onCycleConnection,
   onRecommendationSelect,
   approval,
   worktrees,
@@ -318,11 +344,16 @@ export function ChatComposer({
   baseBranch,
   onBaseBranchChange,
   newChatError,
+  findOpen = false,
+  findSignal = 0,
+  onFindClose,
+  notice,
+  onDismissNotice,
 }: ChatComposerProps) {
-  const [tab, setTab] = useState("Worktrees");
+  const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = tab === "Worktrees" && messages.length === 0;
+  const isNewChat = messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -339,65 +370,56 @@ export function ChatComposer({
 
   return (
     <div
+      ref={root}
       className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
       onDrop={handleFileDrop}
     >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
+      {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
       {!isNewChat && <MessageScroller
+        key={messages[0]?.session_id ?? "new"}
         navigation="rail"
         followOutput
         smooth
         busy={isSending}
         className="min-h-0 flex-1"
-        viewportClassName="pt-4 pb-2"
+        // The find bar floats over the top of the chat, so the first message moves below it while it is open.
+        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-2`}
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
-        {tab === "Worktrees" ? (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            {messages.map((message) => (
-              <MessageSection
-                key={message.id}
-                message={message}
-                isUser={message.role === "user"}
-                onRecommendationSelect={onRecommendationSelect}
-              />
-            ))}
+        <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {messages.map((message) => (
+            <MessageSection
+              key={message.id}
+              message={message}
+              isUser={message.role === "user"}
+              onRecommendationSelect={onRecommendationSelect}
+              onUpdateCli={onUpdateCli}
+              updatingCli={updatingCli}
+              cliStatus={cliStatus}
+            />
+          ))}
 
-            {isSending && (streamingText || streamingSteps?.length) ? (
-              <MessageSection
-                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-                isUser={false}
-                onRecommendationSelect={onRecommendationSelect}
-                streaming
-                asking={asking}
-                waitingStepIds={waitingStepIds}
-              />
-            ) : null}
-            {isSending && (
-              <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            <div className="flex items-center gap-2 text-[13px] text-ink"><Icon icon={Link01Icon} size={15} /><span className="font-medium">Shared context</span><span className="ml-auto text-[12px] text-ink-3">{eventsCount} events</span></div>
-            <div className="rounded-control bg-inset p-3 text-[13px] leading-6 text-ink-2">
-              <p>{worktreeSummary}</p>
-              <p className="mt-2">Connection: {connectionSummary}</p>
+          {isSending && (streamingText || streamingSteps?.length) ? (
+            <MessageSection
+              message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
+              isUser={false}
+              onRecommendationSelect={onRecommendationSelect}
+              streaming
+              asking={asking}
+              waitingStepIds={waitingStepIds}
+            />
+          ) : null}
+          {isSending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
-            <p className="text-[12px] text-ink-3">Messages sent from this chat can use the context shared by both worktrees.</p>
-            <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-3">
-              {firstWorktreeName !== "No worktree" && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleFirst}>{firstAgentRunning ? "Stop" : "Start"} {firstWorktreeName}</button>}
-              {secondWorktreeName && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleSecond}>{secondAgentRunning ? "Stop" : "Start"} {secondWorktreeName}</button>}
-              <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onCycleConnection}>Link as {connectionSummary.toLowerCase()}</button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
@@ -406,17 +428,36 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
+        {notice && (
+          <div
+            role="status"
+            data-notice
+            className="mb-2 flex w-full items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay"
+            style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
+          >
+            <span className="min-w-0 flex-1 break-words">{notice}</span>
+            <button
+              type="button"
+              onClick={onDismissNotice}
+              className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {!isNewChat && onResolveConflicts && (
+        {!isNewChat && pullRequestAction && (
           <div className="mb-2 flex px-1">
             <button
               type="button"
-              onClick={onResolveConflicts}
+              onClick={pullRequestAction.onRun}
               disabled={sendBlocked || isSending || imageDraft.loading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red/20 bg-red/5 px-2.5 py-0.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red disabled:cursor-not-allowed disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+                ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+                : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
             >
               <Icon icon={GitPullRequestIcon} size={14} />
-              Resolve conflicts
+              {pullRequestAction.label}
             </button>
           </div>
         )}
@@ -432,6 +473,8 @@ export function ChatComposer({
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}
+          onUpdateCli={onUpdateCli}
+          updatingCli={updatingCli}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           capability={capability}

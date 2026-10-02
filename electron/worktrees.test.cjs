@@ -199,6 +199,23 @@ test("a worktree with nothing to copy returns the plain result", async (t) => {
   assert.equal("copy" in created, false);
 });
 
+test("dependency and build folders are skipped by the default and by unanchored patterns", async (t) => {
+  const fx = await ignoredFixture(t, { "node_modules/pkg/.env": "DEP=1\n", "apps/web/node_modules/pkg/.env": "DEP=2\n", "dist/.env": "BUILD=1\n", ".venv/lib/.env": "PY=1\n", "vendor/bundle/gem/.env": "RB=1\n" });
+  const created = await create(fx);
+  assert.deepEqual([...created.copy.copied].sort(), [".env", ".env.local"]);
+  assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, [".env", ".env.local"]);
+  assert.deepEqual((await previewFilesToCopy(fx.project, [".env*", "!.env.local"])).matches, [".env"]);
+});
+
+test("an anchored pattern can still ask for a file inside an excluded folder", async (t) => {
+  const fx = await ignoredFixture(t, { "dist/config.json": "{}", "dist/other.json": "{}", "node_modules/pkg/.env": "DEP=1\n", "vendor/bundle/gem/.env": "RB=1\n" });
+  await fs.appendFile(path.join(fx.project, ".gitignore"), "dist/\n*.json\n");
+  const created = await create(fx, { copyPatterns: ["dist/config.json", "vendor/bundle/gem/.env"] });
+  assert.deepEqual([...created.copy.copied].sort(), ["dist/config.json", "vendor/bundle/gem/.env"]);
+  await fs.writeFile(path.join(fx.project, ".worktreeinclude"), "/node_modules/pkg/.env\n");
+  assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, ["node_modules/pkg/.env"]);
+});
+
 test("previewFilesToCopy lists what the effective patterns match", async (t) => {
   const fx = await ignoredFixture(t, { "apps/web/.env": "1" });
   const found = await previewFilesToCopy(fx.project, undefined);

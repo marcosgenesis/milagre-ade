@@ -9,7 +9,25 @@ const execFileAsync = promisify(execFile);
 // Files a new worktree gets from the project's main checkout, after Conductor's "Files to copy":
 // untracked files that git ignores and that match the project's patterns (.gitignore syntax).
 const DEFAULT_PATTERNS = [".env*"];
-const COPY_LIMITS = { maxFiles: 500, maxBytes: 100 * 1024 * 1024 };
+// Dependency and build folders are left out of the walk and the copy: an unanchored pattern such as the default
+// `.env*` would otherwise pick up a dependency's own files (node_modules/bottleneck/.env).
+const EXCLUDED_FOLDERS = ["node_modules", ".git", "vendor/bundle", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".turbo", ".cache"];
+
+/**
+ * The folders to skip for these patterns. A folder comes back in when an anchored pattern (one with a slash
+ * before its end, like `dist/config.json` or `**\/node_modules/pkg/.env`) names it, so it can still be asked for.
+ * Unanchored patterns never lift an exclusion.
+ */
+function excludedFolders(patterns) {
+  const anchored = patterns
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => line.replace(/^!/, "").replace(/^\//, ""))
+    .filter((line) => line.replace(/\/+$/, "").includes("/") || /^[^/]+\/$/.test(line));
+  return EXCLUDED_FOLDERS.filter((folder) => !anchored.some((line) => line === `${folder}/` || line.startsWith(`${folder}/`) || line.includes(`/${folder}/`)));
+}
+
+const COPY_LIMITS ={ maxFiles: 500, maxBytes: 100 * 1024 * 1024 };
 const GIT_LIMITS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 30_000 };
 
 function patternLines(text) {
@@ -60,7 +78,8 @@ async function findFilesToCopy(projectPath, patterns) {
   try {
     const patternFile = path.join(scratch, "patterns");
     await fs.writeFile(patternFile, `${patterns.join("\n")}\n`);
-    const { stdout } = await execFileAsync("git", ["-C", projectPath, "ls-files", "-z", "--others", "--ignored", `--exclude-from=${patternFile}`], GIT_LIMITS);
+    const skipped = excludedFolders(patterns).map((folder) => `:(exclude,glob)**/${folder}/**`);
+    const { stdout } = await execFileAsync("git", ["-C", projectPath, "ls-files", "-z", "--others", "--ignored", `--exclude-from=${patternFile}`, "--", ".", ...skipped], GIT_LIMITS);
     candidates = stdout.split("\0").filter(Boolean);
   } finally {
     await fs.rm(scratch, { recursive: true, force: true });
@@ -119,4 +138,4 @@ async function copyFilesToWorktree({ projectPath, worktreePath, setting, limits 
   return { copied, notes };
 }
 
-module.exports = { COPY_LIMITS, DEFAULT_PATTERNS, copyFilesToWorktree, findFilesToCopy, previewFilesToCopy, resolvePatterns };
+module.exports = { COPY_LIMITS, DEFAULT_PATTERNS, EXCLUDED_FOLDERS, excludedFolders, copyFilesToWorktree, findFilesToCopy, previewFilesToCopy, resolvePatterns };

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
@@ -11,6 +11,8 @@ import { updateSettings, useSettings } from "../lib/settings";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
+import { Select } from "./primitives/Select";
+import { ProviderLogo } from "./ProviderLogo";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -71,22 +73,6 @@ function Row({ label, description, children }: { label: string; description?: st
   );
 }
 
-function Select({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
-  return (
-    <span className="relative inline-flex">
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-8 appearance-none rounded-control border border-line bg-surface pr-8 pl-3 text-[13px] font-medium text-ink transition-colors hover:bg-hover"
-      >
-        {children}
-      </select>
-      <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-ink-3"><Icon icon={ArrowDown01Icon} size={14} /></span>
-    </span>
-  );
-}
-
 function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <button
@@ -109,24 +95,42 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
     <>
     <Group title="Agents">
       <Row label="Default model" description="Selected when Milagre opens">
-        <Select label="Default model" value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
-          {(["codex", "claude"] as const).map((provider) => (
-            <optgroup key={provider} label={provider === "codex" ? "Codex" : "Claude"}>
-              {models.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-            </optgroup>
-          ))}
-        </Select>
+        <Select
+          label="Default model"
+          title="Choose a model"
+          width={280}
+          value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
+          onChange={(defaultModelId) => updateSettings({ defaultModelId })}
+          options={(["codex", "claude"] as const).flatMap((provider) => models.filter((model) => model.provider === provider).map((model) => ({
+            value: model.id,
+            label: model.name,
+            icon: <ProviderLogo provider={provider} size={14} />,
+            group: provider === "codex" ? "Codex" : "Claude",
+          })))}
+        />
       </Row>
       <Row label="Default permission" description="Applied when Milagre opens">
-        <Select label="Default permission" value={settings.defaultPermissionMode} onChange={(mode) => updateSettings({ defaultPermissionMode: mode as PermissionMode })}>
-          {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
-        </Select>
+        <Select<PermissionMode>
+          label="Default permission"
+          title="Agent permissions"
+          width={340}
+          value={settings.defaultPermissionMode}
+          onChange={(defaultPermissionMode) => updateSettings({ defaultPermissionMode })}
+          options={PERMISSION_MODES.map((mode) => ({
+            value: mode.id,
+            label: mode.name,
+            description: mode.description,
+            icon: <span className={`flex shrink-0 ${mode.id === "full" ? "text-ink" : mode.id === "auto" ? "text-green" : "text-accent-ink"}`}><Icon icon={SecurityCheckIcon} size={14} /></span>,
+          }))}
+        />
       </Row>
       <Row label="Claude replies">
-        <Select label="Claude replies" value={settings.claudeReplies} onChange={(claudeReplies) => updateSettings({ claudeReplies: claudeReplies as ClaudeReplies })}>
-          <option value="concise">Concise</option>
-          <option value="normal">Normal</option>
-        </Select>
+        <Select<ClaudeReplies>
+          label="Claude replies"
+          value={settings.claudeReplies}
+          onChange={(claudeReplies) => updateSettings({ claudeReplies })}
+          options={[{ value: "concise", label: "Concise" }, { value: "normal", label: "Normal" }]}
+        />
       </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
@@ -137,9 +141,12 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
         {editors && editors.length === 0 ? (
           <span className="text-ink-3">No editor found</span>
         ) : (
-          <Select label="Open files in" value={editor?.id ?? ""} onChange={(editorId) => updateSettings({ editorId })}>
-            {(editors ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </Select>
+          <Select
+            label="Open files in"
+            value={editor?.id ?? ""}
+            onChange={(editorId) => updateSettings({ editorId })}
+            options={(editors ?? []).map((item) => ({ value: item.id, label: item.name }))}
+          />
         )}
       </Row>
     </Group>
@@ -150,10 +157,12 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
     </Group>
     <Group title="Plan usage">
       <Row label="Show" description="Claude and Codex plan limits">
-        <Select label="Show usage as" value={settings.usageDisplay} onChange={(display) => updateSettings({ usageDisplay: display as UsageDisplay })}>
-          <option value="used">Used</option>
-          <option value="remaining">Remaining</option>
-        </Select>
+        <Select<UsageDisplay>
+          label="Show usage as"
+          value={settings.usageDisplay}
+          onChange={(usageDisplay) => updateSettings({ usageDisplay })}
+          options={[{ value: "used", label: "Used" }, { value: "remaining", label: "Remaining" }]}
+        />
       </Row>
       <Row label="Show in sidebar" description="Hover a provider for its limits and reset times">
         <Switch label="Show usage in sidebar" checked={settings.showUsageInSidebar} onChange={(showUsageInSidebar) => updateSettings({ showUsageInSidebar })} />
@@ -168,11 +177,12 @@ function AppearanceSettings() {
   return (
     <Group title="Theme">
       <Row label="Theme" description="System follows your macOS appearance">
-        <Select label="Theme" value={settings.theme} onChange={(theme) => updateSettings({ theme: theme as ThemePreference })}>
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </Select>
+        <Select<ThemePreference>
+          label="Theme"
+          value={settings.theme}
+          onChange={(theme) => updateSettings({ theme })}
+          options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]}
+        />
       </Row>
     </Group>
   );

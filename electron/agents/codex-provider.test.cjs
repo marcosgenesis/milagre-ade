@@ -541,9 +541,9 @@ test("a Codex whose token expired mid-session closes its session, so the next me
   const { session, events } = codex(t, { scenario: "unauthorized" });
   await session.startTurn(TURN);
   await ended(events);
-  await waitUntil(() => session.closed);
+  // closed flips when close() starts; the app-server's exit lands once the kill completes.
+  await waitUntil(() => session.closed && session.rpc.exited);
   assert.deepEqual(events.at(-1), failedWith(loginMessage("codex"), { login: true }));
-  assert.equal(session.rpc.exited, true);
 });
 
 test("a 401 on a provider that needs no OpenAI login keeps Codex's own error and the session", async (t) => {

@@ -50,6 +50,7 @@ The agent host lives in the Electron main process, which already owns processes 
 - `environment.cjs`: imports the login shell's environment at startup and resolves binaries on the resulting `PATH` (see Environment).
 - `cli.cjs`: finds each agent's CLI and checks its version, once per app run (see Environment).
 - `models.cjs`: asks each CLI for its models, once per app run (see Models).
+- `status.cjs`: how each CLI stands for the model picker: ready, missing, outdated, logged out or broken (see Environment).
 - `process-tree.cjs`: tree-kills a session's process group, sending SIGTERM and then SIGKILL after 2 s.
 
 `electron/agent-runner.cjs` and the CLI-argument half of `electron/image-input.cjs` are removed once both providers are in place. Image validation (`decodeImages`) stays.
@@ -85,7 +86,7 @@ Main sends `agent:event` messages `{ chatId, event }` to the renderer. Event typ
 - `permission-resolved { requestId, decision }`, where `decision` is `allow`, `allow-for-chat`, `deny` or `cancelled`. A request is cancelled when its turn is interrupted or ends, or when the agent withdraws it.
 - `question-request { requestId, questions }`, where each question is `{ id, header, question, options, multiSelect, allowOther, secret }` and each option is `{ label, description? }` (see Questions).
 - `question-resolved { requestId, outcome }`, where `outcome` is `answered`, `dismissed` or `cancelled`.
-- `turn-completed`, `turn-failed { message }`, `turn-cancelled`
+- `turn-completed`, `turn-failed { message, notice?, login? }`, `turn-cancelled`. `notice` marks a message Milagre wrote (missing, too old, doesn't start, not logged in, stopped unexpectedly, couldn't resume): a full sentence that names the CLI and the fix, which the chat shows as it is. Any other message is the agent's own error, and the chat shows it as `Agent error: <message>`. `login` marks the not-logged-in message.
 - `session-reset`: the saved native id can't be resumed (transcript or thread deleted). The renderer forgets it and the next message starts a fresh session.
 
 Text deltas and step output are batched in main into 50 ms windows before sending, to keep IPC traffic low during fast streaming. A batch of step output keeps only its last 20 KB, as the renderer does.
@@ -94,11 +95,12 @@ Text deltas and step output are batched in main into 50 ms windows before sendin
 
 Renderer to main:
 
-- `agent:start-turn { chatId, provider, model, cwd, permissionMode, prompt, images, resumeId? }`. It resolves once the turn starts; results arrive as events. It rejects with the message to show when the provider's CLI is missing, too old or doesn't start, and the renderer shows that as the turn's failure.
+- `agent:start-turn { chatId, provider, model, cwd, permissionMode, prompt, images, resumeId? }`. It resolves once the turn starts; results arrive as events. When the provider's CLI is missing, too old or doesn't start, it resolves at once and sends a `turn-failed` event with the message and `notice: true`, like any other failure.
 - `agent:respond-permission { chatId, requestId, decision }`
 - `agent:answer-question { chatId, requestId, answers }`. It resolves to whether the question was still open.
 - `agent:interrupt { chatId }`
-- `agent:models`: returns `{ codex: ReportedModel[] | null, claude: ReportedModel[] | null }`, where `ReportedModel = { id, name, description, recommended, efforts, defaultEffort?, ultracode }`. `null` means the CLI is missing, too old, or couldn't be asked. It replaces `agent:capabilities`.
+- `agent:models`: returns `{ codex: ReportedModel[] | null, claude: ReportedModel[] | null }`, where `ReportedModel = { id, name, description, recommended, efforts, defaultEffort?, ultracode }`. `null` means the CLI is missing, too old, logged out (Claude only), or couldn't be asked. It replaces `agent:capabilities`.
+- `agent:cli-status`: returns `{ claude: CliStatus, codex: CliStatus }`, where `CliStatus = { state: "ready" | "missing" | "outdated" | "logged-out" | "broken", message?: string }`. `message` is the text a turn would fail with for that case, and is absent for `ready`. It's the model picker's source (see Environment).
 
 `agent:send` and `agent:cancel` are removed.
 
@@ -110,7 +112,8 @@ Renderer to main:
 - **Timeouts.** Turns, permission waits and question waits have none. Claude Code's dialog deadline (`dialogExpiry`, `CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS`) doesn't apply to `canUseTool`: a question held there for 15 s under a 3 s deadline stayed open. Only control calls are bounded: the `turn/start` acknowledgement at 90 s, and interrupt at 3 s before falling back to a tree-kill.
 - **Idle sessions.** A session with no turn for 10 minutes is closed. Its saved native id lets the next message resume it.
 - **Shutdown.** On app quit every session is closed and its process tree killed. The renderer saves finished turns, so closing the last window on macOS (where the app stays open) also interrupts running turns and closes the sessions. They resume on the next message.
-- **Crashes.** If an agent process exits mid-turn, the session emits `turn-failed` and is dropped. The next message starts a new process that resumes the saved native id. Killing Claude Code 2.1.287 or codex-cli 0.158.0 with SIGKILL mid-reply ended the turn at once, and the next message resumed the chat and recalled a word from before the crash. The failure reads "Claude Code stopped unexpectedly: <reason>. Send your message again to continue this chat." (or "Codex stopped unexpectedly: …"), where the reason is the last line the process printed.
+- **Crashes.** If an agent process exits mid-turn, the session emits `turn-failed` and is dropped. The next message starts a new process that resumes the saved native id. Killing Claude Code 2.1.287 or codex-cli 0.158.0 with SIGKILL mid-reply ended the turn at once, and the next message resumed the chat and recalled a word from before the crash. The failure reads "Claude Code stopped unexpectedly: <reason>. Send your message again to continue this chat." (or "Codex stopped unexpectedly: …"), where the reason is the last line the process printed, without terminal colours and without a log line's timestamp, level and module (`2026-10-02T00:59:00Z ERROR codex_core::tools::router: error=…` reads `error=…`). When that line is only a log line, or empty, and the process died by a signal, the reason is "Codex exited with signal SIGKILL" (or the Claude Code equivalent).
+- **Login failures.** A turn that fails with the not-logged-in message closes its session, so the next message starts a fresh process that reads the credentials again; a session left open would keep answering "not logged in" after the user logged in. A Claude session that announced its id in that run and was not resuming forgets it (`session-reset`): the chat never got an answer, and a logged-out run's session may not resume.
 
 ### Claude provider
 
@@ -151,7 +154,7 @@ Renderer to main:
 ### Codex provider
 
 - **Startup.** Spawn `codex app-server` detached. Send `initialize { clientInfo: { name: "milagre", version } }`, then the `initialized` notification.
-- **Login.** Before the first thread, the provider calls `account/read { refreshToken: false }`. A logged-out Codex answers `{ account: null, requiresOpenaiAuth: true }` at once, while a turn would retry for about 15 s and fail with a raw "401 Unauthorized". So `account: null` with `requiresOpenaiAuth: true` fails the turn with the login message and closes the session. A provider that needs no OpenAI login (`requiresOpenaiAuth: false`), or an error from `account/read`, doesn't hold the turn up. A turn that fails with `codexErrorInfo` `"unauthorized"` or an HTTP status of 401 also shows the login message. A failed turn whose message is a raw JSON API error shows its `error.message`.
+- **Login.** Before the first thread, the provider calls `account/read { refreshToken: false }`. A logged-out Codex answers `{ account: null, requiresOpenaiAuth: true }` at once, while a turn would retry for about 15 s and fail with a raw "401 Unauthorized". So `account: null` with `requiresOpenaiAuth: true` fails the turn with the login message and closes the session. A provider that needs no OpenAI login (`requiresOpenaiAuth: false`), or an error from `account/read`, doesn't hold the turn up. A turn that fails with `codexErrorInfo` `"unauthorized"` or an HTTP status of 401 also shows the login message and closes the session (its app-server holds the old credentials), but only where `account/read` said `requiresOpenaiAuth: true`; on an API key or a custom provider the 401 stays that provider's own error. `account/read` has an 8 s timeout. A failed turn whose message is a raw JSON API error shows its `error.message`.
 - **Threads.** The first turn calls `thread/start { model, cwd, approvalPolicy, sandbox, developerInstructions, config }`. Later turns reuse the thread. After a restart the provider calls `thread/resume` with the same parameters, with `thread/unarchive` as a fallback. `config` is `{ features: { default_mode_request_user_input: true } }`, which lets Codex ask questions outside Plan mode (see Questions).
 - **Turns.** `turn/start { threadId, input, model, approvalPolicy, sandboxPolicy, cwd }`. Images are written to a temporary file and sent as `{ type: "localImage", path }`. The file is deleted when the turn ends.
 - **Mapping.**
@@ -244,11 +247,11 @@ When an agent asks the user to choose, the turn waits on a question card instead
 - **Login environment.** An app opened from Finder or the Dock gets launchd's environment: `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, with no `LANG` and nothing the user's shell sets. Neither CLI is found, and Codex installed with npm under nvm can't start even by its full path (`env: node: No such file or directory`).
   - At startup, `$SHELL -i -l -c` runs `/usr/bin/printf '%s' <mark>; /usr/bin/env -0; /usr/bin/printf '%s' <mark>`, where the mark is random. Only text between the two marks is read, so whatever rc files print is ignored. `-i` is needed: on the test Mac, `-l` alone missed the folders of both CLIs, which `.zshrc` adds.
   - Supported shells are zsh, bash, fish, sh, dash and ksh. For other shells, no import is attempted.
-  - The shell is given 10 s. A shell that hangs has its process group killed. The import counts as failed when the shell can't start, hangs, or exits without printing both marks (an rc file that `exec`s something else).
+  - The shell is given 10 s. A shell that hangs has its process group killed, and the kill stays armed after the closing mark, so a shell that hangs in an exit hook is killed at the timeout too. The import counts as failed when the shell can't start, hangs, or exits without printing both marks (an rc file that `exec`s something else).
   - The whole environment is imported, not only `PATH`. Login, config and tool variables live there (`ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `LANG`, `JAVA_HOME`, `ANDROID_HOME`, proxies), and agents should see what they see in a terminal.
     - Variables the app already has keep their value (`HOME`, `TMPDIR`, `SSH_AUTH_SOCK` from launchd).
-    - `PWD`, `OLDPWD`, `SHLVL` and `_` are skipped.
-  - `PATH` is merged in order, keeping each folder's first position and dropping empty entries: the shell's folders, then the app's, then these install folders where they exist:
+    - `PWD`, `OLDPWD`, `SHLVL`, `_`, `ELECTRON_RUN_AS_NODE` and `ELECTRON_NO_ATTACH_CONSOLE` are skipped.
+  - `PATH` is merged in order, keeping each folder's first position and dropping empty entries. Opened from Finder or the Dock (the app's `PATH` is launchd's bare one), the order is the shell's folders, then the app's, then these install folders where they exist. Started from a terminal (`npm run dev`), the app's own folders come first, so a terminal's `nvm use`, direnv or virtualenv still wins, then the shell's, then the install folders. The install folders:
     - `~/.local/bin` (Claude Code's native installer) and `~/.claude/local` (its older local npm install);
     - `/opt/homebrew/bin` and `/usr/local/bin`;
     - nvm's default node bin, where npm puts Codex;
@@ -256,13 +259,20 @@ When an agent asks the user to choose, the turn waits on a question card instead
   - The import runs once, in the background, as the main process loads. Windows open without waiting for it, and the first CLI check waits for it. Windows doesn't run it.
 - **CLI check.** Before a provider's first turn in an app run, `cli.cjs` resolves its CLI on the merged `PATH` and runs `--version`, which prints `2.1.287 (Claude Code)` and `codex-cli 0.158.0`. The first `x.y.z` in that output is the version.
   - The minimums are Claude Code 2.1.286 and Codex 0.158.0. A version that can't be read is accepted.
-  - A CLI that passes is remembered for the app run. One that is missing, too old or doesn't start is checked again on the next message, so installing, updating, or logging in needs no restart.
-- **Messages.** The turn fails with the message, and the chat shows it as `Agent error: <message>`. The picker shows no hint.
+  - A CLI that passes is remembered for the app run. One that is missing, too old or doesn't start is checked again on the next message, so installing, updating, or logging in needs no restart. Before that second look the install folders that exist by then are added to `PATH` (after the folders it has), because an installer may have just created `~/.local/bin`, or nvm a new node version.
+- **Messages.** The turn fails with the message (`turn-failed` with `notice: true`), and the chat shows it as it is, without an `Agent error:` prefix: each is a full sentence that names the CLI and the fix. The model picker shows the same problem too (see Picker status below).
   - Missing: "Milagre couldn't find Claude Code. Install it with `curl -fsSL https://claude.ai/install.sh | bash`, then send your message again." For Codex: "Milagre couldn't find Codex. Install it with `npm install -g @openai/codex`, then send your message again."
   - Too old: "Milagre needs Claude Code 2.1.286 or later, and you have 2.1.200. Run `claude update` in a terminal, then send your message again." For Codex the command is `codex update`.
   - Doesn't start: "Codex (/path/to/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal, then send your message again."
   - Not logged in: "Claude Code isn't logged in. Run `claude auth login` in a terminal, then send your message again." For Codex the command is `codex login`.
   - Crashed: see Session lifecycle.
+- **Picker status.** `agent:cli-status` (`status.cjs`) tells the model picker how each CLI stands, so a problem shows before a message fails.
+  - `missing`, `outdated` and `broken` come from the CLI check, with its message.
+  - `logged-out`, Codex: `account/read { refreshToken: false }` on a short-lived `codex app-server` answers `account: null` with `requiresOpenaiAuth: true`. An error, or an app-server that won't start, counts as ready.
+  - `logged-out`, Claude: `claude auth status` (10 s timeout) prints JSON and exits 1 when logged out. With an empty `CLAUDE_CONFIG_DIR` it printed `{ "loggedIn": false, "authMethod": "none", "apiProvider": "firstParty", … }`; logged in it prints `"loggedIn": true` and exits 0. The JSON is read from its first `{`, and only `"loggedIn": false` with `"apiProvider": "firstParty"` counts: on Bedrock, Vertex or Foundry the CLI authenticates through the cloud account and `claude auth login` is no remedy. Any other failure or unreadable output counts as ready, so the check never blocks anything.
+  - Milagre never runs login, logout or any other command that changes credentials.
+  - A `ready` status is kept for 5 minutes. A problem is never kept: it is checked again on the next call. A turn that fails with the login message forgets that provider's kept status, so the picker doesn't show "ready" after it. Everything waits for the login environment.
+  - The picker loads the status at startup, together with `agent:models`, and again each time it opens (a model list that is already good isn't fetched again). A provider tab whose status isn't ready shows a short label in orange instead of its model count: "Not installed", "Update", "Log in" or "Not working", with the full message as its tooltip (the locked-provider hint wins). The open tab shows one notice above the model rows with the message up to its command, without "then send your message again" (`Codex isn't logged in. Run \`codex login\` in a terminal.`), and only once that status has loaded. The models stay listed and selectable, and sending fails with the full message.
 
 ### Models
 
@@ -271,7 +281,7 @@ When an agent asks the user to choose, the turn waits on a question card instead
   - **Codex:** `model/list` on a short-lived `codex app-server`, page by page, without hidden models.
   - A lookup that fails or comes back empty gives `null`, and is tried again on the next call.
   - The maintained list in `app/src/model.ts` mirrors what codex-cli 0.158.0 and Claude Code 2.1.287 report. It is shown while the lists load, and for an agent whose CLI is missing, too old or couldn't be asked.
-- **Why Claude's list too.** Claude Code 2.1.287 reports Fable 5.1, which the old maintained list lacked. The old list offered `claude-sonnet-4-5`, which Claude Code no longer lists. A logged-out Claude reports fewer models. The lookup already ran for effort levels, so the list costs nothing more.
+- **Why Claude's list too.** Claude Code 2.1.287 reports Fable 5.1, which the old maintained list lacked. The old list offered `claude-sonnet-4-5`, which Claude Code no longer lists. A logged-out Claude reports only its four aliases, named "Opus", "Fable", "Sonnet" and "Haiku", so while Claude is logged out its lookup is skipped, the maintained list stands in, and it is asked again once the login is done. The lookup already ran for effort levels, so the list costs nothing more.
 - **Claude rows.** `supportedModels()` lists aliases (`default`, `opus`, `fable`, `sonnet`, `haiku`) and then older models by id.
   - Each alias becomes the model it resolves to (`resolvedModel`), so a chat keeps its model when an alias moves on.
   - `default` only marks the recommended model.
@@ -279,9 +289,9 @@ When an agent asks the user to choose, the turn waits on a question card instead
 - **Names and order.** The names and descriptions are the CLI's own: "Opus 5.5", "GPT-6-Astra". Trailing periods are dropped. Each provider's recommended model comes first (Codex's `isDefault`, Claude's `default`), then the CLI's order. Codex's upgrade fields are ignored for now.
 - **Models no longer offered.** On codex-cli 0.158.0 with a ChatGPT account, an unlisted model fails the turn: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." That model was the old list's default. So once the lists arrive:
   - a selected model that isn't offered gives way to its provider's recommended model;
-  - until the user picks a model, the picker shows the Settings default when the lists have it;
+  - when the lists first arrive and the user hasn't picked a model, the picker shows the Settings default (unless the open chat is bound to the other provider); after that the current model stays, and a refetch that changed nothing changes nothing;
   - a chat bound to a provider falls back to that provider's recommended model when its last model is gone.
-- **Picker.** The model picker and the Settings default-model menu read the merged list. Effort levels come from the same lookup.
+- **Picker.** The model picker and the Settings default-model menu read the merged list; the menu shows a saved default that isn't offered as the composer resolves it, its provider's recommended model. Effort levels come from the same lookup.
 
 ### Persistence
 
@@ -336,6 +346,7 @@ The work ships as five stacked pull requests, each usable on its own:
 - **Environment, CLI check and models.**
   - `environment.cjs` is tested with a fake spawn: marks amid rc-file noise, a hung shell, a shell that prints nothing, and unsupported shells. One real `bash -i -l -c` run against a temporary home also checks the command line itself. The `PATH` merge, the install folders and nvm's default node are pure and tested directly.
   - `cli.cjs` is tested with fake resolvers and version runs. One test reads the SDK's package.json, so bumping the SDK without the Claude minimum fails.
+  - `status.cjs` is tested with a fake exec and a fake app-server: each state, the 5-minute cache, a problem looked at again on every call, the first-party and notice-line cases of `claude auth status`, and a login check that fails in any other way counting as ready.
   - `models.cjs` maps recorded `supportedModels()` rows and `model/list` entries, and pages through the fake app-server.
   - The renderer's merge rules live in `app/src/lib/models.ts` and are tested with Node.
 - **Renderer.** Headless Chromium checks with a stubbed bridge that emits event sequences. They cover streaming, tool rows, the approval card, cancel, and two chats running at once.

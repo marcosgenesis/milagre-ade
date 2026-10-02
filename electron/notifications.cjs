@@ -10,9 +10,8 @@ const capped = (value, max) => {
 
 const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 
-// System notifications for chats that wait on the user: an approval or a question. The main process
-// sees every agent event first (observe), so it knows which requests are still open; the renderer
-// names the chat and asks to notify. One shows only while no Milagre window has focus, once per
+// System notifications for chats that wait on the user: an approval or a question. Every agent event
+// is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
 class AttentionNotifier {
   constructor({ createNotification, isAppFocused, openChat, setBadge = () => {} }) {
@@ -76,7 +75,7 @@ class AttentionNotifier {
     this.updateBadge();
   }
 
-  // The renderer is untrusted input: it can only notify about a request an agent is waiting on.
+  // Only a request an agent still waits on is notified about.
   notify({ chatId, requestId, title, subtitle, body } = {}) {
     const key = keyOf(String(chatId), String(requestId));
     if (!this.open.has(key) || this.open.get(key) || this.isAppFocused()) return false;

@@ -1,11 +1,11 @@
 export {};
 
-import type { AttentionNotice } from "./lib/attention";
+import type { AgentRuns } from "./lib/agent-runs";
+import type { SessionPatch, WorktreeRename } from "../../electron/shared/project-edits.mjs";
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
-import type { WorktreeRename } from "./lib/worktree-rename";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, DiffStat, EditorInfo, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { AgentCliStatus, AgentModels, EditorInfo, AgentEvent, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -19,7 +19,7 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
-export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
+export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
 
 declare global {
   interface Window {
@@ -52,8 +52,8 @@ declare global {
       saveWorktreeSetup: (projectPath: string, command: string) => Promise<WorktreeSetupSettings>;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
-      /** Lines the worktree adds and removes against its base, or null outside a repository. */
-      readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
+      /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */
+      refreshDiffs: (projectPath: string, worktreeIds: number[]) => Promise<void>;
       /** The current branch's open or merged PR, or null when none is available. */
       readPullRequest: (worktreePath: string) => Promise<PullRequest | null>;
       /** PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */
@@ -81,29 +81,46 @@ declare global {
       switchProject: (projectPath: string) => Promise<OpenProject>;
       /** Takes a project off the recent list (its folder is untouched) and resolves to the list. */
       forgetProject: (projectPath: string) => Promise<RecentProject[]>;
-      saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
-      startTurn: (request: AgentStartTurnRequest) => Promise<{ turnId: string | null; steered: boolean }>;
+      /** A project's state changed in the main process, its only writer. Changes made by agent events come with the event instead. */
+      onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
+      /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
+      sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
+      patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
+      /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
+      archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;
+      archiveFinishedSubagents: (projectPath: string, sessionId: number) => Promise<void>;
+      /** Records in a chat what the "Commit and open PR" dialog did; while the chat's turn runs, the line waits for it to end. */
+      addGitNote: (chatId: string, body: string) => Promise<void>;
+      /** The chat on screen, by chat key, which opening reads; a turn that ends in any other chat leaves it unread. */
+      setOpenChat: (chatId: string | null) => Promise<void>;
+      /** The turns streaming now, in every project, and the number of the last agent event they hold. */
+      getRuns: () => Promise<{ runs: AgentRuns; seq: number }>;
       respondToPermission: (chatId: string, requestId: string, decision: PermissionDecision) => Promise<boolean>;
       /** Sends the answers to a question card, or dismisses it (null). False when the question is gone. */
-      answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null) => Promise<boolean>;
+      answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
       /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
       getModels: () => Promise<AgentModels>;
       /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
       getCliStatus: () => Promise<AgentCliStatus>;
+      /** Runs update for the specified CLI agent and refreshes status. */
+      updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
-      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
+      /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
+      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
+      checkForUpdates: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;
       getCachedUsage: () => Promise<UsageSnapshot>;
-      /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
+      /** Whether a chat that waits on the user while Milagre is in the background gets a system notification. */
+      setNotifyWhenWaiting: (on: boolean) => Promise<void>;
+      /** The open project's unread chats and the notification settings, for completion alerts and the Dock badge. */
       syncNotifications: (state: { projectPath: string; activeChatId: string | null; unread: string[]; notifyOnCompletion: boolean; showDockBadge: boolean }) => Promise<void>;
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
-      notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;
     };

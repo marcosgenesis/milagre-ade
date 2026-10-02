@@ -51,7 +51,7 @@ async function inspectCli(name, { resolve = resolveExecutable, version = runVers
 function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh = () => undefined } = {}) {
   const cache = new Map();
   const hadProblem = new Set();
-  return (name) => {
+  const check = (name) => {
     if (!cache.has(name)) {
       const pending = Promise.resolve().then(ready).catch(() => {}).then(() => (hadProblem.has(name) ? refresh() : undefined)).catch(() => {}).then(() => inspect(name)).then((status) => {
         if (status.problem) {
@@ -67,6 +67,11 @@ function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh
     }
     return cache.get(name);
   };
+  check.invalidate = (name) => {
+    cache.delete(name);
+    hadProblem.add(name);
+  };
+  return check;
 }
 
 module.exports = { MIN_VERSIONS, createCliCache, inspectCli, isAtLeast, parseVersion, runVersion };

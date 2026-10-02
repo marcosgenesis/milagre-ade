@@ -5,9 +5,9 @@ const { setTimeout: delay } = require('node:timers/promises');
 const fixture = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { createInitialState } from '/src/model';
 import '/src/styles.css';
-const state = createInitialState('Milagre', '/fixture');
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'feature/palette', path: '/fixture/palette', project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' } };
 state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Add a command palette', context: null }];

@@ -14,15 +14,11 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // A title given at the end replaces the first one, for agents that only know it then.
 // A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
 
-const MAX_OUTPUT = 20_000;
-const TRUNCATED = "… truncated";
+// Command output keeps its end, where results and errors are (capOutput); diffs and other details keep their start.
+const { MAX_OUTPUT, capOutput } = require("../shared/agent-runs.mjs");
+
 const CLAUDE_EDIT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit"]);
 const CLAUDE_AGENT_TOOLS = new Set(["Agent", "Task"]);
-
-// Command output keeps its end, where results and errors are; diffs and other details keep their start.
-function capOutput(text) {
-  return text.length > MAX_OUTPUT ? `${TRUNCATED}\n${text.slice(-MAX_OUTPUT)}` : text;
-}
 
 // Text shown as code in a title: one line of at most 80 characters, with no backticks of its own.
 function code(text, max = 80) {

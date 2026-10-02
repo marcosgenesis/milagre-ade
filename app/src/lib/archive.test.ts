@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentSession, ChatMessage, CoordinatorState, Worktree } from "../model";
-import { archiveChoices, isInsideRoots, isMilagreWorktree, lossReason, removeFailureNotice, withoutWorktree, worktreeShared } from "./archive.ts";
+import { archiveChoices, isInsideRoots, isMilagreWorktree, lossReason, removeFailureNotice, worktreeShared } from "./archive.ts";
 import type { ArchivePlan, WorktreeStatus } from "./archive.ts";
 
 const clean: WorktreeStatus = { uncommitted: 0, unpushed: 0, branch: "milagre/x", head: "abc", removable: true };
@@ -98,18 +98,6 @@ test("worktreeShared: any other unarchived chat in the same worktree, even an em
   assert.equal(worktreeShared({ ...initial, sessions: { ...initial.sessions, 3: session(3, 2, { archived: true }) } }, 2), false);
   assert.equal(worktreeShared({ ...initial, messages: initial.messages.filter((item) => item.session_id !== 3) }, 2), true);
   assert.equal(worktreeShared(initial, 99), false);
-});
-
-test("withoutWorktree drops the worktree and what hangs off it, and leaves the rest", () => {
-  const initial = state();
-  const next = withoutWorktree(initial, 2);
-  assert.deepEqual(Object.keys(next.worktrees), ["1", "3"]);
-  assert.deepEqual(Object.keys(next.sessions), ["1", "4"]);
-  assert.deepEqual(next.connections, {});
-  assert.deepEqual(next.events.map((event) => event.id), [2]);
-  assert.deepEqual(next.messages.map((item) => item.id), [3]);
-  assert.deepEqual(next.tasks, {});
-  assert.equal(withoutWorktree(initial, 99), initial);
 });
 
 test("removeFailureNotice names git's message, says the chat stays, and has no path", () => {

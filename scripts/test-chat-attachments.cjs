@@ -7,15 +7,23 @@ const fixture = `
 window.imageBytes = ${JSON.stringify(imageBytes)};
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { createInitialState } from '/src/model';
 import '/src/styles.css';
-const state = createInitialState('Milagre', '/fixture');
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'main', path: '/fixture', project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' }, 5: { id: 5, worktree_id: 1, agent_name: 'Other', provider: 'codex', status: 'Idle' } };
 state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }];
 state.next_id = 7;
 window.calls = []; window.searches = []; window.notices = []; window.synced = []; window.listeners = [];
-window.emitAgent = event => window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event }));
+window.stateListeners = [];
+// Stands in for the main process: it saves every project's state, and tells the window.
+const broadcast = () => { window.saved = { ...state }; window.stateListeners.forEach(fn => fn({ path: '/fixture', state: window.saved })); };
+// A turn that ends in a chat not on screen leaves it unread, and the state comes with the event (see ChatHost.receive).
+window.emitAgent = event => {
+  const ended = ['turn-completed', 'turn-failed', 'turn-cancelled'].includes(event.type);
+  if (ended && window.openChat !== '/fixture#3') state.sessions = { ...state.sessions, 3: { ...state.sessions[3], unread: true } };
+  window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event, ...(ended ? { state: { ...state } } : {}) }));
+};
 window.milagre = new Proxy({
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
@@ -24,12 +32,27 @@ window.milagre = new Proxy({
  getCachedUsage: async () => ({ providers: [] }), readUsage: async () => ({ providers: [] }), getUpdateState: async () => ({ status: 'idle' }),
  getPathForFile: file => '/fixture/files/' + file.name,
  searchProjectFiles: async (root, query) => { window.searches.push({root,query}); return ['src/my app.ts', 'src/model.ts', 'media/photo.png', 'media/clip.mp4'].filter(p => p.includes(query)); },
- startTurn: async request => { window.calls.push(request); window.emitAgent({ type: 'turn-started', turnId: 'test' }); return { turnId: 'test', steered: false }; },
+ // The main process saves the message, then starts the turn (see ChatHost.send).
+ sendMessage: async request => {
+   window.calls.push(request);
+   const message = { id: state.next_id, session_id: request.sessionId, body: request.body, images: request.images, ...(request.files.length ? { files: request.files } : {}), context: null, role: 'user', model: request.model };
+   Object.assign(state, { next_id: state.next_id + 1, messages: [...state.messages, message] });
+   window.saved = { ...state };
+   window.listeners.forEach(fn => fn({ chatId: '/fixture#' + request.sessionId, event: { type: 'message-sent', model: request.model }, state: window.saved }));
+   window.emitAgent({ type: 'turn-started', turnId: 'test' });
+   return { sessionId: request.sessionId };
+ },
  onAgentEvent: fn => { window.listeners.push(fn); return () => { window.listeners = window.listeners.filter(x => x !== fn); }; },
+ onProjectState: fn => { window.stateListeners.push(fn); return () => { window.stateListeners = window.stateListeners.filter(x => x !== fn); }; },
+ // Opening a chat reads it.
+ setOpenChat: async chatId => {
+   window.openChat = chatId;
+   const id = chatId ? Number(chatId.split('#').pop()) : null;
+   if (id !== null && state.sessions[id]?.unread) { state.sessions = { ...state.sessions, [id]: { ...state.sessions[id], unread: false } }; broadcast(); }
+ },
  notifyCompletion: async notice => { window.notices.push(notice); },
  syncNotifications: async value => { window.synced.push(value); },
  interruptAgent: async () => { window.interrupted = true; },
- saveProject: async (path, value) => { window.saved = value; },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null); } });
 localStorage.setItem('milagre-settings', JSON.stringify({ theme: 'dark' }));
 const { default: App } = await import('/src/App');

@@ -1,10 +1,7 @@
-import { archiveSubagent, archiveFinishedSubagents } from "./lib/subagents";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
-  ConnectionType,
   ChatMessage,
-  AgentSession,
   ImageAttachment,
   CoordinatorState,
   Isolation,
@@ -21,21 +18,19 @@ import {
   capabilityFor,
   effortFor,
   supportsFastMode,
-  createInitialState,
   sessionForWorktree,
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
-import { attentionNotice } from "./lib/attention";
 import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
-import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
+import { chatMark, chatTitle } from "./lib/chat-list";
+import type { SessionPatch } from "../../electron/shared/project-edits.mjs";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
-import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
@@ -47,13 +42,10 @@ import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
-import { runningChat as chatToAskAbout, type SwitchTarget } from "./lib/project-list";
-import { createProjectSwitcher } from "./lib/project-switch";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
-import { renameWorktree } from "./lib/worktree-rename";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
@@ -65,8 +57,6 @@ import { CommandPalette } from "./components/CommandPalette";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
-
-const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
@@ -80,12 +70,15 @@ function App() {
   const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
   const projectRef = useRef<OpenProject | null>(null);
   projectRef.current = project;
-  const [state, setState] = useState<CoordinatorState | null>(null);
-  const stateRef = useRef<CoordinatorState | null>(null);
-  stateRef.current = state;
+  // The latest state of every project the main process has sent this window; it's their only writer
+  // (see ADR-0001). The ref leads, so callbacks read a state that arrived since the last render.
+  const [states, setStates] = useState<Record<string, CoordinatorState>>({});
+  const statesRef = useRef(states);
+  const state = project ? states[project.path] ?? null : null;
+  /** The open project's latest state. */
+  const openState = () => (projectRef.current ? statesRef.current[projectRef.current.path] : undefined);
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
-  const openSessionRef = useRef<number | null>(null);
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   const [draft, setDraft] = useState("");
@@ -143,6 +136,28 @@ function App() {
   const [newChatError, setNewChatError] = useState<string | null>(null);
   // A short message about something that happened off to the side (a worktree that wouldn't go).
   const [notice, setNotice] = useState<string | null>(null);
+  const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
+
+  const handleUpdateCli = async (provider: ModelProvider) => {
+    setUpdatingCli(provider);
+    try {
+      const result = await window.milagre.updateCli(provider);
+      if (result.status) {
+        setCliStatus((previous) => (previous ? { ...previous, [provider]: result.status! } : previous));
+      }
+      refreshCliStatus();
+      if (result.ok) {
+        setNotice(`${provider === "codex" ? "Codex" : "Claude Code"} updated to version ${result.version ?? "latest"} successfully!`);
+      } else {
+        setNotice(result.error ?? `Failed to update ${provider === "codex" ? "Codex" : "Claude Code"}.`);
+      }
+    } catch (error) {
+      setNotice(`Error updating ${provider === "codex" ? "Codex" : "Claude Code"}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setUpdatingCli(null);
+    }
+  };
+
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 12_000);
@@ -169,10 +184,7 @@ function App() {
 
   useEffect(() => {
     window.milagre.getCurrentProject().then((current) => {
-      setProject(current);
-      const nextState = current.state ?? createInitialState(current.name, current.path);
-      setState(nextState);
-      selectInitialChat(nextState, current.path);
+      adoptProject(current);
       setLoading(false);
     });
   }, []);
@@ -190,20 +202,16 @@ function App() {
 
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
-  const secondWorktree = worktrees[1];
-  const firstSession = state && firstWorktree ? sessionForWorktree(state, firstWorktree.id) : undefined;
-  const secondSession = state && secondWorktree ? sessionForWorktree(state, secondWorktree.id) : undefined;
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
-  const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
   lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
-  // The chat on screen; a turn that ends anywhere else leaves its chat unread.
-  openSessionRef.current = view === "chat" ? selectedSessionId : null;
-  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
-  const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const agentRuns = useAgentRuns(receiveState, (chatId) => {
+    const latest = statesRef.current[projectOfKey(chatId)];
+    return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
+  });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
@@ -212,7 +220,7 @@ function App() {
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge } = useSettings();
+  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
@@ -267,16 +275,12 @@ function App() {
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
-  // Every state change goes through here, so turns finishing in two chats can't overwrite each other.
-  function commit(next: CoordinatorState) {
-    stateRef.current = next;
-    setState(next);
-    if (project) void window.milagre.saveProject(project.path, next);
+  function receiveState(projectPath: string, next: CoordinatorState) {
+    statesRef.current = { ...statesRef.current, [projectPath]: next };
+    setStates(statesRef.current);
   }
 
-  async function persist(nextState: CoordinatorState) {
-    commit(nextState);
-  }
+  useEffect(() => window.milagre.onProjectState(({ path, state: next }) => receiveState(path, next)), []);
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
@@ -308,49 +312,34 @@ function App() {
         };
       });
   }, [state, asking, waiting, running, pullRequests, chatPrs]);
-  // Switching projects asks first while a turn runs here (the project menu says which chat).
-  const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
-  const runningChatRef = useRef(runningChat);
-  runningChatRef.current = runningChat;
-  // Opens the project menu asking about a switch: ⌘O while a turn runs, or a turn that started during the dialog.
-  const [askToSwitch, setAskToSwitch] = useState<{ seq: number; target: SwitchTarget } | null>(null);
-  const askInMenu = (target: SwitchTarget) => {
-    setView("chat");
-    setAskToSwitch((previous) => ({ seq: (previous?.seq ?? 0) + 1, target }));
-  };
-
-  // Chat row actions build on the latest state, so a turn that finished since the last render isn't lost.
-  function patchChat(sessionId: number, patch: Parameters<typeof patchSession>[2]) {
-    const latest = stateRef.current;
-    if (!latest) return;
-    const next = patchSession(latest, sessionId, patch);
-    if (next !== latest) commit(next);
+  // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
+  function patchChat(sessionId: number, patch: SessionPatch) {
+    const current = projectRef.current;
+    if (current) void window.milagre.patchChat(current.path, sessionId, patch).catch(() => {});
   }
 
   function archiveChild(id: string, archived: boolean) {
-    const latest = stateRef.current;
+    const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (!latest || parentId === null) return;
-    commit(archiveSubagent(latest, parentId, id, archived));
+    if (current && parentId !== null) void window.milagre.archiveSubagent(current.path, parentId, id, archived).catch(() => {});
   }
 
   function archiveFinishedChildren() {
-    const latest = stateRef.current;
+    const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (!latest || parentId === null) return;
-    const next = archiveFinishedSubagents(latest, parentId);
-    if (next !== latest) commit(next);
+    if (current && parentId !== null) void window.milagre.archiveFinishedSubagents(current.path, parentId).catch(() => {});
   }
 
   function openChat(sessionId: number) {
     setSelectedSessionId(sessionId);
-    setSelectedWorktreeId(stateRef.current?.sessions[sessionId]?.worktree_id ?? null);
+    setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? null);
     setView("chat");
   }
 
-  // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
+  // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
+  // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
   useEffect(() => {
-    if (view === "chat" && selectedSessionId !== null) patchChat(selectedSessionId, { unread: false });
+    void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
   }, [selectedSessionId, view, project?.path]);
 
   // Archiving hides the chat for good; a turn still running in it is stopped first. The steps and their order
@@ -363,7 +352,7 @@ function App() {
     return runArchive({
       projectPath,
       chatId: key,
-      getState: () => stateRef.current,
+      getState: () => openState() ?? null,
       currentProjectPath: () => projectRef.current?.path,
       stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
       hide: () => {
@@ -376,9 +365,9 @@ function App() {
         if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
       },
       remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
-      applyRemoval: (next, removed) => {
-        commit(next);
-        // A removal that drops the open chat or the picked worktree moves the selection on.
+      // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
+      // worktree moves the selection on.
+      applyRemoval: (removed) => {
         setSelectedSessionId((current) => (current !== null && removed.sessionIds.includes(current) ? null : current));
         setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
       },
@@ -390,7 +379,7 @@ function App() {
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
   // uses it, and what it would lose.
   async function checkArchive(sessionId: number): Promise<ArchivePlan> {
-    const latest = stateRef.current;
+    const latest = openState();
     const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
     if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots())) return { milagreOwned: false, shared: false, status: null };
     if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null };
@@ -399,7 +388,7 @@ function App() {
 
   // "Commit and open PR…" opens the chat, with the dialog over it.
   function openGitDialog(sessionId: number) {
-    const latest = stateRef.current;
+    const latest = openState();
     const session = latest?.sessions[sessionId];
     const worktree = session ? latest.worktrees[session.worktree_id] : undefined;
     if (!latest || !session || !worktree) return;
@@ -408,45 +397,20 @@ function App() {
     setGitDialog({ sessionId, worktreeId: worktree.id, cwd: worktree.path, base: worktree.base, provider: session.provider, chat: gitChatContext(chatTitle(session, sessionMessages), sessionMessages) });
   }
 
-  // What the dialog did goes on record as a short line in the chat. While the chat's turn runs, the
-  // line waits (by chat key) for the turn to end, so it lands after the reply instead of inside it.
-  const pendingGitNotes = useRef(new Map<string, string[]>());
-  const runsRef = useRef(agentRuns.runs);
-  runsRef.current = agentRuns.runs;
-
-  function appendGitNote(sessionId: number, body: string) {
-    const latest = stateRef.current;
-    if (!latest?.sessions[sessionId]) return;
-    const note: ChatMessage = { id: latest.next_id, session_id: sessionId, body, context: { kind: "git-action" }, role: "assistant" };
-    commit({ ...latest, next_id: latest.next_id + 1, messages: [...latest.messages, note] });
-  }
-
+  // What the dialog did goes on record as a short line in the chat; the main process holds it back while the
+  // chat's turn runs, so it lands after the reply instead of inside it.
   function recordGitNote(sessionId: number, body: string) {
     const current = projectRef.current;
-    if (!current) return;
-    const key = chatKey(current.path, sessionId);
-    if (!runsRef.current[key]) return appendGitNote(sessionId, body);
-    pendingGitNotes.current.set(key, [...(pendingGitNotes.current.get(key) ?? []), body]);
+    if (current) void window.milagre.addGitNote(chatKey(current.path, sessionId), body).catch(() => {});
   }
-
-  useEffect(() => {
-    const current = project;
-    if (!current) return;
-    for (const [key, notes] of [...pendingGitNotes.current]) {
-      if (agentRuns.runs[key]) continue;
-      pendingGitNotes.current.delete(key);
-      // A note for a project that was left goes with it, like that project's unsaved replies.
-      if (chatInProject(current.path, key)) for (const note of notes) appendGitNote(sessionIdFromKey(key), note);
-    }
-  }, [agentRuns.runs, project?.path]);
 
   function revealChat(sessionId: number) {
     if (!project) return;
-    void window.milagre.revealInFolder(chatRevealPath(stateRef.current, sessionId, project.path)).catch(() => {});
+    void window.milagre.revealInFolder(chatRevealPath(openState() ?? null, sessionId, project.path)).catch(() => {});
   }
 
   function openChatInEditor(sessionId: number) {
-    const latest = stateRef.current;
+    const latest = openState();
     const worktree = latest?.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1];
     if (worktree) void openInEditor(worktree.path);
   }
@@ -460,61 +424,33 @@ function App() {
     void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
   }, [project?.path, view, selectedSessionId, JSON.stringify(unreadChatIds), notifyOnCompletion, showDockBadge]);
 
-  // A reply that arrived while the app was in the background becomes read when its chat regains focus.
+  // The main process notifies about a chat that waits on the user while Milagre is in the background.
   useEffect(() => {
-    const read = () => {
-      const id = openSessionRef.current;
-      const latest = stateRef.current;
-      const current = projectRef.current;
-      if (id === null || !latest?.sessions[id]?.unread || !current) return;
-      const next = patchSession(latest, id, { unread: false });
-      stateRef.current = next;
-      setState(next);
-      void window.milagre.saveProject(current.path, next);
-    };
-    window.addEventListener("focus", read);
-    return () => window.removeEventListener("focus", read);
-  }, []);
+    void window.milagre.setNotifyWhenWaiting(notifyWhenWaiting).catch(() => {});
+  }, [notifyWhenWaiting]);
 
-  // A chat that waits on the user while Milagre is in the background gets a system notification.
+  // A turn that ends in the open project while Milagre is in the background gets a completion alert.
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
     const current = projectRef.current;
-    const latest = stateRef.current;
+    const latest = openState();
     if (!current || !latest || !chatInProject(current.path, chatId)) return;
     const session = latest.sessions[sessionIdFromKey(chatId)];
     if (!session || session.archived) return;
     if (event.type === "turn-completed" || event.type === "turn-failed") {
-      void window.milagre.notifyCompletion({ chatId, title: current.name, subtitle: chatTitle(session, latest.messages.filter(message => message.session_id === session.id)) }).catch(() => {});
+      void window.milagre.notifyCompletion({ chatId, title: current.name, subtitle: chatTitle(session, latest.messages.filter((message) => message.session_id === session.id)) }).catch(() => {});
     }
-    if (!getSettings().notifyWhenWaiting) return;
-    const notice = attentionNotice(event, {
-      projectName: current.name,
-      worktreeName: session ? latest.worktrees[session.worktree_id]?.name : undefined,
-      chatTitle: session ? chatTitle(session, latest.messages.filter((message) => message.session_id === session.id)) : undefined,
-      provider: session?.provider,
-    });
-    if (notice && "requestId" in event) void window.milagre.notifyAttention({ chatId, requestId: event.requestId, ...notice }).catch(() => {});
   }), []);
 
-  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked.
+  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; the main process saves the new name.
   useEffect(() => window.milagre.onWorktreeRenamed((rename) => {
-    const latest = stateRef.current;
-    if (projectRef.current?.path !== rename.projectPath || !latest) return;
-    const next = renameWorktree(latest, rename);
-    // Not commit(): this listener outlives the render whose `project` that would save under.
-    if (next !== latest) {
-      stateRef.current = next;
-      setState(next);
-      void window.milagre.saveProject(rename.projectPath, next);
-    }
-    void window.milagre.listBranches(rename.projectPath).then(setBranches);
+    if (projectRef.current?.path === rename.projectPath) void window.milagre.listBranches(rename.projectPath).then(setBranches);
   }), []);
 
   const pendingNotificationChat = useRef<string | null>(null);
-  // Clicking a notification opens its chat, using the usual switch confirmation if another project is running.
+  // Clicking a notification opens its chat, in another project too.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const current = projectRef.current;
-    const session = current && chatInProject(current.path, chatId) ? stateRef.current?.sessions[sessionIdFromKey(chatId)] : undefined;
+    const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
     if (session) { openChat(session.id); return; }
     const separator = chatId.lastIndexOf("#");
     if (separator <= 0) return;
@@ -523,7 +459,8 @@ function App() {
   }), []);
 
   function startNewChat() {
-    if (stateRef.current && projectRef.current) restoreProjectChoices(stateRef.current, projectRef.current.path);
+    const latest = openState();
+    if (latest && projectRef.current) restoreProjectChoices(latest, projectRef.current.path);
     setSelectedSessionId(null);
     setDraft("");
     setNewChatError(null);
@@ -542,77 +479,55 @@ function App() {
     if (sessionId !== null) setSelectedWorktreeId(nextState.sessions[sessionId]?.worktree_id ?? null);
   }
 
-  // Rendered at once, so an agent event that arrives meanwhile can't be saved against the wrong project.
+  // Switching projects leaves the other project's turns running; their marks come back with it.
   function adoptProject(nextProject: OpenProject) {
-    const nextState = nextProject.state ?? createInitialState(nextProject.name, nextProject.path);
+    receiveState(nextProject.path, nextProject.state);
+    projectRef.current = nextProject;
     // The project's remembered worktree and base branch come back with it; nothing about the old project's chats
     // carries over, the commit dialog included (it names a chat by id, and every project has a chat 2).
     flushSync(() => {
       setProject(nextProject);
-      setState(nextState);
-      selectInitialChat(nextState, nextProject.path);
+      selectInitialChat(nextProject.state, nextProject.path);
       setDraft("");
       setGitDialog(null);
       setView("chat");
     });
   }
 
-  // Replaces the open project (lib/project-switch). Its running turns are stopped only once the next project has
-  // loaded and only if the menu asked (`confirmed`); a turn that started while the dialog was open makes the menu ask
-  // instead. The switch waits for the turns, so each reply so far is saved in its own chat, and sends wait it out.
-  const [switcher] = useState(createProjectSwitcher);
-  const pickedProject = useRef<OpenProject | null>(null);
-  async function replaceProject(load: () => Promise<OpenProject | null>, confirmed: boolean, askAbout: (next: OpenProject) => SwitchTarget) {
-    const currentPath = projectRef.current?.path;
+  // Opens a project in place of the one shown; a cancelled dialog, or the project already open, changes nothing.
+  async function replaceProject(load: () => Promise<OpenProject | null>) {
     try {
-      await switcher.change({
-        currentPath,
-        load,
-        mayStop: () => confirmed || !currentPath || agentRuns.runningIn(currentPath).length === 0,
-        ask: (next) => askInMenu(askAbout(next)),
-        stop: agentRuns.stopProject,
-        adopt: adoptProject,
-      });
+      const next = await load();
+      if (next && next.path !== projectRef.current?.path) adoptProject(next);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setNotice(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
     }
   }
 
-  // A project picked in the dialog that the menu then asks about is kept, so confirming doesn't open the dialog again.
-  const openProject = (confirmed = false) => replaceProject(() => window.milagre.openProject(), confirmed, (next) => {
-    pickedProject.current = next;
-    return { kind: "loaded", path: next.path, name: next.name };
-  });
-  const switchProject = (projectPath: string, confirmed = false) => replaceProject(() => window.milagre.switchProject(projectPath), confirmed, (next) => ({ kind: "project", path: next.path }));
-  const openPicked = (projectPath: string) => {
-    const picked = pickedProject.current;
-    pickedProject.current = null;
-    if (picked?.path === projectPath) void replaceProject(async () => picked, true, () => ({ kind: "open" }));
-  };
+  const openProject = () => replaceProject(() => window.milagre.openProject());
+  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
 
-  // Where a message goes, without building state: an open chat keeps its session, a new local chat
-  // (session null) gets one from the latest state at commit time, and a new chat in "New worktree"
-  // isolation gets its own worktree first. Callers merge into the latest state, never a stale copy.
+  // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
+  // from the main process, and a new chat in "New worktree" isolation gets its own worktree first.
   async function resolveSendTarget(body: string) {
     if (!state || !project || !selectedWorktree) return null;
-    if (selectedSession) return { session: selectedSession as AgentSession | null, worktree: selectedWorktree, createdNextId: undefined as number | undefined };
-    if (isolation === "local") return { session: null, worktree: selectedWorktree, createdNextId: undefined };
+    if (selectedSession) return { sessionId: selectedSession.id as number | null, worktreeId: selectedWorktree.id };
+    if (isolation === "local") return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
     const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
-    const worktree = created.project.state.worktrees[created.worktreeId];
-    const session = sessionForWorktree(created.project.state, worktree.id);
-    if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
+    const session = sessionForWorktree(created.project.state, created.worktreeId);
+    if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(setBranches);
-    return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
+    return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
   }
+
+  const ipcError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false) {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
-    // A switch is stopping this project's turns: a new one would start behind the stop. The draft stays.
-    if (!switcher.canSend()) return;
     setPreparing(true);
     setNewChatError(null);
 
@@ -620,8 +535,7 @@ function App() {
     try {
       target = await resolveSendTarget(body);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setNewChatError(`Could not create the worktree: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "")}`);
+      setNewChatError(`Could not create the worktree: ${ipcError(error)}`);
       setPreparing(false);
       return;
     }
@@ -629,65 +543,41 @@ function App() {
       setPreparing(false);
       return;
     }
-    // A message sent while this chat's turn runs steers it; the reply streamed so far is saved first,
-    // so it stays above the new message.
-    if (target.session) agentRuns.splitForSteer(chatKey(project.path, target.session.id));
-    // Read the state only now: a turn in another chat may have finished while the target resolved.
-    const latest = stateRef.current;
-    if (!latest) {
+    // The main process saves the message, then starts the chat's turn, or steers the one running.
+    const latest = openState();
+    const session = target.sessionId !== null ? latest?.sessions[target.sessionId] : undefined;
+    const model = modelForChat(selectedModel, session?.provider, latest?.messages.filter((message) => message.session_id === target.sessionId) ?? [], models);
+    try {
+      const { sessionId } = await agentRuns.send({
+        projectPath: project.path,
+        sessionId: target.sessionId,
+        worktreeId: target.worktreeId,
+        body,
+        images,
+        files,
+        prompt: attachmentPrompt(body, files),
+        provider: model.provider,
+        model: model.id,
+        permissionMode: mode,
+        effort: effortFor(capabilityFor(model, capabilities), effort),
+        ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
+        fastMode: supportsFastMode(model) && fastMode,
+        replies: getSettings().claudeReplies,
+        tldrEnabled: getSettings().tldrEnabled,
+      });
+      if (projectRef.current?.path === project.path) {
+        setSelectedSessionId(sessionId);
+        setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
+        if (!preserveComposer) {
+          setDraft("");
+          imageDraft.clear();
+        }
+      }
+    } catch (error) {
+      setNewChatError(`Could not send the message: ${ipcError(error)}`);
+    } finally {
       setPreparing(false);
-      return;
     }
-    const { worktree } = target;
-    let nextId = Math.max(latest.next_id, target.createdNextId ?? 0);
-    const worktrees = target.createdNextId !== undefined ? { ...latest.worktrees, [worktree.id]: worktree } : latest.worktrees;
-    let session = target.session;
-    if (!session) {
-      session = Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
-        ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" as const };
-    }
-    const chatSession = session;
-
-    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), models);
-    const userMessage = {
-      id: nextId++,
-      session_id: chatSession.id,
-      body,
-      images,
-      files,
-      context: null,
-      role: "user" as const,
-      model: model.id,
-    };
-    commit({
-      ...latest,
-      next_id: nextId,
-      worktrees,
-      sessions: { ...latest.sessions, [chatSession.id]: { ...chatSession, provider: model.provider } },
-      messages: [...latest.messages, userMessage],
-    });
-    setSelectedSessionId(chatSession.id);
-    setSelectedWorktreeId(worktree.id);
-    if (!preserveComposer) {
-      setDraft("");
-      imageDraft.clear();
-    }
-    setPreparing(false);
-    await agentRuns.start({
-      chatId: chatKey(project.path, chatSession.id),
-      provider: model.provider,
-      model: model.id,
-      cwd: worktree.path,
-      permissionMode: mode,
-      effort: effortFor(capabilityFor(model, capabilities), effort),
-      ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
-      fastMode: supportsFastMode(model) && fastMode,
-      replies: getSettings().claudeReplies,
-      tldrEnabled: getSettings().tldrEnabled,
-      prompt: attachmentPrompt(body, files),
-      images,
-      resumeId: chatSession.native_session_id,
-    });
   }
 
   async function sendMessage() {
@@ -701,33 +591,6 @@ function App() {
   const recommendationRef = useRef<(option: string) => void>(() => {});
   recommendationRef.current = (option) => { void executeSend(option, permissionMode); };
   const sendRecommendation = useCallback((option: string) => recommendationRef.current(option), []);
-
-  // Built from the latest state, so a turn that finished since the last render isn't lost.
-  async function toggleSession(worktreeId: number) {
-    const latest = stateRef.current;
-    if (!latest) return;
-    const session = sessionForWorktree(latest, worktreeId);
-    if (!session) return;
-    const nextStatus = session.status === "Running" ? "Stopped" : "Running";
-    await persist({
-      ...latest,
-      sessions: {
-        ...latest.sessions,
-        [session.id]: { ...session, status: nextStatus },
-      },
-    });
-  }
-
-  async function cycleConnection() {
-    const latest = stateRef.current;
-    const current = latest ? Object.values(latest.connections)[0] : undefined;
-    if (!latest || !current) return;
-    const nextKind = connectionTypes[(connectionTypes.indexOf(current.kind) + 1) % connectionTypes.length];
-    await persist({
-      ...latest,
-      connections: { ...latest.connections, [current.id]: { ...current, kind: nextKind } },
-    });
-  }
 
   // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
   const [findOpen, setFindOpen] = useState(false);
@@ -767,9 +630,7 @@ function App() {
         startNewChat();
       } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
-        // While a turn runs, the project menu opens and asks first.
-        if (runningChatRef.current) askInMenu({ kind: "open" });
-        else void openProject();
+        void openProject();
       }
     }
 
@@ -835,7 +696,7 @@ function App() {
   const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
   const commands: Command[] = [
     { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
-    { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => { if (runningChatRef.current) askInMenu({ kind: "open" }); else return openProject(); } },
+    { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => openProject() },
     { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
     { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
     { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
@@ -862,7 +723,7 @@ function App() {
   })));
   commands.push(...recentProjects.filter((recent) => recent.path !== project.path).map((recent): Command => ({
     id: `project:${recent.path}`, label: recent.name, group: "Projects", icon: "folder", detail: recent.path,
-    run: () => { if (runningChatRef.current) askInMenu({ kind: "project", path: recent.path }); else return switchProject(recent.path); },
+    run: () => switchProject(recent.path),
   })));
 
   return (
@@ -871,16 +732,10 @@ function App() {
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-          <span>Milagre {update.version} está pronto para atualizar.</span>
+          <span>Milagre {update.version} is ready to update.</span>
           <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-            Atualizar e reiniciar
+            Update and restart
           </button>
-        </div>
-      )}
-      {notice && (
-        <div role="status" data-notice className="fixed inset-x-4 bottom-4 z-[80] mx-auto flex max-w-[520px] items-start gap-3 rounded-[12px] bg-surface px-4 py-3 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]">
-          <span className="min-w-0 flex-1 break-words">{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-medium text-ink-3 hover:text-ink">Dismiss</button>
         </div>
       )}
       <div
@@ -893,7 +748,7 @@ function App() {
         fill
         workspaceName={project.name}
         workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
-        onOpenProject={(confirmed) => void openProject(confirmed)}
+        onOpenProject={() => void openProject()}
         recents={chats}
         activeId={selectedSession ? String(selectedSession.id) : null}
         onPick={(id) => openChat(Number(id))}
@@ -911,10 +766,7 @@ function App() {
         onOpenCommands={() => setCommandPaletteOpen(true)}
         hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
         projectPath={project.path}
-        onSwitchProject={(path, confirmed) => void switchProject(path, confirmed)}
-        onOpenPicked={openPicked}
-        runningChat={runningChat}
-        askToSwitch={askToSwitch}
+        onSwitchProject={(path) => void switchProject(path)}
         onOpenProjectSettings={() => { setSettingsSection("project"); setView("settings"); }}
         usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
       />
@@ -926,7 +778,17 @@ function App() {
       )}
 
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        {view === "settings" && <SettingsPanel section={settingsSection} projectPath={project.path} models={models} />}
+        {view === "settings" && (
+          <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+            {notice && (
+              <div role="status" data-notice className="mx-auto mt-2 mb-1 flex w-full max-w-2xl items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay">
+                <span className="min-w-0 flex-1 break-words">{notice}</span>
+                <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-xs font-medium text-ink-3 hover:text-ink">Dismiss</button>
+              </div>
+            )}
+            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
+          </div>
+        )}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
@@ -963,6 +825,8 @@ function App() {
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}
+            onUpdateCli={handleUpdateCli}
+            updatingCli={updatingCli}
             selectedModel={selectedModel}
             onModelChange={chooseModel}
             capability={selectedCapability}
@@ -974,16 +838,6 @@ function App() {
             onFastModeChange={setFastMode}
             permissionMode={permissionMode}
             onPermissionModeChange={changePermissionMode}
-            worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}
-            connectionSummary={connection?.kind ?? "No connection"}
-            eventsCount={state.events.length}
-            firstWorktreeName={firstWorktree?.name ?? "No worktree"}
-            secondWorktreeName={secondWorktree?.name}
-            firstAgentRunning={firstSession?.status === "Running"}
-            secondAgentRunning={secondSession?.status === "Running"}
-            onToggleFirst={() => { if (firstWorktree) void toggleSession(firstWorktree.id); }}
-            onToggleSecond={() => { if (secondWorktree) void toggleSession(secondWorktree.id); }}
-            onCycleConnection={() => void cycleConnection()}
             onRecommendationSelect={sendRecommendation}
             worktrees={worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path }))}
             selectedWorktreeId={selectedWorktree?.id}
@@ -1000,6 +854,8 @@ function App() {
             findOpen={findOpen}
             findSignal={findSignal}
             onFindClose={() => setFindOpen(false)}
+            notice={notice}
+            onDismissNotice={() => setNotice(null)}
             approval={pendingApproval ? (
               <PermissionCard
                 key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
@@ -1042,7 +898,7 @@ function App() {
           }}
           onRan={(note) => {
             recordGitNote(gitDialog.sessionId, note);
-            void worktreeDiffs.refresh([gitDialog.worktreeId]);
+            void window.milagre.refreshDiffs(project.path, [gitDialog.worktreeId]).catch(() => {});
           }}
         />
       )}

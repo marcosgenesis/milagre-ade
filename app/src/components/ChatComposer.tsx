@@ -15,7 +15,6 @@ import {
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
-  Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
@@ -33,6 +32,7 @@ import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
+import { extractOutdatedProvider } from "../lib/cli-status";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -61,6 +61,9 @@ const MessageSection = memo(function MessageSection({
   message,
   isUser,
   onRecommendationSelect,
+  onUpdateCli,
+  updatingCli,
+  cliStatus,
   streaming = false,
   asking = false,
   waitingStepIds = [],
@@ -68,6 +71,9 @@ const MessageSection = memo(function MessageSection({
   message: AppChatMessage;
   isUser: boolean;
   onRecommendationSelect: (option: string) => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
+  cliStatus?: AgentCliStatus | null;
   streaming?: boolean;
   /** The running turn is waiting on the user's answer to a question. */
   asking?: boolean;
@@ -75,6 +81,13 @@ const MessageSection = memo(function MessageSection({
   waitingStepIds?: string[];
 }) {
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
+  const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
+  const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
+  const showUpdateButton = Boolean(
+    outdatedProvider &&
+    onUpdateCli &&
+    (isCurrentlyOutdated || updatingCli === outdatedProvider)
+  );
   const steps = message.steps ?? [];
   return (
     <article
@@ -97,6 +110,25 @@ const MessageSection = memo(function MessageSection({
           </>
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
+        )}
+        {showUpdateButton && outdatedProvider && onUpdateCli && (
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={updatingCli === outdatedProvider}
+              onClick={() => onUpdateCli(outdatedProvider)}
+              className="flex items-center gap-1.5 rounded-[8px] border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+            >
+              {updatingCli === outdatedProvider ? (
+                <>
+                  <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                  <span>Updating {outdatedProvider === "codex" ? "Codex" : "Claude"}…</span>
+                </>
+              ) : (
+                <span>Update {outdatedProvider === "codex" ? "Codex" : "Claude"} now</span>
+              )}
+            </button>
+          </div>
         )}
       </div>
     </article>
@@ -141,6 +173,8 @@ interface ChatComposerProps {
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -152,16 +186,6 @@ interface ChatComposerProps {
   onFastModeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
-  worktreeSummary: string;
-  connectionSummary: string;
-  eventsCount: number;
-  firstWorktreeName: string;
-  secondWorktreeName?: string;
-  firstAgentRunning: boolean;
-  secondAgentRunning: boolean;
-  onToggleFirst: () => void;
-  onToggleSecond: () => void;
-  onCycleConnection: () => void;
   onRecommendationSelect: (option: string) => void;
   approval?: ReactNode;
   worktrees: Array<{ id: number; name: string; path: string }>;
@@ -173,6 +197,8 @@ interface ChatComposerProps {
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
   newChatError: string | null;
+  notice?: string | null;
+  onDismissNotice?: () => void;
 }
 
 const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon: IconData }> = [
@@ -294,6 +320,8 @@ export function ChatComposer({
   models,
   cliStatus,
   onModelPickerOpen,
+  onUpdateCli,
+  updatingCli,
   selectedModel,
   onModelChange,
   capability,
@@ -305,16 +333,6 @@ export function ChatComposer({
   onFastModeChange,
   permissionMode,
   onPermissionModeChange,
-  worktreeSummary,
-  connectionSummary,
-  eventsCount,
-  firstWorktreeName,
-  secondWorktreeName,
-  firstAgentRunning,
-  secondAgentRunning,
-  onToggleFirst,
-  onToggleSecond,
-  onCycleConnection,
   onRecommendationSelect,
   approval,
   worktrees,
@@ -329,12 +347,13 @@ export function ChatComposer({
   findOpen = false,
   findSignal = 0,
   onFindClose,
+  notice,
+  onDismissNotice,
 }: ChatComposerProps) {
   const root = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState("Worktrees");
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = tab === "Worktrees" && messages.length === 0;
+  const isNewChat = messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -372,48 +391,35 @@ export function ChatComposer({
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
-        {tab === "Worktrees" ? (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            {messages.map((message) => (
-              <MessageSection
-                key={message.id}
-                message={message}
-                isUser={message.role === "user"}
-                onRecommendationSelect={onRecommendationSelect}
-              />
-            ))}
+        <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {messages.map((message) => (
+            <MessageSection
+              key={message.id}
+              message={message}
+              isUser={message.role === "user"}
+              onRecommendationSelect={onRecommendationSelect}
+              onUpdateCli={onUpdateCli}
+              updatingCli={updatingCli}
+              cliStatus={cliStatus}
+            />
+          ))}
 
-            {isSending && (streamingText || streamingSteps?.length) ? (
-              <MessageSection
-                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-                isUser={false}
-                onRecommendationSelect={onRecommendationSelect}
-                streaming
-                asking={asking}
-                waitingStepIds={waitingStepIds}
-              />
-            ) : null}
-            {isSending && (
-              <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            <div className="flex items-center gap-2 text-[13px] text-ink"><Icon icon={Link01Icon} size={15} /><span className="font-medium">Shared context</span><span className="ml-auto text-[12px] text-ink-3">{eventsCount} events</span></div>
-            <div className="rounded-control bg-inset p-3 text-[13px] leading-6 text-ink-2">
-              <p>{worktreeSummary}</p>
-              <p className="mt-2">Connection: {connectionSummary}</p>
+          {isSending && (streamingText || streamingSteps?.length) ? (
+            <MessageSection
+              message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
+              isUser={false}
+              onRecommendationSelect={onRecommendationSelect}
+              streaming
+              asking={asking}
+              waitingStepIds={waitingStepIds}
+            />
+          ) : null}
+          {isSending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
-            <p className="text-[12px] text-ink-3">Messages sent from this chat can use the context shared by both worktrees.</p>
-            <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-3">
-              {firstWorktreeName !== "No worktree" && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleFirst}>{firstAgentRunning ? "Stop" : "Start"} {firstWorktreeName}</button>}
-              {secondWorktreeName && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleSecond}>{secondAgentRunning ? "Stop" : "Start"} {secondWorktreeName}</button>}
-              <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onCycleConnection}>Link as {connectionSummary.toLowerCase()}</button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
@@ -422,6 +428,23 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
+        {notice && (
+          <div
+            role="status"
+            data-notice
+            className="mb-2 flex w-full items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay"
+            style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
+          >
+            <span className="min-w-0 flex-1 break-words">{notice}</span>
+            <button
+              type="button"
+              onClick={onDismissNotice}
+              className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {approval && <div className="mb-2 w-full">{approval}</div>}
         {!isNewChat && pullRequestAction && (
           <div className="mb-2 flex px-1">
@@ -450,6 +473,8 @@ export function ChatComposer({
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}
+          onUpdateCli={onUpdateCli}
+          updatingCli={updatingCli}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
           capability={capability}

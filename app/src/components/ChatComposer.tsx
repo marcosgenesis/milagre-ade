@@ -383,7 +383,7 @@ export function ChatComposer({
               type="button"
               onClick={onResolveConflicts}
               disabled={sendBlocked || isSending || imageDraft.loading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red/20 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full border border-red/20 bg-red/5 px-2.5 py-0.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Icon icon={GitPullRequestIcon} size={14} />
               Resolve conflicts

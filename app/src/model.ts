@@ -314,6 +314,19 @@ export interface AgentTask {
   status: "pending" | "in_progress" | "completed";
 }
 
+/** A TCP port a chat's commands listen on, such as a dev server. */
+export interface AgentPort {
+  port: number;
+  pid: number;
+  /** The listening process's name, as lsof reports it ("node"). */
+  command: string;
+  /** The address it listens on: "*", "127.0.0.1", "::1". */
+  address: string;
+}
+
+/** Every chat's listening ports, by chat key; a chat with none is absent. */
+export type AgentPorts = Record<string, AgentPort[]>;
+
 export type AgentEvent =
   /** Milagre's own event: the user's message was saved, so a turn starts, or a running one is steered and its reply split. */
   | { type: "message-sent"; model: string }

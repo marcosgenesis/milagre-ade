@@ -6,6 +6,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Archive02Icon,
   BubbleChatIcon,
+  EthernetPortIcon,
   CircleIcon,
   Copy01Icon,
   FileEditIcon,
@@ -27,7 +28,8 @@ import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archiv
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
-import type { DiffStat, PullRequest } from "@/model";
+import type { AgentPort, DiffStat, PullRequest } from "@/model";
+import { portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
 
 const toneClass = { red: "text-red", orange: "text-orange" } as const;
@@ -47,6 +49,8 @@ export type ChatDetails = {
   pullRequests?: PullRequest[];
   /** The chat's last turn failed. */
   failed?: boolean;
+  /** Ports the chat's commands listen on. */
+  ports?: AgentPort[];
 };
 
 export type SidebarRecent = {
@@ -452,6 +456,27 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
                 </a>
               );
             })}
+          </div>
+        ) : null}
+        {details.ports?.length ? (
+          <div data-chat-card-ports className="flex min-w-0 items-start gap-2">
+            <span className="flex h-5 w-4 shrink-0 items-center justify-center text-ink-3"><HugeIcon icon={EthernetPortIcon} size={14} /></span>
+            <span className="flex min-w-0 flex-wrap gap-1">
+              {details.ports.map((port) => (
+                <a
+                  key={port.port}
+                  href={portUrl(port)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-chat-card-port
+                  title={`${port.command} · open ${portUrl(port)}`}
+                  onClick={onOpenLink}
+                  className="rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  :{port.port}
+                </a>
+              ))}
+            </span>
           </div>
         ) : null}
         {details.diff && (

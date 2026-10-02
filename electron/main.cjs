@@ -3,6 +3,7 @@ const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSav
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
+const { realpathSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
@@ -21,6 +22,7 @@ const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { createModelCache } = require("./agents/models.cjs");
 const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
+const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
@@ -367,8 +369,30 @@ const agents = new SessionManager({
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
   onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
+  onTurnStarted: () => ports.wake(),
   send: (chatId, event) => void chats.receive(chatId, event),
 });
+
+// lsof reports real paths (/private/var for /var).
+function realCwd(cwd) {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
+// The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
+const ports = new PortWatcher({
+  roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
+  publish: (next) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      window.webContents.send("agent:ports", next);
+    }
+  },
+});
+ipcMain.handle("agent:ports", () => ports.snapshot());
 
 async function startAgentTurn(request) {
   const images = decodeImages(request.images);
@@ -574,6 +598,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   agentsClosed = true;
   keepAwake.quit();
+  ports.stop();
   // Agents run in their own process groups, so stop them before the app exits.
   // Their cancelled turns are saved before the app exits.
   Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());

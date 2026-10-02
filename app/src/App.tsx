@@ -22,6 +22,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
+import { useAgentPorts } from "./lib/ports";
 import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
@@ -218,6 +219,7 @@ function App() {
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
     : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
+  const agentPorts = useAgentPorts();
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
   const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
@@ -308,10 +310,11 @@ function App() {
             diff: worktree?.diff,
             pullRequests: worktree ? chatPullRequests(pullRequestRefs(sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
             failed: lastReply?.outcome === "failed",
+            ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
           },
         };
       });
-  }, [state, chatOrder, asking, waiting, running, pullRequests, chatPrs]);
+  }, [state, chatOrder, asking, waiting, running, pullRequests, chatPrs, agentPorts, project]);
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -818,6 +821,7 @@ function App() {
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}
             tasks={run?.tasks}
+            ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}

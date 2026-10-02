@@ -4,9 +4,14 @@ export function promptToken(draft: string, caret = draft.length): PromptToken | 
   if (!match) return null;
   return { kind: match[2] === '@' ? 'at' : 'slash', query: match[3].toLowerCase(), start: match.index + match[1].length, end: caret };
 }
-export function insertFileMention(draft: string, token: Pick<PromptToken, 'start' | 'end'>, path: string): string {
-  const mention = /\s|"/.test(path) ? `@${JSON.stringify(path)}` : `@${path}`;
-  return insertPromptToken(draft, token, mention);
+export function fileMentionPath(root: string, relative: string): string | null {
+  if (!root.startsWith('/') || !relative || relative.startsWith('/') || relative.split('/').some(part => part === '..' || part === '.')) return null;
+  return `${root.replace(/\/$/, '')}/${relative}`;
+}
+export function removePromptToken(draft: string, token: Pick<PromptToken, 'start' | 'end'>): string {
+  const prefix = draft.slice(0, token.start);
+  const suffix = draft.slice(token.end);
+  return prefix + (prefix.endsWith(' ') && suffix.startsWith(' ') ? suffix.slice(1) : suffix);
 }
 export function insertPromptToken(draft: string, token: Pick<PromptToken, 'start' | 'end'>, mention: string): string {
   const suffix = draft.slice(token.end);

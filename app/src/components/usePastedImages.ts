@@ -95,12 +95,17 @@ export function usePastedImages(scope: string) {
     setLoading(false);
   }
 
+  function attachPath(path: string) {
+    setFiles(current => current.includes(path) ? current : [...current, path]);
+    setError("");
+  }
+
   function removeFile(path: string) {
     setFiles(current => current.filter(file => file !== path));
     setImages(current => current.filter(image => image.path !== path));
   }
 
-  return { images, files, loading, error, onPaste, addFiles, attachFiles, removeFile, clear, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
+  return { images, files, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
 }
 
 export type ImageDraft = ReturnType<typeof usePastedImages>;

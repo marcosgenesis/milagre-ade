@@ -18,7 +18,7 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
-import { promptToken, insertFileMention, insertPromptToken } from "../lib/file-mentions";
+import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
 import { useSkills } from "./useSkills";
 
 type SpeechRecognitionResultLike = { [index: number]: { transcript: string } };
@@ -281,7 +281,14 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     if (source?.key === "attach") {
       fileInputRef.current?.click();
     } else if (menu === "at") {
-      if (token && row.path) onDraftChange(insertFileMention(draft, token, row.path));
+      if (token && row.path) {
+        const path = fileMentionPath(projectPath, row.path);
+        if (!path) return;
+        imageDraft.attachPath(path);
+        onDraftChange(removePromptToken(draft, token));
+        const position = token.start;
+        requestAnimationFrame(() => inputRef.current?.setSelectionRange(position, position));
+      }
     } else {
       onDraftChange(token ? insertPromptToken(draft, token, row.name) : `${draft}${row.name} `);
     }

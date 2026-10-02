@@ -23,7 +23,7 @@ window.milagre = new Proxy({
  listRecentProjects: async () => [], listBranches: async () => ['main'], listEditors: async () => [],
  getCachedUsage: async () => ({ providers: [] }), readUsage: async () => ({ providers: [] }), getUpdateState: async () => ({ status: 'idle' }),
  getPathForFile: file => '/fixture/files/' + file.name,
- searchProjectFiles: async (root, query) => { window.searches.push({root,query}); return ['src/my app.ts', 'src/model.ts'].filter(p => p.includes(query)); },
+ searchProjectFiles: async (root, query) => { window.searches.push({root,query}); return ['src/my app.ts', 'src/model.ts', 'media/photo.png', 'media/clip.mp4'].filter(p => p.includes(query)); },
  startTurn: async request => { window.calls.push(request); window.emitAgent({ type: 'turn-started', turnId: 'test' }); return { turnId: 'test', steered: false }; },
  onAgentEvent: fn => { window.listeners.push(fn); return () => { window.listeners = window.listeners.filter(x => x !== fn); }; },
  notifyCompletion: async notice => { window.notices.push(notice); },
@@ -104,9 +104,25 @@ async function browserChecks() {
   await waitFor(String.raw`document.querySelector("[aria-label=\"Project files\"]")?.textContent.includes("my app.ts")`);
   await screenshot('file-mentions');
   await key('Enter');
-  assert.equal(await evaluate('document.querySelector("textarea").value'), '@"src/my app.ts" ');
+  assert.equal(await evaluate('document.querySelector("textarea").value'), '');
+  await waitFor(String.raw`!!document.querySelector('[data-promptbar] [aria-label="Remove my app.ts"]')`);
   assert.equal(await evaluate('window.calls.length'), 1, 'Choosing a file does not send the message');
   assert.equal(await evaluate('window.searches.at(-1).root'), '/fixture');
+  await type('@photo');
+  await waitFor(String.raw`document.querySelector('[aria-label="Project files"]')?.textContent.includes('photo.png')`);
+  await key('Enter');
+  await waitFor(String.raw`document.querySelector('[data-promptbar] img')?.naturalWidth > 0`);
+  await type('@clip');
+  await waitFor(String.raw`document.querySelector('[aria-label="Project files"]')?.textContent.includes('clip.mp4')`);
+  await key('Enter');
+  await waitFor(String.raw`document.querySelector('[data-promptbar] video')?.videoWidth > 0`);
+  assert.equal(await evaluate('document.querySelector("textarea").value'), '', 'Media selections stay out of the textarea');
+  await screenshot('file-attachments-selected');
+  await type('Review these');
+  await click('[aria-label="Send"]');
+  await waitFor('window.calls.length === 2');
+  assert.ok(await evaluate('window.calls[1].prompt.includes("/fixture/media/photo.png") && window.calls[1].prompt.includes("/fixture/media/clip.mp4")'));
+  assert.equal(await evaluate('window.saved.messages.at(-1).body'), 'Review these');
   await type('');
   await evaluate(`(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(6 * 1024 * 1024)], 'photo.png', {type:'image/png'})); document.querySelector('textarea').dispatchEvent(new DragEvent('drop', { bubbles:true, cancelable:true, dataTransfer:dt })); })()`);
   await waitFor(String.raw`document.querySelector('[data-promptbar] img')?.src.startsWith('milagre-media:')`);

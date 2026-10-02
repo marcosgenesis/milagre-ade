@@ -136,7 +136,7 @@ Renderer to main:
     - The step fails when `is_error` is true: a tool error, a denied approval, or a tool cut off by Stop.
     - Edit and Write diffs come from the message's `tool_use_result.structuredPatch`, or from the input when there is none.
     - A read that worked keeps no detail.
-  - **Subagents.** Messages with `parent_tool_use_id` set are not shown; the `Agent` call that started them is one step.
+  - **Subagents.** The parent reply keeps the `Agent` launch as one step. Child messages appear in a persistent Subagents control near the composer, with the chat activity indicator and an anchored popover of child names. Each row offers an archive action. The compact trigger uses the same activity indicator as the tab bar. Selecting a child shows its status, elapsed time, latest activity, and a read-only transcript in the popover. Archive hides the child from the list and can be reversed from Archived; archiving does not stop provider execution. The top action manually archives all completed, failed, or stopped children, leaving active and status-unavailable children visible. Claude task events and Codex child activity track completion independently of the parent turn. Finished and failed children stay available; disconnected children show status unavailable until the provider reports them again.
     - Its detail is the agent's report, from `tool_use_result.content`.
     - Claude often starts agents in the background. Then the step completes at launch, titled "Started an agent: …". The report arrives after the turn ends, in a turn Claude Code starts by itself (see Steering).
   - `result` becomes `turn-completed`, or `turn-failed` when `is_error`.

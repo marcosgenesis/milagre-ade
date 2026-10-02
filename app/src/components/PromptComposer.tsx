@@ -86,6 +86,8 @@ interface PromptComposerProps {
 }
 
 const POPOVER_GAP = 12;
+// In the tall layout the controls sit on the composer's bottom row, so a popover opens just above its own button.
+const POPOVER_BUTTON_GAP = 8;
 // Popovers stay clear of the window-drag strip across the top of the window.
 const POPOVER_TOP_INSET = 48;
 const POPOVER_BOTTOM_INSET = 16;
@@ -133,7 +135,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const compactWidthRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const popoverRootRef = useRef<HTMLDivElement>(null);
-  const [anchor, setAnchor] = useState<{ left: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
+  const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [rowBox, setRowBox] = useState<{ top: number; height: number } | null>(null);
 
@@ -214,25 +216,38 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     return () => document.removeEventListener("pointerdown", close);
   }, [modelOpen, plusOpen, permissionOpen, effortOpen]);
 
-  // Right-align the popover with its trigger, or left-align when that would leave the composer.
-  // A tall composer has its controls at the bottom, so its popovers open below when there is room.
+  // Right-align the popover with its trigger, or left-align when that would leave the composer. It opens above the
+  // composer, or, in the tall layout, right above its button; below the button when there's more room there.
   function anchorTo(trigger: HTMLElement, width: number) {
     const root = popoverRootRef.current?.getBoundingClientRect();
     if (!root) return;
     const button = trigger.getBoundingClientRect();
     const alignRight = button.right - width >= root.left;
     const left = Math.max(0, Math.min((alignRight ? button.right - width : button.left) - root.left, root.width - width));
-    const roomBelow = window.innerHeight - root.bottom - POPOVER_GAP - POPOVER_BOTTOM_INSET;
+    const roomBelow = window.innerHeight - button.bottom - POPOVER_BUTTON_GAP - POPOVER_BOTTOM_INSET;
     const below = expanded && roomBelow >= POPOVER_MIN_BELOW;
-    setAnchor({ left, alignRight, below, maxHeight: below ? roomBelow : root.top - POPOVER_GAP - POPOVER_TOP_INSET });
+    const edge = expanded ? button.top - POPOVER_BUTTON_GAP : root.top - POPOVER_GAP;
+    setAnchor(below
+      ? { left, alignRight, below, top: button.bottom + POPOVER_BUTTON_GAP - root.top, maxHeight: roomBelow }
+      : { left, alignRight, below, bottom: root.bottom - edge, maxHeight: edge - POPOVER_TOP_INSET });
   }
 
-  const anchorClass = anchor.below ? "top-[calc(100%+0.75rem)]" : "bottom-[calc(100%+0.75rem)]";
   const anchorStyle = {
     left: anchor.left,
+    top: anchor.top,
+    bottom: anchor.bottom,
     maxHeight: anchor.maxHeight,
     transformOrigin: `${anchor.below ? "top" : "bottom"} ${anchor.alignRight ? "right" : "left"}`,
   };
+
+  // Sending moves on from whatever was being picked, and the composer's layout may change under an open popover.
+  function send() {
+    setModelOpen(false);
+    setPermissionOpen(false);
+    setEffortOpen(false);
+    setPlusOpen(false);
+    onSend();
+  }
 
   function chooseModel(model: ModelOption) {
     onModelChange(model);
@@ -293,7 +308,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      onSend();
+      send();
     }
   }
 
@@ -333,7 +348,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             placeholder="Search models…"
             emptyLabel="No models found."
             isEmpty={modelRows.length === 0}
-            className={`absolute w-[360px] ${anchorClass}`}
+            className="absolute w-[360px]"
             style={anchorStyle}
             header={
               lockedProvider !== undefined && onHandover && canHandover ? (
@@ -380,7 +395,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         )}
 
         {effortOpen && (
-          <PickerPanel title="Thinking effort" className={`absolute w-[320px] ${anchorClass}`} style={anchorStyle}>
+          <PickerPanel title="Thinking effort" className="absolute w-[320px]" style={anchorStyle}>
             {effortLevels.map((level, index) => (
               <PickerRow
                 key={level}
@@ -410,7 +425,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         )}
 
         {permissionOpen && (
-          <PickerPanel title="Agent permissions" className={`absolute w-[340px] ${anchorClass}`} style={anchorStyle}>
+          <PickerPanel title="Agent permissions" className="absolute w-[340px]" style={anchorStyle}>
             {PERMISSION_MODES.map((mode) => (
               <PickerRow
                 key={mode.id}
@@ -443,7 +458,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             {canUseFastMode && <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster Opus output at higher usage rates`}><button type="button" aria-label="Fast mode" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button></Tooltip>}
             </div>
             <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
-            <button type="button" aria-label="Send" disabled={!canSend || sendBlocked || imageDraft.loading} onClick={onSend} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canSend && !sendBlocked ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>
+            <button type="button" aria-label="Send" disabled={!canSend || sendBlocked || imageDraft.loading} onClick={send} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canSend && !sendBlocked ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>
           </div>
         </div>
       </div>

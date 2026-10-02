@@ -19,8 +19,9 @@ const bodies = [
   filler + " Another NEEDLE here and one more needle after it.",
   filler,
   "A closing line without the term, then a last needle.",
+  "A phrase that runs across **bold text** and \`inline\` code boundaries.",
 ];
-const messages = bodies.map((body, index) => ({ id: index + 1, session_id: 1, context: null, role: index % 2 ? "assistant" : "user", body }));
+const messages = bodies.map((body, index) => ({ id: index + 1, session_id: 1, context: null, role: index % 2 || index === bodies.length - 1 ? "assistant" : "user", body }));
 function Fixture() {
   const [findOpen, setFindOpen] = useState(false);
   const [findSignal, setFindSignal] = useState(0);
@@ -49,6 +50,40 @@ function Fixture() {
   </div>;
 }
 createRoot(document.getElementById("root")).render(<Fixture />);
+`;
+
+const appFixture = `
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { createInitialState } from "/src/model";
+import "/src/styles.css";
+const state = createInitialState("Fixture", "/fixture");
+state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } };
+state.sessions = {
+  3: { id: 3, worktree_id: 1, agent_name: "Chat one", provider: "claude", status: "Idle" },
+  5: { id: 5, worktree_id: 1, agent_name: "Chat two", provider: "claude", status: "Idle" },
+};
+state.messages = [
+  { id: 4, session_id: 3, role: "user", body: "Chat one needle and a second needle", context: null },
+  { id: 6, session_id: 5, role: "user", body: "Chat two needle", context: null },
+];
+state.next_id = 7;
+window.interrupts = [];
+window.milagre = new Proxy({
+  getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
+  listBranches: async () => ["main"],
+  listEditors: async () => [],
+  getCachedUsage: async () => ({ providers: [] }),
+  readUsage: async () => ({ providers: [] }),
+  getUpdateState: async () => ({ status: "idle" }),
+  listRecentProjects: async () => [],
+  startTurn: async () => null,
+  interruptAgent: async (chatId) => { window.interrupts.push(chatId); },
+}, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
+// Opens a sidebar chat by its title.
+window.openChatWith = (title) => [...document.querySelectorAll("button")].find((el) => el.textContent.includes(title))?.click();
+const { default: App } = await import("/src/App");
+createRoot(document.getElementById("root")).render(<App />);
 `;
 
 async function browserChecks() {
@@ -84,6 +119,68 @@ async function browserChecks() {
   const activeOffset = () => evaluate('(() => { const range = [...CSS.highlights.get("find-active")][0]; return range.startContainer.data.slice(0, range.startOffset).length + range.startContainer.data.length * 1000; })()');
   const inView = () => evaluate('(() => { const v = document.querySelector("section"); const vr = v.getBoundingClientRect(); const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return r.top >= vr.top && r.bottom <= vr.bottom; })()');
   const setTheme = (dark) => evaluate(`document.documentElement.classList.toggle("dark", ${dark})`);
+  // The same keys and shortcuts through the real App: its state, shortcut handlers and command palette.
+  async function appPhase() {
+    await window.loadURL(process.argv[3]);
+    await waitFor('!!document.querySelector("[aria-label=\\"New chat\\"]") && !!document.querySelector("[aria-label=Conversation]")');
+    const bar = '!!document.querySelector("[data-find-bar]")';
+    const text = () => evaluate('document.querySelector("[aria-label=Conversation]").textContent');
+    // Open chat 1 (has messages).
+    await evaluate('window.openChatWith("Chat one needle")');
+    await waitFor('document.querySelector("[aria-label=Conversation]").textContent.includes("Chat one needle")');
+    await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');
+    key("F", ["meta"]);
+    await waitFor(bar);
+    await waitFor('document.activeElement === document.querySelector("[data-find-bar] input")');
+    window.webContents.insertText("needle");
+    await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 2"');
+    await screenshot("find-app");
+
+    // Switching chats closes the bar.
+    await evaluate('window.openChatWith("Chat two needle")');
+    await waitFor('document.querySelector("[aria-label=Conversation]").textContent.includes("Chat two needle")');
+    await waitFor(`!(${bar})`);
+    assert.equal(await evaluate('CSS.highlights.size'), 0);
+
+    // A new, empty chat has nothing to search.
+    await evaluate('document.querySelector("[aria-label=\\"New chat\\"]").click()');
+    await waitFor('!!document.querySelector("[data-new-chat-pickers]")');
+    key("F", ["meta"]);
+    await delay(300);
+    assert.equal(await evaluate(bar), false);
+
+    // The command palette lists Find in chat on a chat with messages, and running it opens the bar.
+    await evaluate('window.openChatWith("Chat one needle")');
+    await waitFor('document.querySelector("[aria-label=Conversation]").textContent.includes("Chat one needle")');
+    key("K", ["meta"]);
+    await waitFor('!!document.querySelector("dialog[open][aria-label=\\"Command palette\\"]")');
+    window.webContents.insertText("search text");
+    await waitFor('[...document.querySelectorAll("dialog [role=option]")].some(el => el.textContent.includes("Find in chat"))');
+    key("Return");
+    await waitFor(bar);
+    await waitFor('document.activeElement === document.querySelector("[data-find-bar] input")');
+    key("Escape");
+    await waitFor(`!(${bar})`);
+    assert.equal(await evaluate('document.activeElement === document.querySelector("textarea[aria-label=Prompt]")'), true);
+
+    // Escape closes the bar first; the stop-agent handler only gets the next one.
+    await evaluate('window.interrupts.length = 0');
+    await evaluate('(() => { const i = document.querySelector("textarea[aria-label=Prompt]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(i, "go"); i.dispatchEvent(new Event("input", { bubbles: true })); })()');
+    await waitFor('!document.querySelector("[aria-label=Send]").disabled');
+    await evaluate('document.querySelector("[aria-label=Send]").click()');
+    await waitFor('document.body.textContent.includes("Working with")');
+    key("F", ["meta"]);
+    await waitFor(bar);
+    await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');
+    key("Escape");
+    await waitFor(`!(${bar})`);
+    await delay(200);
+    assert.equal(await evaluate('window.interrupts.length'), 0, "Escape that closes the bar must not stop the agent");
+    key("Escape");
+    await waitFor('window.interrupts.length === 1');
+    console.log("PASS: real App: opens on a chat, ignores an empty new chat, closes on chat switch, palette command, Escape closes the bar before stopping the agent");
+  }
+
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("textarea[aria-label=Prompt]")');
@@ -127,6 +224,17 @@ async function browserChecks() {
     await waitFor('document.querySelector("[data-find-count]").textContent === "5 of 5"');
     assert.ok(await inView());
 
+    // A match may cross inline markup.
+    await evaluate('document.querySelector("[data-find-bar] input").select()');
+    window.webContents.insertText("across bold text and inline");
+    await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 1"');
+    assert.equal(await evaluate('(() => { const r = [...CSS.highlights.get("find-active")][0]; return r.startContainer !== r.endContainer && r.toString() === "across bold text and inline"; })()'), true);
+    await evaluate('document.querySelector("[data-find-bar] input").select()');
+    window.webContents.insertText("needle");
+    await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 5"');
+    key("Return", ["shift"]);
+    await waitFor('document.querySelector("[data-find-count]").textContent === "5 of 5"');
+
     // Reopening with the bar open selects the field text.
     await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');
     key("F", ["meta"]);
@@ -149,6 +257,7 @@ async function browserChecks() {
     assert.equal(await evaluate('CSS.highlights.size'), 0);
     assert.equal(await evaluate('document.activeElement === document.querySelector("textarea[aria-label=Prompt]")'), true);
     console.log("PASS: opens with the shortcut, live count, Enter and Shift+Enter step and scroll, wrap, reopen selects, Esc clears and restores focus");
+    await appPhase();
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -163,12 +272,13 @@ async function main() {
     server: { host: "127.0.0.1", port: 0 },
     plugins: [{
       name: "find-fixture",
-      resolveId(id) { if (id === "/__find_fixture.tsx") return id; },
-      load(id) { if (id === "/__find_fixture.tsx") return fixture; },
+      resolveId(id) { if (id.startsWith("/__find_")) return id; },
+      load(id) { if (id === "/__find_fixture.tsx") return fixture; if (id === "/__find_app_fixture.tsx") return appFixture; },
       configureServer(server) {
         server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__find__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__find_fixture.tsx"></script></body></html>');
+          const entry = { "/__find__": "/__find_fixture.tsx", "/__find_app__": "/__find_app_fixture.tsx" }[request.url];
+          if (!entry) return next();
+          const html = await server.transformIndexHtml(request.url, `<html><body><div id="root"></div><script type="module" src="${entry}"></script></body></html>`);
           response.setHeader("Content-Type", "text/html");
           response.end(html);
         });
@@ -179,7 +289,7 @@ async function main() {
     await server.listen();
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__find__`], { env, stdio: "inherit" });
+    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__find__`, `${server.resolvedUrls.local[0]}__find_app__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
       child.on("exit", code => resolve(code ?? 1));

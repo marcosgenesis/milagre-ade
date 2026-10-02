@@ -1,30 +1,55 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
-import { clampMatch, findLabel, matchOffsets, stepMatch } from "../lib/find-in-chat";
+import { clampMatch, findLabel, locateOffset, matchOffsets, stepMatch } from "../lib/find-in-chat";
 import { isMac } from "../lib/shortcut-hints";
 import Tooltip from "./primitives/Tooltip";
 
 const MATCH = "find-match";
 const ACTIVE = "find-active";
 
-/** Text ranges for every match under `root`. Hidden text (collapsed tool rows) isn't laid out, so it is skipped. */
+/** The nearest ancestor that isn't inline, so "a **bold** word" reads as one string. */
+function blockOf(element: Element, cache: Map<Element, Element>): Element {
+  const cached = cache.get(element);
+  if (cached) return cached;
+  let block = element;
+  while (block.parentElement && /^inline/.test(getComputedStyle(block).display)) block = block.parentElement;
+  cache.set(element, block);
+  return block;
+}
+
+/** Text ranges for every match under `root`, including ones that cross inline markup. Hidden text (collapsed tool rows) isn't laid out, so it is skipped. */
 function collectRanges(root: Element, query: string): Range[] {
   const ranges: Range[] = [];
   const visible = new Map<Element, boolean>();
+  const blocks = new Map<Element, Element>();
+  let group: Text[] = [];
+  let groupBlock: Element | null = null;
+  const flush = () => {
+    const nodes = group;
+    group = [];
+    if (!nodes.length) return;
+    const lengths = nodes.map((node) => node.data.length);
+    for (const start of matchOffsets(nodes.map((node) => node.data).join(""), query)) {
+      const from = locateOffset(lengths, start, "start");
+      const to = locateOffset(lengths, start + query.length, "end");
+      const range = document.createRange();
+      range.setStart(nodes[from.index], from.offset);
+      range.setEnd(nodes[to.index], to.offset);
+      ranges.push(range);
+    }
+  };
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
     const parent = node.parentElement;
     if (!parent || parent.closest("script, style")) continue;
     if (!visible.has(parent)) visible.set(parent, parent.checkVisibility?.() ?? true);
     if (!visible.get(parent)) continue;
-    for (const start of matchOffsets(node.data, query)) {
-      const range = document.createRange();
-      range.setStart(node, start);
-      range.setEnd(node, start + query.length);
-      ranges.push(range);
-    }
+    const block = blockOf(parent, blocks);
+    if (block !== groupBlock) { flush(); groupBlock = block; }
+    group.push(node);
   }
+  flush();
   return ranges;
 }
 

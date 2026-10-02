@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampMatch, findLabel, matchOffsets, stepMatch } from "./find-in-chat.ts";
+import { clampMatch, findLabel, locateOffset, matchOffsets, stepMatch } from "./find-in-chat.ts";
 
 test("matches ignore case and do not overlap", () => {
   assert.deepEqual(matchOffsets("Foo foo FOO", "foo"), [0, 4, 8]);
@@ -33,4 +33,12 @@ test("label shows position, no results, or nothing without a query", () => {
   assert.equal(findLabel("", 0, 0), "");
   assert.equal(findLabel("x", 0, 0), "No results");
   assert.equal(findLabel("x", 2, 12), "3 of 12");
+});
+
+test("offsets map back into the node they fall in, across node boundaries", () => {
+  const lengths = [4, 3, 5];
+  assert.deepEqual(locateOffset(lengths, 2, "start"), { index: 0, offset: 2 });
+  assert.deepEqual(locateOffset(lengths, 4, "start"), { index: 1, offset: 0 });
+  assert.deepEqual(locateOffset(lengths, 4, "end"), { index: 0, offset: 4 });
+  assert.deepEqual(locateOffset(lengths, 12, "end"), { index: 2, offset: 5 });
 });

@@ -25,3 +25,14 @@ export function findLabel(query: string, current: number, total: number): string
   if (!query) return "";
   return total ? `${current + 1} of ${total}` : "No results";
 }
+
+/** Which text node an offset into the joined text of `lengths` falls in, and where in it. A range start prefers the later node at a boundary, an end the earlier one. */
+export function locateOffset(lengths: number[], offset: number, edge: "start" | "end"): { index: number; offset: number } {
+  let before = 0;
+  for (let index = 0; index < lengths.length; index++) {
+    const end = before + lengths[index];
+    if (edge === "start" ? offset < end : offset <= end) return { index, offset: offset - before };
+    before = end;
+  }
+  return { index: Math.max(lengths.length - 1, 0), offset: lengths.at(-1) ?? 0 };
+}

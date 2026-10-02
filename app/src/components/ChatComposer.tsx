@@ -228,7 +228,6 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
               style={popoverStyle}
               onKeyDown={(event) => {
                 if (event.key === "Escape") { event.preventDefault(); close(); }
-                if (event.key === "Enter" && branchRows[0]) { branchRows[0].choose(); close(); }
               }}
             >
               {branchRows.map((row) => (
@@ -293,7 +292,9 @@ export function ChatComposer({
   newChatError,
 }: ChatComposerProps) {
   const [tab, setTab] = useState("Worktrees");
-  const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
+  // Preparing a worktree is not a conversation yet. Move the composer only
+  // when the first message is committed and its draft is cleared together.
+  const isNewChat = tab === "Worktrees" && messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   const [dropError, setDropError] = useState("");

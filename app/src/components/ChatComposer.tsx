@@ -114,7 +114,8 @@ interface ChatComposerProps {
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
-  onResolveConflicts?: () => void;
+  /** One-click fix for whatever blocks the chat's PR from merging (conflicts, an outdated branch, requested changes). */
+  pullRequestAction?: { label: string; tone: "red" | "orange"; onRun: () => void };
   isSending: boolean;
   /** Sending is briefly blocked while a message is being prepared; a running turn doesn't block it. */
   sendBlocked: boolean;
@@ -276,7 +277,7 @@ export function ChatComposer({
   draft,
   onDraftChange,
   onSend,
-  onResolveConflicts,
+  pullRequestAction,
   isSending,
   sendBlocked,
   streamingText,
@@ -422,16 +423,18 @@ export function ChatComposer({
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {!isNewChat && onResolveConflicts && (
+        {!isNewChat && pullRequestAction && (
           <div className="mb-2 flex px-1">
             <button
               type="button"
-              onClick={onResolveConflicts}
+              onClick={pullRequestAction.onRun}
               disabled={sendBlocked || isSending || imageDraft.loading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red/20 bg-red/5 px-2.5 py-0.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red disabled:cursor-not-allowed disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+                ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+                : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
             >
               <Icon icon={GitPullRequestIcon} size={14} />
-              Resolve conflicts
+              {pullRequestAction.label}
             </button>
           </div>
         )}

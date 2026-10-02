@@ -134,6 +134,10 @@ export interface PullRequest {
   readyToMerge: boolean;
   hasConflicts: boolean;
   conflictStatusKnown?: boolean;
+  /** The base branch requires PRs to be up to date and this one isn't. */
+  isBehind?: boolean;
+  /** A reviewer requested changes, so the PR can't merge until they're addressed. */
+  changesRequested?: boolean;
 }
 
 export interface Worktree {

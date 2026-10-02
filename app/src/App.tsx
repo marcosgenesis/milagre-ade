@@ -52,9 +52,11 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { handoverLinks, handoverModel } from "./lib/handover";
+import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
+// Notice above is editor-links' toast; this is the dismissable notice card.
+import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
@@ -216,7 +218,9 @@ function App() {
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
-  lockedProviderRef.current = messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined;
+  // A handed-over chat's brief, attached to its first message until it is sent.
+  const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
+  lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const latest = statesRef.current[projectOfKey(chatId)];
@@ -315,7 +319,7 @@ function App() {
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || session.handoverPending);
+      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || isHandoverChat(session));
     return orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
@@ -552,7 +556,9 @@ function App() {
   const ipcError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
-    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
+    // The brief is sent with the main process's copy of the draft, so the message may be empty.
+    const briefAttached = handoverDraft !== undefined;
+    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
     setPreparing(true);
     setNewChatError(null);
 
@@ -580,7 +586,8 @@ function App() {
         body,
         images,
         files,
-        prompt: attachmentPrompt(body, files),
+        // With the brief there is no fallback text for an empty message: the brief is the prompt.
+        prompt: briefAttached && !body ? (files.length ? `Attached files:\n${files.join("\n")}` : "") : attachmentPrompt(body, files),
         provider: model.provider,
         model: model.id,
         permissionMode: mode,
@@ -619,7 +626,7 @@ function App() {
 
   async function sendMessage() {
     const body = draft.trim();
-    if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+    if ((!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
 
@@ -851,12 +858,7 @@ function App() {
         </AnimatePresence>
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-            {notice && (
-              <div role="status" data-notice className="mx-auto mt-2 mb-1 flex w-full max-w-2xl items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay">
-                <span className="min-w-0 flex-1 break-words">{notice}</span>
-                <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-xs font-medium text-ink-3 hover:text-ink">Dismiss</button>
-              </div>
-            )}
+            {notice && <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>{notice}</NoticeCard>}
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
@@ -895,8 +897,14 @@ function App() {
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
-            lockedProvider={messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined}
+            lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
             onHandover={(provider) => void handover(provider)}
+            canHandover={messages.length > 0}
+            handoverBrief={project && selectedSession && handoverDraft !== undefined ? {
+              chatId: chatKey(project.path, selectedSession.id),
+              brief: handoverDraft,
+              onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
+            } : undefined}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}

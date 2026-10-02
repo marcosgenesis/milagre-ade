@@ -483,6 +483,10 @@ ipcMain.handle("chat:handover", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
   return chats.handover(request);
 });
+ipcMain.handle("chat:handover-draft", (_event, projectPath, sessionId, text) => {
+  if (!states.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
+  return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
+});
 ipcMain.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? updateProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
 // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
 ipcMain.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? updateProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));

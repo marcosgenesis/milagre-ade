@@ -33,7 +33,7 @@ createRoot(document.getElementById('root')).render(<App />);
 async function browserChecks() {
   const { app, BrowserWindow } = require('electron');
   await app.whenReady();
-  const window = new BrowserWindow({ width: 1000, height: 760, show: false, webPreferences: { partition: 'command-palette-test', backgroundThrottling: false } });
+  const window = new BrowserWindow({ width: 1280, height: 760, show: false, webPreferences: { partition: 'command-palette-test', backgroundThrottling: false } });
   const evaluate = source => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let n = 0; n < 200; n++) { if (await evaluate(source)) return; await delay(25); }
@@ -68,6 +68,8 @@ async function browserChecks() {
     await key('Meta', { metaKey: true });
     await key('n', { metaKey: true });
     await waitFor('!!document.querySelector("[data-new-chat-pickers]")');
+    // Let the new-chat animation frame finish focusing the composer before the next shortcut.
+    await evaluate('new Promise(resolve => requestAnimationFrame(resolve))');
     assert.equal(await evaluate('document.querySelectorAll("[data-shortcut-hint]").length'), 0, 'Executing a shortcut hides hints');
     await key('1', { metaKey: true });
     await waitFor('!!document.querySelector("[aria-current=page]")');
@@ -97,7 +99,9 @@ async function browserChecks() {
     assert.ok(await evaluate('!!document.querySelector("dialog[open]")'));
     await search('FINDER');
     await key('Enter');
+    await key('Enter');
     await waitFor('window.calls.includes("/fixture/palette")');
+    assert.equal(await evaluate('window.calls.filter(path => path === "/fixture/palette").length'), 1, 'Repeated Enter during exit runs the command once');
     assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Command palette');
     await open({ ctrlKey: true });
     await key('Escape');
@@ -107,6 +111,42 @@ async function browserChecks() {
     await key('k', { metaKey: true });
     await waitFor('!document.querySelector("dialog")');
     await open();
+    await key('Escape');
+    await waitFor('!document.querySelector("dialog")');
+    for (const [query, setting, value] of [
+      ['theme light', 'theme', 'light'],
+      ['theme light', 'theme', 'light'],
+      ['THEME DARK', 'theme', 'dark'],
+      ['theme system', 'theme', 'system'],
+      ['usage remaining', 'usageDisplay', 'remaining'],
+      ['sidebar usage hide', 'showUsageInSidebar', false],
+      ['tldr off', 'tldrEnabled', false],
+      ['tldr on', 'tldrEnabled', true],
+      ['claude replies normal', 'claudeReplies', 'normal'],
+      ['notify finished off', 'notifyOnCompletion', false],
+      ['notify waiting off', 'notifyWhenWaiting', false],
+      ['dock badge off', 'showDockBadge', false],
+      ['keep awake off', 'keepAwake', false],
+    ]) {
+      await open();
+      await search(query);
+      assert.ok(await evaluate('!!document.querySelector("[aria-selected=true]")'), `Command found: ${query}`);
+      await key('Enter');
+      await waitFor(`JSON.parse(localStorage.getItem('milagre-settings'))[${JSON.stringify(setting)}] === ${JSON.stringify(value)}`);
+      await waitFor('!document.querySelector("dialog")');
+      if (setting === 'theme') {
+        await waitFor(`document.documentElement.classList.contains('dark') === ${value === 'system' ? "matchMedia('(prefers-color-scheme: dark)').matches" : value === 'dark'}`);
+      }
+      assert.equal(await evaluate('!!document.querySelector("[aria-label=\\"Settings navigation\\"]")'), false, 'Quick changes stay in the chat');
+    }
+    await open();
+    await search('theme dark');
+    await key('Enter');
+    await waitFor('!document.querySelector("dialog")');
+    await waitFor("JSON.parse(localStorage.getItem('milagre-settings')).theme === 'dark' && document.documentElement.classList.contains('dark')");
+    await open();
+    await search('theme dark');
+    assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Current")'), 'Reopening shows the saved theme as current');
     await search('add palette');
     assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Add a command palette")'), 'Search matches multiple words');
     await search('');
@@ -133,7 +173,15 @@ async function browserChecks() {
     await search('website');
     await key('Enter');
     await waitFor('window.calls.includes("/other")');
-    console.log('PASS: Cmd/Ctrl+K, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation');
+    await waitFor('!document.querySelector("dialog")');
+    window.webContents.debugger.attach('1.3');
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    assert.ok(await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"));
+    await open();
+    await key('Escape');
+    await waitFor('!document.querySelector("dialog")');
+    window.webContents.debugger.detach();
+    console.log('PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation');
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 }

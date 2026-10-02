@@ -19,6 +19,7 @@ export function CommandPalette({ commands, onClose, onError }: {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const executing = useRef(false);
+  const animation = useRef<Animation | null>(null);
   const list = useRef<HTMLDivElement>(null);
   useScrollFade(list);
   const listId = useId();
@@ -28,10 +29,17 @@ export function CommandPalette({ commands, onClose, onError }: {
 
   useLayoutEffect(() => {
     const previous = document.activeElement;
-    dialog.current?.showModal();
+    const element = dialog.current!;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    element.showModal();
+    animation.current = element.animate([
+      { opacity: 0, transform: `translate(-50%, ${reduced ? 0 : 6}px)` },
+      { opacity: 1, transform: "translate(-50%, 0px)" },
+    ], { duration: reduced ? 60 : 120, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
     input.current?.focus();
     return () => {
-      dialog.current?.close();
+      animation.current?.cancel();
+      element.close();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
@@ -40,39 +48,52 @@ export function CommandPalette({ commands, onClose, onError }: {
     dialog.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selected?.id, query]);
 
-  function execute(command: Command) {
+  function close(command?: Command) {
     if (executing.current) return;
     executing.current = true;
-    onClose();
-    // Let focus restore before the action opens a new surface.
-    window.setTimeout(() => {
-      Promise.resolve().then(command.run).catch((error: unknown) => onError(error instanceof Error ? error.message : "Couldn't run this command."));
-    }, 0);
+    const element = dialog.current!;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Start at the current frame when Escape interrupts the entrance.
+    const { opacity, transform } = getComputedStyle(element);
+    animation.current?.cancel();
+    element.dataset.closing = "true";
+    animation.current = element.animate([
+      { opacity, transform },
+      { opacity: 0, transform: `translate(-50%, ${reduced ? 0 : 6}px)` },
+    ], { duration: reduced ? 60 : 90, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "forwards" });
+    void animation.current.finished.then(() => {
+      onClose();
+      // Let focus restore before the action opens a new surface.
+      if (command) window.setTimeout(() => {
+        Promise.resolve().then(command.run).catch((error: unknown) => onError(error instanceof Error ? error.message : "Couldn't run this command."));
+      }, 0);
+    }, () => { /* Unmount cancelled the animation. */ });
   }
 
   return createPortal(
     <dialog ref={dialog} aria-label="Command palette" className="command-palette fixed m-0 flex max-h-[min(560px,80vh)] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-[12px] border border-line bg-surface p-0 text-ink shadow-overlay [-webkit-app-region:no-drag]"
-      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onCancel={(event) => { event.preventDefault(); close(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
         const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
       }}
       onKeyDown={(event) => {
         event.stopPropagation();
+        if (executing.current) { event.preventDefault(); return; }
         if (event.nativeEvent.isComposing) return;
         // Consume Escape before the app's stop-agent shortcut sees it.
         if (event.key === "Escape" || ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k")) {
-          event.preventDefault(); event.stopPropagation(); onClose();
+          event.preventDefault(); event.stopPropagation(); close();
         } else if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
           const command = commands.find((item) => item.shortcut?.replace(/^(⌘|Ctrl\+)/, "").toLowerCase() === event.key.toLowerCase());
-          if (command) { event.preventDefault(); execute(command); }
+          if (command) { event.preventDefault(); close(command); }
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           if (results.length) setSelectedId(results[(selectedIndex + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length].id);
         } else if (event.key === "Enter") {
           event.preventDefault();
-          if (selected) execute(selected);
+          if (selected) close(selected);
         } else if (event.key === "Tab") {
           event.preventDefault(); input.current?.focus();
         }
@@ -90,7 +111,7 @@ export function CommandPalette({ commands, onClose, onError }: {
             <div aria-hidden="true" className="px-2.5 pb-1.5 pt-2.5 text-[11px] font-medium text-ink-3">{group}</div>
             {results.filter((command) => command.group === group).map((command) => (
               <div key={command.id} id={`${listId}-${results.indexOf(command)}`} role="option" aria-selected={command.id === selected?.id}
-                onPointerMove={() => setSelectedId(command.id)} onMouseDown={(event) => event.preventDefault()} onClick={() => execute(command)}
+                onPointerMove={() => setSelectedId(command.id)} onMouseDown={(event) => event.preventDefault()} onClick={() => close(command)}
                 className={`flex cursor-default items-center gap-3 rounded-[6px] px-2.5 py-2 text-[13px] ${command.id === selected?.id ? "bg-hover-2" : ""}`}>
                 <HugeiconsIcon icon={icons[command.icon]} size={17} strokeWidth={1.8} className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{command.label}</span>

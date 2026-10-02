@@ -26,7 +26,7 @@ import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForU
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
-import { chatMark, chatTitle } from "./lib/chat-list";
+import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "../../electron/shared/project-edits.mjs";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
@@ -220,7 +220,7 @@ function App() {
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
+  const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
@@ -288,11 +288,11 @@ function App() {
   const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
-    return Object.values(state.sessions)
+    const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ sessionMessages }) => sessionMessages.length > 0)
-      .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
+      .filter(({ sessionMessages }) => sessionMessages.length > 0);
+    return orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
         // The commit dialog's notes aren't replies: they don't hide a failed turn.
@@ -311,7 +311,7 @@ function App() {
           },
         };
       });
-  }, [state, asking, waiting, running, pullRequests, chatPrs]);
+  }, [state, chatOrder, asking, waiting, running, pullRequests, chatPrs]);
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;

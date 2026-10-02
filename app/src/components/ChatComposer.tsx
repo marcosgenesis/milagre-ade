@@ -362,7 +362,8 @@ export function ChatComposer({
         smooth
         busy={isSending}
         className="min-h-0 flex-1"
-        viewportClassName="pt-4 pb-2"
+        // The find bar floats over the top of the chat, so the first message moves below it while it is open.
+        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-2`}
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}

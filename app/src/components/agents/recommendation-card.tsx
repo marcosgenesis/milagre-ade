@@ -20,7 +20,25 @@ export function RecommendationCard({ question, options, onSelect }: Recommendati
   const recommendation = options.find((option) => option.recommended);
   const others = options.filter((option) => option !== recommendation);
   if (options.length === 0) return null;
+  // A heading and divider only earn their space when there are several alternatives to introduce.
+  const separate = Boolean(recommendation) && others.length >= 2;
   const visible = showAlternatives ? others : others.slice(0, 2);
+  const rows = others.length > 0 && (
+    <>
+      <div className="grid gap-1">
+        {visible.map((option) => (
+          <button key={option.id} type="button" onClick={() => onSelect(option)} className="flex items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover">
+            <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{option.label}</span>
+          </button>
+        ))}
+      </div>
+      {others.length > 2 && (
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <button type="button" onClick={() => setShowAlternatives((current) => !current)} className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hover">{showAlternatives ? "Hide alternatives" : "Alternatives"}</button>
+        </div>
+      )}
+    </>
+  );
   return (
     <section className="overflow-hidden rounded-card border border-line bg-surface shadow-card" aria-label="Agent recommendation">
       <div className="px-3.5 pb-3 pt-3">
@@ -32,21 +50,12 @@ export function RecommendationCard({ question, options, onSelect }: Recommendati
             <span className="shrink-0 text-[11px] font-medium text-green">Recommended</span>
           </button>
         )}
+        {!separate && others.length > 0 && <div className={recommendation ? "mt-1" : "mt-3"}>{rows}</div>}
       </div>
-      {others.length > 0 && (
-        <div className={recommendation ? "border-t border-line px-3.5 py-2.5" : "px-3.5 pb-3"}>
-          {recommendation && <div className="mb-1.5 text-[11px] font-medium text-ink-3">Other options</div>}
-          <div className="grid gap-1">
-            {visible.map((option) => (
-              <button key={option.id} type="button" onClick={() => onSelect(option)} className="flex items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover">
-                <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{option.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 flex items-center justify-end gap-2">
-            {others.length > 2 && <button type="button" onClick={() => setShowAlternatives((current) => !current)} className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hover">{showAlternatives ? "Hide alternatives" : "Alternatives"}</button>}
-            {recommendation && <button type="button" onClick={() => onSelect(recommendation)} className="rounded-control bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90">Accept</button>}
-          </div>
+      {separate && (
+        <div className="border-t border-line px-3.5 py-2.5">
+          <div className="mb-1.5 text-[11px] font-medium text-ink-3">Other options</div>
+          {rows}
         </div>
       )}
     </section>

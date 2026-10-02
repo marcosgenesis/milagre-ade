@@ -479,3 +479,27 @@ test('a rediscovered child keeps its saved transcript and original start time', 
  assert.equal(state.sessions[1].subagents?.[0].startedAt,1);
  assert.equal(state.sessions[1].subagents?.[0].transcript[0].text,'Earlier finding');
 });
+
+test("tasks-updated sets, replaces and clears the run's to-do list, and is ignored without a run", () => {
+  const tasks = [{ id: "0", content: "Write tests", status: "completed" as const }, { id: "1", content: "Fix bug", activeForm: "Fixing bug", status: "in_progress" as const }];
+  const none = applyAgentEvent(base(), {}, PROJECT, key(1), { type: "tasks-updated", tasks });
+  assert.deepEqual(none.runs, {});
+  assert.equal(none.changed, false);
+  let { state, runs, changed } = applyAgentEvent(base(), startRun({}, key(1), "claude"), PROJECT, key(1), { type: "tasks-updated", tasks });
+  assert.equal(changed, false);
+  assert.deepEqual(runs[key(1)].tasks, tasks);
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "tasks-updated", tasks: [tasks[0]] }));
+  assert.deepEqual(runs[key(1)].tasks, [tasks[0]]);
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "tasks-updated", tasks: [] }));
+  assert.equal("tasks" in runs[key(1)], false);
+});
+
+test("tasks survive a steering split and go with the run when the turn ends", () => {
+  const tasks = [{ id: "0", content: "Write tests", status: "pending" as const }];
+  let { state, runs } = applyAgentEvent(base(), startRun({}, key(1), "claude"), PROJECT, key(1), { type: "tasks-updated", tasks });
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "text-delta", messageId: "m", text: "Working" }));
+  const split = splitRunForSteer(state, runs, PROJECT, key(1));
+  assert.deepEqual(split.runs[key(1)].tasks, tasks);
+  const ended = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-completed" });
+  assert.equal(ended.runs[key(1)], undefined);
+});

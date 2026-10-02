@@ -16,6 +16,7 @@ const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
+const { registerGitHandlers } = require("./git-ipc.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
@@ -154,6 +155,9 @@ function executable(name) {
 }
 
 ipcMain.handle("usage:read", () => readUsage());
+
+// The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder.
+registerGitHandlers(ipcMain, { executable, clientVersion: app.getVersion() });
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);

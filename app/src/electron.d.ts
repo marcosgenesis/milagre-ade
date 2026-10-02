@@ -1,6 +1,8 @@
 export {};
 
 import type { AttentionNotice } from "./lib/attention";
+import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
+import type { ModelProvider } from "./model";
 import type { DiffStat, ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
@@ -17,6 +19,15 @@ declare global {
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
       /** Opens the worktree's folder in Finder. */
       revealWorktree: (worktreePath: string) => Promise<void>;
+      /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
+      git: {
+        changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;
+        /** Never rejects for a model failure: `ok: false` carries the note the dialog shows. */
+        generate: (request: { cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext }) => Promise<GitTextResult>;
+        commit: (request: { cwd: string; message: string }) => Promise<GitCommitResult>;
+        push: (request: { cwd: string }) => Promise<GitPushResult>;
+        openPr: (request: { cwd: string; base?: string; title: string; body: string }) => Promise<GitPrResult>;
+      };
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;

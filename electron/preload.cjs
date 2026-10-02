@@ -8,6 +8,13 @@ contextBridge.exposeInMainWorld("milagre", {
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
   readDiffStat: (worktreePath, base) => ipcRenderer.invoke("worktree:diffstat", worktreePath, base),
   revealWorktree: (worktreePath) => ipcRenderer.invoke("worktree:reveal", worktreePath),
+  git: {
+    changes: (request) => ipcRenderer.invoke("git:changes", request),
+    generate: (request) => ipcRenderer.invoke("git:generate", request),
+    commit: (request) => ipcRenderer.invoke("git:commit", request),
+    push: (request) => ipcRenderer.invoke("git:push", request),
+    openPr: (request) => ipcRenderer.invoke("git:open-pr", request),
+  },
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   saveProject: (projectPath, state) => ipcRenderer.invoke("project:save", projectPath, state),

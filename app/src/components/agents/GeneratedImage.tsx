@@ -1,0 +1,74 @@
+import { memo, useEffect, useState } from "react";
+import type { ComponentProps } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import type { ChatStep } from "../../model";
+import { mediaUrl } from "../../lib/media";
+import { ImageGeneration } from "./ImageGeneration";
+import type { ImageGenerationStatus } from "./ImageGeneration";
+import { StepRow } from "./StepRow";
+import Tooltip from "../primitives/Tooltip";
+
+type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
+
+function ImageAction({ label, icon, onClick }: { label: string; icon: IconData; onClick: () => void }) {
+  return (
+    <Tooltip label={label} align="end">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        className="grid size-7 place-items-center rounded-[8px] bg-surface/80 text-ink-2 shadow-[var(--shadow-hairline)] backdrop-blur-sm transition-colors hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"
+      >
+        <HugeiconsIcon icon={icon} size={14} strokeWidth={1.8} color="currentColor" aria-hidden />
+      </button>
+    </Tooltip>
+  );
+}
+
+/**
+ * An image the agent generated, from its image step. Codex reports no progress between start and
+ * finish, so the surface stays in "generating" until the saved file has loaded. A generation that
+ * failed has no image to hold a place for, so it is a failed step row like any other. The image
+ * copies or saves from its buttons or its right-click menu.
+ */
+export const GeneratedImage = memo(function GeneratedImage({ step }: { step: ChatStep }) {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const [broken, setBroken] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const src = step.file && !broken ? mediaUrl(step.file) : null;
+  if (step.status === "failed" || (step.status === "done" && !src)) return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
+  const file = step.file!;
+  const status: ImageGenerationStatus = step.status === "done" && size ? "complete" : "generating";
+  const copy = () => void window.milagre.copyImage(file).then(() => setCopied(true)).catch(() => {});
+  const save = () => void window.milagre.saveImage(file).catch(() => {});
+  return (
+    <div
+      data-slot="generated-image"
+      className="my-2"
+      onContextMenu={status === "complete" ? (event) => { event.preventDefault(); void window.milagre.showImageMenu(file); } : undefined}
+    >
+      <ImageGeneration
+        size="fluid"
+        className="max-w-80"
+        status={status}
+        // The dither field already says it is working and the image says it is ready; the prompt is only its label.
+        showStatus={false}
+        label={step.detail ? `Generated image: ${step.detail}` : "Generated image"}
+        resolution={size ? `${size.width} × ${size.height}` : ""}
+        aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}
+        actions={<>
+          <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
+          <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
+        </>}
+      >
+        {src ? <img src={src} alt="" draggable={false} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setBroken(true)} /> : null}
+      </ImageGeneration>
+    </div>
+  );
+});

@@ -1,5 +1,6 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
-import type { AgentTask, Subagent } from "../model";
+import type { AgentPort, AgentTask, Subagent } from "../model";
+import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
 import { memo, useEffect, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
@@ -29,6 +30,7 @@ import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
 import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
+import { GeneratedImage } from "./agents/GeneratedImage";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
@@ -41,16 +43,17 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
 }
 
 /**
- * A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer.
+ * A reply: its activity (thinking, tool steps and the text between them) folded into one block, the images it generated, then its answer.
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
-  const { setup, activity, answer } = replyActivity(body, steps);
+  const { setup, activity, images, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
       {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
+      {images.map((step) => <GeneratedImage key={step.id} step={step} />)}
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
       {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
     </>
@@ -160,6 +163,10 @@ interface ChatComposerProps {
   waitingForSubagents?: boolean;
   /** The running turn's to-do list, shown as a pill beside the subagents. */
   tasks?: AgentTask[];
+  /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
+  ports?: AgentPort[];
+  /** Stops the command listening on one of the chat's ports. */
+  onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
   /** The running turn is waiting on the user's answer to a question. */
@@ -313,6 +320,8 @@ export function ChatComposer({
   onArchiveSubagent,
   waitingForSubagents = false,
   tasks,
+  ports,
+  onStopPort,
   waitingStepIds,
   asking = false,
   runModelName,
@@ -422,6 +431,7 @@ export function ChatComposer({
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+        <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>

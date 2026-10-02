@@ -22,15 +22,22 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
+import { useAgentPorts } from "./lib/ports";
 import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
-import { chatMark, chatTitle } from "./lib/chat-list";
+import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "../../electron/shared/project-edits.mjs";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
+import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
+import { ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
+import { AnimatePresence } from "motion/react";
+import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "./components/changes/DiffView";
+import { useChanges } from "./components/changes/useChanges";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
@@ -213,14 +220,27 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const changes = useChanges({
+    cwd: selectedWorktree?.path,
+    base: selectedWorktree?.base,
+    chatId: project && selectedSession ? chatKey(project.path, selectedSession.id) : null,
+    available: view === "chat" && Boolean(selectedSession && selectedWorktree),
+  });
+  const diffPrefs = useDiffPreferences();
+  const diffShowing = changes.diffOpen;
+  const diffPresence = useDiffPresence(diffShowing);
+  const changesAvailable = view === "chat" && Boolean(selectedSession && selectedWorktree);
+  const changesAvailableRef = useRef(false);
+  changesAvailableRef.current = changesAvailable;
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
     : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
+  const agentPorts = useAgentPorts();
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
+  const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
@@ -288,11 +308,11 @@ function App() {
   const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
-    return Object.values(state.sessions)
+    const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ sessionMessages }) => sessionMessages.length > 0)
-      .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
+      .filter(({ sessionMessages }) => sessionMessages.length > 0);
+    return orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
         // The commit dialog's notes aren't replies: they don't hide a failed turn.
@@ -308,10 +328,11 @@ function App() {
             diff: worktree?.diff,
             pullRequests: worktree ? chatPullRequests(pullRequestRefs(sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
             failed: lastReply?.outcome === "failed",
+            ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
           },
         };
       });
-  }, [state, asking, waiting, running, pullRequests, chatPrs]);
+  }, [state, chatOrder, asking, waiting, running, pullRequests, chatPrs, agentPorts, project]);
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -612,6 +633,9 @@ function App() {
         if (event.key.toLowerCase() === "t") {
           event.preventDefault();
           toggleTheme();
+        } else if (event.key.toLowerCase() === "d" && changesAvailableRef.current) {
+          event.preventDefault();
+          changes.toggle();
         }
         return;
       }
@@ -730,6 +754,7 @@ function App() {
     <>
     <DotBackground key="app">
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
+      {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
           <span>Milagre {update.version} is ready to update.</span>
@@ -777,7 +802,11 @@ function App() {
         </div>
       )}
 
-      <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+      <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+        <DiffBar open={diffShowing} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
+        <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} />}
+        </AnimatePresence>
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {notice && (
@@ -789,7 +818,8 @@ function App() {
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
-        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
+        {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out both" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
             key={project.path}
@@ -818,6 +848,8 @@ function App() {
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}
             tasks={run?.tasks}
+            ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+            onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
@@ -877,6 +909,9 @@ function App() {
           </EditorLinks>
         </div>
       </main>
+      <ChangesPanelSlot open={changes.open}>
+        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} />
+      </ChangesPanelSlot>
       </div>
       {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (

@@ -25,8 +25,13 @@ contextBridge.exposeInMainWorld("milagre", {
   readPullRequest: (worktreePath) => ipcRenderer.invoke("worktree:pull-request", worktreePath),
   readPullRequests: (worktreePath, refs) => ipcRenderer.invoke("worktree:pull-requests", worktreePath, refs),
   revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
+  copyImage: (file) => ipcRenderer.invoke("image:copy", file),
+  saveImage: (file) => ipcRenderer.invoke("image:save", file),
+  showImageMenu: (file) => ipcRenderer.invoke("image:menu", file),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),
+    diffFiles: (request) => ipcRenderer.invoke("git:diff-files", request),
+    diffFile: (request) => ipcRenderer.invoke("git:diff-file", request),
     generate: (request) => ipcRenderer.invoke("git:generate", request),
     commit: (request) => ipcRenderer.invoke("git:commit", request),
     push: (request) => ipcRenderer.invoke("git:push", request),
@@ -62,6 +67,13 @@ contextBridge.exposeInMainWorld("milagre", {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("agent:event", listener);
     return () => ipcRenderer.removeListener("agent:event", listener);
+  },
+  getAgentPorts: () => ipcRenderer.invoke("agent:ports"),
+  stopAgentPort: (chatId, pid) => ipcRenderer.invoke("agent:stop-port", chatId, pid),
+  onAgentPorts: (callback) => {
+    const listener = (_event, ports) => callback(ports);
+    ipcRenderer.on("agent:ports", listener);
+    return () => ipcRenderer.removeListener("agent:ports", listener);
   },
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),

@@ -285,6 +285,7 @@ class CodexSession {
     this.fileChanges.clear();
     // A command still running when the turn stopped never completes; the renderer closes its step.
     this.state.steps.clear();
+    this.state.thinkingStarts?.clear();
     const imageSets = this.imageSets;
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));

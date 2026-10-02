@@ -8,9 +8,11 @@
 //   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id
 //   { type: "step-started", step }          a tool call began: step = { id, kind, title, detail? } (see steps.cjs)
 //   { type: "step-output", id, text }       command output as it streams (Codex only), appended to the step
-//   { type: "step-completed", id, status, title?, detail? }
+//   { type: "step-completed", id, status, title?, detail?, durationMs? }
 //                                           the tool call ended; detail replaces anything streamed. A step still
 //                                           running when its turn ends gets no step-completed
+//                                           Thinking is a step too (kind "thinking"): its summary streams as
+//                                           step-output, and it ends with how long it took
 //   { type: "permission-request", ...request } and { type: "permission-resolved", requestId, decision }
 //                                           an approval the turn waits on (see permissions.cjs)
 //   { type: "question-request", ...request } and { type: "question-resolved", requestId, outcome }
@@ -18,7 +20,7 @@
 //   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message }
 // Exactly one of the last three ends every turn.
 
-const { claudeStep, claudeStepResult, codexStep, codexStepResult } = require("./steps.cjs");
+const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
 const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.";
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
@@ -32,15 +34,19 @@ function isTerminal(event) {
   return TERMINAL_TYPES.has(event.type);
 }
 
+// The mapper's clock; tests set state.now.
+const now = (state) => (state.now ?? Date.now)();
+
 function textDelta(state, text) {
   state.hasText = true;
   return { type: "text-delta", messageId: state.turnId, text };
 }
 
 // Claude Agent SDK message -> events. Partial messages (includePartialMessages) carry the
-// streamed text. Each assistant message holds a finished content block: a tool_use block starts a
-// step, and the tool_result in a later user message ends it. Subagent messages (parent_tool_use_id
-// set) are not part of the reply: the Agent call that started them is the step.
+// streamed text and thinking: a thinking block is a step from its start to its stop. Each assistant
+// message holds a finished content block: a tool_use block starts a step, and the tool_result in a
+// later user message ends it. Subagent messages (parent_tool_use_id set) are not part of the reply:
+// the Agent call that started them is the step.
 function mapClaudeMessage(message, state) {
   const events = [];
   if (message.type === "system" && message.subtype === "init" && message.session_id && message.session_id !== state.sessionId) {
@@ -51,6 +57,21 @@ function mapClaudeMessage(message, state) {
     const event = message.event ?? {};
     if (event.type === "content_block_start" && event.content_block?.type === "text" && state.hasText) events.push(textDelta(state, "\n\n"));
     if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) events.push(textDelta(state, event.delta.text));
+    if (event.type === "content_block_start" && (event.content_block?.type === "thinking" || event.content_block?.type === "redacted_thinking")) {
+      // The thinking block streaming now; ids count up for the provider's life, so they stay unique in a reply.
+      state.thinkingCount = (state.thinkingCount ?? 0) + 1;
+      state.thinking = { id: `thinking-${state.thinkingCount}`, index: event.index, text: "", startedAt: now(state) };
+      events.push({ type: "step-started", step: thinkingStep(state.thinking.id) });
+    }
+    const thinking = state.thinking;
+    if (thinking && event.index === thinking.index && event.type === "content_block_delta" && event.delta?.type === "thinking_delta" && event.delta.thinking) {
+      thinking.text += event.delta.thinking;
+      events.push({ type: "step-output", id: thinking.id, text: event.delta.thinking });
+    }
+    if (thinking && event.index === thinking.index && event.type === "content_block_stop") {
+      state.thinking = null;
+      events.push({ type: "step-completed", ...thinkingEnd(thinking.id, now(state) - thinking.startedAt, thinking.text) });
+    }
   }
   if (message.type === "assistant" && message.parent_tool_use_id == null) {
     for (const block of message.message?.content ?? []) {
@@ -87,6 +108,7 @@ function mapCodexNotification(method, params, state) {
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
+    if (params.item.type === "reasoning") return codexReasoning(method, params.item, state);
     const step = codexStep(params.item);
     if (!step) return [];
     // Steps started and not yet completed, by item id.
@@ -100,6 +122,9 @@ function mapCodexNotification(method, params, state) {
     const started = state.steps.delete(step.id) ? [] : [{ type: "step-started", step }];
     return [...started, { type: "step-completed", ...codexStepResult(params.item) }];
   }
+  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  // A new summary part is a new paragraph.
+  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
   // The deltas are a preview: the first chunk can be missing, and item/completed carries the whole output.
   if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   if (method === "item/agentMessage/delta" && params.delta) {
@@ -121,6 +146,24 @@ function mapCodexNotification(method, params, state) {
     return [{ type: "turn-completed" }];
   }
   return [];
+}
+
+// A reasoning item is a thinking step: its summary streams in, and item/completed carries all of it.
+function codexReasoning(method, item, state) {
+  const id = String(item.id);
+  state.steps ??= new Set();
+  state.thinkingStarts ??= new Map();
+  if (method === "item/started") {
+    if (state.steps.has(id)) return [];
+    state.steps.add(id);
+    state.thinkingStarts.set(id, now(state));
+    return [{ type: "step-started", step: thinkingStep(id) }];
+  }
+  const started = state.steps.delete(id) ? [] : [{ type: "step-started", step: thinkingStep(id) }];
+  const startedAt = state.thinkingStarts.get(id);
+  state.thinkingStarts.delete(id);
+  const summary = (item.summary ?? []).filter((part) => typeof part === "string" && part).join("\n\n");
+  return [...started, { type: "step-completed", ...thinkingEnd(id, startedAt === undefined ? undefined : now(state) - startedAt, summary) }];
 }
 
 module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, mapCodexNotification, missingCliMessage };

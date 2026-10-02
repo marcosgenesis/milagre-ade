@@ -316,6 +316,22 @@ test("a step that ends without a detail keeps none, and a new title replaces the
   ]);
 });
 
+test("thinking streams its summary and ends with how long it took", () => {
+  const { runs } = fold([
+    { type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } },
+    { type: "step-output", id: "th1", text: "Plan " },
+    { type: "step-output", id: "th1", text: "it." },
+  ]);
+  assert.equal(runs[key(1)].steps[0].detail, "Plan it.");
+  const ended = fold([{ type: "step-completed", id: "th1", status: "done", title: "Thought for 2s", detail: "Plan it.", durationMs: 2_100 }], runs).runs;
+  assert.deepEqual(ended[key(1)].steps, [{ id: "th1", kind: "thinking", title: "Thought for 2s", status: "done", offset: 0, detail: "Plan it.", durationMs: 2_100 }]);
+});
+
+test("thinking cut off by a cancelled turn is saved as done, not failed", () => {
+  const { state } = fold([{ type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } }, { type: "step-started", step: npmTest }, { type: "turn-cancelled" }]);
+  assert.deepEqual(state.messages.at(-1)?.steps?.map((step) => step.status), ["done", "failed"]);
+});
+
 test("streamed output keeps its last 20,000 characters", () => {
   const { runs } = fold([
     { type: "step-started", step: { ...npmTest, detail: "" } },

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("milagre", {
   },
   refreshDiffs: (projectPath, worktreeIds) => ipcRenderer.invoke("worktree:refresh-diffs", projectPath, worktreeIds),
   readPullRequest: (worktreePath) => ipcRenderer.invoke("worktree:pull-request", worktreePath),
+  readPullRequests: (worktreePath, refs) => ipcRenderer.invoke("worktree:pull-requests", worktreePath, refs),
   revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),

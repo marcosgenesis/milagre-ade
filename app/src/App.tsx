@@ -34,6 +34,7 @@ import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
+import { chatPullRequests, pullRequestRefs } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -211,7 +212,7 @@ function App() {
     const latest = statesRef.current[projectOfKey(chatId)];
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
-  const { pullRequests, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
@@ -305,12 +306,12 @@ function App() {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
-            pullRequest: worktree ? pullRequests[worktree.path] ?? undefined : undefined,
+            pullRequests: worktree ? chatPullRequests(pullRequestRefs(sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
             failed: lastReply?.outcome === "failed",
           },
         };
       });
-  }, [state, asking, waiting, running, pullRequests]);
+  }, [state, asking, waiting, running, pullRequests, chatPrs]);
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -717,7 +718,7 @@ function App() {
   commands.push(...chats.map((chat): Command => ({
     id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
     detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
-    keywords: [chat.details.path, chat.details.pullRequest?.title, chat.details.pullRequest ? `#${chat.details.pullRequest.number}` : ""].filter(Boolean).join(" "),
+    keywords: [chat.details.path, ...chat.details.pullRequests.flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
     run: () => openChat(Number(chat.id)),
   })));
   commands.push(...recentProjects.filter((recent) => recent.path !== project.path).map((recent): Command => ({

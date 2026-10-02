@@ -35,6 +35,8 @@ import { ChangesPanel } from "./components/changes/ChangesPanel";
 import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
 import { ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
+import { useDiffComments } from "./components/changes/useDiffComments";
+import { formatCommentsMessage } from "./lib/diff-comments";
 import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "./components/changes/DiffView";
 import { useChanges } from "./components/changes/useChanges";
 import { GitActionsDialog } from "./components/GitActionsDialog";
@@ -225,6 +227,7 @@ function App() {
     chatId: project && selectedSession ? chatKey(project.path, selectedSession.id) : null,
     available: view === "chat" && Boolean(selectedSession && selectedWorktree),
   });
+  const diffComments = useDiffComments(project && selectedSession ? chatKey(project.path, selectedSession.id) : null, changes);
   const diffPrefs = useDiffPreferences();
   const diffShowing = changes.diffOpen;
   const diffPresence = useDiffPresence(diffShowing);
@@ -544,8 +547,8 @@ function App() {
 
   const ipcError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
-  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false) {
-    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
+    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
     setPreparing(true);
     setNewChatError(null);
 
@@ -555,11 +558,11 @@ function App() {
     } catch (error) {
       setNewChatError(`Could not create the worktree: ${ipcError(error)}`);
       setPreparing(false);
-      return;
+      return false;
     }
     if (!target || projectRef.current?.path !== project.path) {
       setPreparing(false);
-      return;
+      return false;
     }
     // The main process saves the message, then starts the chat's turn, or steers the one running.
     const latest = openState();
@@ -591,11 +594,23 @@ function App() {
           imageDraft.clear();
         }
       }
+      return true;
     } catch (error) {
       setNewChatError(`Could not send the message: ${ipcError(error)}`);
+      return false;
     } finally {
       setPreparing(false);
     }
+  }
+
+  // Every comment that still matches the diff goes out as one message, like any send (a running turn is steered).
+  async function sendDiffComments() {
+    const sent = diffComments.sendable;
+    if (sent.length === 0) return;
+    const base = changes.list.state === "ready" && changes.list.isRepo ? changes.list.base : null;
+    // Back to the chat first, so the message shows up as it lands.
+    changes.closeDiff();
+    if (await executeSend(formatCommentsMessage(sent, { mode: changes.mode, base }), permissionMode, [], [], true)) diffComments.removeMany(sent.map((comment) => comment.id));
   }
 
   async function sendMessage() {
@@ -800,9 +815,9 @@ function App() {
       )}
 
       <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        <DiffBar open={diffShowing} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
+        <DiffBar open={diffShowing} onBack={changes.closeDiff} send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
         <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
-          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} />}
+          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
         </AnimatePresence>
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -905,7 +920,7 @@ function App() {
         </div>
       </main>
       <ChangesPanelSlot open={changes.open}>
-        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} />
+        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} commentCounts={diffComments.counts} />
       </ChangesPanelSlot>
       </div>
       {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiffFileEntry, DiffFileResult, DiffMode } from "../../electron";
+import { parsePatch, type DiffHunk } from "../../lib/diff-parse";
 
 // Patches load as files scroll into view; a few at a time keeps git from competing with the agent.
 const MAX_IN_FLIGHT = 4;
@@ -13,6 +14,16 @@ export type DiffList =
   | { state: "error"; message: string }
   | { state: "ready"; isRepo: false; message: string }
   | { state: "ready"; isRepo: true; base: string | null; files: DiffFileEntry[]; message?: string };
+
+const parsed = new WeakMap<object, DiffHunk[]>();
+
+/** A loaded patch's hunks, parsed once however many places read them (a file's rows, the comments' outdated check). */
+export function hunksOf(patch: PatchState | undefined): DiffHunk[] {
+  if (patch?.status !== "ready") return [];
+  let hunks = parsed.get(patch);
+  if (!hunks) parsed.set(patch, (hunks = parsePatch(patch.patch)));
+  return hunks;
+}
 
 export function isLarge(file: DiffFileEntry) {
   return file.added + file.removed > LARGE_DIFF_LINES;

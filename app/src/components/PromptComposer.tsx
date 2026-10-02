@@ -16,6 +16,8 @@ import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-sta
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
+import { HandoverRow } from "./Handover";
+import { handoverBlocker, otherProvider } from "../lib/handover";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
@@ -54,6 +56,8 @@ interface PromptComposerProps {
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
   lockedProvider?: ModelProvider;
+  /** Opens a new chat on the other provider with this chat's context. */
+  onHandover?: (provider: ModelProvider) => void;
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
   /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
@@ -99,7 +103,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, onHandover, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -328,9 +332,17 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             className={`absolute w-[360px] ${anchorClass}`}
             style={anchorStyle}
             header={
-              <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
-              </div>
+              lockedProvider !== undefined && onHandover ? (
+                <HandoverRow
+                  provider={otherProvider(lockedProvider)}
+                  blocked={handoverBlocker({ running, cli: cliMessage(cliStatus?.[otherProvider(lockedProvider)]) ?? null })}
+                  onClick={() => { setModelOpen(false); onHandover(otherProvider(lockedProvider)); }}
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
+                      {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
+                </div>
+              )
             }
           >
             {providerNotice && (

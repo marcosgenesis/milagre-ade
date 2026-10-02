@@ -586,6 +586,32 @@ function App() {
     await executeSend(body, permissionMode);
   }
 
+  async function handover(provider: ModelProvider) {
+    if (!project || selectedSessionId === null) return;
+    const target = modelForChat(selectedModel, provider, messages, models);
+    if (target.provider !== provider) return;
+    const capability = capabilityFor(target, capabilities);
+    try {
+      const { sessionId } = await window.milagre.handover({
+        projectPath: project.path,
+        sessionId: selectedSessionId,
+        provider,
+        model: target.id,
+        permissionMode,
+        effort: effortFor(capability, effort),
+        ultracode: capability.ultracode && ultracode,
+        fastMode: supportsFastMode(target) && fastMode,
+        replies: getSettings().claudeReplies,
+        tldrEnabled: getSettings().tldrEnabled,
+      });
+      if (projectRef.current?.path !== project.path) return;
+      setSelectedSessionId(sessionId);
+      chooseModel(target);
+    } catch (error) {
+      setNewChatError(`Could not hand over: ${ipcError(error)}`);
+    }
+  }
+
   // Keep finished message cards out of the typing render path. Recommendations still use
   // the current model and permission mode when clicked.
   const recommendationRef = useRef<(option: string) => void>(() => {});
@@ -822,6 +848,7 @@ function App() {
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
+            onHandover={(provider) => void handover(provider)}
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}

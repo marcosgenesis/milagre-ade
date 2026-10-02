@@ -167,6 +167,8 @@ interface ChatComposerProps {
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
+  /** Hands this chat over to the other provider in a new chat. */
+  onHandover?: (provider: ModelProvider) => void;
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
   /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
@@ -317,6 +319,7 @@ export function ChatComposer({
   asking = false,
   runModelName,
   lockedProvider,
+  onHandover,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -470,6 +473,7 @@ export function ChatComposer({
           sendBlocked={sendBlocked}
           running={isSending}
           lockedProvider={lockedProvider}
+          onHandover={onHandover}
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}

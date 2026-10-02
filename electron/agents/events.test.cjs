@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { MILAGRE_INSTRUCTIONS, isTerminal, mapClaudeMessage, mapCodexNotification } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, cliBrokenMessage, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 
 const claudeState = () => ({ sessionId: null, turnId: "turn-a", hasText: false });
 const codexState = () => ({ threadId: "thread-1", turnId: null, lastItemId: null, hasText: false });
@@ -49,6 +49,43 @@ test("Codex: turn/completed maps each status", () => {
   assert.deepEqual(done("interrupted"), [{ type: "turn-cancelled" }]);
   assert.deepEqual(done("failed", { message: "The 'gpt-6.1-sol' model is not supported." }), [{ type: "turn-failed", message: "The 'gpt-6.1-sol' model is not supported." }]);
   assert.deepEqual(done("failed"), [{ type: "turn-failed", message: "Codex could not finish this turn." }]);
+});
+
+test("CLI failures name the fix", () => {
+  assert.equal(missingCliMessage("claude"), "Milagre couldn't find Claude Code. Install it with `curl -fsSL https://claude.ai/install.sh | bash`, then send your message again.");
+  assert.equal(missingCliMessage("codex"), "Milagre couldn't find Codex. Install it with `npm install -g @openai/codex`, then send your message again.");
+  assert.equal(cliTooOldMessage("claude", "2.1.200", "2.1.286"), "Milagre needs Claude Code 2.1.286 or later, and you have 2.1.200. Run `claude update` in a terminal, then send your message again.");
+  assert.equal(cliTooOldMessage("codex", "0.150.0", "0.158.0"), "Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal, then send your message again.");
+  assert.equal(cliBrokenMessage("codex", "/Users/x/.nvm/versions/node/v24.13.0/bin/codex", "env: node: No such file or directory\n"), "Codex (/Users/x/.nvm/versions/node/v24.13.0/bin/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal, then send your message again.");
+  assert.equal(loginMessage("claude"), "Claude Code isn't logged in. Run `claude auth login` in a terminal, then send your message again.");
+  assert.equal(loginMessage("codex"), "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.");
+  assert.equal(crashMessage("claude", "Claude Code process terminated by signal SIGKILL"), "Claude Code stopped unexpectedly: Claude Code process terminated by signal SIGKILL. Send your message again to continue this chat.");
+  assert.equal(crashMessage("codex", "Codex exited with code null (SIGKILL)."), "Codex stopped unexpectedly: Codex exited with code null (SIGKILL). Send your message again to continue this chat.");
+  assert.equal(crashMessage("claude", ""), "Claude Code stopped unexpectedly. Send your message again to continue this chat.");
+});
+
+test("lastLine keeps the last thing a CLI printed, without colours", () => {
+  assert.equal(lastLine("\x1b[2m2026-10-01T23:30:17Z\x1b[0m \x1b[31mERROR\x1b[0m connecting\nthread 'main' panicked at core.rs\n\n"), "thread 'main' panicked at core.rs");
+  assert.equal(lastLine("x".repeat(400)).length, 300);
+  assert.equal(lastLine(undefined), "");
+});
+
+test("Claude: a turn it can't authenticate asks to log in", () => {
+  const state = claudeState();
+  const notLoggedIn = { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
+  assert.deepEqual(mapClaudeMessage(notLoggedIn, state), []);
+  assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }, state), [{ type: "turn-failed", message: loginMessage("claude") }]);
+  assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: true, result: "Credit balance is too low" }, state), [{ type: "turn-failed", message: "Credit balance is too low" }]);
+});
+
+test("Codex: a turn it can't authenticate asks to log in, and raw API errors read as their message", () => {
+  const failed = (error) => mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-1", status: "failed", error } }, codexState());
+  const unauthorized = { message: "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } } };
+  assert.deepEqual(failed(unauthorized), [{ type: "turn-failed", message: loginMessage("codex") }]);
+  assert.deepEqual(failed({ message: "Unauthorized", codexErrorInfo: "unauthorized" }), [{ type: "turn-failed", message: loginMessage("codex") }]);
+  const unsupported = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." } });
+  assert.deepEqual(failed({ message: unsupported, codexErrorInfo: null }), [{ type: "turn-failed", message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." }]);
+  assert.deepEqual(failed({ message: "stream disconnected", codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 500 } } }), [{ type: "turn-failed", message: "stream disconnected" }]);
 });
 
 test("Codex: a stale completion or text for another turn id is ignored", () => {

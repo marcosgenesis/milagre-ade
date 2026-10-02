@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UsageSnapshot } from "../../model";
-import { mergeSnapshot } from "./format";
+import { mergeSnapshot, seedSnapshot } from "./format";
 
 const POLL_MS = 5 * 60_000;
 
@@ -31,6 +31,10 @@ export function useUsage() {
   }, [refresh]);
 
   useEffect(() => {
+    // Saved numbers first, so the sidebar isn't empty while the first read runs.
+    window.milagre.getCachedUsage()
+      .then((cached) => setSnapshot((current) => seedSnapshot(current, cached)))
+      .catch(() => {});
     void refresh();
     const timer = window.setInterval(() => void refresh(), POLL_MS);
     return () => window.clearInterval(timer);

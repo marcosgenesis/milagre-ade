@@ -32,6 +32,7 @@ declare global {
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
+      getCachedUsage: () => Promise<UsageSnapshot>;
       /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
       notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */

@@ -60,6 +60,12 @@ export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used")
   return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;
 }
 
+// The saved numbers only seed an empty snapshot: a fresh read that landed first wins.
+export function seedSnapshot(current: UsageSnapshot | null, cached: UsageSnapshot): UsageSnapshot | null {
+  if (current || cached.providers.length === 0) return current;
+  return cached;
+}
+
 // A failed refresh keeps the last good windows and their timestamp, so the card
 // stays useful and "Updated Xm ago" stays truthful while showing the error.
 // Windows that have reset since are dropped: their old numbers no longer apply.

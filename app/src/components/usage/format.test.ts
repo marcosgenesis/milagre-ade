@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderUsage, UsageSnapshot } from "../../model";
-import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, shownPercent, usageLabel, usageTone, visibleProviders } from "./format.ts";
+import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, seedSnapshot, shownPercent, usageLabel, usageTone, visibleProviders } from "./format.ts";
 
 const NOW = Date.parse("2026-10-01T19:30:00Z");
 const MINUTE = 60_000;
@@ -98,4 +98,12 @@ test("drops kept windows that have already reset", () => {
   const merged = mergeSnapshot(previous, failed, NOW + 2 * HOUR);
   assert.deepEqual(merged.providers[0].windows.map((item) => item.id), ["weekly", "weekly:fable"]);
   assert.equal(merged.providers[0].updatedAt, at(-6 * HOUR));
+});
+
+test("seedSnapshot fills an empty snapshot but never overwrites a fresh read", () => {
+  const cached: UsageSnapshot = { providers: [claude()] };
+  const fresh: UsageSnapshot = { providers: [claude({ windows: [] })] };
+  assert.equal(seedSnapshot(null, cached), cached);
+  assert.equal(seedSnapshot(fresh, cached), fresh);
+  assert.equal(seedSnapshot(null, { providers: [] }), null);
 });

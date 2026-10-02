@@ -77,4 +77,16 @@ function createUsageStore({ file } = {}) {
   };
 }
 
-module.exports = { createUsageStore };
+// What the store can show with no network: each provider's last good windows, minus any that have reset.
+function cachedSnapshot(store, nowMs) {
+  const providers = [];
+  for (const provider of PROVIDERS) {
+    const { last } = store.get(provider);
+    if (!last) continue;
+    const windows = last.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > nowMs);
+    if (windows.length) providers.push({ provider, status: "ok", windows, updatedAt: last.updatedAt });
+  }
+  return { providers };
+}
+
+module.exports = { createUsageStore, cachedSnapshot };

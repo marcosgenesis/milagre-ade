@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createUsageReader, readClaudeUsage, readCodexUsage } = require("./usage.cjs");
-const { createUsageStore } = require("./usage-cache.cjs");
+const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const TOKEN = "sk-ant-oat01-SECRET-TOKEN";
 const NOW = Date.parse("2026-10-01T19:30:00Z");
@@ -486,4 +486,16 @@ test("the persisted cache contains no credentials", async () => {
   } finally {
     fsSync.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("cachedSnapshot builds ok providers from the store and drops expired windows", async () => {
+  const store = createUsageStore();
+  store.setLast("claude", { windows: [
+    { id: "session", label: "Session", shortLabel: "5h", usedPercent: 73, resetsAt: "2026-10-01T20:49:59Z" },
+    { id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" },
+  ], updatedAt: "2026-10-01T19:00:00.000Z" });
+  store.setLast("codex", { windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: "2026-10-01T20:00:00Z" }], updatedAt: "2026-10-01T19:10:00.000Z" });
+  const snapshot = cachedSnapshot(store, Date.parse("2026-10-01T21:00:00Z"));
+  assert.deepEqual(snapshot, { providers: [{ provider: "claude", status: "ok", windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" }], updatedAt: "2026-10-01T19:00:00.000Z" }] });
+  assert.deepEqual(cachedSnapshot(createUsageStore(), NOW), { providers: [] });
 });

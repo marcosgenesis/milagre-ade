@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("update:state", listener);
   },
   readUsage: () => ipcRenderer.invoke("usage:read"),
+  getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
   notifyAttention: (notice) => ipcRenderer.invoke("notification:attention", notice),
   onOpenChat: (callback) => {
     const listener = (_event, chatId) => callback(chatId);

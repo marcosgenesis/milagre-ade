@@ -56,6 +56,8 @@ declare global {
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
       /** The current branch's open or merged PR, or null when none is available. */
       readPullRequest: (worktreePath: string) => Promise<PullRequest | null>;
+      /** PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */
+      readPullRequests: (worktreePath: string, refs: string[]) => Promise<Array<PullRequest | null>>;
       /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
       revealInFolder: (folder: string) => Promise<void>;
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */

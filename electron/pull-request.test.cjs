@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readPullRequest } = require("./pull-request.cjs");
+const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
 
 const title = "Show pull requests in the chat sidebar";
 const url = "https://github.com/example/project/pull/10213";
@@ -83,3 +83,29 @@ for (const [state, mergeStateStatus, expected] of [
     assert.equal(result.conflictStatusKnown, mergeStateStatus !== "UNKNOWN");
   });
 }
+
+test("reads a PR the chat created or merged by its URL or number", async () => {
+  const calls = [];
+  const exec = async (command, args, options) => {
+    calls.push([command, args, options.cwd]);
+    const ref = args[2];
+    const number = Number(ref.split("/").at(-1));
+    return { stdout: JSON.stringify({ number, url: `https://github.com/example/project/pull/${number}`, state: number === 84 ? "MERGED" : "OPEN", title, mergeStateStatus: number === 90 ? "DIRTY" : "CLEAN" }) };
+  };
+  assert.deepEqual(await readPullRequests("/project", ["https://github.com/example/project/pull/84", "90"], exec), [
+    { number: 84, url: "https://github.com/example/project/pull/84", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: true },
+    { number: 90, url: "https://github.com/example/project/pull/90", state: "OPEN", title, readyToMerge: false, hasConflicts: true, conflictStatusKnown: true },
+  ]);
+  assert.deepEqual(calls.map(([command, args, cwd]) => [command, args.slice(0, 3), cwd]), [
+    ["gh", ["pr", "view", "https://github.com/example/project/pull/84"], "/project"],
+    ["gh", ["pr", "view", "90"], "/project"],
+  ]);
+});
+
+test("never passes a ref gh could read as a flag, and a failed lookup is null", async () => {
+  let ran = 0;
+  const exec = async () => { ran++; throw new Error("not found"); };
+  assert.deepEqual(await readPullRequests("/project", ["--web", "-R", "javascript:alert(1)", "feature/x", 12, "91"], exec), [null, null, null, null, null, null]);
+  assert.equal(ran, 1, "Only the numeric ref reached gh");
+  assert.deepEqual(await readPullRequests("/project", "90", exec), []);
+});

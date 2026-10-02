@@ -38,6 +38,7 @@ import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
+import { chatPullRequests, pullRequestRefs } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -202,7 +203,7 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
-  const { pullRequests, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, chatPullRequests: chatPrs, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
@@ -296,12 +297,12 @@ function App() {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
-            pullRequest: worktree ? pullRequests[worktree.path] ?? undefined : undefined,
+            pullRequests: worktree ? chatPullRequests(pullRequestRefs(sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
             failed: lastReply?.outcome === "failed",
           },
         };
       });
-  }, [state, waiting, running, pullRequests]);
+  }, [state, waiting, running, pullRequests, chatPrs]);
   // Switching projects asks first while a turn runs here (the project menu says which chat).
   const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
   const runningChatRef = useRef(runningChat);
@@ -851,7 +852,7 @@ function App() {
   commands.push(...chats.map((chat): Command => ({
     id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
     detail: [chat.mark === "waiting" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
-    keywords: [chat.details.path, chat.details.pullRequest?.title, chat.details.pullRequest ? `#${chat.details.pullRequest.number}` : ""].filter(Boolean).join(" "),
+    keywords: [chat.details.path, ...chat.details.pullRequests.flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
     run: () => openChat(Number(chat.id)),
   })));
   commands.push(...recentProjects.filter((recent) => recent.path !== project.path).map((recent): Command => ({

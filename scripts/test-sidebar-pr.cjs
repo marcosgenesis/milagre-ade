@@ -27,13 +27,17 @@ const state = {
 function Fixture() {
   const [collapsed, setCollapsed] = useState(false);
   window.setCollapsed = setCollapsed;
+  const [multi, setMulti] = useState([]);
+  window.setMulti = setMulti;
   const { pullRequests: prs, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests("/fixture", state);
   window.dismissConflictAction = () => dismissConflictAction(prs["/fixture/worktree"]);
   window.dismissedConflicts = dismissedConflicts;
   return <aside data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, paddingTop: 10 }}>
-    <ChatRow item={{ id: "1", label: "Rename fixture", details: { pullRequest: prs["/fixture/worktree"] } }}
+    <ChatRow item={{ id: "1", label: "Rename fixture", details: { pullRequests: prs["/fixture/worktree"] ? [prs["/fixture/worktree"]] : [] } }}
       active collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
     <ChatRow item={{ id: "2", label: "Chat without a PR" }}
+      active={false} collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
+    <ChatRow item={{ id: "3", label: "Pick the next 3 issues", details: { pullRequests: multi } }}
       active={false} collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
   </aside>;
 }
@@ -69,6 +73,8 @@ async function browserChecks() {
     assert.ok(await evaluate('document.querySelector("[data-chat-hover-card]").textContent.includes("Show pull requests in the chat sidebar")'), "Hover card includes the actual PR title");
     assert.ok(await evaluate('[...document.querySelectorAll("[role=tooltip]")].some(node => node.textContent === "Open pull request #10213")'), "Shared tooltip shows PR status and number");
     await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+    // The card waits a moment for the pointer to reach it before closing.
+    await waitFor('!document.querySelector("[data-chat-hover-card]")');
     const openColor = await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color');
     const geometry = await evaluate(`(() => {
       const row = document.querySelector('[data-row]').getBoundingClientRect();
@@ -94,6 +100,8 @@ async function browserChecks() {
     await delay(200);
     await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-ready.png", image.toPNG()));
     await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+    await delay(600);
+    assert.equal(await evaluate('document.querySelectorAll("[data-chat-hover-card]").length'), 0, "Leaving the row closes the card after the grace period");
     await evaluate('window.pr = { ...window.pr, readyToMerge: false }; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Ready")');
     await evaluate('window.pr = { ...window.pr, hasConflicts: true }; window.refreshPR()');
@@ -134,6 +142,57 @@ async function browserChecks() {
     await evaluate('window.setCollapsed(false); window.pr = null; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]") && document.querySelector("aside").dataset.sidebarCollapsed === "false"');
     assert.equal(await evaluate('document.querySelector("[data-row]").getBoundingClientRect().height'), 32);
+
+    // A chat that made three PRs: the row has room for two, the card lists all of them.
+    const prUrl = n => `https://github.com/example/project/pull/${n}`;
+    await evaluate(`window.setMulti([
+      { number: 84, url: "${prUrl(84)}", title: "Show the to-do pill", state: "MERGED", readyToMerge: false, hasConflicts: false },
+      { number: 88, url: "${prUrl(88)}", title: "Find text in the open chat", state: "OPEN", readyToMerge: false, hasConflicts: false },
+      { number: 90, url: "${prUrl(90)}", title: "Run a setup command in new worktrees", state: "OPEN", readyToMerge: false, hasConflicts: true },
+    ])`);
+    await waitFor('document.querySelectorAll("[data-chat-prs] [data-chat-pr]").length === 2');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-chat-pr]")].map(link => link.textContent)'), ["#90", "#88"], "Conflicts first, then open PRs; no status words with several PRs");
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr-more]").textContent'), "+1");
+    assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("conflicts")'));
+    assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-red")'), true);
+    const multiGeometry = await evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-row]')];
+      const row = rows[2].getBoundingClientRect();
+      const chips = document.querySelector('[data-chat-prs]').getBoundingClientRect();
+      return { rowHeight: row.height, rowRight: row.right, chipsRight: chips.right, chipsBottom: chips.bottom, rowBottom: row.bottom };
+    })()`);
+    assert.equal(multiGeometry.rowHeight, 46);
+    assert.ok(multiGeometry.chipsRight <= multiGeometry.rowRight && multiGeometry.chipsBottom <= multiGeometry.rowBottom, "Chips fit inside the row");
+    const thirdRow = 'document.querySelectorAll("[data-row]")[2]';
+    await waitFor('!document.querySelector("[data-chat-hover-card]")');
+    await evaluate(`${thirdRow}.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))`);
+    await waitFor('document.querySelectorAll("[data-chat-card-pr]").length === 3');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-chat-card-pr]")].map(link => link.textContent)'), [
+      "#84 · Show the to-do pill",
+      "#88 · Find text in the open chat",
+      "#90 · Run a setup command in new worktreesMerge conflicts",
+    ], "The card lists every PR in the order the chat made them");
+    // Moving onto the card keeps it open past the grace period.
+    await evaluate(`${thirdRow}.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.querySelector('[data-chat-hover-card]') }))`);
+    await evaluate(`document.querySelector('[data-chat-hover-card]').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: ${thirdRow} }))`);
+    await delay(500);
+    assert.ok(await evaluate('!!document.querySelector("[data-chat-hover-card]")'), "Card stays open while the pointer is on it");
+    await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-multi-pr.png", image.toPNG()));
+    const picksBefore = await evaluate('window.picks');
+    await evaluate('document.querySelector("[data-chat-card-pr]").click()');
+    await delay(150);
+    assert.deepEqual(opened.at(-1), prUrl(84), "A PR in the card opens externally");
+    assert.equal(await evaluate('window.picks'), picksBefore, "Opening a PR from the card does not select the chat");
+    await waitFor('!document.querySelector("[data-chat-hover-card]")');
+    // Leaving the card closes it after the grace period.
+    await evaluate(`${thirdRow}.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))`);
+    await waitFor('!!document.querySelector("[data-chat-hover-card]")');
+    await evaluate(`${thirdRow}.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+    assert.ok(await evaluate('!!document.querySelector("[data-chat-hover-card]")'), "The card waits for the pointer to cross the gap");
+    await waitFor('!document.querySelector("[data-chat-hover-card]")');
+    await evaluate('window.setMulti([])');
+    await waitFor('!document.querySelector("[data-chat-prs]")');
+    console.log("PASS: several PRs: two chips, +N, card lists all and stays open for clicks");
     console.log("PASS: PR lookup, red conflict state and recovery, merged purple icon, external link, title alignment, collapsed sidebar, and no-PR row");
     app.exit(0);
   } catch (error) {

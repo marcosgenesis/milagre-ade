@@ -430,7 +430,21 @@ export function ChatComposer({
           )}
         </div>
       </MessageScroller>}
-      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden">
+        {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right. */}
+        {!isNewChat && pullRequestAction && (
+          <button
+            type="button"
+            onClick={pullRequestAction.onRun}
+            disabled={sendBlocked || isSending || imageDraft.loading}
+            className={`mr-auto inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+              ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+              : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
+          >
+            <Icon icon={GitPullRequestIcon} size={14} />
+            {pullRequestAction.label}
+          </button>
+        )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
@@ -456,21 +470,6 @@ export function ChatComposer({
           </div>
         )}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {!isNewChat && pullRequestAction && (
-          <div className="mb-2 flex px-1">
-            <button
-              type="button"
-              onClick={pullRequestAction.onRun}
-              disabled={sendBlocked || isSending || imageDraft.loading}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
-                ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
-                : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
-            >
-              <Icon icon={GitPullRequestIcon} size={14} />
-              {pullRequestAction.label}
-            </button>
-          </div>
-        )}
         <PromptComposer
           imageDraft={imageDraft}
           projectPath={projectPath}

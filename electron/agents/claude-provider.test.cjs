@@ -118,7 +118,7 @@ const scripts = {
 // Scripts get the query options (for canUseTool), an abort signal that interrupt() trips, a gate
 // the test opens with calls.release(), and next() to read a message sent while they run.
 function fakeSdk(script) {
-  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], interrupts: 0, release: () => {} };
+  const calls = { options: null, queries: 0, prompts: [], models: [], modes: [], flags: [], interrupts: 0, release: () => {} };
   const query = ({ prompt, options }) => {
     calls.queries += 1;
     calls.options = options;
@@ -139,6 +139,7 @@ function fakeSdk(script) {
       interrupt: async () => { calls.interrupts += 1; controller.abort(); markInterrupted(); },
       setModel: async (model) => { calls.models.push(model); },
       setPermissionMode: async (mode) => { calls.modes.push(mode); },
+      applyFlagSettings: async (settings) => { calls.flags.push(settings); },
     });
   };
   return { calls, loadSdk: async () => ({ query }) };
@@ -186,6 +187,66 @@ test("keeps one query across turns and applies model and mode changes", async (t
   assert.deepEqual(calls.models, ["claude-sonnet-5-5"]);
   assert.deepEqual(calls.modes, ["bypassPermissions"]);
   assert.equal(events.filter((event) => event.type === "session-started").length, 1);
+});
+
+test("Concise replies start the query with Claude Code's Concise output style, and Milagre's own prompt is unchanged", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, replies: "concise" });
+  await ended(events);
+  assert.deepEqual(calls.options.settings, { outputStyle: "Concise" });
+  assert.deepEqual(calls.options.systemPrompt, { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS });
+  assert.deepEqual(calls.flags, []);
+});
+
+test("Normal replies leave the output style alone", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, replies: "normal" });
+  await ended(events);
+  assert.equal("settings" in calls.options, false);
+  assert.deepEqual(calls.flags, []);
+});
+
+test("Concise and ultracode share the query's settings", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, replies: "concise", ultracode: true });
+  await ended(events);
+  assert.deepEqual(calls.options.settings, { ultracode: true, outputStyle: "Concise" });
+});
+
+test("switching replies mid-chat applies the output style to the running query", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, replies: "normal" });
+  await ended(events);
+  await session.startTurn({ ...TURN, replies: "concise" });
+  await ended(events, 2);
+  assert.equal(calls.queries, 1);
+  assert.deepEqual(calls.flags, [{ ultracode: false, outputStyle: "Concise" }]);
+
+  await session.startTurn({ ...TURN, replies: "concise" });
+  await ended(events, 3);
+  assert.equal(calls.flags.length, 1);
+
+  await session.startTurn({ ...TURN, replies: "normal" });
+  await ended(events, 4);
+  assert.deepEqual(calls.flags.at(-1), { ultracode: false, outputStyle: "default" });
+  assert.equal(calls.flags.length, 2);
+});
+
+test("a chat that began Concise goes back to Normal with the default style", async (t) => {
+  const { session, events, calls } = claude(t);
+  await session.startTurn({ ...TURN, replies: "concise", effort: "high" });
+  await ended(events);
+  await session.startTurn({ ...TURN, replies: "normal", effort: "high" });
+  await ended(events, 2);
+  assert.deepEqual(calls.flags, [{ effortLevel: "high", ultracode: false, outputStyle: "default" }]);
+});
+
+test("a resumed chat gets the style on its new query", async (t) => {
+  const { session, events, calls } = claude(t, { resumeId: "session-1" });
+  await session.startTurn({ ...TURN, replies: "concise" });
+  await ended(events);
+  assert.deepEqual(calls.options.settings, { outputStyle: "Concise" });
+  assert.equal(calls.options.resume, "session-1");
 });
 
 test("sends images as base64 content blocks", async (t) => {

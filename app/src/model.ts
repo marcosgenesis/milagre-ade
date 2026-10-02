@@ -175,6 +175,8 @@ export interface ChatStep {
   status: "running" | "done" | "failed";
   /** The command and its output, or a unified diff, capped at 20,000 characters. */
   detail?: string;
+  /** The file a read or edit worked on, as the tool named it; the title shows only its name. */
+  file?: string;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
   offset?: number;
 }
@@ -247,7 +249,7 @@ export type AgentEvent =
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
-  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail"> }
+  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }
   | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string }
   | ({ type: "permission-request" } & PermissionRequest)
@@ -267,9 +269,17 @@ export interface AgentStartTurnRequest {
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
+  /** How long Claude's replies run; Claude only, Codex ignores it. */
+  replies?: "concise" | "normal";
   prompt: string;
   images: ImageAttachment[];
   resumeId?: string;
+}
+
+/** A code editor found on this Mac. */
+export interface EditorInfo {
+  id: string;
+  name: string;
 }
 
 export interface WorktreeRequest {

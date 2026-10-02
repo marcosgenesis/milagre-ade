@@ -74,7 +74,14 @@ test("creates one session per chat and reuses it", async (t) => {
   assert.equal(created[0].options.cwd, "/repo");
   assert.equal(created[0].options.resumeId, "thread-7");
   assert.equal(created[0].options.command, "/bin/codex");
-  assert.deepEqual(created[0].turns[0], { prompt: "hi", images: [], model: "gpt-6-sol", permissionMode: "auto", effort: undefined, ultracode: undefined });
+  assert.deepEqual(created[0].turns[0], { prompt: "hi", images: [], model: "gpt-6-sol", permissionMode: "auto", effort: undefined, ultracode: undefined, replies: undefined });
+});
+
+test("a turn carries the reply style to its session", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1", { replies: "concise" }));
+  assert.equal(created[0].turns[0].replies, "concise");
 });
 
 test("keeps chats apart", async (t) => {

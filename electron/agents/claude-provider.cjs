@@ -9,6 +9,11 @@ const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = requir
 // the user, through canUseTool, before edits and commands its rules don't already allow.
 const CLAUDE_MODES = { ask: "default", auto: "acceptEdits", full: "bypassPermissions" };
 
+// Claude Code's built-in terse output style. Unlike text appended to the system prompt, which the SDK
+// records with a conversation and ignores on later turns and resumes, the style applies to new chats, to
+// resumed chats and, through applyFlagSettings, to the running query.
+const CONCISE_STYLE = "Concise";
+
 // Claude Code prints this when --resume names a session it no longer has.
 const MISSING_CONVERSATION = /No conversation found/i;
 
@@ -90,12 +95,12 @@ class ClaudeSession {
     }
   }
 
-  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false, replies }) {
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode);
+      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode, replies);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
@@ -107,11 +112,14 @@ class ClaudeSession {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
         }
+        // Back to Normal after Concise sets the default style; a chat that never had one sets nothing.
+        const style = replies === "concise" ? CONCISE_STYLE : this.outputStyle ? "default" : null;
         // A new effort level alone turns ultracode off, so both keys always travel together.
-        if ((effort && effort !== this.effort) || ultracode !== this.ultracode) {
-          await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode });
+        if ((effort && effort !== this.effort) || ultracode !== this.ultracode || style !== (this.outputStyle ?? null)) {
+          await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode, ...(style ? { outputStyle: style } : {}) });
           this.effort = effort;
           this.ultracode = ultracode;
+          this.outputStyle = style;
         }
       }
     } catch (error) {
@@ -163,7 +171,7 @@ class ClaudeSession {
     this.emit({ type: "turn-started", turnId });
   }
 
-  async start(model, mode, effort, ultracode = false) {
+  async start(model, mode, effort, ultracode = false, replies) {
     const { query } = await this.loadSdk();
     if (this.closed) return;
     this.stderr = "";
@@ -173,6 +181,8 @@ class ClaudeSession {
     this.mode = mode;
     this.effort = effort;
     this.ultracode = ultracode;
+    this.outputStyle = replies === "concise" ? CONCISE_STYLE : null;
+    const settings = { ...(ultracode ? { ultracode: true } : {}), ...(this.outputStyle ? { outputStyle: this.outputStyle } : {}) };
     this.query = query({
       prompt: this.inbox,
       options: {
@@ -180,7 +190,7 @@ class ClaudeSession {
         model,
         permissionMode: mode,
         ...(effort ? { effort } : {}),
-        ...(ultracode ? { settings: { ultracode: true } } : {}),
+        ...(Object.keys(settings).length ? { settings } : {}),
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: this.command,

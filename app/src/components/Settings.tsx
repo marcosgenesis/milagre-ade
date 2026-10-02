@@ -5,7 +5,8 @@ import { ArrowDown01Icon, ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
 import type { PermissionMode } from "../model";
 import { updateSettings, useSettings } from "../lib/settings";
-import type { ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -94,6 +95,7 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
 
 function GeneralSettings() {
   const settings = useSettings();
+  const { editors, editor } = useEditors();
   return (
     <>
     <Group title="Agents">
@@ -111,8 +113,30 @@ function GeneralSettings() {
           {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
         </Select>
       </Row>
+      <Row label="Claude replies">
+        <Select label="Claude replies" value={settings.claudeReplies} onChange={(claudeReplies) => updateSettings({ claudeReplies: claudeReplies as ClaudeReplies })}>
+          <option value="concise">Concise</option>
+          <option value="normal">Normal</option>
+        </Select>
+      </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
+    </Group>
+    <Group title="Editor">
+      <Row label="Open files in" description={editors && editors.length === 0 ? "Install Cursor, VS Code, Zed or another editor to open files and folders" : "Used by file links in replies and Open in on a chat"}>
+        {editors && editors.length === 0 ? (
+          <span className="text-ink-3">No editor found</span>
+        ) : (
+          <Select label="Open files in" value={editor?.id ?? ""} onChange={(editorId) => updateSettings({ editorId })}>
+            {(editors ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </Select>
+        )}
+      </Row>
+    </Group>
+    <Group title="System">
+      <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
+        <Switch label="Keep the Mac awake while agents work" checked={settings.keepAwake} onChange={(keepAwake) => updateSettings({ keepAwake })} />
       </Row>
     </Group>
     <Group title="Plan usage">

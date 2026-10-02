@@ -1,7 +1,7 @@
 export {};
 
 import type { AttentionNotice } from "./lib/attention";
-import type { DiffStat, ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { DiffStat, EditorInfo, ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -17,6 +17,10 @@ declare global {
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
       /** Opens the worktree's folder in Finder. */
       revealWorktree: (worktreePath: string) => Promise<void>;
+      /** Code editors found on this Mac, in the order the first becomes the default. */
+      listEditors: () => Promise<EditorInfo[]>;
+      /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Resolves to null, or a short error message. */
+      openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<string | null>;
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
@@ -32,6 +36,8 @@ declare global {
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
+      /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
+      setKeepAwake: (enabled: boolean) => Promise<void>;
       /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
       notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */

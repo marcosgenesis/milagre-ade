@@ -22,6 +22,7 @@ import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
+import { useScrollFade } from "../lib/use-scroll-fade";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type RunningChat, type SwitchTarget } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
@@ -115,6 +116,9 @@ const SIDEBAR_MOTION = {
   copyOffset: 8,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
+
+// Narrower than this, the sidebar collapses on its own so the chat keeps its room. It can still be expanded.
+const AUTO_COLLAPSE_QUERY = "(max-width: 1024px)";
 
 const CHATS_HEADER_BUTTON =
   "flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
@@ -430,7 +434,11 @@ export default function SidebarNav({
   chatActions = {},
   usage,
 }: SidebarNavProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
+  // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
+  const autoCollapsed = useRef(collapsed);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
@@ -491,6 +499,31 @@ export default function SidebarNav({
     setWorkspaceOpen(false);
   };
 
+  // A manual toggle is the user's choice: the window width stops overriding it until the next crossing.
+  const toggle = () => {
+    autoCollapsed.current = false;
+    if (collapsed) setCollapsed(false);
+    else collapse();
+  };
+
+  useEffect(() => {
+    const query = window.matchMedia(AUTO_COLLAPSE_QUERY);
+    const follow = () => {
+      if (query.matches) {
+        setCollapsed((current) => {
+          if (!current) autoCollapsed.current = true;
+          return true;
+        });
+        setWorkspaceOpen(false);
+      } else if (autoCollapsed.current) {
+        autoCollapsed.current = false;
+        setCollapsed(false);
+      }
+    };
+    query.addEventListener("change", follow);
+    return () => query.removeEventListener("change", follow);
+  }, []);
+
   // ⌘B / Ctrl+B toggles the sidebar exactly like its collapse button.
   useEffect(() => {
     function handleToggle(event: KeyboardEvent) {
@@ -498,8 +531,7 @@ export default function SidebarNav({
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       if (event.key.toLowerCase() !== "b") return;
       event.preventDefault();
-      if (collapsed) setCollapsed(false);
-      else collapse();
+      toggle();
     }
     window.addEventListener("keydown", handleToggle);
     return () => window.removeEventListener("keydown", handleToggle);
@@ -517,7 +549,7 @@ export default function SidebarNav({
           type="button"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
-          onClick={() => collapsed ? setCollapsed(false) : collapse()}
+          onClick={toggle}
           className="flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink [-webkit-app-region:no-drag]"
         >
           <span className="pointer-events-none flex items-center justify-center">
@@ -580,7 +612,7 @@ export default function SidebarNav({
 
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollRef} className="sidebar-scroll scroll-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           {onOpenCommands && (
             <Tooltip label="Search commands, chats, and projects" className="mx-2 mb-3 w-[calc(100%-16px)]" side="bottom" shortcut={`${shortcutModifier}K`}>
               <button type="button" aria-label="Command palette" aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} onClick={onOpenCommands}

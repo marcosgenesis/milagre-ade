@@ -16,7 +16,7 @@ import {
   Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { isAttachableImage, MAX_IMAGES } from "./usePastedImages";
+import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -72,7 +72,7 @@ const MessageSection = memo(function MessageSection({
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="size-20 rounded object-contain" /></a>)}</div>}
+        <Attachments images={message.images} files={message.files} />
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
@@ -307,7 +307,6 @@ export function ChatComposer({
   const isNewChat = tab === "Worktrees" && messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
-  const [dropError, setDropError] = useState("");
   useEffect(() => {
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
@@ -316,28 +315,7 @@ export function ChatComposer({
     const files = Array.from(event.dataTransfer.files);
     if (!files.length) return;
     event.preventDefault();
-    setDropError("");
-
-    const imageSlots = Math.max(0, MAX_IMAGES - imageDraft.images.length);
-    const images: File[] = [];
-    const pathFiles: File[] = [];
-    for (const file of files) {
-      if (isAttachableImage(file) && images.length < imageSlots) images.push(file);
-      else pathFiles.push(file);
-    }
-    void imageDraft.addFiles(images);
-
-    const paths: string[] = [];
-    for (const file of pathFiles) {
-      try {
-        const path = window.milagre.getPathForFile(file);
-        if (path) paths.push(path);
-        else setDropError("Could not get a local path for one or more dropped files.");
-      } catch {
-        setDropError("Could not get a local path for one or more dropped files.");
-      }
-    }
-    if (paths.length) onDraftChange(draft ? `${draft.trimEnd()}\n${paths.join("\n")}` : paths.join("\n"));
+    void imageDraft.attachFiles(files);
     event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
   }
 
@@ -361,7 +339,7 @@ export function ChatComposer({
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         {tab === "Worktrees" ? (
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
             {messages.map((message) => (
               <MessageSection
                 key={message.id}
@@ -387,7 +365,7 @@ export function ChatComposer({
             )}
           </div>
         ) : (
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
             <div className="flex items-center gap-2 text-[13px] text-ink"><Icon icon={Link01Icon} size={15} /><span className="font-medium">Shared context</span><span className="ml-auto text-[12px] text-ink-3">{eventsCount} events</span></div>
             <div className="rounded-control bg-inset p-3 text-[13px] leading-6 text-ink-2">
               <p>{worktreeSummary}</p>
@@ -432,7 +410,6 @@ export function ChatComposer({
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
         />
-        {dropError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{dropError}</p>}
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>
     </div>

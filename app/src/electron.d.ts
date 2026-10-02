@@ -19,6 +19,7 @@ declare global {
   interface Window {
     milagre: {
       getPathForFile: (file: File) => string;
+      searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
@@ -88,6 +89,8 @@ declare global {
       setKeepAwake: (enabled: boolean) => Promise<void>;
       getCachedUsage: () => Promise<UsageSnapshot>;
       /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
+      syncNotifications: (state: { projectPath: string; activeChatId: string | null; unread: string[]; notifyOnCompletion: boolean; showDockBadge: boolean }) => Promise<void>;
+      notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;

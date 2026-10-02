@@ -175,7 +175,7 @@ export function ToolApproval({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={reduce ? undefined : { opacity: 0, height: 0 }}
                 transition={reduce ? { duration: 0 } : SPRING_SWAP}
-                className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] [scrollbar-width:thin]"
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
               >
                 <div className="grid gap-2 border-t border-line bg-inset px-4 py-3">
                   {parameters.map((parameter) => (

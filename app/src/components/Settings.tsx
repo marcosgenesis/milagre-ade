@@ -135,6 +135,12 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
           options={[{ value: "concise", label: "Concise" }, { value: "normal", label: "Normal" }]}
         />
       </Row>
+      <Row label="Notify when finished" description="When a turn finishes or fails while you are outside the chat">
+        <Switch label="Notify when finished" checked={settings.notifyOnCompletion} onChange={(notifyOnCompletion) => updateSettings({ notifyOnCompletion })} />
+      </Row>
+      <Row label="Dock badge" description="Count chats with unread replies or waiting for your input">
+        <Switch label="Dock badge" checked={settings.showDockBadge} onChange={(showDockBadge) => updateSettings({ showDockBadge })} />
+      </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
       </Row>
@@ -179,7 +185,7 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <Group title="Theme">
-      <Row label="Theme" description="System follows your macOS appearance">
+      <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
         <Select<ThemePreference>
           label="Theme"
           value={settings.theme}

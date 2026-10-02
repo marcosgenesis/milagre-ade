@@ -188,6 +188,7 @@ export interface ChatMessage {
   role?: "user" | "assistant";
   model?: string;
   images?: ImageAttachment[];
+  files?: string[];
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
@@ -215,6 +216,7 @@ export interface ChatStep {
 }
 
 export interface ImageAttachment {
+  path?: string;
   id: string;
   name: string;
   dataUrl: string;

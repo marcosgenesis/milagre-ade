@@ -265,6 +265,71 @@ a {
   }
 }
 
+/* One scrollbar everywhere: a thin rounded thumb on no track, quiet until hovered. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--ink-3) 40%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--ink-3) 65%, transparent);
+}
+
+/* Edge fades for scroll lists: an edge fades only while there's more to scroll past it (see useScrollFade). */
+@property --fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
+  transition: --fade-top 180ms ease-out, --fade-bottom 180ms ease-out;
+}
+.scroll-fade[data-fade-top] {
+  --fade-top: 28px;
+}
+.scroll-fade[data-fade-bottom] {
+  --fade-bottom: 28px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-fade {
+    transition: none;
+  }
+}
+
+/* The sidebar list clips its overflow, so focus rings sit inside each control and keep its radius. */
+.sidebar-scroll :focus-visible {
+  outline-offset: -2px;
+  border-radius: revert-layer;
+}
+
+/* The collapsed rail is one 32px column: no scrollbar to squeeze it, no sideways scroll. */
+[data-sidebar-collapsed="true"] .sidebar-scroll {
+  scrollbar-width: none;
+}
+
+/* The conversation rail sits over the left edge of the transcript. When the
+ * window is too narrow for the centred column to clear it, the column's left
+ * padding grows so the ticks keep their own lane (36px from the edge). */
+.chat-column {
+  padding-left: clamp(12px, calc(36px - (100% - 768px) / 2), 36px);
+}
+
 /* Keep the component nav scrollable but hide its scrollbar. */
 .component-nav-scroll {
   scrollbar-width: none; /* Firefox */
@@ -861,7 +926,6 @@ a:focus-visible .animated-underline::after {
   max-height: 438px;
   overflow: auto;
   overscroll-behavior: none;
-  scrollbar-color: var(--line-strong) transparent;
   scrollbar-gutter: stable;
 }
 

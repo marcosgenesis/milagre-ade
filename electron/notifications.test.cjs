@@ -85,3 +85,56 @@ test("caps long text and falls back to a title", () => {
   assert.equal(shown[0].options.body.length, 240);
   assert.ok(shown[0].options.body.endsWith("…"));
 });
+
+test('completion alerts use observed output, show once, and open the originating chat', () => {
+  const { notifier, shown, opened } = setup();
+  notifier.sync({ projectPath: '/shop', activeChatId: '/shop#2', unread: [], notifyOnCompletion: true, showDockBadge: true });
+  notifier.observe('/shop#2', { type: 'turn-started' });
+  notifier.observe('/shop#2', { type: 'text-delta', text: 'Tests passed.' });
+  notifier.observe('/shop#2', { type: 'turn-completed' });
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#2', title: 'shop', subtitle: 'Fix login' }), true);
+  assert.equal(shown[0].options.body, 'Tests passed.');
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#2' }), false);
+  shown[0].emit('click');
+  assert.deepEqual(opened, ['/shop#2']);
+});
+test('completion alerts suppress the focused chat, cancellation, disabled preference and fabricated results', () => {
+  const { notifier, shown } = setup({ focused: true });
+  notifier.sync({ projectPath: '/shop', activeChatId: '/shop#2', unread: [], notifyOnCompletion: true });
+  notifier.observe('/shop#2', { type: 'turn-completed' });
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#2' }), false);
+  notifier.observe('/shop#3', { type: 'turn-cancelled' });
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#3' }), false);
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#4' }), false);
+  notifier.sync({ projectPath: '/shop', unread: [], notifyOnCompletion: false });
+  notifier.observe('/shop#3', { type: 'turn-failed', message: 'Connection lost' });
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#3' }), false);
+  assert.equal(shown.length, 0);
+});
+test('another chat can notify while focused, with failure details and no stale preview on next turn', () => {
+  const { notifier, shown } = setup({ focused: true });
+  notifier.sync({ projectPath: '/shop', activeChatId: '/shop#2', unread: [], notifyOnCompletion: true });
+  notifier.observe('/shop#3', { type: 'turn-failed', message: 'Connection lost' });
+  assert.equal(notifier.notifyCompletion({ chatId: '/shop#3', title: 'shop' }), true);
+  assert.equal(shown[0].options.body, 'Connection lost');
+  assert.match(shown[0].options.title, /failed/);
+  notifier.observe('/shop#3', { type: 'turn-started' });
+  notifier.observe('/shop#3', { type: 'turn-completed' });
+  notifier.notifyCompletion({ chatId: '/shop#3' });
+  assert.equal(shown[1].options.body, 'Turn completed.');
+});
+test('Dock counts distinct waiting or unread chats, survives project changes, and clears when disabled', () => {
+  let badge;
+  const notifier = new AttentionNotifier({ setBadge: value => { badge = value; }, isAppFocused: () => false });
+  notifier.sync({ projectPath: '/shop', unread: ['/shop#2'], showDockBadge: true });
+  notifier.observe('/shop#2', question);
+  notifier.observe('/shop#3', question);
+  notifier.observe('/shop#3', { ...question, requestId: 'q2' });
+  assert.equal(badge, '2');
+  notifier.sync({ projectPath: '/other', unread: ['/other#1'], showDockBadge: true });
+  assert.equal(badge, '3');
+  notifier.observe('/shop#3', { type: 'turn-cancelled' });
+  assert.equal(badge, '2');
+  notifier.sync({ projectPath: '/shop', unread: [], showDockBadge: false });
+  assert.equal(badge, '');
+});

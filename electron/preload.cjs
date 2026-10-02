@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("milagre", {
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
@@ -58,6 +59,8 @@ contextBridge.exposeInMainWorld("milagre", {
   readUsage: () => ipcRenderer.invoke("usage:read"),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
+  syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),
+  notifyCompletion: (notice) => ipcRenderer.invoke("notification:completed", notice),
   notifyAttention: (notice) => ipcRenderer.invoke("notification:attention", notice),
   onOpenChat: (callback) => {
     const listener = (_event, chatId) => callback(chatId);

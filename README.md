@@ -66,11 +66,23 @@ Release installers require a Developer ID Application certificate and Apple nota
 
 For a local build without an Apple certificate, use `npm run package:mac:local`. This explicitly uses an ad-hoc signature and skips notarization; downloaded copies still require a manual security exception.
 
-## Pasting images
+## Attachments and file mentions
 
-Paste an image into the chat prompt with Cmd+V (Ctrl+V on other platforms). Images appear as removable thumbnails and can be sent with a prompt or on their own. PNG, JPEG, WebP, and GIF are supported, with up to four images per message and a 5 MB limit per image. Plain-text pasting is unchanged.
+Use **+ > Add files**, or drop files onto the chat, to attach local files. Images and videos have previews in the draft and sent message. Click a preview to open it; videos have playback controls. Escape closes the viewer without stopping the agent. Other files appear as removable filename chips before sending.
 
-Sent images remain in the local conversation history. Claude receives image content through structured input; Codex receives temporary image files that are removed when its request finishes. Restart the development Electron process after updating to load the new image-handling backend.
+File paths reach the agent while the visible message keeps your prompt text. Disk previews require the original files to remain in place. Picked or dropped PNG, JPEG, WebP, and GIF images up to 5 MB are also sent as image content, up to four per message. Larger images and other files are sent by path. Video playback depends on the format supported by Electron.
+
+Paste an image with Cmd+V (Ctrl+V on other platforms) to send image content without a disk path. Pasted images keep the four-image and 5 MB limits and remain in local conversation history. Claude receives structured image content; Codex receives temporary image files removed when its request finishes.
+
+Type `@` to find tracked and untracked, non-ignored files in the chat's worktree. Search by filename or path and select with Enter or Tab. Images and videos appear as previews in the composer; other files appear as removable chips. The selected path is sent to the agent without inserting it into your message text. Results are limited and cached for five seconds. Switching chats clears attachment drafts.
+
+Restart Electron after updating to register the media protocol and file-search IPC. Run `npm run test:chat-attachments` for the Chromium integration checks, including video playback, attachment delivery and file selection without calling an agent.
+
+## Notifications
+
+Milagre can notify when a turn completes or fails while its chat is not focused, with a preview of the result. Clicking the notification opens that chat, including switching projects through the usual confirmation flow. The focused chat stays quiet; cancelled turns do not send completion alerts.
+
+The Dock badge counts chats with unread replies or pending approvals/questions, counting each chat once. Reading a chat clears its unread status. **Settings > General** has separate switches for completion notifications, waiting notifications and the Dock badge.
 
 ## Workspace image
 

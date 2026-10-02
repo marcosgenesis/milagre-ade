@@ -34,7 +34,7 @@ function Fixture() {
   }));
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
-      imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
+      imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
@@ -54,6 +54,7 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-subagent-ui-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
+  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
   const evaluate = async (source) => {
     try { return await window.webContents.executeJavaScript(source); }
     catch (error) { throw new Error(`${source}: ${error.message}`); }

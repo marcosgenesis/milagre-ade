@@ -9,6 +9,7 @@ import {
   Folder01Icon,
   FolderOpenIcon,
   GitBranchIcon,
+  GitPullRequestIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   Tick02Icon,
@@ -47,6 +48,8 @@ export type ChatRowActions = {
   onRename?: (id: string, title: string) => void;
   onMarkUnread?: (id: string, unread: boolean) => void;
   onReveal?: (id: string) => void;
+  /** Opens the chat with its "Commit and open PR" dialog. */
+  onCommit?: (id: string) => void;
   onArchive?: (id: string) => void;
 };
 
@@ -424,6 +427,8 @@ function ChatMenu({
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : { key: "unread", label: "Mark as unread", icon: CircleIcon, onSelect: run(() => actions.onMarkUnread?.(item.id, true)), disabled: !actions.onMarkUnread },
     { key: "reveal", label: IS_MAC ? "Open in Finder" : "Open in file manager", icon: FolderOpenIcon, onSelect: run(() => actions.onReveal?.(item.id)), disabled: !actions.onReveal || !details.path },
+    // Every chat's folder came from `git worktree list`, so a chat with a folder is in a repository.
+    { key: "commit", label: "Commit and open PR…", icon: GitPullRequestIcon, onSelect: run(() => actions.onCommit?.(item.id)), disabled: !actions.onCommit || !details.path },
     "divider",
     archiveArmed
       ? { key: "archive", label: item.mark === "running" || item.mark === "waiting" ? "Stop and archive" : "Confirm archive", icon: Archive02Icon, onSelect: run(() => actions.onArchive?.(item.id)), danger: true }

@@ -25,6 +25,9 @@ import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat
 import { attentionNotice } from "./lib/attention";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
+import { GitActionsDialog } from "./components/GitActionsDialog";
+import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
+import type { ModelProvider } from "./model";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -78,6 +81,7 @@ function App() {
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
   useApplyTheme();
 
   useEffect(() => {
@@ -127,7 +131,7 @@ function App() {
   // The chat on screen; a turn that ends anywhere else leaves its chat unread.
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId);
-  useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -234,6 +238,25 @@ function App() {
     if (agentRuns.runs[key]) void agentRuns.interrupt(key).catch(() => {});
     patchChat(sessionId, { archived: true, unread: false });
     if (selectedSessionId === sessionId) startNewChat();
+  }
+
+  // "Commit and open PR…" opens the chat, with the dialog over it.
+  function openGitDialog(sessionId: number) {
+    const latest = stateRef.current;
+    const session = latest?.sessions[sessionId];
+    const worktree = session ? latest.worktrees[session.worktree_id] : undefined;
+    if (!latest || !session || !worktree) return;
+    const sessionMessages = latest.messages.filter((message) => message.session_id === sessionId);
+    openChat(sessionId);
+    setGitDialog({ sessionId, worktreeId: worktree.id, cwd: worktree.path, base: worktree.base, provider: session.provider, chat: gitChatContext(chatTitle(session, sessionMessages), sessionMessages) });
+  }
+
+  // What the dialog did goes on record as a short reply in the chat.
+  function recordGitNote(sessionId: number, body: string) {
+    const latest = stateRef.current;
+    if (!latest?.sessions[sessionId]) return;
+    const note: ChatMessage = { id: latest.next_id, session_id: sessionId, body, context: { kind: "git-action" }, role: "assistant", outcome: "completed" };
+    commit({ ...latest, next_id: latest.next_id + 1, messages: [...latest.messages, note] });
   }
 
   function revealChat(sessionId: number) {
@@ -483,6 +506,7 @@ function App() {
           onRename: (id, title) => patchChat(Number(id), { title }),
           onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
           onReveal: (id) => revealChat(Number(id)),
+          onCommit: (id) => openGitDialog(Number(id)),
           onArchive: (id) => archiveChat(Number(id)),
         }}
         onNewChat={startNewChat}
@@ -565,6 +589,28 @@ function App() {
         </div>
       </main>
       </div>
+      {gitDialog && (
+        <GitActionsDialog
+          key={gitDialog.sessionId}
+          cwd={gitDialog.cwd}
+          base={gitDialog.base}
+          provider={gitDialog.provider}
+          chat={gitDialog.chat}
+          onClose={() => setGitDialog(null)}
+          // The dialog's chat is the open one; a message sent while its turn runs steers it.
+          onSendToAgent={(text) => {
+            if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
+            else {
+              openChat(gitDialog.sessionId);
+              setDraft(text);
+            }
+          }}
+          onRan={(note) => {
+            recordGitNote(gitDialog.sessionId, note);
+            void worktreeDiffs.refresh([gitDialog.worktreeId]);
+          }}
+        />
+      )}
     </DotBackground>
   );
 }

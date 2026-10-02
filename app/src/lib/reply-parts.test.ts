@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatStep } from "../model";
-import { activitySummary, replyActivity, replyParts, titleSpans } from "./reply-parts.ts";
+import { activitySummary, replyActivity, replyParts, titleSpans, unspokenThought } from "./reply-parts.ts";
 
 const step = (id: string, offset?: number): ChatStep => ({ id, kind: "shell", title: `Ran \`${id}\``, status: "done", ...(offset === undefined ? {} : { offset }) });
 
@@ -78,4 +78,15 @@ test("the summary starts with a capital and leaves out what didn't happen", () =
   assert.deepEqual(activitySummary([step("a"), step("b")]), { text: "Ran 2 commands", failed: 0 });
   assert.deepEqual(activitySummary([thought("t", 0)]), { text: "Thought", failed: 0 });
   assert.deepEqual(activitySummary([thought("t", 0, 75_000), { id: "s", kind: "search", title: "x", status: "done" }, { id: "s2", kind: "search", title: "y", status: "done" }]), { text: "Thought for 1m 15s · searched 2 times", failed: 0 });
+});
+
+test("a reply that only thought surfaces its last thinking; one that wrote anything doesn't", () => {
+  const withDetail = (id: string, detail: string): ChatStep => ({ ...thought(id, 0), detail });
+  const silent = replyActivity("", [withDetail("t1", "Looking."), step("a", 0), withDetail("t2", "So the answer is no."), withDetail("t3", "  ")]);
+  assert.equal(unspokenThought(silent.activity, silent.answer), "So the answer is no.");
+  const spoken = replyActivity("No, it isn't.", [withDetail("t1", "So the answer is no.")]);
+  assert.equal(unspokenThought(spoken.activity, spoken.answer), "");
+  const narrated = replyActivity("Checking.", [withDetail("t1", "Hm."), step("a", 9)]);
+  assert.equal(unspokenThought(narrated.activity, narrated.answer), "");
+  assert.equal(unspokenThought(replyActivity("", [step("a", 0)]).activity, ""), "");
 });

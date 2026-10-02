@@ -41,6 +41,16 @@ export function replyActivity(body: string, steps: ChatStep[] = []): { activity:
   return { activity, answer };
 }
 
+/**
+ * What a reply that never wrote an answer concluded: its last thinking, when the agent kept it all
+ * there. Shown under the fold so the answer isn't hidden in a step the user rarely opens.
+ */
+export function unspokenThought(activity: ActivityEntry[], answer: string): string {
+  if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
+  const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
+  return thought?.type === "step" ? thought.step.detail?.trim() ?? "" : "";
+}
+
 const count = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
 
 /** "4s", "1m 15s" */

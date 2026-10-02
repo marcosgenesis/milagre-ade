@@ -29,7 +29,7 @@ import { parseRecommendation } from "../lib/recommendation";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
-import { replyActivity } from "../lib/reply-parts";
+import { replyActivity, unspokenThought } from "../lib/reply-parts";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -37,13 +37,18 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-/** A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer. */
-function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; waitingStepIds: string[] }) {
+/**
+ * A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer.
+ * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
+ */
+function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
   const { activity, answer } = replyActivity(body, steps);
+  const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
+      {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
     </>
   );
 }
@@ -53,12 +58,15 @@ const MessageSection = memo(function MessageSection({
   isUser,
   onRecommendationSelect,
   streaming = false,
+  asking = false,
   waitingStepIds = [],
 }: {
   message: AppChatMessage;
   isUser: boolean;
   onRecommendationSelect: (option: string) => void;
   streaming?: boolean;
+  /** The running turn is waiting on the user's answer to a question. */
+  asking?: boolean;
   /** Steps whose approval card is open. */
   waitingStepIds?: string[];
 }) {
@@ -84,7 +92,7 @@ const MessageSection = memo(function MessageSection({
             </div>
           </>
         ) : (
-          <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />
+          <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
         )}
       </div>
     </article>
@@ -111,6 +119,8 @@ interface ChatComposerProps {
   waitingForSubagents?: boolean;
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
+  /** The running turn is waiting on the user's answer to a question. */
+  asking?: boolean;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
@@ -266,6 +276,7 @@ export function ChatComposer({
   onArchiveSubagent,
   waitingForSubagents = false,
   waitingStepIds,
+  asking = false,
   runModelName,
   lockedProvider,
   models,
@@ -358,6 +369,7 @@ export function ChatComposer({
                 isUser={false}
                 onRecommendationSelect={onRecommendationSelect}
                 streaming
+                asking={asking}
                 waitingStepIds={waitingStepIds}
               />
             ) : null}

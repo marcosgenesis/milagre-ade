@@ -32,6 +32,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
+import { renameWorktree } from "./lib/worktree-rename";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
@@ -255,6 +256,20 @@ function App() {
       provider: session?.provider,
     });
     if (notice && "requestId" in event) void window.milagre.notifyAttention({ chatId, requestId: event.requestId, ...notice }).catch(() => {});
+  }), []);
+
+  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked.
+  useEffect(() => window.milagre.onWorktreeRenamed((rename) => {
+    const latest = stateRef.current;
+    if (projectRef.current?.path !== rename.projectPath || !latest) return;
+    const next = renameWorktree(latest, rename);
+    // Not commit(): this listener outlives the render whose `project` that would save under.
+    if (next !== latest) {
+      stateRef.current = next;
+      setState(next);
+      void window.milagre.saveProject(rename.projectPath, next);
+    }
+    void window.milagre.listBranches(rename.projectPath).then(setBranches);
   }), []);
 
   // Clicking a notification opens its chat.

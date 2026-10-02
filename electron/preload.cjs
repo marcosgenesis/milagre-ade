@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld("milagre", {
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
+  onWorktreeRenamed: (callback) => {
+    const listener = (_event, rename) => callback(rename);
+    ipcRenderer.on("worktree:renamed", listener);
+    return () => ipcRenderer.removeListener("worktree:renamed", listener);
+  },
   readDiffStat: (worktreePath, base) => ipcRenderer.invoke("worktree:diffstat", worktreePath, base),
   revealWorktree: (worktreePath) => ipcRenderer.invoke("worktree:reveal", worktreePath),
   getCurrentProject: () => ipcRenderer.invoke("project:current"),

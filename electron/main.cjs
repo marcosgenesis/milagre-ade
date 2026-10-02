@@ -14,7 +14,8 @@ const { createCapabilityCache } = require("./agents/capabilities.cjs");
 const { resolveExecutable } = require("./agents/environment.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
-const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
+const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
@@ -89,7 +90,15 @@ ipcMain.handle("project:branches", (_event, projectPath) => listBranches(project
 ipcMain.handle("project:image", (_event, projectPath) => resolveProjectImage(projectPath));
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
-ipcMain.handle("worktree:create", async (_event, request) => {
+// A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
+// picks one, so the chat never waits on it.
+async function nameWorktree(sender, projectPath, created, prompt) {
+  const slug = await suggestWorktreeName(prompt, { command: await executable("claude"), timeoutMs: 15_000 });
+  const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
+  if (name && !sender.isDestroyed()) sender.send("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
+}
+
+ipcMain.handle("worktree:create", async (event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
@@ -97,6 +106,7 @@ ipcMain.handle("worktree:create", async (_event, request) => {
   const worktree = { ...listed, base: created.base };
   project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
+  void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
   return { project, worktreeId: worktree.id };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));

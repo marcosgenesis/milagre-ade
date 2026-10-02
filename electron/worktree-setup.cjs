@@ -144,10 +144,6 @@ function setupCompleted(id, command, result, timeoutMs = SETUP_TIMEOUT_MS) {
   return { type: "step-completed", id, status: ok ? "done" : "failed", title: `${ok ? "Ran setup" : "Setup failed"} ${code(command)}`, note, detail: capOutput(`$ ${command}\n${result.output}${why}`), durationMs: result.durationMs };
 }
 
-/**
- * The setup commands waiting for their worktree's first turn, and the ones running. `send(chatId, event)`
- * shows a run as a shell step at the start of the chat's reply, its output streamed in batches.
- */
 // Worktrees are keyed by their real path: git lists them resolved (/private/tmp, not /tmp), so the folder
 // createWorktree made and the chat's cwd only match once symlinks are followed.
 function worktreeKey(worktreePath) {
@@ -158,9 +154,16 @@ function worktreeKey(worktreePath) {
   }
 }
 
+const IDLE_AWAKE = { setupStarted() {}, setupEnded() {} };
+
+/**
+ * The setup commands waiting for their worktree's first turn, and the ones running. `send(chatId, event)`
+ * shows a run as a shell step at the start of the chat's reply, its output streamed in batches. `keepAwake`
+ * holds the Mac awake while a run goes and hands the hold to the turn after it; a stopped run has no turn.
+ */
 class WorktreeSetups {
-  constructor({ send, run = runSetupCommand, timeoutMs = SETUP_TIMEOUT_MS, batchMs = BATCH_MS }) {
-    Object.assign(this, { send, run, timeoutMs, batchMs });
+  constructor({ send, keepAwake = IDLE_AWAKE, run = runSetupCommand, timeoutMs = SETUP_TIMEOUT_MS, batchMs = BATCH_MS }) {
+    Object.assign(this, { send, keepAwake, run, timeoutMs, batchMs });
     this.pending = new Map();
     this.running = new Map();
   }
@@ -203,6 +206,7 @@ class WorktreeSetups {
       buffered = "";
     };
     this.send(chatId, setupStarted(id, command));
+    this.keepAwake.setupStarted(chatId);
     const done = this.run({
       command,
       cwd,
@@ -215,6 +219,7 @@ class WorktreeSetups {
     }).then((result) => {
       flush();
       this.send(chatId, setupCompleted(id, command, result, this.timeoutMs));
+      this.keepAwake.setupEnded(chatId, { turnFollows: result.status !== "cancelled" });
       return result;
     }).finally(() => this.running.delete(chatId));
     this.running.set(chatId, { controller, done });

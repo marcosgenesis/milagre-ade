@@ -111,6 +111,9 @@ function GeneralSettings() {
           {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
         </Select>
       </Row>
+      <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
+        <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
     </Group>
     <Group title="Plan usage">
       <Row label="Show" description="Claude and Codex plan limits">

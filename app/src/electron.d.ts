@@ -1,5 +1,6 @@
 export {};
 
+import type { AttentionNotice } from "./lib/attention";
 import type { ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
@@ -26,6 +27,10 @@ declare global {
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
+      /** Shows a system notification for a request a chat waits on, unless Milagre has focus. True when one showed. */
+      notifyAttention: (notice: AttentionNotice & { chatId: string; requestId: string }) => Promise<boolean>;
+      /** A notification was clicked: the window is back, and the chat it was about should open. */
+      onOpenChat: (callback: (chatId: string) => void) => () => void;
     };
   }
 }

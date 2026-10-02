@@ -12,13 +12,15 @@ export interface AppSettings {
   defaultPermissionMode: PermissionMode;
   usageDisplay: UsageDisplay;
   showUsageInSidebar: boolean;
+  /** Show a system notification when a chat waits on an approval or question while Milagre is in the background. */
+  notifyWhenWaiting: boolean;
 }
 
 const STORAGE_KEY = "milagre-settings";
 const LEGACY_THEME_KEY = "milagre-theme";
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
 const USAGE_DISPLAYS: UsageDisplay[] = ["used", "remaining"];
-const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true };
+const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true };
 
 function load(): AppSettings {
   try {
@@ -31,6 +33,7 @@ function load(): AppSettings {
       defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode) ? saved.defaultPermissionMode! : DEFAULTS.defaultPermissionMode,
       usageDisplay: USAGE_DISPLAYS.includes(saved.usageDisplay as UsageDisplay) ? saved.usageDisplay! : DEFAULTS.usageDisplay,
       showUsageInSidebar: typeof saved.showUsageInSidebar === "boolean" ? saved.showUsageInSidebar : DEFAULTS.showUsageInSidebar,
+      notifyWhenWaiting: typeof saved.notifyWhenWaiting === "boolean" ? saved.notifyWhenWaiting : DEFAULTS.notifyWhenWaiting,
     };
   } catch {
     return DEFAULTS;

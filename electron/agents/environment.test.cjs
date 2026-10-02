@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
-const { installDirs, loadLoginEnvironment, mergePath, readLoginShellEnv, resolveExecutable } = require("./environment.cjs");
+const { installDirs, loadLoginEnvironment, mergePath, readLoginShellEnv, refreshInstallPath, resolveExecutable } = require("./environment.cjs");
 
 // A stand-in for spawn: `script(child, mark)` plays the shell, given the mark the command line asks it to print.
 function fakeShell(script) {
@@ -109,7 +109,7 @@ test("fills in what the app lacks from the login shell, and puts the shell's PAT
   const asked = [];
   const readShellEnv = async (options) => {
     asked.push(options.shell);
-    return { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: "/elsewhere", TMPDIR: "/tmp/", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "key", PWD: "/Users/x", OLDPWD: "/", SHLVL: "2", _: "/usr/bin/env" };
+    return { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: "/elsewhere", TMPDIR: "/tmp/", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "key", PWD: "/Users/x", OLDPWD: "/", SHLVL: "2", _: "/usr/bin/env", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" };
   };
   const result = await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"] });
   assert.deepEqual(result, { source: "shell" });
@@ -133,4 +133,51 @@ test("falls back to the install folders when the shell gives nothing, and leaves
   const windows = { PATH: "C:\\Windows" };
   assert.deepEqual(await loadLoginEnvironment({ target: windows, platform: "win32", readShellEnv: async () => assert.fail("no shell on Windows") }), { source: "none" });
   assert.deepEqual(windows, { PATH: "C:\\Windows" });
+});
+
+test("a shell that hangs after printing the environment is still killed at the timeout", async () => {
+  const { spawnImpl } = fakeShell((child, mark) => {
+    child.stdout.write(`${mark}${envBlock({ PATH: "/opt/homebrew/bin:/usr/bin" })}${mark}`);
+  });
+  const killed = [];
+  const env = await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, timeoutMs: 30, killGroup: (pid) => killed.push(pid) });
+  assert.deepEqual(env, { PATH: "/opt/homebrew/bin:/usr/bin" });
+  assert.deepEqual(killed, []);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(killed, [4242]);
+});
+
+test("a shell that ends in time is not killed", async () => {
+  const { spawnImpl } = fakeShell((child, mark) => {
+    child.stdout.write(`${mark}${envBlock({ PATH: "/usr/bin" })}${mark}`);
+    child.emit("close", 0);
+  });
+  const killed = [];
+  await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, timeoutMs: 30, killGroup: (pid) => killed.push(pid) });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(killed, []);
+});
+
+test("an app started from a terminal keeps its own PATH first, and the shell's comes after", async () => {
+  const target = { PATH: "/Users/x/proj/.venv/bin:/Users/x/.nvm/versions/node/v22.0.0/bin:/usr/bin:/bin", HOME: "/Users/x", SHELL: "/bin/zsh" };
+  const readShellEnv = async () => ({ PATH: "/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/usr/bin:/bin" });
+  await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin"] });
+  assert.equal(target.PATH, "/Users/x/proj/.venv/bin:/Users/x/.nvm/versions/node/v22.0.0/bin:/usr/bin:/bin:/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/Users/x/.local/bin");
+  const finder = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: "/Users/x", SHELL: "/bin/zsh" };
+  await loadLoginEnvironment({ target: finder, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin"] });
+  assert.equal(finder.PATH, "/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin");
+});
+
+test("refreshing the install folders adds ones that appeared, after the folders PATH already has", () => {
+  const present = new Set(["/Users/x/.local/bin"]);
+  const target = { PATH: "/opt/homebrew/bin:/usr/bin:/Users/x/.local/bin" };
+  const dirs = () => ["/Users/x/.local/bin", "/Users/x/.volta/bin"].filter((dir) => present.has(dir));
+  refreshInstallPath({ target, platform: "darwin", home: "/Users/x", dirs });
+  assert.equal(target.PATH, "/opt/homebrew/bin:/usr/bin:/Users/x/.local/bin");
+  present.add("/Users/x/.volta/bin");
+  refreshInstallPath({ target, platform: "darwin", home: "/Users/x", dirs });
+  assert.equal(target.PATH, "/opt/homebrew/bin:/usr/bin:/Users/x/.local/bin:/Users/x/.volta/bin");
+  const windows = { PATH: "C:\\Windows" };
+  refreshInstallPath({ target: windows, platform: "win32", dirs: () => assert.fail("no folders on Windows") });
+  assert.equal(windows.PATH, "C:\\Windows");
 });

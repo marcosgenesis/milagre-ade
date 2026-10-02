@@ -45,13 +45,19 @@ async function inspectCli(name, { resolve = resolveExecutable, version = runVers
 }
 
 // Each CLI is inspected once per app run, after `ready` (the login environment). One with a problem is
-// inspected again on the next call, so installing, updating or fixing it needs no restart.
-function createCliCache({ ready = () => undefined, inspect = inspectCli } = {}) {
+// inspected again on the next call, so installing, updating or fixing it needs no restart. Before that
+// second look `refresh` runs (it adds install folders created since startup to PATH), because the fix may
+// well be an installer that made a new folder.
+function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh = () => undefined } = {}) {
   const cache = new Map();
+  const hadProblem = new Set();
   return (name) => {
     if (!cache.has(name)) {
-      const pending = Promise.resolve().then(ready).catch(() => {}).then(() => inspect(name)).then((status) => {
-        if (status.problem) cache.delete(name);
+      const pending = Promise.resolve().then(ready).catch(() => {}).then(() => (hadProblem.has(name) ? refresh() : undefined)).catch(() => {}).then(() => inspect(name)).then((status) => {
+        if (status.problem) {
+          cache.delete(name);
+          hadProblem.add(name);
+        } else hadProblem.delete(name);
         return status;
       }, (error) => {
         cache.delete(name);

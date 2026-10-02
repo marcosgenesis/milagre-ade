@@ -15,8 +15,11 @@ const SHELL_TIMEOUT_MS = 10_000;
 // Shells that take `-i -l -c` and run the command line below as written. Others aren't started; the
 // install folders still apply.
 const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "ksh"]);
-// Set by the throwaway shell itself; they mean nothing to the app.
-const SHELL_ONLY = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
+// Not imported: set by the throwaway shell itself (PWD, OLDPWD, SHLVL, _), or meaning something to Electron
+// that the user's shell can't know about this app (a shell started from a terminal that runs Electron as Node).
+const SHELL_ONLY = new Set(["PWD", "OLDPWD", "SHLVL", "_", "ELECTRON_RUN_AS_NODE", "ELECTRON_NO_ATTACH_CONSOLE"]);
+// What launchd gives an app opened from Finder or the Dock. Any other PATH came from a terminal.
+const LAUNCHD_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 // Only absolute commands and `;`, which zsh, bash and fish all read the same way. The random mark keeps
 // whatever rc files print (banners, prompts) out of the result.
@@ -56,23 +59,32 @@ function readLoginShellEnv({ shell, env = process.env, timeoutMs = SHELL_TIMEOUT
     const settle = (result) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       resolve(result);
     };
+    // The timer stays armed after the closing mark: a shell that hangs in an exit hook is killed with its
+    // group at the timeout all the same. It only stops once the shell has ended.
     const timer = setTimeout(() => {
       try {
         killGroup(child.pid);
       } catch {}
       settle(null);
     }, timeoutMs);
+    timer.unref?.();
+    const ended = () => clearTimeout(timer);
     child.stdout.setEncoding?.("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       const parsed = parseShellEnv(stdout, mark);
       if (parsed) settle(parsed);
     });
-    child.on("error", () => settle(null));
-    child.on("close", () => settle(parseShellEnv(stdout, mark)));
+    child.on("error", () => {
+      ended();
+      settle(null);
+    });
+    child.on("close", () => {
+      ended();
+      settle(parseShellEnv(stdout, mark));
+    });
   });
 }
 
@@ -130,16 +142,27 @@ function userShell() {
   }
 }
 
+// Adds the install folders that exist now to PATH, after the folders it already has. A CLI installed while
+// the app runs (its installer may create ~/.local/bin, or nvm a new node version) is found on the next check.
+function refreshInstallPath({ target = process.env, platform = process.platform, home = os.homedir(), dirs = installDirs } = {}) {
+  if (platform === "win32") return;
+  target.PATH = mergePath(target.PATH, dirs(home));
+}
+
 // Fills the app's environment from the login shell, once, at startup. Variables the app already has keep
-// their value (HOME, TMPDIR, SSH_AUTH_SOCK from launchd), except PATH, which becomes the shell's folders,
-// then the app's, then the install folders.
+// their value (HOME, TMPDIR, SSH_AUTH_SOCK from launchd), except PATH. Opened from Finder or the Dock,
+// PATH becomes the shell's folders, then the app's, then the install folders. Started from a terminal
+// (npm run dev), the app's own PATH comes first, so an `nvm use`, direnv or virtualenv there still wins,
+// then the shell's, then the install folders.
 async function loadLoginEnvironment({ target = process.env, platform = process.platform, home = os.homedir(), shell = target.SHELL || userShell() || "/bin/zsh", readShellEnv = readLoginShellEnv, dirs = installDirs } = {}) {
   if (platform === "win32") return { source: "none" };
   const imported = await readShellEnv({ shell, env: { ...target } });
   for (const [key, value] of Object.entries(imported ?? {})) {
     if (key !== "PATH" && !SHELL_ONLY.has(key) && target[key] === undefined) target[key] = value;
   }
-  target.PATH = mergePath(imported?.PATH, target.PATH, dirs(home));
+  target.PATH = target.PATH === LAUNCHD_PATH || !target.PATH
+    ? mergePath(imported?.PATH, target.PATH, dirs(home))
+    : mergePath(target.PATH, imported?.PATH, dirs(home));
   return { source: imported ? "shell" : "fallback" };
 }
 
@@ -152,4 +175,4 @@ function resolveExecutable(name, { execFileImpl = execFile } = {}) {
   });
 }
 
-module.exports = { SHELL_TIMEOUT_MS, installDirs, loadLoginEnvironment, mergePath, parseShellEnv, readLoginShellEnv, resolveExecutable };
+module.exports = { SHELL_TIMEOUT_MS, installDirs, loadLoginEnvironment, mergePath, parseShellEnv, readLoginShellEnv, refreshInstallPath, resolveExecutable };

@@ -11,7 +11,7 @@ const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
 const { createCliCache } = require("./agents/cli.cjs");
-const { loadLoginEnvironment } = require("./agents/environment.cjs");
+const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { createModelCache } = require("./agents/models.cjs");
 const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
@@ -149,7 +149,7 @@ const agents = new SessionManager({
 });
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
-const agentCli = createCliCache({ ready: () => environmentReady });
+const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
 
 ipcMain.handle("usage:read", () => readUsage());
 

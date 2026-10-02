@@ -3,6 +3,8 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const { MIN_VERSIONS, createCliCache, inspectCli, isAtLeast, parseVersion, runVersion } = require("./cli.cjs");
+const os = require("node:os");
+const { refreshInstallPath } = require("./environment.cjs");
 const { cliBrokenMessage, cliTooOldMessage, missingCliMessage } = require("./events.cjs");
 
 test("reads the version each CLI prints", () => {
@@ -74,4 +76,40 @@ test("each CLI is inspected once per run, after the environment, until it has a 
   assert.deepEqual(await cli("codex"), { command: "/x", version: "0.158.0" });
   assert.deepEqual(await cli("claude"), { command: "/c", version: "2.1.287" });
   assert.deepEqual(order, ["environment", "environment", "claude", "codex", "environment", "codex"]);
+});
+
+test("a CLI whose installer creates a new folder is found on the next check", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-install-"));
+  const target = { PATH: "/usr/bin:/bin" };
+  const bin = path.join(home, ".local/bin");
+  const dirs = (root) => [path.join(root, ".local/bin")].filter((dir) => fs.existsSync(dir));
+  const resolve = async (name) => {
+    for (const dir of target.PATH.split(":")) if (fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+    return null;
+  };
+  try {
+    const cli = createCliCache({
+      inspect: (name) => inspectCli(name, { resolve, version: async () => ({ output: "2.1.287 (Claude Code)" }) }),
+      refresh: () => refreshInstallPath({ target, platform: "darwin", home, dirs }),
+    });
+    assert.equal((await cli("claude")).problem, missingCliMessage("claude"));
+    // The installer runs: a folder that didn't exist at startup appears, with the CLI in it.
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n");
+    assert.deepEqual(await cli("claude"), { command: path.join(bin, "claude"), version: "2.1.287" });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the refresh runs only before looking again at a CLI that had a problem", async () => {
+  let refreshed = 0;
+  const answers = [{ command: null, version: null, problem: "missing" }, { command: "/c", version: "2.1.287" }];
+  const cli = createCliCache({ inspect: async () => answers.shift() ?? { command: "/c", version: "2.1.287" }, refresh: () => { refreshed += 1; } });
+  await cli("claude");
+  assert.equal(refreshed, 0);
+  await cli("claude");
+  assert.equal(refreshed, 1);
+  await cli("claude");
+  assert.equal(refreshed, 1);
 });

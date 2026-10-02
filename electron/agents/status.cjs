@@ -15,16 +15,22 @@ const { loginMessage } = require("./events.cjs");
 
 const READY_TTL_MS = 5 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
+// account/read answers in well under a second.
+const ACCOUNT_TIMEOUT_MS = 8_000;
 
-// `claude auth status` prints JSON and exits 1 when logged out, so the output is read either way. Only
-// an explicit `"loggedIn": false` counts; anything unreadable is not a reason to flag the CLI.
+// `claude auth status` prints JSON and exits 1 when logged out, so the output is read either way, from its
+// first "{" (a notice line may come before it). Only an explicit `"loggedIn": false` on Anthropic's own API
+// (`"apiProvider": "firstParty"`) counts: on Bedrock, Vertex or Foundry the CLI authenticates through the
+// cloud account and `claude auth login` is no remedy. Anything unreadable is not a reason to flag the CLI.
 function claudeLoggedOut(command, { execFileImpl = execFile } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
       child = execFileImpl(command, ["auth", "status"], { encoding: "utf8", timeout: AUTH_TIMEOUT_MS }, (error, stdout) => {
         try {
-          resolve(JSON.parse(String(stdout)).loggedIn === false);
+          const text = String(stdout);
+          const status = JSON.parse(text.slice(text.indexOf("{")));
+          resolve(status.loggedIn === false && status.apiProvider === "firstParty");
         } catch {
           resolve(false);
         }
@@ -46,7 +52,7 @@ async function codexLoggedOut(command, { cwd, clientVersion = "0.0.0", createRpc
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: AUTH_TIMEOUT_MS });
     rpc.notify("initialized");
-    const account = await rpc.request("account/read", { refreshToken: false }, { timeoutMs: AUTH_TIMEOUT_MS });
+    const account = await rpc.request("account/read", { refreshToken: false }, { timeoutMs: ACCOUNT_TIMEOUT_MS });
     return !account.account && account.requiresOpenaiAuth === true;
   } catch {
     return false;
@@ -90,10 +96,13 @@ function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READ
     cache.set(name, entry);
     return entry.promise;
   }
-  return async () => {
+  const check = async () => {
     const [claude, codex] = await Promise.all([lookup("claude"), lookup("codex")]);
     return { claude, codex };
   };
+  // A turn just failed with this provider's login message: a status kept as ready is out of date.
+  check.invalidate = (name) => { cache.delete(name); };
+  return check;
 }
 
 /**

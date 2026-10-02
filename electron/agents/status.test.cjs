@@ -26,6 +26,13 @@ test("Claude: loggedIn false, with the exit code 1 that goes with it, is logged 
   assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(LOGGED_IN) }), false);
 });
 
+test("Claude: only Anthropic's own login counts, and a notice line before the JSON doesn't hide it", async () => {
+  const other = (apiProvider) => JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider });
+  for (const provider of ["bedrock", "vertex", "foundry"]) assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(other(provider), Object.assign(new Error("exit 1"), { code: 1 })) }), false);
+  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(JSON.stringify({ loggedIn: false })) }), false);
+  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(`Update available: 2.1.300\n${LOGGED_OUT}`, Object.assign(new Error("exit 1"), { code: 1 })) }), true);
+});
+
 test("Claude: a check that fails in any other way counts as ready", async () => {
   assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("", Object.assign(new Error("timed out"), { killed: true })) }), false);
   assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("Not logged in · Please run /login", Object.assign(new Error("exit 1"), { code: 1 })) }), false);
@@ -160,4 +167,15 @@ test("a logged-out Claude is a CLI with a problem for the model lookup, so its d
   assert.equal((await broken("claude")).problem, "missing");
   const failing = cliWhenLoggedIn(cli, async () => { throw new Error("boom"); });
   assert.deepEqual(await failing("claude"), { command: "/bin/claude", version: "9.9.9" });
+});
+
+test("invalidate forgets a ready status, so the next call looks again", async () => {
+  const clock = 1;
+  const { check, checked } = statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, now: () => clock });
+  await check();
+  await check();
+  assert.deepEqual(checked, { claude: 1, codex: 1 });
+  check.invalidate("claude");
+  await check();
+  assert.deepEqual(checked, { claude: 2, codex: 1 });
 });

@@ -6,7 +6,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Add01Icon,
   ArrowDown01Icon,
-  ArrowLeft01Icon,
   Cancel01Icon,
   Copy01Icon,
   FolderAddIcon,
@@ -17,7 +16,6 @@ import {
   SidebarRight01Icon,
   SparklesIcon,
   Tick02Icon,
-  UserAdd01Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
@@ -42,7 +40,6 @@ const PROJECT_MENU_ICONS: Record<ProjectMenuKey, HugeIconData> = {
   settings: Settings01Icon,
 };
 
-const IconArrowBoxLeft = (props: HugeIconProps) => <HugeIcon icon={ArrowLeft01Icon} {...props} />;
 const IconCheckmark1Small = (props: HugeIconProps) => <HugeIcon icon={Tick02Icon} {...props} />;
 const IconChevronDownSmall = (props: HugeIconProps) => <HugeIcon icon={ArrowDown01Icon} {...props} />;
 const IconCrossSmall = (props: HugeIconProps) => <HugeIcon icon={Cancel01Icon} {...props} />;
@@ -51,7 +48,6 @@ const IconMagnifyingGlass = (props: HugeIconProps) => <HugeIcon icon={Search01Ic
 const IconPlusMedium = (props: HugeIconProps) => <HugeIcon icon={Add01Icon} {...props} />;
 const IconPopsicle2 = (props: HugeIconProps) => <HugeIcon icon={SparklesIcon} {...props} />;
 const IconSettingsGear1 = (props: HugeIconProps) => <HugeIcon icon={Settings01Icon} {...props} />;
-const IconUserAdd = (props: HugeIconProps) => <HugeIcon icon={UserAdd01Icon} {...props} />;
 
 /* ─────────────────────────────────────────────────────────
  * SIDEBAR NAV
@@ -264,24 +260,6 @@ function WorkspaceMenu({
           <span className="shrink-0 text-ink"><IconCheckmark1Small size={18} /></span>
         </button>
         <div className="my-1 h-px bg-line" />
-        {[
-          { label: "New workspace", icon: <IconPlusMedium size={16} /> },
-          { label: "Workspace settings", icon: <IconSettingsGear1 size={16} /> },
-          { label: "Invite team members", icon: <IconUserAdd size={16} /> },
-        ].map((item) => (
-          <button
-            key={item.label}
-            data-menu-row
-            role="menuitem"
-            type="button"
-            onClick={onClose}
-            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
-          >
-            <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">{item.icon}</span>
-            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
-          </button>
-        ))}
-        <div className="my-1 h-px bg-line" />
         <button
           data-menu-row
           role="menuitem"
@@ -289,8 +267,8 @@ function WorkspaceMenu({
           onClick={onClose}
           className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
         >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconArrowBoxLeft size={16} /></span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Sign out</span>
+          <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
+          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">New workspace</span>
         </button>
       </GlideMenu>
     </div>,

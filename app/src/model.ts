@@ -66,6 +66,11 @@ export interface ModelOption {
   recommended?: boolean;
 }
 
+/** Claude's faster inference is offered only on these Opus models. */
+export function supportsFastMode(model: Pick<ModelOption, "provider" | "id">): boolean {
+  return model.provider === "claude" && ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(model.id);
+}
+
 /**
  * The maintained list: what codex-cli 0.158.0 and Claude Code 2.1.287 report, recommended model first.
  * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
@@ -289,6 +294,8 @@ export interface AgentStartTurnRequest {
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
+  /** Claude only: faster Opus output at premium usage rates. */
+  fastMode?: boolean;
   /** How long Claude's replies run; Claude only, Codex ignores it. */
   replies?: "concise" | "normal";
   prompt: string;

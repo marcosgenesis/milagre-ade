@@ -11,13 +11,14 @@ import {
   Cancel01Icon,
   CommandIcon,
   File02Icon,
+  FlashIcon,
   Link01Icon,
   Mic01Icon,
   SecurityCheckIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { effortCopy, PERMISSION_MODES } from "../model";
+import { effortCopy, PERMISSION_MODES, supportsFastMode } from "../model";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -100,6 +101,8 @@ interface PromptComposerProps {
   onEffortChange: (effort: EffortLevel) => void;
   ultracode: boolean;
   onUltracodeChange: (on: boolean) => void;
+  fastMode: boolean;
+  onFastModeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Keep the tall layout (input above the controls) even while the draft is empty. */
@@ -128,7 +131,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -140,6 +143,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share the accent.
   const orchestrating = ultracode || effort === "ultra";
   const effortLabel = ultracode ? "Ultracode" : effortName;
+  const canUseFastMode = supportsFastMode(selectedModel);
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
@@ -152,9 +156,8 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const [listening, setListening] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
-  const modelRef = useRef<HTMLDivElement>(null);
+  const compactWidthRef = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const popoverRootRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<{ left: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -194,19 +197,30 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
   useLayoutEffect(() => {
     const input = inputRef.current;
-    const controls = controlsRef.current;
-    const measure = measureRef.current;
-    const modelButton = modelRef.current;
-    if (!input || !controls || !measure || !modelButton) return;
-    const fixedControlsWidth = 28 * 3 + modelButton.offsetWidth;
-    const inlineInputWidth = controls.clientWidth - fixedControlsWidth - 16;
-    const needsFullWidth = alwaysExpanded || draft.includes("\n") || measure.offsetWidth + 8 > inlineInputWidth;
-    if (needsFullWidth !== expanded) setExpanded(needsFullWidth);
+    if (!input) return;
     input.style.height = "0px";
     const contentHeight = input.scrollHeight;
     input.style.height = `${Math.min(Math.max(contentHeight, 28), 100)}px`;
     input.style.overflowY = contentHeight > 100 ? "auto" : "hidden";
-  }, [draft, expanded, selectedModel.name, effortLabel, alwaysExpanded]);
+    if (!expanded) compactWidthRef.current = input.clientWidth;
+    let needsFullWidth = alwaysExpanded || draft.includes("\n");
+    if (!needsFullWidth && expanded && draft.length > 0) {
+      // Measure only short drafts when deciding whether the compact layout fits again.
+      // The compact textarea's own scrollHeight detects wrapping as the user types.
+      if (draft.length > 200 || !compactWidthRef.current) needsFullWidth = true;
+      else {
+        const canvas = canvasRef.current ??= document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        if (context) {
+          context.font = `13px ${getComputedStyle(input).fontFamily}`;
+          needsFullWidth = context.measureText(draft).width + 8 > compactWidthRef.current;
+        }
+      }
+    } else if (!needsFullWidth && !expanded) {
+      needsFullWidth = contentHeight > 28;
+    }
+    if (needsFullWidth !== expanded) setExpanded(needsFullWidth);
+  }, [draft, expanded, selectedModel.name, effortLabel, fastMode, alwaysExpanded]);
 
   useEffect(() => {
     if (!modelOpen && !plusOpen && !permissionOpen && !effortOpen) return;
@@ -424,13 +438,13 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
           {imageDraft.loading && <div role="status" className="px-2 text-xs text-ink-3">Loading images…</div>}
           {imageDraft.error && <div role="alert" className="px-2 text-xs text-red">{imageDraft.error}</div>}
           {attachments.length > 0 && <div className="flex flex-wrap gap-1.5 px-0.5 pt-0.5">{attachments.map((file, index) => <span key={`${file}-${index}`} className="flex h-6.5 items-center gap-1.5 rounded-chip bg-field py-1 pr-1 pl-1.5 text-[11.5px] text-ink-2 shadow-hairline"><Icon icon={File02Icon} size={12} /><span className="max-w-36 truncate">{file}</span><button type="button" aria-label={`Remove ${file}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="flex size-5 items-center justify-center rounded-[5px] text-ink-3 hover:bg-line hover:text-ink"><Icon icon={Cancel01Icon} size={10} /></button></span>)}</div>}
-          <span ref={measureRef} aria-hidden="true" className="pointer-events-none absolute invisible whitespace-pre text-[13px] leading-[18px]">{draft}</span>
-          <div ref={controlsRef} className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px_28px]"}`}>
+          <div className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
             <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onChange={(event) => { onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={listening ? "Listening…" : running ? "Steer the agent…" : "Prompt or tag a worktree with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px]"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
-            <div ref={modelRef} className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
+            <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}
+            {canUseFastMode && <button type="button" aria-label="Fast mode" title="Fast mode: faster Opus output at higher usage rates" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button>}
             </div>
             <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
             <button type="button" aria-label={listening ? "Stop voice input" : "Start voice input"} aria-pressed={listening} onClick={toggleListening} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"} ${listening ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}><Icon icon={Mic01Icon} size={15} /></button>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -45,7 +45,7 @@ function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string
   );
 }
 
-function MessageSection({
+const MessageSection = memo(function MessageSection({
   message,
   isUser,
   onRecommendationSelect,
@@ -86,7 +86,7 @@ function MessageSection({
       </div>
     </article>
   );
-}
+});
 
 interface ChatComposerProps {
   imageDraft: ImageDraft;
@@ -119,6 +119,8 @@ interface ChatComposerProps {
   onEffortChange: (effort: EffortLevel) => void;
   ultracode: boolean;
   onUltracodeChange: (on: boolean) => void;
+  fastMode: boolean;
+  onFastModeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
   worktreeSummary: string;
@@ -264,6 +266,8 @@ export function ChatComposer({
   onEffortChange,
   ultracode,
   onUltracodeChange,
+  fastMode,
+  onFastModeChange,
   permissionMode,
   onPermissionModeChange,
   worktreeSummary,
@@ -410,6 +414,8 @@ export function ChatComposer({
           onEffortChange={onEffortChange}
           ultracode={ultracode}
           onUltracodeChange={onUltracodeChange}
+          fastMode={fastMode}
+          onFastModeChange={onFastModeChange}
           permissionMode={permissionMode}
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}

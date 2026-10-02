@@ -14,8 +14,11 @@ const noop = () => {};
 function Fixture() {
   const [count, setCount] = useState(50);
   const [draft, setDraft] = useState("");
+  const [model, setModel] = useState(MODEL_CATALOG[0]);
+  const [fastMode, setFastMode] = useState(false);
   window.setMessageCount = setCount;
   window.setDraft = setDraft;
+  window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
   const messages = Array.from({ length: count }, (_, index) => ({
     id: index + 1, session_id: 1, context: null, role: "assistant",
     body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
@@ -24,8 +27,9 @@ function Fixture() {
     <ChatComposer messages={messages}
       imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false} sendBlocked={false}
-      models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={MODEL_CATALOG[0]} onModelChange={noop}
-      capability={capabilityFor(MODEL_CATALOG[0], null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
+      models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+      capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
+      fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
       worktreeSummary="main" connectionSummary="No connection" eventsCount={0} firstWorktreeName="main"
       firstAgentRunning={false} secondAgentRunning={false} onToggleFirst={noop} onToggleSecond={noop}
       onCycleConnection={noop} onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
@@ -87,6 +91,22 @@ async function browserChecks() {
         await evaluate(`document.querySelector('[aria-label="Message navigation"]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
       }
     }
+    await evaluate('window.setModel("claude-opus-5-5")');
+    await evaluate('window.setDraft("")');
+    await waitFor('!!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    assert.equal(await evaluate('document.querySelector("[aria-label=\\"Fast mode\\"]").getAttribute("aria-pressed")'), "false");
+    await evaluate('document.querySelector("[aria-label=\\"Fast mode\\"]").click()');
+    await waitFor('document.querySelector("[aria-label=\\"Fast mode\\"]").getAttribute("aria-pressed") === "true"');
+    await evaluate('window.setDraft("short")');
+    await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").value === "short"');
+    const compactTop = await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top');
+    await evaluate(`window.setDraft(${JSON.stringify("A longer prompt ".repeat(50))})`);
+    await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top < ' + compactTop);
+    await evaluate('window.setDraft("")');
+    await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
+    await evaluate('window.setModel("claude-sonnet-5-5")');
+    await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    console.log("PASS: fast mode appears only for supported Opus models and the prompt expands on wrapping");
     console.log("PASS: message previews stay inside the conversation and above the prompt");
     app.exit(0);
   } catch (error) {

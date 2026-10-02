@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ConnectionType,
   ChatMessage,
@@ -18,6 +18,7 @@ import {
   AgentModels,
   capabilityFor,
   effortFor,
+  supportsFastMode,
   createInitialState,
   sessionForWorktree,
   sortedWorktrees,
@@ -80,6 +81,8 @@ function App() {
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
   const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
+  const [fastMode, setFastModeState] = useState(() => localStorage.getItem("milagre.fastMode") === "on");
+  const setFastMode = (on: boolean) => { setFastModeState(on); localStorage.setItem("milagre.fastMode", on ? "on" : "off"); };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const [reported, setReported] = useState<AgentModels | null>(null);
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
@@ -541,6 +544,7 @@ function App() {
       permissionMode: mode,
       effort: effortFor(capabilityFor(model, capabilities), effort),
       ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
+      fastMode: supportsFastMode(model) && fastMode,
       replies: getSettings().claudeReplies,
       prompt: body || "Describe the attached images.",
       images,
@@ -553,6 +557,12 @@ function App() {
     if ((!body && !imageDraft.images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
+
+  // Keep finished message cards out of the typing render path. Recommendations still use
+  // the current model and permission mode when clicked.
+  const recommendationRef = useRef<(option: string) => void>(() => {});
+  recommendationRef.current = (option) => { void executeSend(option, permissionMode); };
+  const sendRecommendation = useCallback((option: string) => recommendationRef.current(option), []);
 
   // Built from the latest state, so a turn that finished since the last render isn't lost.
   async function toggleSession(worktreeId: number) {
@@ -707,6 +717,8 @@ function App() {
             onEffortChange={setEffort}
             ultracode={selectedCapability.ultracode && ultracode}
             onUltracodeChange={setUltracode}
+            fastMode={fastMode}
+            onFastModeChange={setFastMode}
             permissionMode={permissionMode}
             onPermissionModeChange={changePermissionMode}
             worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}
@@ -719,7 +731,7 @@ function App() {
             onToggleFirst={() => { if (firstWorktree) void toggleSession(firstWorktree.id); }}
             onToggleSecond={() => { if (secondWorktree) void toggleSession(secondWorktree.id); }}
             onCycleConnection={() => void cycleConnection()}
-            onRecommendationSelect={(option) => void executeSend(option, permissionMode)}
+            onRecommendationSelect={sendRecommendation}
             worktrees={worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path }))}
             selectedWorktreeId={selectedWorktree?.id}
             onWorktreeChange={(id) => {

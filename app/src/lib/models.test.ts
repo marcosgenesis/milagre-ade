@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentModels, ModelOption, ReportedModel } from "../model";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./models.ts";
+import { supportsFastMode } from "../model.ts";
+
+test("fast mode is offered only on supported Claude Opus models", () => {
+  for (const id of ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]) assert.equal(supportsFastMode({ id, provider: "claude", name: id }), true);
+  for (const id of ["claude-opus-4-7", "claude-sonnet-5-5", "gpt-6-astra"]) assert.equal(supportsFastMode({ id, provider: id.startsWith("gpt") ? "codex" : "claude", name: id }), false);
+});
 
 const fallback: ModelOption[] = [
   { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier", recommended: true },

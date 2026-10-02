@@ -77,7 +77,8 @@ export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapsho
       const before = previous?.providers.find((item) => item.provider === current.provider);
       if (!before || before.windows.length === 0) return current;
       const windows = before.windows.filter((item) => !item.resetsAt || Date.parse(item.resetsAt) > now);
-      return { ...current, windows, updatedAt: before.updatedAt };
+      const banked = before.bankedResets ? { bankedResets: before.bankedResets } : {};
+      return { ...current, windows, updatedAt: before.updatedAt, ...banked };
     }),
   };
 }

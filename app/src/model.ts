@@ -430,6 +430,8 @@ export interface ProviderUsage {
   windows: UsageWindow[];
   updatedAt: string;
   message?: string;
+  /** Rate-limit resets the account has banked; absent when there are none. */
+  bankedResets?: number;
 }
 
 export interface UsageSnapshot {

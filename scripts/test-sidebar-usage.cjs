@@ -19,7 +19,7 @@ function Fixture() {
   window.setCollapsed = setCollapsed;
   const snapshot = { providers: [
     { provider: "claude", status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
-    { provider: "codex", status: "ok", windows: hasSession ? [session, weekly] : [weekly] },
+    { provider: "codex", status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
   ] };
   return <aside className="bg-surface rounded-[8px]" data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, padding: 8, margin: 24 }}>
     <SidebarUsage usage={{ snapshot, loading: false, refresh: async () => {}, refreshIfStale: () => {} }} />
@@ -78,11 +78,22 @@ async function browserChecks() {
     await evaluate('window.setDisplay("used")');
     await waitFor('document.querySelectorAll(".sidebar-usage-row")[1].textContent.includes("96%")');
     await screenshot("weekly-only-light");
+    window.setContentSize(560, 420);
+    await evaluate('document.querySelector("aside").style.marginTop = "300px"');
+    const cardText = '(document.querySelector("[data-usage-card]")?.textContent ?? "")';
+    await evaluate('document.querySelectorAll(".sidebar-usage-row")[1].click()');
+    await waitFor(`${cardText}.includes("Codex")`);
+    assert.match(await evaluate(cardText), /Banked resets3 left/);
+    await screenshot("codex-card-banked");
+    await evaluate('document.querySelectorAll(".sidebar-usage-row")[0].click()');
+    await waitFor(`${cardText}.includes("Claude")`);
+    assert.doesNotMatch(await evaluate(cardText), /Banked/, "No banked row when the account has none");
+    await evaluate('document.querySelector("aside").style.marginTop = ""');
     await evaluate('window.setCollapsed(true)');
     await waitFor('document.querySelector("aside").dataset.sidebarCollapsed === "true"');
     assert.equal(await evaluate('getComputedStyle(document.querySelectorAll(".sidebar-usage-row")[1].querySelector(".sidebar-copy")).display'), "none");
     assert.equal(await evaluate('document.querySelectorAll(".sidebar-usage-rail")[1].firstElementChild.getBoundingClientRect().width'), 16);
-    console.log("PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, collapsed rail; four screenshots saved to the temp directory");
+    console.log("PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail; five screenshots saved to the temp directory");
     app.exit(0);
   } catch (error) {
     console.error(error);

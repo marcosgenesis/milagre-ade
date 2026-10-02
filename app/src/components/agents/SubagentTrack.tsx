@@ -7,6 +7,7 @@ import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
+import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 
@@ -52,7 +53,7 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
   const child = rows.find(agent => agent.id === selected);
   const close = () => { setOpened(false); trigger.current?.focus(); };
 
-  const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: child ? 480 : 420 });
+  const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: child ? 480 : 420, height: child ? 520 : 360 });
 
   if (!agents.length) return null;
   const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
@@ -77,14 +78,14 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
           <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">{child.title}</h2>
           <button type="button" aria-label="Close subagents" onClick={close} className={actionClass}><HugeiconsIcon icon={Cancel01Icon} size={14} /></button>
         </header>
-        <div className="min-h-0 overflow-y-auto overscroll-contain"><SubagentTranscript agent={child} /></div>
+        <ScrollArea><SubagentTranscript agent={child} /></ScrollArea>
       </> : <>
         {!archived && <div className="mb-1 shrink-0 border-b border-line pb-1">
           <button type="button" data-subagent-archive-finished disabled={!onArchiveFinished || !visible.some(subagentFinished)} onClick={onArchiveFinished} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-ink-2 hover:bg-hover focus-visible:outline-2 disabled:opacity-40 disabled:hover:bg-transparent">
             <HugeiconsIcon icon={Archive02Icon} size={14} />Archive finished subagents
           </button>
         </div>}
-        <ul className="min-h-0 overflow-y-auto overscroll-contain">
+        <ScrollArea as="ul">
           {rows.map(agent => <li key={agent.id} data-subagent-row className="group flex items-center gap-1 rounded-md px-1 hover:bg-hover focus-within:bg-hover">
             <button type="button" data-subagent-open onClick={() => setSelected(agent.id)} title={`${agent.title} (${labels[agent.status]})`} className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-1 text-left text-[13px] focus-visible:outline-2">
               <span className="flex size-4 shrink-0 items-center justify-center text-ink-3">{subagentActive(agent) ? <SpinnerRing size={12} /> : <ProviderLogo provider={provider} size={14} />}</span>
@@ -94,7 +95,7 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
               <Tooltip label={archived ? "Restore subagent" : "Archive subagent"}><button type="button" aria-label={`${archived ? "Restore" : "Archive"} ${agent.title}`} disabled={!onArchive} onClick={() => onArchive?.(agent.id, !archived)} className={actionClass}><HugeiconsIcon icon={Archive02Icon} size={14} /></button></Tooltip>
             </span>
           </li>)}
-        </ul>
+        </ScrollArea>
         {!rows.length && <p className="px-3 py-5 text-[12px] text-ink-3">{archived ? "No archived subagents." : "No subagents to show."}</p>}
         {(archivedCount > 0 || archived) && <button type="button" data-subagent-archived-toggle onClick={() => setArchived(!archived)} className="mt-1 border-t border-line px-2 py-2 text-left text-[11px] text-ink-3 hover:text-ink">{archived ? "Back to subagents" : `Archived (${archivedCount})`}</button>}
       </>}

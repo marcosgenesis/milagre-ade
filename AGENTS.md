@@ -8,6 +8,10 @@ Issues and specs live in GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 This is a single-context repo. See `docs/agents/domain.md`.
 
+### UI rules
+
+Scroll containers, scrollbars and choice menus go through shared primitives. See `docs/agents/ui.md`.
+
 ### Pull request screenshots
 
 Every PR that changes something visible includes screenshots in its description. Take them from a real run (an Electron check under `scripts/test-*.cjs`, or the dev app) and show the before/after or each state the change adds.

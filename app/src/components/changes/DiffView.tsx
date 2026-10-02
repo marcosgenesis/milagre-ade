@@ -4,7 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Layout2ColumnIcon, LayoutTopIcon, RefreshIcon, TextWrapIcon } from "@hugeicons/core-free-icons";
 import Tooltip from "../primitives/Tooltip";
 import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
-import { useScrollFade } from "../../lib/use-scroll-fade";
+import { ScrollArea } from "../primitives/ScrollArea";
 import type { DiffFileEntry } from "../../electron";
 import { CommentCard, CommentSlot } from "./DiffComments";
 import { DiffFile, type DiffLayout } from "./DiffFile";
@@ -52,7 +52,6 @@ export function DiffView({ changes, prefs, comments }: { changes: Changes; prefs
   const reduced = useReducedMotion();
   const { list, load, patchFor, scrollTarget } = changes;
   const scroller = useRef<HTMLDivElement>(null);
-  useScrollFade(scroller);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const files = list.state === "ready" && list.isRepo ? list.files : [];
 
@@ -106,7 +105,7 @@ export function DiffView({ changes, prefs, comments }: { changes: Changes; prefs
       initial={{ opacity: 0, x: 32 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 32 }}
       transition={reduced ? { duration: 0 } : { x: SPRING_LAYOUT, opacity: { duration: 0.2, ease: EASE_OUT }}}>
       {/* Starts 60px down, level with the sidebar and the panel; only the bottom edge fades, while there's more below. */}
-      <div ref={scroller} data-diff-view className="diff-scroll scroll-fade mt-[60px] h-[calc(100%-60px)] overflow-y-auto px-3 pb-4">
+      <ScrollArea ref={scroller} data-diff-view className="diff-scroll mt-[60px] h-[calc(100%-60px)] px-3 pb-4">
         {files.length === 0 && <p className="py-16 text-center text-[13px] text-ink-3">{list.state === "ready" ? "No changes to show." : "Loading changes…"}</p>}
         {orphans.length > 0 && (
           <div data-diff-orphans className="mb-3 overflow-hidden rounded-card border border-line bg-surface">
@@ -128,7 +127,7 @@ export function DiffView({ changes, prefs, comments }: { changes: Changes; prefs
               onVisible={load} onShowLarge={showLarge} />
           ))}
         </div>
-      </div>
+      </ScrollArea>
     </motion.div>
   );
 }

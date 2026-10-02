@@ -21,5 +21,6 @@
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true
   },
-  "include": ["app/src"]
+  "include": ["app/src"],
+  "exclude": ["app/src/**/*.test.ts"]
 }

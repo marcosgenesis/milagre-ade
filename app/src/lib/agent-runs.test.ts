@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest } from "../model";
-import { applyAgentEvent, chatInProject, chatsWaitingForApproval, chatKey, clearAnswered, markAnswered, modelForChat, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import type { AgentEvent, ChatStep, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
+import { applyAgentEvent, capOutput, chatInProject, chatsRunning, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -70,12 +70,12 @@ test("streams text per chat and saves each finished reply once", () => {
 });
 
 test("keeps partial text when a turn fails or is cancelled", () => {
-  const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   const failed = applyAgentEvent(base(), runs, PROJECT, key(1), { type: "turn-failed", message: "Codex stopped: boom" });
   assert.equal(failed.state.messages[0].body, "Half an answer\n\nAgent error: Codex stopped: boom");
   assert.equal(failed.state.messages[0].outcome, "failed");
 
-  const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
+  const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
   assert.equal(cancelled.state.messages[0].body, "Agent run cancelled.");
   assert.equal(cancelled.state.messages[0].outcome, "cancelled");
 });
@@ -90,7 +90,7 @@ test("a key from another project path never touches this state", () => {
   const state = base();
   // "/work/app#x" + "#2" starts with "/work/app#" but belongs to the project at "/work/app#x".
   for (const other of ["/work/other", "/work", "/work/app#x", "/work/app/sub"]) {
-    const runs = { [chatKey(other, 2)]: { text: "Not yours", model: "claude-opus-5-5", approvals: [], answered: {} } };
+    const runs = { [chatKey(other, 2)]: { text: "Not yours", model: "claude-opus-5-5", approvals: [], steps: [], questions: [], answered: {} } };
     for (const event of [
       { type: "session-started", nativeId: "foreign" },
       { type: "session-reset" },
@@ -104,7 +104,7 @@ test("a key from another project path never touches this state", () => {
 
 test("an unknown session id is a no-op", () => {
   const state = base();
-  const runs = { [key(99)]: { text: "Orphan", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(99)]: { text: "Orphan", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   for (const chatId of [key(99), `${PROJECT}#`, `${PROJECT}#abc`]) {
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "session-started", nativeId: "x" }), { state, runs, changed: false });
     assert.deepEqual(applyAgentEvent(state, runs, PROJECT, chatId, { type: "turn-completed" }), { state, runs, changed: false });
@@ -113,7 +113,7 @@ test("an unknown session id is a no-op", () => {
 
 test("an unknown event type changes nothing", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "Partial", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Partial", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   // Later steps add event types (tool steps, approvals); only the three turn endings end a run.
   const event = { type: "tool-started", toolId: "t-1" } as unknown as AgentEvent;
   assert.deepEqual(applyAgentEvent(state, runs, PROJECT, key(1), event), { state, runs, changed: false });
@@ -139,7 +139,7 @@ const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "
 test("turn-started opens a run for a turn this window didn't start", () => {
   const state = { ...base(), messages: [{ id: 5, session_id: 2, body: "One more thing", context: null, role: "user" as const, model: "claude-opus-5-5" }] };
   const opened = applyAgentEvent(state, {}, PROJECT, key(2), { type: "turn-started", turnId: "t-2" });
-  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", approvals: [], answered: {} });
+  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", approvals: [], steps: [], questions: [], answered: {} });
   assert.equal(opened.changed, false);
 
   const running = startRun({}, key(2), "claude-sonnet-5-5");
@@ -169,15 +169,15 @@ test("approval requests wait on the run, oldest first, until they're resolved", 
 
 test("a steer saves the reply so far and keeps the run going", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "  Half an answer \n", model: "gpt-6-sol", approvals: [approval("a")], answered: {} } };
+  const runs = { [key(1)]: { text: "  Half an answer \n", model: "gpt-6-sol", approvals: [approval("a")], steps: [], questions: [], answered: {} } };
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.changed, true);
   assert.deepEqual(split.state.messages.at(-1), { id: state.next_id, session_id: 1, body: "Half an answer", context: null, role: "assistant", model: "gpt-6-sol" });
   assert.equal(split.state.next_id, state.next_id + 1);
-  assert.deepEqual(split.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [approval("a")], answered: {}, split: true });
+  assert.deepEqual(split.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [approval("a")], steps: [], questions: [], answered: {}, split: true });
 
   const cases: Array<[AgentRuns, string]> = [
-    [{ [key(1)]: { text: "  ", model: "gpt-6-sol", approvals: [], answered: {} } }, key(1)],
+    [{ [key(1)]: { text: "  ", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } }, key(1)],
     [{}, key(1)],
     [runs, chatKey("/work/other", 1)],
     [runs, key(99)],
@@ -217,7 +217,7 @@ test("a resolved request drops its answer", () => {
 
 test("a turn that completes with no text after a steer split saves no reply", () => {
   const state = base();
-  const runs = { [key(1)]: { text: "Half", model: "gpt-6-sol", approvals: [], answered: {} } };
+  const runs = { [key(1)]: { text: "Half", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.runs[key(1)].split, true);
   const done = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-completed" });
@@ -230,9 +230,9 @@ test("a turn that completes with no text after a steer split saves no reply", ()
   assert.equal(more.state.messages.at(-1)?.body, "Rest");
 });
 
-test("chatsWaitingForApproval lists only this project's chats with a pending approval", () => {
+test("chatsWaitingForUser lists only this project's chats with a pending approval or question", () => {
   const request = { requestId: "r1" } as PermissionRequest;
-  const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, answered: {} });
+  const run = (approvals: PermissionRequest[]) => ({ text: "", model: "m", approvals, steps: [], questions: [], answered: {} });
   const runs: AgentRuns = {
     [key(1)]: run([request]),
     [key(2)]: run([]),
@@ -240,6 +240,187 @@ test("chatsWaitingForApproval lists only this project's chats with a pending app
     [chatKey("/work/app#other", 4)]: run([request]),
     [chatKey("/work/other", 5)]: run([request]),
   };
-  assert.deepEqual([...chatsWaitingForApproval(runs, PROJECT)].sort(), [1, 3]);
-  assert.equal(chatsWaitingForApproval({}, PROJECT).size, 0);
+  assert.deepEqual([...chatsWaitingForUser(runs, PROJECT)].sort(), [1, 3]);
+  const asking: AgentRuns = { [key(6)]: { ...run([]), questions: [question("q1")] }, [key(7)]: run([]) };
+  assert.deepEqual([...chatsWaitingForUser(asking, PROJECT)], [6]);
+  assert.equal(chatsWaitingForUser({}, PROJECT).size, 0);
+});
+
+test("chatsRunning lists only this project's chats with a run", () => {
+  const run = { text: "", model: "m", approvals: [], steps: [], questions: [], answered: {} };
+  const runs: AgentRuns = { [key(1)]: run, [key(4)]: run, [chatKey("/work/app#other", 2)]: run, [chatKey("/work/other", 3)]: run };
+  assert.deepEqual([...chatsRunning(runs, PROJECT)].sort(), [1, 4]);
+});
+
+const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });
+
+test("questions wait on the run, oldest first, until they're resolved", () => {
+  const state = base();
+  let runs = startRun({}, key(1), "claude-opus-5-5");
+  for (const requestId of ["a", "b"]) runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-request", ...question(requestId) }).runs;
+  assert.deepEqual(runs[key(1)].questions, [question("a"), question("b")]);
+  assert.deepEqual(runs[key(1)].approvals, []);
+
+  runs = markAnswered(runs, key(1), "a", "answered");
+  runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "a", outcome: "answered" }).runs;
+  assert.deepEqual(runs[key(1)].questions.map((item) => item.requestId), ["b"]);
+  assert.deepEqual(runs[key(1)].answered, {});
+
+  const unchanged = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "missing", outcome: "cancelled" });
+  assert.equal(unchanged.runs, runs);
+  assert.equal(applyAgentEvent(state, {}, PROJECT, key(1), { type: "question-request", ...question("c") }).runs[key(1)], undefined);
+  assert.equal(applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-cancelled" }).runs[key(1)], undefined);
+});
+
+test("what was sent reads back as a decision for approvals and a reply for questions", () => {
+  let runs = startRun({}, key(1), "gpt-6-sol");
+  runs = markAnswered(markAnswered(markAnswered(runs, key(1), "p", "allow-for-chat"), key(1), "q", "dismissed"), key(1), "r", "answered");
+  assert.equal(sentDecision(runs[key(1)], "p"), "allow-for-chat");
+  assert.equal(sentDecision(runs[key(1)], "q"), null);
+  assert.equal(sentReply(runs[key(1)], "q"), "dismissed");
+  assert.equal(sentReply(runs[key(1)], "r"), "answered");
+  assert.equal(sentReply(runs[key(1)], "p"), null);
+  assert.equal(sentReply(undefined, "q"), null);
+});
+
+const npmTest = { id: "s1", kind: "shell" as const, title: "Ran `npm test`", detail: "$ npm test\n" };
+
+/** Folds events into one chat's run, starting from a fresh run unless `runs` is given. */
+function fold(events: AgentEvent[], runs: AgentRuns = startRun({}, key(1), "gpt-6-sol"), state = base()) {
+  let result = { state, runs, changed: false };
+  for (const event of events) result = applyAgentEvent(result.state, result.runs, PROJECT, key(1), event);
+  return result;
+}
+
+test("a step starts where the reply's text has got to, streams its output, and ends with its own detail", () => {
+  const { runs } = fold([
+    { type: "text-delta", messageId: "t", text: "Testing." },
+    { type: "step-started", step: npmTest },
+    { type: "step-output", id: "s1", text: "ok 2\n" },
+  ]);
+  assert.deepEqual(runs[key(1)].steps, [{ ...npmTest, status: "running", offset: 8, detail: "$ npm test\nok 2\n" }]);
+
+  const ended = fold([{ type: "step-completed", id: "s1", status: "failed", detail: "$ npm test\nok 1\nok 2\n1 failing\n" }], runs).runs;
+  assert.deepEqual(ended[key(1)].steps, [{ ...npmTest, status: "failed", offset: 8, detail: "$ npm test\nok 1\nok 2\n1 failing\n" }]);
+  // Output after the end, or for a step the run doesn't have, changes nothing.
+  assert.equal(fold([{ type: "step-output", id: "s1", text: "late" }], ended).runs, ended);
+  assert.equal(fold([{ type: "step-completed", id: "nope", status: "done" }], ended).runs, ended);
+});
+
+test("a step that ends without a detail keeps none, and a new title replaces the first", () => {
+  const read = { id: "r1", kind: "read" as const, title: "Read `app.js`", detail: "$ cat app.js\n" };
+  const { runs } = fold([
+    { type: "step-started", step: read },
+    { type: "step-output", id: "r1", text: "export const a = 1;\n" },
+    { type: "step-completed", id: "r1", status: "done" },
+    { type: "step-started", step: { id: "w1", kind: "search", title: "Searched the web" } },
+    { type: "step-completed", id: "w1", status: "done", title: "Searched the web for `IANA`" },
+  ]);
+  assert.deepEqual(runs[key(1)].steps, [
+    { id: "r1", kind: "read", title: "Read `app.js`", status: "done", offset: 0 },
+    { id: "w1", kind: "search", title: "Searched the web for `IANA`", status: "done", offset: 0 },
+  ]);
+});
+
+test("streamed output keeps its last 20,000 characters", () => {
+  const { runs } = fold([
+    { type: "step-started", step: { ...npmTest, detail: "" } },
+    { type: "step-output", id: "s1", text: "a".repeat(15_000) },
+    { type: "step-output", id: "s1", text: "b".repeat(15_000) },
+  ]);
+  assert.equal(runs[key(1)].steps[0].detail, `… truncated\n${"a".repeat(5_000)}${"b".repeat(15_000)}`);
+  assert.equal(capOutput("short"), "short");
+});
+
+test("a step that starts with a huge detail is saved capped when the turn is cancelled", () => {
+  const { state } = fold([{ type: "step-started", step: { ...npmTest, detail: `$ ${"x".repeat(60_000)}\n` } }, { type: "turn-cancelled" }]);
+  assert.ok((state.messages.at(-1)?.steps?.[0].detail?.length ?? 0) <= 20_012);
+});
+
+test("step events for a chat with nothing running change nothing", () => {
+  const state = base();
+  for (const event of [{ type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "x" }, { type: "step-completed", id: "s1", status: "done" }] as AgentEvent[]) {
+    assert.deepEqual(applyAgentEvent(state, {}, PROJECT, key(1), event), { state, runs: {}, changed: false });
+  }
+});
+
+test("a finished reply saves its steps where they happened in the trimmed text", () => {
+  const { state } = fold([
+    { type: "text-delta", messageId: "t", text: "\n  Testing." },
+    { type: "step-started", step: npmTest },
+    { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\nok\n" },
+    { type: "text-delta", messageId: "t", text: "\n\nAll green. " },
+    { type: "turn-completed" },
+  ]);
+  const saved = state.messages.at(-1);
+  assert.equal(saved?.body, "Testing.\n\nAll green.");
+  assert.deepEqual(saved?.steps, [{ ...npmTest, status: "done", offset: 8, detail: "$ npm test\nok\n" }]);
+});
+
+test("a step still running when the turn ends is saved as done or failed with the turn", () => {
+  const running = fold([{ type: "text-delta", messageId: "t", text: "Testing." }, { type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "ok 1\n" }]).runs;
+  const cancelled = fold([{ type: "turn-cancelled" }], running).state.messages.at(-1);
+  assert.equal(cancelled?.body, "Testing.\n\nAgent run cancelled.");
+  assert.deepEqual(cancelled?.steps, [{ ...npmTest, status: "failed", offset: 8, detail: "$ npm test\nok 1\n" }]);
+  assert.equal(fold([{ type: "turn-failed", message: "boom" }], running).state.messages.at(-1)?.steps?.[0].status, "failed");
+  assert.equal(fold([{ type: "turn-completed" }], running).state.messages.at(-1)?.steps?.[0].status, "done");
+});
+
+test("a reply with steps and no text saves an empty body; one with neither says so", () => {
+  const withSteps = fold([{ type: "step-started", step: npmTest }, { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" }, { type: "turn-completed" }]).state.messages.at(-1);
+  assert.equal(withSteps?.body, "");
+  assert.deepEqual(withSteps?.steps?.map((step: ChatStep) => step.offset), [0]);
+  const empty = fold([{ type: "turn-completed" }]).state.messages.at(-1);
+  assert.equal(empty?.body, "The agent finished without a reply.");
+  assert.equal(empty && "steps" in empty, false);
+});
+
+test("a steer saves finished steps with the reply so far; running ones carry on below the new message", () => {
+  const { runs, state } = fold([
+    { type: "text-delta", messageId: "t", text: "Testing." },
+    { type: "step-started", step: { id: "r1", kind: "read", title: "Read `a.js`" } },
+    { type: "step-completed", id: "r1", status: "done" },
+    { type: "step-started", step: npmTest },
+  ]);
+  const split = splitRunForSteer(state, runs, PROJECT, key(1));
+  assert.deepEqual(split.state.messages.at(-1)?.steps, [{ id: "r1", kind: "read", title: "Read `a.js`", status: "done", offset: 8 }]);
+  assert.deepEqual(split.runs[key(1)].steps, [{ ...npmTest, status: "running", offset: 0 }]);
+  assert.equal(split.runs[key(1)].text, "");
+
+  // The running step finishes after the steer and is saved with the rest of the reply.
+  const rest = fold([{ type: "step-completed", id: "s1", status: "done", detail: "$ npm test\nok\n" }, { type: "turn-completed" }], split.runs, split.state).state.messages.at(-1);
+  assert.equal(rest?.body, "");
+  assert.deepEqual(rest?.steps, [{ ...npmTest, status: "done", offset: 0, detail: "$ npm test\nok\n" }]);
+});
+
+test("a steer with only finished steps and no text still saves them", () => {
+  const { runs, state } = fold([{ type: "step-started", step: npmTest }, { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" }]);
+  const split = splitRunForSteer(state, runs, PROJECT, key(1));
+  assert.equal(split.changed, true);
+  assert.equal(split.state.messages.at(-1)?.body, "");
+  assert.equal(split.state.messages.at(-1)?.steps?.length, 1);
+  // Nothing new after the split: the turn saves no second reply.
+  const done = fold([{ type: "turn-completed" }], split.runs, split.state);
+  assert.equal(done.changed, false);
+  // Only a running step and no text: nothing to save yet.
+  const onlyRunning = fold([{ type: "step-started", step: npmTest }]);
+  assert.equal(splitRunForSteer(onlyRunning.state, onlyRunning.runs, PROJECT, key(1)).changed, false);
+});
+
+test("an open approval and question survive a steer and keep their steps; the turn's end drops them with the run", () => {
+  const request = { ...approval("a"), stepId: "s1" };
+  const { runs, state } = fold([
+    { type: "text-delta", messageId: "t", text: "Testing." },
+    { type: "step-started", step: npmTest },
+    { type: "permission-request", ...request },
+    { type: "question-request", requestId: "q-1", questions: [{ id: "0", header: "", question: "Which?", options: [], multiSelect: false, allowOther: true, secret: false }] },
+  ]);
+  const split = splitRunForSteer(state, runs, PROJECT, key(1));
+  const run = split.runs[key(1)];
+  assert.equal(run.approvals[0].stepId, "s1");
+  assert.deepEqual(run.questions.map((question) => question.requestId), ["q-1"]);
+  assert.deepEqual(run.steps.map((step) => step.id), ["s1"]);
+  const ended = fold([{ type: "turn-cancelled" }], split.runs, split.state);
+  assert.equal(ended.runs[key(1)], undefined);
+  assert.equal(ended.state.messages.at(-1)?.steps?.[0].status, "failed");
 });

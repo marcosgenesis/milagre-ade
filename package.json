@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
+    "test:ui": "node --test \"app/src/**/*.test.ts\"",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",
     "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",

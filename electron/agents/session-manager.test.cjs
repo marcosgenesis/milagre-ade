@@ -21,8 +21,17 @@ class FakeSession {
     this.interrupts += 1;
   }
 
+  setPermissionMode(mode) {
+    this.modes = [...(this.modes ?? []), mode];
+  }
+
   respondToPermission(requestId, decision) {
     this.answers = [...(this.answers ?? []), { requestId, decision }];
+    return true;
+  }
+
+  answerQuestion(requestId, answers) {
+    this.replies = [...(this.replies ?? []), { requestId, answers }];
     return true;
   }
 
@@ -223,6 +232,16 @@ test("routes approval answers to the chat's session and refuses unknown decision
   assert.throws(() => manager.respondToPermission("1", "req-1", "yes"), /Unknown permission decision: yes/);
 });
 
+test("a mode switch reaches the chat's session", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  await manager.setPermissionMode("1", "full");
+  await manager.setPermissionMode("9", "full");
+  assert.deepEqual(created[0].modes, ["full"]);
+  await assert.rejects(manager.setPermissionMode("1", "yolo"), /Unknown permission mode: yolo/);
+});
+
 test("interruptAll stops every chat's turn", async (t) => {
   const { manager, created } = harness();
   t.after(() => manager.closeAll());
@@ -239,6 +258,38 @@ test("an approval request is sent right after the text before it", async (t) => 
   created[0].emit({ type: "text-delta", messageId: "t1", text: "Let me check" });
   created[0].emit({ type: "permission-request", requestId: "r1", kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
   assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "permission-request"]);
+});
+
+test("command output is batched per step, in order with the reply around it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  const step = { id: "exec-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" };
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "Testing." });
+  created[0].emit({ type: "step-started", step });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok 1\n" });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok 2\n" });
+  created[0].emit({ type: "step-output", id: "exec-2", text: "other\n" });
+  assert.deepEqual(sent.map((item) => item.event), [
+    { type: "text-delta", messageId: "t1", text: "Testing." },
+    { type: "step-started", step },
+    { type: "step-output", id: "exec-1", text: "ok 1\nok 2\n" },
+  ]);
+  created[0].emit({ type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" });
+  assert.deepEqual(sent.slice(3).map((item) => item.event), [
+    { type: "step-output", id: "exec-2", text: "other\n" },
+    { type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" },
+  ]);
+});
+
+test("a batch of command output keeps only its end", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "step-output", id: "exec-1", text: "a".repeat(15_000) });
+  created[0].emit({ type: "step-output", id: "exec-1", text: "b".repeat(15_000) });
+  await waitUntil(() => sent.length === 1);
+  assert.equal(sent[0].event.text, `… truncated\n${"a".repeat(5_000)}${"b".repeat(15_000)}`);
 });
 
 test("a message a closed session hands back is retried once on a fresh session", async (t) => {
@@ -271,4 +322,37 @@ test("a second sessionClosed failure propagates instead of retrying forever", as
   };
   await assert.rejects(manager.startTurn(request("1")), (error) => error.sessionClosed === true);
   assert.equal(created.length, 2);
+});
+
+test("routes question answers to the chat's session and refuses malformed ones", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  assert.equal(manager.answerQuestion("1", "q-1", { color: ["Green", "a darker one"] }), true);
+  assert.equal(manager.answerQuestion("1", "q-2", null), true);
+  assert.deepEqual(created[0].replies, [{ requestId: "q-1", answers: { color: ["Green", "a darker one"] } }, { requestId: "q-2", answers: null }]);
+  assert.equal(manager.answerQuestion("9", "q-1", null), false);
+  for (const bad of [undefined, "Green", ["Green"], { color: "Green" }, { color: [7] }, { color: ["x".repeat(10_001)] }]) {
+    assert.throws(() => manager.answerQuestion("1", "q-1", bad), /Invalid answers to an agent question/);
+  }
+  assert.equal(created[0].replies.length, 2);
+});
+
+test("a question is sent right after the command output before it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "step-output", id: "exec-1", text: "ok\n" });
+  created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
+  assert.deepEqual(sent.map((item) => item.event.type), ["step-output", "question-request"]);
+});
+
+test("a question is sent right after the text before it", async (t) => {
+  const { manager, sent, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "text-delta", messageId: "t1", text: "One thing first" });
+  created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
+  created[0].emit({ type: "question-resolved", requestId: "q-1", outcome: "dismissed" });
+  assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "question-request", "question-resolved"]);
 });

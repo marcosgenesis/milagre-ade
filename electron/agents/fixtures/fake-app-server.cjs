@@ -4,7 +4,13 @@
 // takes back), steer (the first turn waits; turn/steer joins it, or is refused when its text says
 // "too late"), no-turn-id (the first turn is never given an id and ends on its own), stubborn (turn never ends, interrupt unanswered), hang-init (initialize unanswered),
 // resume-exit (exits on thread/resume), slow-stop (the first turn takes 150ms to stop after an interrupt),
-// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping).
+// late-approval (like slow-stop, and Codex asks for a command approval while the turn is stopping),
+// reject-config (thread/start and thread/resume fail with an RPC error when they carry `config`),
+// question (Codex asks a question and ends the turn on the answer), question-steer (Codex asks a question
+// and the turn waits for turn/steer), question-withdrawn (a question Codex takes back), late-question
+// (like late-approval, with a question).
+// steps (a command with streamed output and a new file, then a reply), running-step (a command
+// starts and the turn waits until it's interrupted).
 // fake/turn-started makes it announce a turn nobody asked for.
 const fs = require("node:fs");
 const { createInterface } = require("node:readline");
@@ -17,6 +23,9 @@ let pendingTurn = null;
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const notify = (method, params) => send({ method, params });
 const completeTurn = (threadId, turnId, status, error = null) => notify("turn/completed", { threadId, turn: { id: turnId, items: [], status, error } });
+
+const QUESTIONS = [{ id: "color", header: "Color", question: "Which color?", isOther: true, isSecret: false, options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }] }];
+const askQuestion = (id, threadId, turnId) => send({ id, method: "item/tool/requestUserInput", params: { threadId, turnId, itemId: "call-1", questions: QUESTIONS, isBlocking: false, autoResolutionMs: null } });
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -41,9 +50,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "fake/received":
       return send({ id, result: { received, threadStarts } });
     case "thread/start":
+      if (scenario === "reject-config" && params.config) return send({ id, error: { code: -32602, message: "invalid params: config" } });
       threadStarts += 1;
       return send({ id, result: { thread: { id: `thread-${threadStarts}` }, model: params.model } });
     case "thread/resume":
+      if (scenario === "reject-config" && params.config) return send({ id, error: { code: -32602, message: "invalid params: config" } });
       if (scenario === "resume-exit") {
         process.stderr.write("resume exploded\n");
         process.exit(4);
@@ -73,13 +84,29 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
-      if ((scenario === "slow-stop" || scenario === "late-approval") && turnId === "turn-1") {
+      if ((scenario === "slow-stop" || scenario === "late-approval" || scenario === "late-question") && turnId === "turn-1") {
         pendingTurn = { threadId, turnId };
         return undefined;
       }
       if (scenario === "slow") {
         pendingTurn = { threadId, turnId };
         return undefined;
+      }
+      if (scenario === "steps" || scenario === "running-step") {
+        const command = { type: "commandExecution", id: "exec-1", command: "/bin/zsh -lc 'npm test'", cwd: "/repo", status: "inProgress", commandActions: [{ type: "unknown", command: "npm test" }], aggregatedOutput: null, exitCode: null };
+        notify("item/started", { threadId, turnId, item: command });
+        if (scenario === "running-step") {
+          pendingTurn = { threadId, turnId };
+          return undefined;
+        }
+        notify("item/commandExecution/outputDelta", { threadId, turnId, itemId: "exec-1", delta: "ok 2\n" });
+        notify("item/completed", { threadId, turnId, item: { ...command, status: "completed", aggregatedOutput: "ok 1\nok 2\n", exitCode: 0 } });
+        notify("item/started", { threadId, turnId, item: { type: "reasoning", id: "rs-1", summary: [], content: [] } });
+        const patch = { type: "fileChange", id: "exec-2", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] };
+        notify("item/started", { threadId, turnId, item: patch });
+        notify("item/completed", { threadId, turnId, item: { ...patch, status: "completed" } });
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Done" });
+        return completeTurn(threadId, turnId, "completed");
       }
       if (scenario === "approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
@@ -89,6 +116,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
         notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] } });
         return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
+      }
+      if (scenario === "question") {
+        pendingTurn = { threadId, turnId, approvalId: "srv-q" };
+        return askQuestion("srv-q", threadId, turnId);
+      }
+      if (scenario === "question-steer") {
+        pendingTurn = { threadId, turnId };
+        return askQuestion("srv-q", threadId, turnId);
+      }
+      if (scenario === "question-withdrawn") {
+        askQuestion("srv-q", threadId, turnId);
+        notify("serverRequest/resolved", { threadId, requestId: "srv-q" });
+        return completeTurn(threadId, turnId, "completed");
       }
       if (scenario === "permissions") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
@@ -109,12 +149,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: {} });
     case "turn/interrupt":
       if (scenario === "stubborn") return undefined;
-      if (scenario === "slow-stop" || scenario === "late-approval") {
+      if (scenario === "slow-stop" || scenario === "late-approval" || scenario === "late-question") {
         const stopping = pendingTurn;
         pendingTurn = null;
         setTimeout(() => {
           send({ id, result: {} });
           if (scenario === "late-approval") send({ id: "srv-late", method: "item/commandExecution/requestApproval", params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+          if (scenario === "late-question") askQuestion("srv-late", stopping.threadId, stopping.turnId);
           completeTurn(stopping.threadId, stopping.turnId, "interrupted");
         }, 150);
         return undefined;

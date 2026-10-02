@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision } from "../model";
-import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, splitRunForSteer, startRun } from "../lib/agent-runs";
-import type { AgentRuns } from "../lib/agent-runs";
+import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
+import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, sessionIdFromKey, splitRunForSteer, startRun } from "../lib/agent-runs";
+import { patchSession } from "../lib/chat-list";
+import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
+
+const TURN_ENDS = new Set<AgentEvent["type"]>(["turn-completed", "turn-cancelled", "turn-failed"]);
 
 /**
  * Streams agent turns per chat and saves each finished turn into the open project's state.
  * Chats are named by chat key (`chatKey`); events for another project's chats are ignored.
+ * A turn that ends in a chat that isn't open (`isOpen`) leaves the chat unread.
  */
-export function useAgentRuns(projectPath: string, getState: () => CoordinatorState | null, commit: (next: CoordinatorState) => void) {
+export function useAgentRuns(projectPath: string, getState: () => CoordinatorState | null, commit: (next: CoordinatorState) => void, isOpen: (sessionId: number) => boolean = () => false) {
   const [runs, setRuns] = useState<AgentRuns>({});
   const runsRef = useRef(runs);
   const projectPathRef = useRef(projectPath);
   const getStateRef = useRef(getState);
   const commitRef = useRef(commit);
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
   projectPathRef.current = projectPath;
   getStateRef.current = getState;
   commitRef.current = commit;
@@ -23,7 +29,10 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
     const result = applyAgentEvent(state, runsRef.current, projectPathRef.current, chatId, event);
     runsRef.current = result.runs;
     setRuns(result.runs);
-    if (result.changed) commitRef.current(result.state);
+    if (!result.changed) return;
+    const sessionId = sessionIdFromKey(chatId);
+    const ended = TURN_ENDS.has(event.type) && !isOpenRef.current(sessionId) && !result.state.sessions[sessionId]?.archived;
+    commitRef.current(ended ? patchSession(result.state, sessionId, { unread: true }) : result.state);
   }, []);
 
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
@@ -70,14 +79,14 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   }, []);
 
   /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
-  const respond = useCallback(async (chatId: string, requestId: string, decision: PermissionDecision) => {
+  const send = useCallback(async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
     const setAnswers = (next: AgentRuns) => {
       runsRef.current = next;
       setRuns(next);
     };
-    setAnswers(markAnswered(runsRef.current, chatId, requestId, decision));
+    setAnswers(markAnswered(runsRef.current, chatId, requestId, sent));
     try {
-      const accepted = await window.milagre.respondToPermission(chatId, requestId, decision);
+      const accepted = await deliver();
       if (!accepted) setAnswers(clearAnswered(runsRef.current, chatId, requestId));
       return accepted;
     } catch (error) {
@@ -86,5 +95,10 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
     }
   }, []);
 
-  return { runs, start, interrupt, respond, splitForSteer };
+  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => send(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [send]);
+
+  /** Sends the answers to a question, or dismisses it (null). */
+  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
+
+  return { runs, start, interrupt, respond, answerQuestion, splitForSteer };
 }

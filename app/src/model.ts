@@ -99,11 +99,21 @@ export interface Project {
   name: string;
 }
 
+export interface DiffStat {
+  added: number;
+  removed: number;
+}
+
 export interface Worktree {
   id: number;
   project_id: number;
   path: string;
+  /** The checked-out branch, or the folder name when HEAD is detached. */
   name: string;
+  /** The ref a worktree Milagre created started from; its changes are measured against it. */
+  base?: string;
+  /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
+  diff?: DiffStat;
 }
 
 export interface AgentSession {
@@ -115,6 +125,12 @@ export interface AgentSession {
   provider?: ModelProvider;
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
+  /** A name the user gave the chat; otherwise it's named after its first message. */
+  title?: string;
+  /** A turn ended while the chat wasn't open, or the user marked it unread. */
+  unread?: boolean;
+  /** Hidden from the chat list. */
+  archived?: boolean;
 }
 
 export interface Connection {
@@ -143,6 +159,24 @@ export interface ChatMessage {
   images?: ImageAttachment[];
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
+  /** The tool calls the agent made in this reply, in the order they started. */
+  steps?: ChatStep[];
+}
+
+export type StepKind = "shell" | "edit" | "read" | "search" | "other";
+
+/** One tool call in an agent's reply: a command, an edit, a read, a search or another tool. */
+export interface ChatStep {
+  id: string;
+  kind: StepKind;
+  /** What it did, e.g. "Ran `npm test`"; text between backticks is code. */
+  title: string;
+  /** Saved steps are done or failed; only a reply still streaming has running ones. */
+  status: "running" | "done" | "failed";
+  /** The command and its output, or a unified diff, capped at 20,000 characters. */
+  detail?: string;
+  /** Where the step sits in the reply: the length of the reply's text when it started. */
+  offset?: number;
 }
 
 export interface ImageAttachment {
@@ -169,17 +203,57 @@ export interface PermissionRequest {
   reason?: string;
   /** Whether "Always allow in this chat" can be offered. */
   allowForChat: boolean;
+  /** The tool step this request is about. */
+  stepId?: string;
 }
 
 export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
+
+/** One option on a question card. */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question an agent asks, as shown on the question card. */
+export interface AgentQuestion {
+  /** Unique within its request; answers are keyed by it. */
+  id: string;
+  /** A short tag such as "Library"; may be empty. */
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  /** The user may pick several options. */
+  multiSelect: boolean;
+  /** The user may type an answer of their own. */
+  allowOther: boolean;
+  /** The typed answer is a secret, so the field hides it. */
+  secret: boolean;
+}
+
+/** Questions a turn waits on, asked together. */
+export interface QuestionRequest {
+  requestId: string;
+  questions: AgentQuestion[];
+}
+
+/** The labels picked and any typed answer, per question id. */
+export type QuestionAnswers = Record<string, string[]>;
+
+export type QuestionOutcome = "answered" | "dismissed" | "cancelled";
 
 export type AgentEvent =
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
+  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail"> }
+  | { type: "step-output"; id: string; text: string }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
+  | ({ type: "question-request" } & QuestionRequest)
+  | { type: "question-resolved"; requestId: string; outcome: QuestionOutcome }
   | { type: "turn-completed" }
   | { type: "turn-cancelled" }
   | { type: "turn-failed"; message: string };
@@ -262,4 +336,24 @@ export interface SkillOption {
 export interface SkillCatalog {
   skills: SkillOption[];
   warnings: string[];
+}
+
+export interface UsageWindow {
+  id: string;
+  label: string;
+  shortLabel: string;
+  usedPercent: number;
+  resetsAt: string | null;
+}
+
+export interface ProviderUsage {
+  provider: ModelProvider;
+  status: "ok" | "unavailable" | "error";
+  windows: UsageWindow[];
+  updatedAt: string;
+  message?: string;
+}
+
+export interface UsageSnapshot {
+  providers: ProviderUsage[];
 }

@@ -3,7 +3,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest } = require("./permissions.cjs");
+const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
+const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
+
+// Outside Plan mode, Codex offers its question tool (request_user_input) only behind this feature.
+// It is set per thread, where an unknown feature is ignored; `--enable` would refuse to start instead.
+const THREAD_CONFIG = { features: { default_mode_request_user_input: true } };
 
 // Milagre permission mode -> Codex policy. Ask asks before any command Codex doesn't already trust,
 // Auto only when Codex wants to go beyond the workspace sandbox, and Full never asks.
@@ -34,7 +39,8 @@ const sessionClosedError = () => Object.assign(new Error("The agent session clos
 class CodexSession {
   constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
     Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
-    this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false };
+    // steps: ids of the tool steps started in this turn and not yet completed.
+    this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
     this.starting = null;
     this.turnActive = false;
@@ -47,6 +53,7 @@ class CodexSession {
     this.ready = false;
     this.closed = false;
     this.permissions = new PendingPermissions((event) => this.emit(event));
+    this.questions = new PendingQuestions((event) => this.emit(event));
     // fileChange items by id, from item/started: their approval requests carry no diff of their own.
     this.fileChanges = new Map();
   }
@@ -76,6 +83,7 @@ class CodexSession {
 
   async beginTurn({ prompt, images = [], model, permissionMode, effort }) {
     const policy = codexPolicy(permissionMode, this.cwd);
+    this.permissions.setMode(permissionMode);
     try {
       this.starting ??= this.start(model, policy);
       await this.starting;
@@ -127,7 +135,10 @@ class CodexSession {
       if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
+    if (request.permissionMode) this.setPermissionMode(request.permissionMode);
     const turnId = this.state.turnId;
+    // An open question waits for its answer; the message is the user's reply, so the question is dismissed.
+    this.questions.dismissAll();
     const files = request.images?.length ? await writeImages(request.images) : null;
     if (files) this.imageSets.push(files);
     try {
@@ -150,8 +161,8 @@ class CodexSession {
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
-    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS };
-    const thread = this.resumeId ? await this.resume(threadParams) : (await rpc.request("thread/start", threadParams, { timeoutMs: 60_000 })).thread;
+    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS, config: THREAD_CONFIG };
+    const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;
       this.emit({ type: "session-started", nativeId: thread.id });
@@ -159,16 +170,28 @@ class CodexSession {
     this.ready = true;
   }
 
+  // Codex ignores a feature it doesn't know, but a Codex that rejects `config` outright would leave the
+  // chat unusable. On an RPC error the call is tried once more without it: no question tool, but a chat.
+  async requestThread(method, params) {
+    try {
+      return await this.rpc.request(method, params, { timeoutMs: 60_000 });
+    } catch (error) {
+      if (!error.rpcError || !params.config) throw error;
+      const { config: _config, ...bare } = params;
+      return this.rpc.request(method, bare, { timeoutMs: 60_000 });
+    }
+  }
+
   async resume(threadParams) {
     const params = { ...threadParams, threadId: this.resumeId };
     try {
-      return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
+      return (await this.requestThread("thread/resume", params)).thread;
     } catch (first) {
       // Only an answer from Codex itself means the thread is gone; timeouts and exits keep the saved id.
       if (!first.rpcError) throw first;
       try {
         await this.rpc.request("thread/unarchive", { threadId: this.resumeId });
-        return (await this.rpc.request("thread/resume", params, { timeoutMs: 60_000 })).thread;
+        return (await this.requestThread("thread/resume", params)).thread;
       } catch (second) {
         if (!second.rpcError) throw second;
         throw Object.assign(new Error(RESUME_FAILED_MESSAGE), { resumeFailed: true });
@@ -178,7 +201,10 @@ class CodexSession {
 
   handleNotification(method, params) {
     if (method === "item/started" && params.item?.type === "fileChange") this.fileChanges.set(params.item.id, params.item.changes ?? []);
-    if (method === "serverRequest/resolved") this.permissions.forget(String(params.requestId));
+    if (method === "serverRequest/resolved") {
+      this.permissions.forget(String(params.requestId));
+      this.questions.forget(String(params.requestId));
+    }
     // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
     if (method === "turn/started" && !this.turnActive) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
@@ -196,7 +222,10 @@ class CodexSession {
     // A request that arrives once its turn has stopped has nobody to ask.
     if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
     else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
-    else if (method === "item/fileChange/requestApproval") this.permissions.add(codexFileRequest(id, params, this.fileChanges.get(params.itemId)), answer);
+    else if (method === "item/fileChange/requestApproval") {
+      const request = codexFileRequest(id, params, this.fileChanges.get(params.itemId));
+      this.permissions.add(request, answer, { inWorkspace: !params.grantRoot && request.files.length > 0 && insideRoot(this.cwd, request.files) });
+    } else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
     else {
@@ -217,6 +246,28 @@ class CodexSession {
     return this.permissions.resolve(requestId, decision);
   }
 
+  // Codex waits on its question until the user answers or dismisses the card, a steering message
+  // dismisses it, or the turn stops. A question it can't show, or one asked once its turn has
+  // stopped, gets no answers, which Codex reads as "carry on without them".
+  askQuestion(id, params) {
+    const request = codexQuestionRequest(id, params);
+    if (!request || !this.turnActive || this.cancelRequested || this.closed) {
+      this.reply(id, codexQuestionResponse("cancelled"));
+      return;
+    }
+    this.questions.add(request, (outcome, answers) => this.reply(id, codexQuestionResponse(outcome, answers)));
+  }
+
+  answerQuestion(requestId, answers) {
+    return this.questions.answer(requestId, answers);
+  }
+
+  // Codex fixes its approval policy when a turn starts, so a switch mid-turn is applied here (see
+  // PendingPermissions); the next turn starts with the new policy.
+  setPermissionMode(permissionMode) {
+    this.permissions.setMode(permissionMode);
+  }
+
   handleExit(detail) {
     this.closed = true;
     void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : { type: "turn-failed", message: `Codex stopped: ${detail}` }]);
@@ -230,7 +281,10 @@ class CodexSession {
     this.markTurnEnded = null;
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     this.fileChanges.clear();
+    // A command still running when the turn stopped never completes; the renderer closes its step.
+    this.state.steps.clear();
     const imageSets = this.imageSets;
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));
@@ -244,6 +298,7 @@ class CodexSession {
     clearTimeout(this.interruptTimer);
     this.interruptTimer = setTimeout(() => void this.stopNow(), this.interruptGraceMs);
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     if (!this.state.turnId || !this.rpc) return;
     try {
       await this.rpc.request("turn/interrupt", { threadId: this.state.threadId, turnId: this.state.turnId }, { timeoutMs: this.interruptGraceMs });
@@ -261,6 +316,7 @@ class CodexSession {
 
   async close() {
     this.permissions.cancelAll();
+    this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
     await this.rpc?.close();

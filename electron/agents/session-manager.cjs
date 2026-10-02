@@ -1,13 +1,23 @@
 const { isTerminal } = require("./events.cjs");
-const { USER_DECISIONS } = require("./permissions.cjs");
+const { PERMISSION_MODES, USER_DECISIONS } = require("./permissions.cjs");
+const { validAnswers } = require("./questions.cjs");
+const { capOutput } = require("./steps.cjs");
 
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
 
+// Streamed events that are batched: reply text per turn, and command output per step.
+function streamKey(event) {
+  if (event.type === "text-delta") return `text:${event.messageId}`;
+  if (event.type === "step-output") return `step:${event.id}`;
+  return null;
+}
+
 // One agent session per chat. A chat id is the renderer's chat key, `${projectPath}#${sessionId}`.
 // Sessions start on a chat's first turn, resume from the id the chat saved, close after a quiet
 // period, and are replaced when they crash or the chat changes provider or working directory.
-// Text deltas are batched so fast streams don't flood IPC. Replacing and closing a chat's
+// Text deltas and command output are batched so fast streams don't flood IPC; a batch of output
+// keeps only the end the renderer would keep. Replacing and closing a chat's
 // session run one at a time per chat, and events from a session that is no longer the chat's
 // current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
@@ -58,16 +68,17 @@ class SessionManager {
 
   forward(chatId, entry, event) {
     if (this.sessions.get(chatId) !== entry) return;
-    if (event.type === "text-delta") {
+    const key = streamKey(event);
+    if (key) {
       const buffer = this.buffers.get(chatId);
-      if (buffer && buffer.messageId !== event.messageId) this.flush(chatId);
+      if (buffer && buffer.key !== key) this.flush(chatId);
       let next = this.buffers.get(chatId);
       if (!next) {
-        next = { messageId: event.messageId, text: "", timer: setTimeout(() => this.flush(chatId), this.batchMs) };
+        next = { key, event, text: "", timer: setTimeout(() => this.flush(chatId), this.batchMs) };
         next.timer.unref?.();
         this.buffers.set(chatId, next);
       }
-      next.text += event.text;
+      next.text = event.type === "step-output" ? capOutput(next.text + event.text) : next.text + event.text;
       return;
     }
     this.flush(chatId);
@@ -83,7 +94,7 @@ class SessionManager {
     if (!buffer) return;
     clearTimeout(buffer.timer);
     this.buffers.delete(chatId);
-    if (buffer.text) this.send(chatId, { type: "text-delta", messageId: buffer.messageId, text: buffer.text });
+    if (buffer.text) this.send(chatId, { ...buffer.event, text: buffer.text });
   }
 
   scheduleIdleClose(chatId) {
@@ -104,6 +115,18 @@ class SessionManager {
   respondToPermission(chatId, requestId, decision) {
     if (!USER_DECISIONS.has(decision)) throw new Error(`Unknown permission decision: ${decision}`);
     return this.sessions.get(chatId)?.session.respondToPermission(requestId, decision) ?? false;
+  }
+
+  // Answers come from the renderer too: only null or a few short strings per question id reach a session.
+  answerQuestion(chatId, requestId, answers) {
+    if (!validAnswers(answers)) throw new Error("Invalid answers to an agent question.");
+    return this.sessions.get(chatId)?.session.answerQuestion(requestId, answers) ?? false;
+  }
+
+  // A mode switch reaches the chat's session at once, so a running turn stops asking for what it allows.
+  async setPermissionMode(chatId, mode) {
+    if (!PERMISSION_MODES.has(mode)) throw new Error(`Unknown permission mode: ${mode}`);
+    await this.sessions.get(chatId)?.session.setPermissionMode(mode);
   }
 
   async interruptAll() {

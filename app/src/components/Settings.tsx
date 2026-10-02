@@ -5,7 +5,7 @@ import { ArrowDown01Icon, ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
 import type { PermissionMode } from "../model";
 import { updateSettings, useSettings } from "../lib/settings";
-import type { ThemePreference } from "../lib/settings";
+import type { ThemePreference, UsageDisplay } from "../lib/settings";
 import { GlideGroup, RailButton } from "./SidebarNav";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -77,9 +77,25 @@ function Select({ label, value, onChange, children }: { label: string; value: st
   );
 }
 
+function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative flex h-5 w-8 items-center rounded-full transition-colors duration-150 ${checked ? "bg-ink" : "bg-line-strong"}`}
+    >
+      <span className={`absolute left-0.5 size-4 rounded-full bg-surface shadow-card transition-transform duration-150 ${checked ? "translate-x-3" : "translate-x-0"}`} />
+    </button>
+  );
+}
+
 function GeneralSettings() {
   const settings = useSettings();
   return (
+    <>
     <Group title="Agents">
       <Row label="Default model" description="Selected when Milagre opens">
         <Select label="Default model" value={settings.defaultModelId} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
@@ -95,7 +111,22 @@ function GeneralSettings() {
           {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
         </Select>
       </Row>
+      <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
+        <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
     </Group>
+    <Group title="Plan usage">
+      <Row label="Show" description="Claude and Codex plan limits">
+        <Select label="Show usage as" value={settings.usageDisplay} onChange={(display) => updateSettings({ usageDisplay: display as UsageDisplay })}>
+          <option value="used">Used</option>
+          <option value="remaining">Remaining</option>
+        </Select>
+      </Row>
+      <Row label="Show in sidebar" description="Hover a provider for its limits and reset times">
+        <Switch label="Show usage in sidebar" checked={settings.showUsageInSidebar} onChange={(showUsageInSidebar) => updateSettings({ showUsageInSidebar })} />
+      </Row>
+    </Group>
+    </>
   );
 }
 

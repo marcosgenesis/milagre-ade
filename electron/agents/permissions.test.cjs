@@ -6,7 +6,9 @@ const {
   PendingPermissions,
   capText,
   claudeRequest,
+  insideRoot,
   claudeResult,
+  codexChangesDiff,
   codexCommandRequest,
   codexDecision,
   codexFileRequest,
@@ -56,6 +58,39 @@ test("always allowing in this chat can't exceed what the request offered", () =>
   assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.decision), ["allow", "allow-for-chat"]);
 });
 
+test("switching to Auto answers waiting edits inside the worktree; Full answers everything", () => {
+  const { permissions, events, answers } = pending();
+  const add = (requestId, kind, inWorkspace) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace });
+  add("edit", "edit", true);
+  add("outside", "edit", false);
+  add("command", "command", true);
+  permissions.setMode("auto");
+  assert.deepEqual(answers, [{ requestId: "edit", decision: "allow" }]);
+  permissions.setMode("full");
+  assert.deepEqual(answers.map((answer) => answer.requestId), ["edit", "outside", "command"]);
+  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId), ["edit", "outside", "command"]);
+  assert.equal(permissions.size, 0);
+});
+
+test("in Full a request is answered without a card; in Auto the agent's own rules still ask", () => {
+  const { permissions, events, answers } = pending();
+  const add = (requestId, kind) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace: true });
+  permissions.setMode("full");
+  add("command", "command");
+  assert.deepEqual(answers, [{ requestId: "command", decision: "allow" }]);
+  assert.equal(events.length, 0);
+  permissions.setMode("auto");
+  add("edit", "edit");
+  assert.equal(permissions.size, 1);
+});
+
+test("insideRoot", () => {
+  assert.equal(insideRoot("/repo", ["/repo/a.txt", "src/b.ts"]), true);
+  assert.equal(insideRoot("/repo", ["/repo/a.txt", "/etc/hosts"]), false);
+  assert.equal(insideRoot("/repo", ["/repo-other/a.txt"]), false);
+  assert.equal(insideRoot("/repo", ["/repo"]), false);
+});
+
 test("forget drops a withdrawn request without answering it", () => {
   const { permissions, events, answers, ask } = pending();
   ask("a");
@@ -67,7 +102,7 @@ test("forget drops a withdrawn request without answering it", () => {
 
 test("Claude: a shell command shows the command", () => {
   const request = claudeRequest("Bash", { command: "npm test", description: "Run tests" }, { requestId: "r1", toolUseID: "t1", suggestions: [{ type: "addRules" }] });
-  assert.deepEqual(request, { requestId: "r1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test", allowForChat: true });
+  assert.deepEqual(request, { requestId: "r1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test", allowForChat: true, stepId: "t1" });
 });
 
 test("Claude: edits show the file and a diff", () => {
@@ -132,7 +167,7 @@ test("Codex: the shell wrapper is removed from commands", () => {
 
 test("Codex: command requests", () => {
   assert.deepEqual(codexCommandRequest("srv-1", { itemId: "c", command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" }), {
-    requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true,
+    requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true, stepId: "c",
   });
   assert.deepEqual(codexCommandRequest(7, { command: "curl x", reason: null, networkApprovalContext: { host: "example.com", protocol: "https" } }), {
     requestId: "7", kind: "command", tool: "Shell", title: "Allow network access to example.com?", command: "curl x", allowForChat: true,
@@ -142,7 +177,7 @@ test("Codex: command requests", () => {
 test("Codex: file requests show the changes Codex reported when the edit started", () => {
   const changes = [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }];
   assert.deepEqual(codexFileRequest("srv-2", { itemId: "p", reason: "Write notes" }, changes), {
-    requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true,
+    requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true, stepId: "p",
   });
   assert.equal(codexFileRequest("s", {}, [changes[0], { path: "/repo/b", diff: "" }]).title, "Edit 2 files?");
   assert.deepEqual(codexFileRequest("s", { grantRoot: "/tmp/out" }, undefined), { requestId: "s", kind: "edit", tool: "Edit files", title: "Allow writing to /tmp/out?", files: [], allowForChat: true });
@@ -160,6 +195,14 @@ test("Codex: added and deleted files get +/- markers, real diffs are left alone"
   assert.equal(diffOf({ type: "add" }, ""), "--- /r/a\n");
   const big = codexFileRequest("s", {}, [{ path: "/r/a", kind: { type: "add" }, diff: "x\n".repeat(20_000) }]).diff;
   assert.ok(big.endsWith("\n… truncated") && big.startsWith("--- /r/a\n+x\n+x"));
+});
+
+test("Codex: new and deleted files are whole contents; updates are already diffs", () => {
+  assert.equal(codexChangesDiff([
+    { path: "/repo/new.txt", kind: { type: "add" }, diff: "one\ntwo\n" },
+    { path: "/repo/old.txt", kind: { type: "delete" }, diff: "gone\n" },
+    { path: "/repo/app.js", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-Hello\n+Hi\n" },
+  ]), "--- /repo/new.txt\n+one\n+two\n\n--- /repo/old.txt\n-gone\n\n--- /repo/app.js\n@@ -1 +1 @@\n-Hello\n+Hi\n");
 });
 
 test("Codex: decisions", () => {

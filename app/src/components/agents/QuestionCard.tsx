@@ -7,6 +7,7 @@ import type { AgentQuestion, QuestionAnswers, QuestionRequest } from "../../mode
 import { arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
 import type { QuestionDrafts } from "../../lib/question-answers";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 /**
  * The open chat's oldest question: the agent's options as rows, an answer of the user's own, and Dismiss.
@@ -98,7 +99,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
       transition={reduce ? { duration: 0 } : SPRING_SWAP}
       className="flex max-h-[min(72vh,620px)] w-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-overlay"
     >
-      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overscroll-contain p-4">
+      <ScrollArea className="grid flex-1 gap-3 p-4">
         {several && (
           <div role="tablist" aria-label="Questions" className="flex flex-wrap gap-1.5">
             {questions.map((item, index) => {
@@ -174,7 +175,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
             />
           )}
         </div>
-      </div>
+      </ScrollArea>
 
       <AnimatePresence initial={false}>
         {pending && (

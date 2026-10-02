@@ -274,7 +274,7 @@ function WorkspaceMenu({
       aria-label={`${workspace.name} actions`}
       onKeyDown={moveFocus}
       data-workspace-menu
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-[14px] bg-surface p-1.5 shadow-overlay"
+      className="fixed z-50 flex max-h-[calc(100vh-16px)] w-64 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
       style={{
         top: position.top,
         left: position.left,
@@ -282,6 +282,7 @@ function WorkspaceMenu({
         transformOrigin: "top left",
       }}
     >
+      <ScrollArea className="p-1.5">
       <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
         {projectMenuActions(IS_MAC).map((item) => (
           <button
@@ -356,6 +357,7 @@ function WorkspaceMenu({
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
       </GlideMenu>
+      </ScrollArea>
     </div>,
     document.body,
   );

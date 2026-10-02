@@ -1,6 +1,7 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { ScrollArea } from "./ScrollArea";
 
 /* Popover picker shared by the model, permission, and branch selectors and by Select: title,
  * optional header slot (e.g. provider tabs), optional search, and a scrolling list. */
@@ -66,10 +67,10 @@ export function PickerPanel({
           <input className="w-full border-0 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={placeholder} autoFocus />
         </label>
       )}
-      <div className="grid max-h-64 min-h-0 grid-cols-1 content-start gap-0.5 overflow-y-auto">
+      <ScrollArea className="grid max-h-64 grid-cols-1 content-start gap-0.5">
         {children}
         {isEmpty && <div className="px-2 py-5 text-center text-xs text-ink-3">{emptyLabel}</div>}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

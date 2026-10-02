@@ -1,3 +1,4 @@
+import { archiveSubagent, archiveFinishedSubagents } from "./lib/subagents";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -58,6 +59,7 @@ import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { CommandPalette } from "./components/CommandPalette";
+import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
 
@@ -315,6 +317,21 @@ function App() {
     const latest = stateRef.current;
     if (!latest) return;
     const next = patchSession(latest, sessionId, patch);
+    if (next !== latest) commit(next);
+  }
+
+  function archiveChild(id: string, archived: boolean) {
+    const latest = stateRef.current;
+    const parentId = selectedSessionRef.current;
+    if (!latest || parentId === null) return;
+    commit(archiveSubagent(latest, parentId, id, archived));
+  }
+
+  function archiveFinishedChildren() {
+    const latest = stateRef.current;
+    const parentId = selectedSessionRef.current;
+    if (!latest || parentId === null) return;
+    const next = archiveFinishedSubagents(latest, parentId);
     if (next !== latest) commit(next);
   }
 
@@ -783,11 +800,12 @@ function App() {
     { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
     { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => { if (runningChatRef.current) askInMenu({ kind: "open" }); else return openProject(); } },
     { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
-    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme dark light system", run: () => { setSettingsSection("appearance"); setView("settings"); } },
-    { id: "toggle-theme", label: "Toggle light and dark", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "theme appearance dark light mode", run: toggleTheme },
+    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
+    { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
     { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: project.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
   ];
   if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
+  commands.push(...settingsCommands(getSettings(), updateSettings));
   if (selectedSession && view === "chat") {
     const sessionId = selectedSession.id;
     commands.unshift(
@@ -887,6 +905,10 @@ function App() {
             sendBlocked={preparing}
             streamingText={run?.text}
             streamingSteps={run?.steps}
+            subagents={selectedSession?.subagents}
+            onArchiveFinishedSubagents={archiveFinishedChildren}
+            onArchiveSubagent={archiveChild}
+            waitingForSubagents={run?.waitingForSubagents}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}

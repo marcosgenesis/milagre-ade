@@ -17,6 +17,7 @@ export interface AgentRun {
   answered: Record<string, SentAnswer>;
   /** A steering message split the reply, so a turn that ends with nothing more to show saves nothing more. */
   split?: boolean;
+  waitingForSubagents?: boolean;
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -129,6 +130,25 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
   if (!chatInProject(projectPath, chatId) || !session) return { state, runs, changed: false };
   const run = runs[chatId];
   switch (event.type) {
+    case "subagent-update": {
+      const children = session.subagents ?? [];
+      const previous = children.find(agent => agent.id === event.agent.id);
+      if (previous && previous.updatedAt > event.agent.updatedAt) return { state, runs, changed: false };
+      // A resumed provider can rediscover a child before it has replayed the earlier output.
+      const agent = previous ? {
+        ...event.agent,
+        archived: previous.archived,
+        title: event.agent.title === "Subagent" ? previous.title : event.agent.title,
+        prompt: event.agent.prompt ?? previous.prompt,
+        startedAt: Math.min(previous.startedAt, event.agent.startedAt),
+        transcript: [...new Map([...previous.transcript, ...event.agent.transcript].map(entry => [entry.id, entry])).values()].slice(-100),
+      } : event.agent;
+      const subagents = previous ? children.map(child => child.id === agent.id ? agent : child) : [...children, agent];
+      return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
+    }
+    case "subagents-waiting":
+      return run ? { state, runs: { ...runs, [chatId]: { ...run, waitingForSubagents: event.waiting } }, changed: false } : { state, runs, changed: false };
+
     case "session-started": {
       if (session.native_session_id === event.nativeId) return { state, runs, changed: false };
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, native_session_id: event.nativeId } } }, runs, changed: true };
@@ -172,7 +192,7 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
     }
     case "text-delta": {
       if (!run) return { state, runs, changed: false };
-      return { state, runs: { ...runs, [chatId]: { ...run, text: run.text + event.text } }, changed: false };
+      return { state, runs: { ...runs, [chatId]: { ...run, text: run.text + event.text, ...(run.waitingForSubagents ? { waitingForSubagents: false } : {}) } }, changed: false };
     }
     case "step-started": {
       if (!run) return { state, runs, changed: false };
@@ -220,7 +240,7 @@ function replyBody(text: string, event: AgentEvent, hasSteps: boolean) {
     const failure = event.notice ? event.message : `Agent error: ${event.message}`;
     return reply ? `${reply}\n\n${failure}` : failure;
   }
-  if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
+  if (event.type === "turn-cancelled") return reply ? `${reply}\n\nWhat should I work on instead?` : "What should I work on instead?";
   return reply || (hasSteps ? "" : "The agent finished without a reply.");
 }
 

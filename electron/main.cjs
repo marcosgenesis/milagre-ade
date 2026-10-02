@@ -28,7 +28,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { readPullRequest } = require("./pull-request.cjs");
-const { reconcileState } = require("./project-state.cjs");
+const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, savesSettled, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
@@ -108,7 +108,8 @@ async function readProject(projectPath) {
     storedState = JSON.parse(contents);
   } catch {}
   const discoveredWorktrees = await discoverWorktrees(projectPath);
-  const state = reconcileState(storedState, name, discoveredWorktrees);
+  const liveSessionIds = new Set(Object.keys(storedState?.sessions ?? {}).filter(id => (agents.sessions.has(`${projectPath}#${id}`) && !agents.sessions.get(`${projectPath}#${id}`).session.closed)).map(Number));
+  const state = markDisconnectedSubagents(reconcileState(storedState, name, discoveredWorktrees), liveSessionIds);
   if (storedState && JSON.stringify(storedState) !== JSON.stringify(state)) await saveProjectState(projectPath, state);
   return { path: projectPath, name, state };
 }

@@ -11,10 +11,15 @@ const state = createInitialState("Fixture", "/fixture");
 state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 }, 2: { id: 2, name: "develop", path: "/fixture-dev", project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle" } };
 state.messages = [{ id: 4, session_id: 3, role: "user", body: "Previous chat", context: null }];
-state.next_id = 5;
+state.sessions[5] = { id: 5, worktree_id: 2, agent_name: "develop", status: "Idle" };
+state.next_id = 6;
 window.milagre = new Proxy({
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
   listBranches: async () => ["main", "develop"],
+  createWorktree: () => new Promise((resolve, reject) => {
+    window.finishWorktree = () => resolve({ project: { path: "/fixture", name: "Fixture", state }, worktreeId: 2 });
+    window.failWorktree = () => reject(new Error("Creation failed"));
+  }),
   listEditors: async () => [],
   getCachedUsage: async () => ({ providers: [] }),
   readUsage: async () => ({ providers: [] }),
@@ -63,7 +68,35 @@ async function browserChecks() {
     await click("Full");
     assert.equal(await evaluate(`JSON.parse(localStorage.getItem('milagre-settings')).defaultPermissionMode`), "full");
     await click("main");
-    await click("develop");
+    await waitFor(`!!document.querySelector('input[placeholder="Search branches…"]')`);
+    await evaluate(`document.querySelector('input[placeholder="Search branches…"]').focus()`);
+    const key = name => evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`);
+    await key("ArrowDown");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first branch");
+    await key("ArrowDown");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Down advances to next branch");
+    await key("ArrowUp");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Up returns to previous branch");
+    await key("ArrowUp");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Up wraps to the last branch");
+    async function searchBranches(query) {
+      await evaluate(`(() => {
+        const input = document.querySelector('input[placeholder="Search branches…"]');
+        input.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(query)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+    }
+    await searchBranches("no-matching-branch");
+    await waitFor(`document.body.textContent.includes('No branches found.')`);
+    await key("ArrowDown");
+    await key("ArrowUp");
+    await searchBranches("dev");
+    await waitFor(`document.querySelectorAll('[data-picker-row]').length === 1`);
+    await key("ArrowDown");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Navigation follows the filtered results");
+    await key("Enter");
+    await waitFor(`!document.querySelector('input[placeholder="Search branches…"]')`);
     await newChat();
     await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
     await click("Local");
@@ -80,6 +113,25 @@ async function browserChecks() {
     await modelIs("Opus 5.5");
     await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('New worktree') && document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
     await waitFor(`document.querySelector('[aria-label="Agent permissions"]').textContent === "Full"`);
+    await evaluate(`(() => {
+      const input = document.querySelector('textarea[aria-label="Prompt"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'First prompt');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await waitFor(`!document.querySelector('[aria-label="Send"]').disabled`);
+    await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
+    await waitFor(`!!window.finishWorktree`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-new-chat-pickers]')`), true, "Keep the new-chat layout until the worktree and first message are ready");
+    await evaluate(`window.failWorktree()`);
+    await waitFor(`document.body.textContent.includes('Could not create the worktree')`);
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "First prompt");
+    await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
+    await delay(50);
+    await evaluate(`window.finishWorktree()`);
+    await waitFor(`!document.querySelector('[data-new-chat-pickers]')`);
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "");
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Conversation"]').textContent.includes('First prompt')`), true);
+    console.log("PASS: first send waits for preparation and preserves the draft on failure");
     console.log("PASS: new chats follow Settings, remember explicit selections, and restore them after reload");
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }

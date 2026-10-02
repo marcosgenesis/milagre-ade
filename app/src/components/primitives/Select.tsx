@@ -90,16 +90,7 @@ export function Select<T extends string>({
   }, [open]);
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const rows = [...(panelRef.current?.querySelectorAll<HTMLElement>("[data-picker-row]") ?? [])];
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      rows[(index + step + rows.length) % rows.length]?.focus();
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      rows[event.key === "Home" ? 0 : rows.length - 1]?.focus();
-    } else if (event.key === "Escape" || event.key === "Tab") {
+    if (event.key === "Escape" || event.key === "Tab") {
       event.preventDefault();
       close();
     }

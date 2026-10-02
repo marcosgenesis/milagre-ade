@@ -112,7 +112,7 @@ export function PreviewRail({
         aria-label={label}
         onPointerLeave={() => setHoveredId(null)}
         style={{ gridTemplateRows: rowTemplate }}
-        className={`absolute inset-y-0 left-0 z-10 grid w-12 content-center ${railClassName}`}
+        className={`absolute inset-y-0 left-0 z-10 grid w-6 content-center ${railClassName}`}
       >
         {items.map((item, index) => {
           const selected = item.id === selectedId;
@@ -141,7 +141,7 @@ export function PreviewRail({
               }}
               onClick={() => selectItem(item)}
               style={{ height: "100%" }}
-              className="relative flex h-6 w-12 items-center justify-end text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="relative flex h-6 w-6 items-center justify-end text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <motion.span
                 data-slot="preview-rail-tick"

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Add01Icon,
@@ -15,6 +15,7 @@ import {
   Message01Icon,
 } from "@hugeicons/core-free-icons";
 import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { isAttachableImage, MAX_IMAGES } from "./usePastedImages";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -295,11 +296,46 @@ export function ChatComposer({
   const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
+  const [dropError, setDropError] = useState("");
   useEffect(() => {
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
+
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    event.preventDefault();
+    setDropError("");
+
+    const imageSlots = Math.max(0, MAX_IMAGES - imageDraft.images.length);
+    const images: File[] = [];
+    const pathFiles: File[] = [];
+    for (const file of files) {
+      if (isAttachableImage(file) && images.length < imageSlots) images.push(file);
+      else pathFiles.push(file);
+    }
+    void imageDraft.addFiles(images);
+
+    const paths: string[] = [];
+    for (const file of pathFiles) {
+      try {
+        const path = window.milagre.getPathForFile(file);
+        if (path) paths.push(path);
+        else setDropError("Could not get a local path for one or more dropped files.");
+      } catch {
+        setDropError("Could not get a local path for one or more dropped files.");
+      }
+    }
+    if (paths.length) onDraftChange(draft ? `${draft.trimEnd()}\n${paths.join("\n")}` : paths.join("\n"));
+    event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
+  }
+
   return (
-    <div className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}>
+    <div
+      className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
+      onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+      onDrop={handleFileDrop}
+    >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && <MessageScroller
@@ -383,6 +419,7 @@ export function ChatComposer({
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
         />
+        {dropError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{dropError}</p>}
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>
     </div>

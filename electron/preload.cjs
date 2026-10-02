@@ -1,6 +1,7 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("milagre", {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),

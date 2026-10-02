@@ -69,12 +69,16 @@ function App() {
   const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const [reported, setReported] = useState<AgentModels | null>(null);
-  useEffect(() => { void window.milagre.getModels().then(setReported).catch(() => undefined); }, []);
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
   // Whether each agent's CLI is missing, outdated, broken or logged out, for the model picker. Loaded at
   // startup and again each time the picker opens, so a fix shows without a restart.
   const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
-  const refreshCliStatus = () => { void window.milagre.getCliStatus().then(setCliStatus).catch(() => undefined); };
+  // The model lists come along: the main process keeps a good list for the run but asks again for an agent
+  // that had none (a CLI that was missing, or Claude Code before it was logged in).
+  const refreshCliStatus = () => {
+    void window.milagre.getCliStatus().then(setCliStatus).catch(() => undefined);
+    void window.milagre.getModels().then(setReported).catch(() => undefined);
+  };
   useEffect(refreshCliStatus, []);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // Until the user picks a model, the picker shows the default from Settings once the lists have it. A

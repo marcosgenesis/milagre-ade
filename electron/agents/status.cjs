@@ -96,4 +96,18 @@ function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READ
   };
 }
 
-module.exports = { READY_TTL_MS, claudeLoggedOut, codexLoggedOut, createCliStatus };
+/**
+ * `cli`, except that a logged-out Claude counts as a CLI with a problem. Claude Code answers supportedModels()
+ * with only its four aliases ("Opus", "Fable", "Sonnet", "Haiku") until it is logged in, and a model list is
+ * asked once per run; this way the lookup is skipped, and asked again, until the login is done.
+ */
+function cliWhenLoggedIn(cli, status, names = ["claude"]) {
+  return async (name) => {
+    const result = await cli(name);
+    if (result.problem || !names.includes(name)) return result;
+    const current = (await status().catch(() => ({})))[name];
+    return current?.state === "logged-out" ? { ...result, problem: current.message } : result;
+  };
+}
+
+module.exports = { READY_TTL_MS, claudeLoggedOut, cliWhenLoggedIn, codexLoggedOut, createCliStatus };

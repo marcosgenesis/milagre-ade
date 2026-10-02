@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { cliBrokenMessage, cliTooOldMessage, loginMessage, missingCliMessage } = require("./events.cjs");
-const { READY_TTL_MS, claudeLoggedOut, codexLoggedOut, createCliStatus } = require("./status.cjs");
+const { READY_TTL_MS, claudeLoggedOut, cliWhenLoggedIn, codexLoggedOut, createCliStatus } = require("./status.cjs");
 
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const fakeRpc = (scenario) => (options) => new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } });
@@ -144,4 +144,20 @@ test("concurrent callers share one lookup", async () => {
   const { check, asked } = statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] } });
   await Promise.all([check(), check(), check()]);
   assert.deepEqual(asked, { claude: 1, codex: 1 });
+});
+
+test("a logged-out Claude is a CLI with a problem for the model lookup, so its degraded list isn't kept", async () => {
+  const cli = async (name) => ({ command: `/bin/${name}`, version: "9.9.9" });
+  let state = "logged-out";
+  const status = async () => ({ claude: { state, ...(state === "logged-out" ? { message: loginMessage("claude") } : {}) }, codex: { state: "logged-out", message: loginMessage("codex") } });
+  const wrapped = cliWhenLoggedIn(cli, status);
+  assert.deepEqual(await wrapped("claude"), { command: "/bin/claude", version: "9.9.9", problem: loginMessage("claude") });
+  // Codex lists its models whether or not it is logged in.
+  assert.deepEqual(await wrapped("codex"), { command: "/bin/codex", version: "9.9.9" });
+  state = "ready";
+  assert.deepEqual(await wrapped("claude"), { command: "/bin/claude", version: "9.9.9" });
+  const broken = cliWhenLoggedIn(async () => ({ command: null, version: null, problem: "missing" }), async () => assert.fail("not asked for a CLI that's missing"));
+  assert.equal((await broken("claude")).problem, "missing");
+  const failing = cliWhenLoggedIn(cli, async () => { throw new Error("boom"); });
+  assert.deepEqual(await failing("claude"), { command: "/bin/claude", version: "9.9.9" });
 });

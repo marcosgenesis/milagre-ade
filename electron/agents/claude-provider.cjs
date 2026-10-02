@@ -1,7 +1,7 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
@@ -291,7 +291,7 @@ class ClaudeSession {
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
     else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
-    else this.finishTurn({ type: "turn-failed", message: error?.message || this.stderr.trim() || "Claude Code stopped unexpectedly." });
+    else this.finishTurn({ type: "turn-failed", message: crashMessage("claude", error?.message || this.stderr) });
   }
 
   resumeFailed() {

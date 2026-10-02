@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { ClaudeSession } = require("./claude-provider.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage } = require("./events.cjs");
 const { DISMISSED_MESSAGE, UNSHOWN_MESSAGE } = require("./questions.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
@@ -235,8 +235,22 @@ test("reports a crash mid-turn", async (t) => {
   const { session, events } = claude(t, { script: scripts.crash });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.at(-1), { type: "turn-failed", message: "Claude Code process exited with code 1" });
+  assert.deepEqual(events.at(-1), { type: "turn-failed", message: crashMessage("claude", "Claude Code process exited with code 1") });
   assert.equal(session.closed, true);
+});
+
+test("a logged-out Claude fails the turn with the login message", async (t) => {
+  // Recorded from Claude Code 2.1.287 with an empty CLAUDE_CONFIG_DIR.
+  const script = async function* () {
+    yield init;
+    yield { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
+    yield { type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" };
+  };
+  const { session, events } = claude(t, { script });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-failed", message: loginMessage("claude") });
+  assert.equal(events.some((event) => event.type === "text-delta"), false);
 });
 
 test("explains a missing CLI without starting anything", async (t) => {
@@ -251,7 +265,7 @@ test("keeps the saved session when a resumed start fails for another reason", as
   const { session, events } = claude(t, { script, resumeId: "session-1" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.slice(1), [{ type: "turn-failed", message: "spawn EACCES" }]);
+  assert.deepEqual(events.slice(1), [{ type: "turn-failed", message: crashMessage("claude", "spawn EACCES") }]);
 });
 
 test("cancels a turn interrupted while the SDK is still loading", async (t) => {

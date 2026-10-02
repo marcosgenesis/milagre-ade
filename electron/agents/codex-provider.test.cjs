@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { CodexSession } = require("./codex-provider.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage } = require("./events.cjs");
 const { decodeImages } = require("../image-input.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
@@ -125,7 +125,7 @@ test("reports a failed turn and a crashed process", async (t) => {
   const crashed = codex(t, { scenario: "crash" });
   await crashed.session.startTurn(TURN);
   await ended(crashed.events);
-  assert.match(crashed.events.at(-1).message, /boom: model unavailable/);
+  assert.deepEqual(crashed.events.at(-1), { type: "turn-failed", message: crashMessage("codex", "boom: model unavailable") });
   assert.equal(crashed.session.closed, true);
 });
 
@@ -227,6 +227,21 @@ test("closes a session whose startup failed so the next message starts over", as
   await session.startTurn(TURN);
   assert.match(events.at(-1).message, /isn't installed or isn't on your PATH/);
   assert.equal(session.closed, true);
+});
+
+test("a logged-out Codex fails the turn at once with the login message", async (t) => {
+  const { session, events } = codex(t, { scenario: "logged-out" });
+  await session.startTurn(TURN);
+  assert.deepEqual(events, [{ type: "turn-failed", message: loginMessage("codex") }]);
+  assert.equal(session.closed, true);
+});
+
+test("a Codex on a provider that needs no OpenAI login isn't held up", async (t) => {
+  const { session, events } = codex(t, { scenario: "custom-provider" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-completed" });
+  assert.deepEqual((await received(session)).map((message) => message.method).slice(0, 4), ["initialize", "initialized", "account/read", "thread/start"]);
 });
 
 test("explains a missing CLI without starting anything", async (t) => {

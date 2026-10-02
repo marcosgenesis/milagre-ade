@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
@@ -161,6 +161,7 @@ class CodexSession {
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
+    await this.checkLogin(rpc);
     const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS, config: THREAD_CONFIG };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
@@ -168,6 +169,14 @@ class CodexSession {
       this.emit({ type: "session-started", nativeId: thread.id });
     }
     this.ready = true;
+  }
+
+  // A logged-out Codex accepts a turn, retries for about 15 s and fails it with a raw 401. account/read
+  // answers at once: no account while OpenAI auth is required means `codex login` is needed. A Codex that
+  // can't answer, or one on a provider that needs no OpenAI login, isn't held up.
+  async checkLogin(rpc) {
+    const status = await rpc.request("account/read", { refreshToken: false }).catch(() => null);
+    if (status && !status.account && status.requiresOpenaiAuth === true) throw new Error(loginMessage("codex"));
   }
 
   // Codex ignores a feature it doesn't know, but a Codex that rejects `config` outright would leave the
@@ -270,7 +279,7 @@ class CodexSession {
 
   handleExit(detail) {
     this.closed = true;
-    void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : { type: "turn-failed", message: `Codex stopped: ${detail}` }]);
+    void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : { type: "turn-failed", message: crashMessage("codex", detail) }]);
   }
 
   async finishTurn(events) {

@@ -47,6 +47,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: { userAgent: "fake/0.158.0" } });
     case "initialized":
       return undefined;
+    // logged-out: no login while OpenAI auth is required; custom-provider: a provider that needs no OpenAI login.
+    case "account/read":
+      if (scenario === "logged-out") return send({ id, result: { account: null, requiresOpenaiAuth: true } });
+      if (scenario === "custom-provider") return send({ id, result: { account: null, requiresOpenaiAuth: false } });
+      return send({ id, result: { account: { type: "chatgpt", email: null, planType: "pro" }, requiresOpenaiAuth: true } });
+    // Two pages, the second with a hidden model, as model/list pages with nextCursor.
+    case "model/list":
+      if (!params.cursor) return send({ id, result: { data: [{ id: "gpt-6-astra", displayName: "GPT-6-Astra", description: "Frontier intelligence.", hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "ultra" }], defaultReasoningEffort: "medium" }], nextCursor: "page-2" } });
+      return send({ id, result: { data: [{ id: "gpt-6-luna", displayName: "GPT-6-Luna", description: "Fast.", hidden: false, isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: "low" }], defaultReasoningEffort: "low" }, { id: "codex-auto-review", displayName: "Codex Auto Review", description: "Review model.", hidden: true, isDefault: false, supportedReasoningEfforts: [], defaultReasoningEffort: "medium" }], nextCursor: null } });
     case "fake/received":
       return send({ id, result: { received, threadStarts } });
     case "thread/start":

@@ -20,6 +20,9 @@ import {
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
+import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
+
+export type { SidebarRecent } from "./sidebar/ChatRow";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -48,14 +51,6 @@ const IconUserAdd = (props: HugeIconProps) => <HugeIcon icon={UserAdd01Icon} {..
 
 const WORKSPACE = { key: "creamery", name: "Creamery Ops", monogram: "C" };
 
-export type SidebarRecent = {
-  id: string;
-  label: string;
-  prompt?: string;
-  /** The chat waits on an approval from the user. */
-  waiting?: boolean;
-};
-
 const DEFAULT_RECENTS: SidebarRecent[] = [
   { id: "suppliers", label: "Supplier records" },
   { id: "todos", label: "Urgent to-dos this morning" },
@@ -66,13 +61,6 @@ const DEFAULT_RECENTS: SidebarRecent[] = [
   { id: "edits", label: "Propose flavor edits" },
   { id: "subway", label: "Subway surfing" },
 ];
-
-function recentInitials(label: string) {
-  const words = label.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return `${words[0][0]}${words[1][0]}`.toUpperCase();
-}
 
 type SidebarNavProps = {
   workspaceName?: string;
@@ -87,6 +75,8 @@ type SidebarNavProps = {
   onPick?: (id: string, label: string, prompt?: string) => void;
   onOpenSettings?: () => void;
   recents?: SidebarRecent[];
+  /** What the chat rows' menu can do; an action left out is shown disabled. */
+  chatActions?: ChatRowActions;
   /** Plan usage, shown above the footer buttons in both the expanded and collapsed sidebar. */
   usage?: ReactNode;
   variant?: string;
@@ -248,6 +238,7 @@ export default function SidebarNav({
   onPick,
   onOpenSettings,
   recents = DEFAULT_RECENTS,
+  chatActions = {},
   usage,
 }: SidebarNavProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -439,35 +430,19 @@ export default function SidebarNav({
           </div>
 
           <GlideGroup>
-            {visibleRecents.map((item) => {
-              const active = activeId !== undefined ? item.id === activeId : item.label === selectedTitle;
-              return (
-                <button
-                  key={item.id}
-                  data-row
-                  type="button"
-                  title={item.label}
-                  onClick={() => {
-                    if (activeTitle === undefined) setDemoActiveTitle(item.label);
-                    onPick?.(item.id, item.label, item.prompt);
-                  }}
-                  className={`sidebar-row relative z-10 mx-2 flex h-8 items-center rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
-                    active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
-                  }`}
-                >
-                  <span className="sidebar-chat-initials size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">
-                    {recentInitials(item.label)}
-                  </span>
-                  <span className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] font-medium ${active ? "text-ink" : "text-ink-2"}`}>
-                    {item.label}
-                  </span>
-                  {item.waiting && (
-                    // A sidebar-copy, so the collapsed rail (no room) hides it with the labels.
-                    <span role="img" aria-label="Waiting for you" title="Waiting for you" data-slot="waiting-mark" className="sidebar-copy ml-2 size-2 shrink-0 rounded-full bg-accent" />
-                  )}
-                </button>
-              );
-            })}
+            {visibleRecents.map((item) => (
+              <ChatRow
+                key={item.id}
+                item={item}
+                active={activeId !== undefined ? item.id === activeId : item.label === selectedTitle}
+                collapsed={collapsed}
+                actions={chatActions}
+                onPick={() => {
+                  if (activeTitle === undefined) setDemoActiveTitle(item.label);
+                  onPick?.(item.id, item.label, item.prompt);
+                }}
+              />
+            ))}
             {query && visibleRecents.length === 0 && (
               <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">No chats found</div>
             )}

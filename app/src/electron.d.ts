@@ -5,7 +5,7 @@ import type { SessionPatch, WorktreeRename } from "../../electron/shared/project
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, EditorInfo, AgentEvent, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { AgentCliStatus, AgentModels, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -85,6 +85,8 @@ declare global {
       onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
+      /** Opens a chat on the other provider in this chat's worktree and sends it a brief of this chat. Resolves once the new chat exists. */
+      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;

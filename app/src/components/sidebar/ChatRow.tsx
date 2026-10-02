@@ -584,6 +584,23 @@ function ChatMenu({
         }))
       : [{ key: "archive-checking", label: "Checking worktree…", icon: Archive02Icon, onSelect: () => {}, disabled: true, archiveChoice: true }];
 
+  // Enter confirms the armed archive wherever focus is, since a mouse click on "Archive" leaves it on the page.
+  // A row focused with the arrow keys keeps Enter for itself.
+  const confirmEntry = archiveItems.length === 1 && archiveItems[0].archiveChoice && !archiveItems[0].disabled ? archiveItems[0] : null;
+  useEffect(() => {
+    if (!confirmEntry) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.matches("[data-menu-row]") && !active.matches("[data-archive-choice]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      confirmEntry.onSelect();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [confirmEntry]);
+
   const items: Array<MenuEntry | "divider"> = [
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },

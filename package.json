@@ -23,6 +23,7 @@
     "test:sidebar-usage": "node scripts/test-sidebar-usage.cjs",
     "test:sidebar-resize": "node scripts/test-sidebar-resize.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
+    "test:archive-enter": "node scripts/test-archive-enter.cjs",
     "test:ui": "node --test \"app/src/**/*.test.ts\"",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",

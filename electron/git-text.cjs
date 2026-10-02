@@ -27,7 +27,7 @@ const RULES = `Write the commit message and pull request text for this change. R
 - commitMessage: a subject line of at most 72 characters in the style of the recent commit subjects (for example "type: summary" when they use conventional commits). Add a blank line and a short body only when the subject can't carry the change alone.
 - prTitle: one line, like the commit subject.
 - prBody: short. One summary paragraph or a few bullets on what changed and why. End with a line starting "How was it verified?" only if tests were run in the chat (see <tests_run>), saying which. No headings, no AI or "Generated with" footer, no co-author line.
-- Plain, short English. Describe the change itself, not the conversation.`;
+- Plain, short English. Describe what the diff below changes, not the conversation. The recent commit subjects show the style only: don't repeat them.`;
 
 function cap(text, limit) {
   const value = String(text ?? "").trim();

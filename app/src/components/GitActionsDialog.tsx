@@ -226,6 +226,25 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
   const close = () => {
     if (!running) onClose();
   };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
+  // Escape closes the dialog wherever focus is (a finished step's button may have taken it away), and is
+  // consumed here so it doesn't also stop the chat's turn. Tab from outside comes back in.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current();
+      } else if (event.key === "Tab" && !panelRef.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        panelRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   async function run(stepsToRun: GitStep[]) {
     if (!repo || running) return;
@@ -284,16 +303,14 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
     if (!failed) setFinished(true);
     await load();
     setRunning(false);
+    // The button that ran the steps may be gone; keep focus in the dialog.
+    window.requestAnimationFrame(() => {
+      if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
+    });
   }
 
-  // Tab and Shift+Tab stay inside the dialog; Escape closes it (and isn't taken as "stop the turn").
+  // Tab and Shift+Tab stay inside the dialog.
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
     if (event.key !== "Tab") return;
     const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((element) => element.offsetParent !== null);
     if (!focusable.length) {
@@ -399,6 +416,9 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
                 <Section label={finished ? "Result" : "Progress"}>
                   <ol className="grid gap-0.5" aria-live="polite">
                     {steps.map((state) => <StepLine key={state.step} state={state} result={result} />)}
+                    {result.pr && !result.pr.created && (
+                      <StepLine state={{ step: "pr", status: "done", detail: result.pr.number ? `Updated PR #${result.pr.number}` : "Updated the PR" }} result={result} />
+                    )}
                   </ol>
                 </Section>
               )}

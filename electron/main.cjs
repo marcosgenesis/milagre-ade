@@ -108,7 +108,19 @@ ipcMain.handle("worktree:roots", async () => {
   return [...new Set([root, await fs.realpath(root).catch(() => root)])];
 });
 ipcMain.handle("worktree:status", (_event, worktreePath, base) => worktreeStatus(worktreePath, base));
-ipcMain.handle("worktree:remove", (_event, worktreePath, options) => removeWorktree({ path: worktreePath, root: worktreeRoot(), force: Boolean(options?.force) }));
+// The renderer sends what the user saw (base, status, chat) and the project; main re-checks after closing the chat's agent.
+ipcMain.handle("worktree:remove", (_event, worktreePath, options = {}) => {
+  const { force, base, projectPath, chatId, seen } = options;
+  return removeWorktree({
+    path: worktreePath,
+    root: worktreeRoot(),
+    projectPath,
+    base,
+    seen,
+    force: Boolean(force),
+    closeSession: typeof chatId === "string" ? () => agents.closeChat(chatId) : undefined,
+  });
+});
 ipcMain.handle("files-to-copy:read", async (_event, projectPath) => {
   const { filesToCopy } = await projectSettings().get(projectPath);
   return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };

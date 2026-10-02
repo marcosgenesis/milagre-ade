@@ -59,6 +59,11 @@ export function sendsOnPick(questions: AgentQuestion[]): boolean {
   return questions.length === 1 && !questions[0].multiSelect;
 }
 
+/** On a card with several questions, a pick on a single-choice question moves on to the next one. The last question waits for Send, so the answers get a final look. */
+export function advancesOnPick(questions: AgentQuestion[], active: number): boolean {
+  return questions.length > 1 && !questions[active]?.multiSelect && primaryAction(questions, active) === "next";
+}
+
 /** Whether one question has an answer: a pick, or a typed answer where the agent allows one. */
 export function questionAnswered(question: AgentQuestion, drafts: QuestionDrafts): boolean {
   return draftAnswers([question], drafts) !== null;

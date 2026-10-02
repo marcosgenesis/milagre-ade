@@ -80,7 +80,7 @@ export function CommentEditor({ text, onSave, onCancel }: { text: MutableRefObje
           if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancel(); }
           else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); if (body) onSave(body); }
         }}
-        className="block w-full resize-none rounded-control border border-line bg-page px-2.5 py-2 text-[12.5px] leading-[18px] text-ink outline-none placeholder:text-ink-3 focus:border-accent" />
+        className="block w-full resize-none rounded-control border border-line bg-page px-2.5 py-2 text-[12.5px] leading-[18px] text-ink outline-none placeholder:text-ink-3 focus:border-ink" />
       <div className="flex justify-end gap-2">
         <button type="button" data-diff-comment-cancel onClick={onCancel} className="h-7 rounded-control border border-line px-3 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink">Cancel</button>
         <button type="button" data-diff-comment-save disabled={!body} onClick={() => onSave(body)} className="inline-flex h-7 items-center gap-1.5 rounded-control bg-ink px-3 text-[12px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">

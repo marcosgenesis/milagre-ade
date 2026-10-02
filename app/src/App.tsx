@@ -924,6 +924,7 @@ function App() {
             waitingForSubagents={run?.waitingForSubagents}
             tasks={run?.tasks}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
+            asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             models={models}

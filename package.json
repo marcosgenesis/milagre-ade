@@ -13,6 +13,7 @@
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",
+    "test:reply-thought": "node scripts/test-reply-thought.cjs",
     "test:task-track": "node scripts/test-task-track.cjs",
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",

@@ -130,6 +130,10 @@ test("Codex: a started turn is announced", () => {
   assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-9", turn: { id: "t-3" } }, state), []);
 });
 
+test("agents are told to put what the user needs in their reply, not only in thinking", () => {
+  assert.match(MILAGRE_INSTRUCTIONS, /Anything they need to read \(an answer, findings, the reason behind a question\) goes in your reply text/);
+});
+
 test("agents are told to ask with their question tool, and in a short list without one", () => {
   assert.match(MILAGRE_INSTRUCTIONS, /ask with your question tool if you have one \(AskUserQuestion or request_user_input\)/);
   assert.match(MILAGRE_INSTRUCTIONS, /otherwise ask in your reply as a short numbered list\.$/);

@@ -27,7 +27,9 @@ const state = {
 function Fixture() {
   const [collapsed, setCollapsed] = useState(false);
   window.setCollapsed = setCollapsed;
-  const prs = useWorktreePullRequests("/fixture", state);
+  const { pullRequests: prs, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests("/fixture", state);
+  window.dismissConflictAction = () => dismissConflictAction(prs["/fixture/worktree"]);
+  window.dismissedConflicts = dismissedConflicts;
   return <aside data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, paddingTop: 10 }}>
     <ChatRow item={{ id: "1", label: "Rename fixture", details: { pullRequest: prs["/fixture/worktree"] } }}
       active collapsed={collapsed} actions={{}} onPick={() => window.picks++} />
@@ -99,6 +101,19 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-chat-pr] > span").classList.contains("text-red")'), true);
     assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("conflicts")'));
     await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-conflicts.png", image.toPNG()));
+    await evaluate('window.dismissConflictAction()');
+    await waitFor('window.dismissedConflicts.includes(window.pr.url)');
+    await evaluate('window.refreshPR()');
+    await delay(100);
+    assert.equal(await evaluate('window.dismissedConflicts.includes(window.pr.url)'), true, "Refreshing the same conflict keeps the action dismissed");
+    assert.ok(await evaluate('document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")'), "Dismissing the action preserves the sidebar conflict state");
+    assert.ok(await evaluate('JSON.parse(localStorage.getItem("milagre.dismissed-conflict-actions")).includes(window.pr.url)'), "Dismissal persists across reloads");
+    await evaluate('window.pr = { ...window.pr, hasConflicts: false }; window.refreshPR()');
+    await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
+    await waitFor('!window.dismissedConflicts.includes(window.pr.url)');
+    await evaluate('window.pr = { ...window.pr, hasConflicts: true }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
+    assert.equal(await evaluate('window.dismissedConflicts.includes(window.pr.url)'), false, "A later conflict can offer the action again");
     await evaluate('window.pr = { ...window.pr, hasConflicts: false }; window.refreshPR()');
     await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Conflicts")');
     assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color'), openColor);

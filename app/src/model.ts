@@ -273,7 +273,8 @@ export type AgentEvent =
   | { type: "question-resolved"; requestId: string; outcome: QuestionOutcome }
   | { type: "turn-completed" }
   | { type: "turn-cancelled" }
-  | { type: "turn-failed"; message: string };
+  /** `notice`: a message Milagre wrote (it names the CLI and the fix), shown as it is; otherwise it is the agent's own error. */
+  | { type: "turn-failed"; message: string; notice?: boolean; login?: boolean };
 
 export interface AgentStartTurnRequest {
   /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */

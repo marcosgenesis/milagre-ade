@@ -215,7 +215,11 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
 
 function replyBody(text: string, event: AgentEvent, hasSteps: boolean) {
   const reply = text.trim();
-  if (event.type === "turn-failed") return reply ? `${reply}\n\nAgent error: ${event.message}` : `Agent error: ${event.message}`;
+  if (event.type === "turn-failed") {
+    // Milagre's own messages are full sentences that name the CLI and the fix; the agent's raw errors get a prefix.
+    const failure = event.notice ? event.message : `Agent error: ${event.message}`;
+    return reply ? `${reply}\n\n${failure}` : failure;
+  }
   if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
   return reply || (hasSteps ? "" : "The agent finished without a reply.");
 }

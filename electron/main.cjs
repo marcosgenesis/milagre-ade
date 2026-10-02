@@ -12,6 +12,7 @@ const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
 const { createCliCache } = require("./agents/cli.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
+const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { createModelCache } = require("./agents/models.cjs");
 const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
@@ -93,7 +94,11 @@ async function readProject(projectPath) {
 
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
 ipcMain.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
-ipcMain.handle("project:image", (_event, projectPath) => resolveProjectImage(projectPath));
+// The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
+ipcMain.handle("project:image", async (_event, projectPath) => {
+  await environmentReady;
+  return resolveProjectImage(projectPath);
+});
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("worktree:create", async (_event, request) => {
@@ -134,18 +139,24 @@ const notifier = new AttentionNotifier({
 
 ipcMain.handle("notification:attention", (_event, notice) => (Notification.isSupported() ? notifier.notify(notice) : false));
 
+function sendAgentEvent(chatId, event) {
+  notifier.observe(chatId, event);
+  // A turn that just failed on a login problem makes a "ready" picker status out of date.
+  if (event.type === "turn-failed" && event.login) {
+    for (const name of ["claude", "codex"]) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
+  }
+  for (const window of BrowserWindow.getAllWindows()) {
+    // A window can be mid-teardown while agents shut down on quit.
+    if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+    window.webContents.send("agent:event", { chatId, event });
+  }
+}
+
 const agents = new SessionManager({
   createSession: (provider, options) => (provider === "codex"
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
-  send: (chatId, event) => {
-    notifier.observe(chatId, event);
-    for (const window of BrowserWindow.getAllWindows()) {
-      // A window can be mid-teardown while agents shut down on quit.
-      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-      window.webContents.send("agent:event", { chatId, event });
-    }
-  },
+  send: sendAgentEvent,
 });
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
@@ -157,8 +168,11 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);
   const prompt = await expandSkillPrompt(request.cwd, request.prompt);
   const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
-  // The renderer shows a start refused here as the turn's failure.
-  if (cli.problem) throw new Error(cli.problem);
+  // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
+  if (cli.problem) {
+    sendAgentEvent(request.chatId, failedWith(cli.problem));
+    return { turnId: null, steered: false };
+  }
   return agents.startTurn({ ...request, prompt, images, command: cli.command });
 });
 

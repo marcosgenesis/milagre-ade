@@ -69,6 +69,16 @@ test("streams text per chat and saves each finished reply once", () => {
   assert.equal(second.state.next_id, 12);
 });
 
+test("Milagre's own failure messages carry no \"Agent error:\" prefix, the agent's raw errors do", () => {
+  const run = (text: string) => ({ [key(1)]: { text, model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } });
+  const own = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.", notice: true, login: true });
+  assert.equal(own.state.messages[0].body, "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.");
+  const partial = applyAgentEvent(base(), run("Half"), PROJECT, key(1), { type: "turn-failed", message: "Codex stopped unexpectedly. Send your message again to continue this chat.", notice: true });
+  assert.equal(partial.state.messages[0].body, "Half\n\nCodex stopped unexpectedly. Send your message again to continue this chat.");
+  const raw = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "The model gpt-x is not supported." });
+  assert.equal(raw.state.messages[0].body, "Agent error: The model gpt-x is not supported.");
+});
+
 test("keeps partial text when a turn fails or is cancelled", () => {
   const runs = { [key(1)]: { text: "Half an answer", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   const failed = applyAgentEvent(base(), runs, PROJECT, key(1), { type: "turn-failed", message: "Codex stopped: boom" });

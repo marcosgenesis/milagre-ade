@@ -234,6 +234,16 @@ body {
   color: var(--ink);
 }
 
+/* Find in chat (CSS Custom Highlight API). */
+::highlight(find-match) {
+  background-color: color-mix(in oklch, var(--orange) 28%, transparent);
+  color: inherit;
+}
+::highlight(find-active) {
+  background-color: color-mix(in oklch, var(--orange) 70%, transparent);
+  color: var(--ink);
+}
+
 /* ── interface hygiene (interfaces.dev cheat sheet) ────── */
 
 /* headings balance; descriptions avoid orphans (skip long-form — we have none) */

@@ -5,7 +5,7 @@ export type Command = {
   detail?: string;
   keywords?: string;
   shortcut?: string;
-  icon: "chat" | "add" | "folder" | "settings" | "git" | "editor" | "copy" | "unread";
+  icon: "chat" | "add" | "folder" | "settings" | "git" | "editor" | "copy" | "unread" | "search";
   run: () => void | Promise<unknown>;
 };
 

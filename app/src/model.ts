@@ -197,9 +197,9 @@ export interface ChatMessage {
   steps?: ChatStep[];
 }
 
-export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking";
+export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup";
 
-/** One tool call in an agent's reply (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
+/** One tool call in an agent's reply (a `setup` step is the worktree's setup command, which Milagre ran, not the agent) (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
 export interface ChatStep {
   id: string;
   kind: StepKind;
@@ -211,6 +211,8 @@ export interface ChatStep {
   detail?: string;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. */
   file?: string;
+  /** Muted text after the title, e.g. "3s" or "exited with code 1 after 4s". */
+  note?: string;
   /** How long a thinking step took. */
   durationMs?: number;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
@@ -314,7 +316,7 @@ export type AgentEvent =
   | { type: "text-delta"; messageId: string | null; text: string }
   | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }
-  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; note?: string; detail?: string; durationMs?: number }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | ({ type: "question-request" } & QuestionRequest)

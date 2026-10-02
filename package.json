@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
+    "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",
     "test:reply-thought": "node scripts/test-reply-thought.cjs",
     "test:task-track": "node scripts/test-task-track.cjs",
@@ -25,7 +26,8 @@
     "release:dry": "semantic-release --dry-run --no-ci",
     "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",
     "test:release": "node --test scripts/release-workflow.test.cjs",
-    "package:mac:local": "npm run package:mac -- --config.mac.identity=- --config.mac.notarize=false"
+    "package:mac:local": "npm run package:mac -- --config.mac.identity=- --config.mac.notarize=false",
+    "test:worktree-setup": "node scripts/test-worktree-setup.cjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.286",
@@ -63,7 +65,9 @@
     "appId": "com.milagre.app",
     "productName": "Milagre",
     "asar": true,
-    "asarUnpack": ["electron/bundled-skills/**/*"],
+    "asarUnpack": [
+      "electron/bundled-skills/**/*"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",

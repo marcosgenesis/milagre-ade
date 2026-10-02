@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("milagre", {
   readFilesToCopy: (projectPath) => ipcRenderer.invoke("files-to-copy:read", projectPath),
   previewFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:preview", projectPath, patterns),
   saveFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:save", projectPath, patterns),
+  readWorktreeSetup: (projectPath) => ipcRenderer.invoke("worktree-setup:read", projectPath),
+  saveWorktreeSetup: (projectPath, command) => ipcRenderer.invoke("worktree-setup:save", projectPath, command),
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);

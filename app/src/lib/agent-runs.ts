@@ -82,8 +82,8 @@ function updateStep(run: AgentRun, id: string, update: (step: ChatStep) => ChatS
 }
 
 /** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
-function endStep({ detail: _streamed, ...step }: ChatStep, end: { status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }): ChatStep {
-  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
+function endStep({ detail: _streamed, ...step }: ChatStep, end: { status: "done" | "failed"; title?: string; note?: string; detail?: string; durationMs?: number }): ChatStep {
+  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.note === undefined ? {} : { note: end.note }), ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
 }
 
 /**

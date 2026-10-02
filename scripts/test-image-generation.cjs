@@ -1,6 +1,6 @@
 // Run with node scripts/test-image-generation.cjs. Checks that an image Codex generates shows in the
 // reply as its own surface, outside the folded activity: generating while the step runs, the image
-// once it is saved and loaded, and the reason when it fails. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
+// once it is saved and loaded, and a failed step row (no surface) when it fails. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -82,10 +82,10 @@ async function browserChecks() {
     assert.match(done.text, /mountain landscape/, "shows the prompt it was made from");
     await screenshot("complete");
     await evaluate('window.setFixture("failed")');
-    await waitFor(`${surface}?.dataset.state === "error"`);
-    assert.match(await evaluate(`${surface}.textContent`), /Couldn't generate the image: image limit reached/);
+    await waitFor(`!${surface} && !!document.querySelector("[data-slot=step][data-status=failed]")`);
+    assert.match(await evaluate('document.querySelector("[data-slot=step][data-status=failed]").textContent'), /Couldn't generate an image.*image limit reached/);
     await screenshot("failed");
-    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution and prompt, or failed with the reason");
+    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution and prompt, or a failed step row with the reason and no image surface");
     app.exit(0);
   } catch (error) {
     console.error(error);

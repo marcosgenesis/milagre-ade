@@ -80,6 +80,11 @@ class CodexSession {
     return this.state.threadId;
   }
 
+  /** The app-server process, while it runs; the ports its commands open belong to the chat. */
+  get pid() {
+    return this.closed ? null : this.rpc?.child?.pid ?? null;
+  }
+
   async startTurn(request) {
     if (this.turnActive) return this.steer(request);
     if (!this.command) {

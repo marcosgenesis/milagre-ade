@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelOption } from "../model";
-import { handoverBlocker, handoverLinks, handoverModel, otherProvider } from "./handover.ts";
+import type { ChatMessage, ModelOption } from "../model";
+import { handoverBriefId, handoverBlocker, handoverLinks, handoverModel, otherProvider } from "./handover.ts";
 
 test("the other provider", () => {
   assert.equal(otherProvider("claude"), "codex");
@@ -39,4 +39,11 @@ test("both chats link to each other by title", () => {
 test("a link to a chat that is gone is dropped", () => {
   assert.deepEqual(handoverLinks(sessions[3], { sessions: { 3: sessions[3] }, messages: [] }), { pending: false });
   assert.deepEqual(handoverLinks(undefined, { sessions, messages: [] }), { pending: false });
+});
+
+test("the brief is the first user message of a handed-over chat only", () => {
+  const messages = [{ id: 4, role: "user" }, { id: 5, role: "assistant" }, { id: 6, role: "user" }] as ChatMessage[];
+  assert.equal(handoverBriefId(messages, 3), 4);
+  assert.equal(handoverBriefId(messages, undefined), undefined);
+  assert.equal(handoverBriefId([{ id: 5, role: "assistant" }] as ChatMessage[], 3), undefined);
 });

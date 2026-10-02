@@ -25,7 +25,7 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoverFromLabel, HandoverLinkBar } from "./Handover";
-import type { HandoverLinks } from "../lib/handover";
+import { handoverBriefId, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -62,6 +62,7 @@ function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }
 const MessageSection = memo(function MessageSection({
   message,
   isUser,
+  markdown = false,
   onRecommendationSelect,
   onUpdateCli,
   updatingCli,
@@ -72,6 +73,8 @@ const MessageSection = memo(function MessageSection({
 }: {
   message: AppChatMessage;
   isUser: boolean;
+  /** A user message whose body is markdown (the handover brief). */
+  markdown?: boolean;
   onRecommendationSelect: (option: string) => void;
   onUpdateCli?: (provider: ModelProvider) => void;
   updatingCli?: ModelProvider | null;
@@ -101,7 +104,9 @@ const MessageSection = memo(function MessageSection({
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
         <Attachments images={message.images} files={message.files} />
-        {isUser ? (
+        {isUser && markdown ? (
+          <div className="break-words [overflow-wrap:anywhere] [&_:first-child]:mt-0 [&_:last-child]:mb-0 [&_h1]:text-[14px] [&_h2]:text-[13px] [&_h3]:text-[13px] [&_h1]:mt-2 [&_h2]:mt-2 [&_h3]:mt-2 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1"><Markdown text={message.body} /></div>
+        ) : isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
           <>
@@ -361,6 +366,7 @@ export function ChatComposer({
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
   const isNewChat = messages.length === 0 && !handover?.pending;
+  const briefId = handoverBriefId(messages, handover?.from?.id);
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -405,6 +411,7 @@ export function ChatComposer({
               key={message.id}
               message={message}
               isUser={message.role === "user"}
+              markdown={message.id === briefId}
               onRecommendationSelect={onRecommendationSelect}
               onUpdateCli={onUpdateCli}
               updatingCli={updatingCli}
@@ -429,7 +436,7 @@ export function ChatComposer({
           )}
           {handover?.pending && (
             <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-              <ThinkingIndicator label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
+              <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
             </div>
           )}
           {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}

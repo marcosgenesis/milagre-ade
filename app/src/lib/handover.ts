@@ -29,3 +29,9 @@ export function handoverLinks(session: AgentSession | undefined, state: { sessio
   if (from) links.from = { id: from.id, title: titleOf(from) };
   return links;
 }
+
+/** The id of the handover brief: the first user message of a chat that was handed over to, else undefined. */
+export function handoverBriefId(messages: ChatMessage[], handedOverFrom: number | undefined): number | undefined {
+  if (handedOverFrom == null) return undefined;
+  return messages.find((message) => message.role === "user")?.id;
+}

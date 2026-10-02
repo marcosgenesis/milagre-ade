@@ -1,7 +1,7 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
 import type { AgentTask, Subagent } from "../model";
 import { TaskTrack } from "./agents/TaskTrack";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -18,6 +18,7 @@ import {
   Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { FindBar } from "./FindBar";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
@@ -101,6 +102,10 @@ const MessageSection = memo(function MessageSection({
 });
 
 interface ChatComposerProps {
+  /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
+  findOpen?: boolean;
+  findSignal?: number;
+  onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
@@ -318,7 +323,11 @@ export function ChatComposer({
   baseBranch,
   onBaseBranchChange,
   newChatError,
+  findOpen = false,
+  findSignal = 0,
+  onFindClose,
 }: ChatComposerProps) {
+  const root = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState("Worktrees");
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
@@ -339,12 +348,14 @@ export function ChatComposer({
 
   return (
     <div
+      ref={root}
       className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
       onDrop={handleFileDrop}
     >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
+      {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
       {!isNewChat && <MessageScroller
         navigation="rail"
         followOutput

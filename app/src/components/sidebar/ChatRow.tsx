@@ -139,12 +139,14 @@ export function ChatRow({
   collapsed,
   onPick,
   actions,
+  shortcutHint,
 }: {
   item: SidebarRecent;
   active: boolean;
   collapsed: boolean;
   onPick: () => void;
   actions: ChatRowActions;
+  shortcutHint?: string;
 }) {
   const mark = item.mark ?? "idle";
   const pullRequest = !collapsed ? item.details?.pullRequest : undefined;
@@ -230,7 +232,7 @@ export function ChatRow({
           </span>
           <ChatMarkDot mark={mark} topAligned={Boolean(pullRequest)} />
           <span
-            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${pullRequest ? "leading-5" : ""} transition-[padding] duration-150 group-hover/row:pr-6 ${menu ? "pr-6" : ""} ${
+            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${pullRequest ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-10" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
@@ -266,7 +268,11 @@ export function ChatRow({
         </Tooltip>
       )}
 
-      {!collapsed && !renaming && (
+      {shortcutHint && !renaming && !menu && <kbd aria-hidden="true" data-shortcut-hint
+        className={`pointer-events-none absolute right-3 top-1.5 z-30 rounded border border-line bg-surface px-1 text-[11px] leading-5 text-ink ${collapsed ? "right-1" : ""}`}>
+        {shortcutHint}
+      </kbd>}
+      {!collapsed && !renaming && !shortcutHint && (
         <button
           ref={triggerRef}
           type="button"

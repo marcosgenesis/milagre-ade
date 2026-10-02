@@ -56,6 +56,9 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
+import { CommandPalette } from "./components/CommandPalette";
+import type { Command } from "./lib/commands";
+import type { RecentProject } from "./lib/project-list";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
@@ -118,6 +121,16 @@ function App() {
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  useEffect(() => {
+    if (!commandPaletteOpen) return;
+    let cancelled = false;
+    window.milagre.listRecentProjects().then((projects) => {
+      if (!cancelled) setRecentProjects(projects);
+    }).catch(() => { if (!cancelled) setRecentProjects([]); });
+    return () => { cancelled = true; };
+  }, [commandPaletteOpen]);
   const [isolation, setIsolation] = useState<Isolation>(() => loadChatPreferences(localStorage, "").isolation);
   const [branches, setBranches] = useState<string[]>([]);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
@@ -650,8 +663,12 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"], dialog[open]')) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
-      if (event.key === ",") {
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+      } else if (event.key === ",") {
         event.preventDefault();
         setView("settings");
       } else if (event.key.toLowerCase() === "n") {
@@ -693,9 +710,53 @@ function App() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [run, project?.path, selectedSession?.id, view]);
 
+  useEffect(() => {
+    function jumpToChat(event: KeyboardEvent) {
+      if (view !== "chat" || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return;
+      if (!(event.metaKey || event.ctrlKey) || !/^[1-9]$/.test(event.key)) return;
+      if (document.querySelector('dialog[open], [role="dialog"], [role="menu"], [aria-label="Chat name"]')) return;
+      const chat = chats[Number(event.key) - 1];
+      if (!chat) return;
+      event.preventDefault();
+      openChat(Number(chat.id));
+    }
+    window.addEventListener("keydown", jumpToChat);
+    return () => window.removeEventListener("keydown", jumpToChat);
+  }, [chats, view]);
+
   if (loading || !project || !state) {
     return <div className="grid h-screen place-items-center overflow-hidden bg-page text-sm text-ink-3">Loading workspace…</div>;
   }
+
+  const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+  const commands: Command[] = [
+    { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
+    { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => { if (runningChatRef.current) askInMenu({ kind: "open" }); else return openProject(); } },
+    { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
+    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme dark light system", run: () => { setSettingsSection("appearance"); setView("settings"); } },
+    { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: project.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
+  ];
+  if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
+  if (selectedSession && view === "chat") {
+    const sessionId = selectedSession.id;
+    commands.unshift(
+      { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
+      { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
+      { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+      { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
+    );
+    if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
+  }
+  commands.push(...chats.map((chat): Command => ({
+    id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
+    detail: [chat.mark === "waiting" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
+    keywords: [chat.details.path, chat.details.pullRequest?.title, chat.details.pullRequest ? `#${chat.details.pullRequest.number}` : ""].filter(Boolean).join(" "),
+    run: () => openChat(Number(chat.id)),
+  })));
+  commands.push(...recentProjects.filter((recent) => recent.path !== project.path).map((recent): Command => ({
+    id: `project:${recent.path}`, label: recent.name, group: "Projects", icon: "folder", detail: recent.path,
+    run: () => { if (runningChatRef.current) askInMenu({ kind: "project", path: recent.path }); else return switchProject(recent.path); },
+  })));
 
   return (
     <DotBackground>
@@ -736,6 +797,8 @@ function App() {
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
+        onOpenCommands={() => setCommandPaletteOpen(true)}
+        hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
         projectPath={project.path}
         onSwitchProject={(path, confirmed) => void switchProject(path, confirmed)}
         onOpenPicked={openPicked}
@@ -829,6 +892,7 @@ function App() {
         </div>
       </main>
       </div>
+      {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (
         <GitActionsDialog
           key={gitDialog.sessionId}

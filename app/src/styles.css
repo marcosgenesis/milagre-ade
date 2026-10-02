@@ -6,6 +6,13 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+.command-palette {
+  top: min(14vh, 100px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.command-palette::backdrop { background: rgb(0 0 0 / 24%); }
+
 /* GENERIC FOUNDATION — tokens, @theme, base rules, the primitive-*
  * spacing utilities, and shared keyframes below are needed by EVERY
  * component. Blocks tagged COMPONENT-SPECIFIC further down belong to

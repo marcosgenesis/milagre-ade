@@ -21,6 +21,7 @@ import {
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
+import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type RunningChat, type SwitchTarget } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
@@ -84,6 +85,8 @@ type SidebarNavProps = {
   onNewChat?: () => void;
   onPick?: (id: string, label: string, prompt?: string) => void;
   onOpenSettings?: () => void;
+  onOpenCommands?: () => void;
+  hintsEnabled?: boolean;
   /** The project folder, for the project menu's reveal and copy path. */
   projectPath?: string;
   /** Opens a project from the recent list in the project menu; `confirmed` as for onOpenProject. */
@@ -110,19 +113,6 @@ const SIDEBAR_MOTION = {
   duration: 280,
   copyDuration: 180,
   copyOffset: 8,
-  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-};
-
-/* ─────────────────────────────────────────────────────────
- * CHAT SEARCH STORYBOARD
- *
- *   0ms   search is triggered; Chats label begins fading
- *   0ms   field grows right → left from the search control
- * 180ms   field fills the row; cursor is focused and ready
- * ───────────────────────────────────────────────────────── */
-const CHAT_SEARCH_MOTION = {
-  duration: 180,
-  closedWidth: 28,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
 
@@ -428,6 +418,8 @@ export default function SidebarNav({
   onNewChat,
   onPick,
   onOpenSettings,
+  onOpenCommands,
+  hintsEnabled = true,
   projectPath,
   onOpenProjectSettings,
   onSwitchProject,
@@ -444,13 +436,10 @@ export default function SidebarNav({
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
   const [workspaceAsk, setWorkspaceAsk] = useState<SwitchTarget | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
-  const visibleRecents = recents.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()));
   const workspace = { name: workspaceName, image: workspaceImage, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
   const projects = projectPath ? projectRows({ recent: recentProjects, currentPath: projectPath, currentName: workspaceName }) : [];
 
@@ -497,15 +486,9 @@ export default function SidebarNav({
     return () => document.removeEventListener("pointerdown", close);
   }, [workspaceOpen]);
 
-  useEffect(() => {
-    if (searchOpen) searchRef.current?.focus();
-  }, [searchOpen]);
-
   const collapse = () => {
     setCollapsed(true);
     setWorkspaceOpen(false);
-    setSearchOpen(false);
-    setQuery("");
   };
 
   // ⌘B / Ctrl+B toggles the sidebar exactly like its collapse button.
@@ -598,94 +581,42 @@ export default function SidebarNav({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className={`sidebar-copy relative mx-2 mb-1 h-8 ${collapsed ? "hidden" : ""}`}>
-            <div
-              aria-hidden={searchOpen}
-              className={`absolute inset-0 flex items-center gap-1.5 px-2 text-[12.5px] font-medium text-ink-3 transition-[opacity,transform] ${searchOpen ? "pointer-events-none -translate-x-1 opacity-0" : "translate-x-0 opacity-100"}`}
-              style={{ transitionDuration: `${CHAT_SEARCH_MOTION.duration}ms`, transitionTimingFunction: CHAT_SEARCH_MOTION.easing }}
-            >
-              <span>Chats</span>
-            </div>
-
-            <div
-              className={`absolute right-0 top-0 z-10 flex transition-opacity ${searchOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
-              style={{ transitionDuration: `${CHAT_SEARCH_MOTION.duration}ms` }}
-            >
-              <Tooltip label="New chat" shortcut="⌘N" align="end">
-                <button
-                  type="button"
-                  aria-label="New chat"
-                  onClick={() => {
-                    if (activeTitle === undefined) setDemoActiveTitle(null);
-                    onNewChat?.();
-                  }}
-                  className={CHATS_HEADER_BUTTON}
-                >
-                  <IconPlusMedium size={16} />
-                </button>
-              </Tooltip>
-              <button type="button" aria-label="Search chats" aria-expanded={searchOpen} onClick={() => setSearchOpen(true)} className={CHATS_HEADER_BUTTON}>
+          {onOpenCommands && (
+            <Tooltip label="Search commands, chats, and projects" className="mx-2 mb-3 w-[calc(100%-16px)]" side="bottom" shortcut={`${shortcutModifier}K`}>
+              <button type="button" aria-label="Command palette" aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} onClick={onOpenCommands}
+                className={`flex h-8 w-full items-center gap-2 rounded-[8px] px-2 text-left text-[13px] text-ink-3 hover:bg-hover-2 hover:text-ink ${collapsed ? "justify-center" : ""}`}>
                 <IconMagnifyingGlass size={16} />
+                {!collapsed && <span className={`min-w-0 flex-1 truncate ${showHints ? "pr-7" : ""}`}>Search commands…</span>}
               </button>
-            </div>
-
-            <div
-              className={`absolute right-0 top-0 z-20 flex h-8 items-center overflow-hidden rounded-[8px] bg-field text-ink-3 shadow-hairline transition-[width,opacity] focus-within:text-ink-2 ${searchOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-              style={{
-                width: searchOpen ? "100%" : CHAT_SEARCH_MOTION.closedWidth,
-                transitionDuration: `${CHAT_SEARCH_MOTION.duration}ms`,
-                transitionTimingFunction: CHAT_SEARCH_MOTION.easing,
-              }}
-            >
-              <span className="ml-2 flex shrink-0 items-center justify-center">
-                <IconMagnifyingGlass size={15} />
-              </span>
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setSearchOpen(false);
-                    setQuery("");
-                  }
-                }}
-                placeholder="Search chats"
-                aria-label="Search chat history"
-                className="ml-1.5 min-w-0 flex-1 bg-transparent text-[13px] font-medium text-ink outline-none placeholder:text-ink-3"
-              />
-              <button
-                type="button"
-                aria-label="Close chat search"
-                onClick={() => {
-                  setSearchOpen(false);
-                  setQuery("");
-                }}
-                className="flex size-8 shrink-0 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]"
-              >
-                <IconCrossSmall size={16} />
+            </Tooltip>
+          )}
+          <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
+            <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
+            <Tooltip label="New chat" shortcut="⌘N" align="end">
+              <button type="button" aria-label="New chat" onClick={() => {
+                if (activeTitle === undefined) setDemoActiveTitle(null);
+                onNewChat?.();
+              }} className={CHATS_HEADER_BUTTON}>
+                <IconPlusMedium size={16} />
               </button>
-            </div>
+            </Tooltip>
           </div>
 
           <GlideGroup>
-            {visibleRecents.map((item) => (
+            {recents.map((item, index) => (
               <ChatRow
                 key={item.id}
                 item={item}
                 active={activeId !== undefined ? item.id === activeId : item.label === selectedTitle}
                 collapsed={collapsed}
                 actions={chatActions}
+                shortcutHint={showHints && index < 9 ? `${shortcutModifier}${index + 1}` : undefined}
                 onPick={() => {
                   if (activeTitle === undefined) setDemoActiveTitle(item.label);
                   onPick?.(item.id, item.label, item.prompt);
                 }}
               />
             ))}
-            {query && visibleRecents.length === 0 && (
-              <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">No chats found</div>
-            )}
           </GlideGroup>
         </div>
 

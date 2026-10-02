@@ -7,6 +7,7 @@ import { handoverNotes, providerLabel } from "../lib/handover";
 import { ProviderLogo } from "./ProviderLogo";
 import { Notice } from "./Notice";
 import { Markdown } from "./markdown/Markdown";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 /** Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context. */
 export function HandoverRow({ provider, blocked, onClick }: { provider: ModelProvider; blocked: string | null; onClick: () => void }) {
@@ -202,9 +203,9 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
               className="min-h-0 w-full flex-1 resize-none rounded-control border border-line bg-field px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink outline-none transition-colors focus:border-line-strong"
             />
           ) : (
-            <div data-brief-preview className="min-h-0 flex-1 overflow-y-auto overscroll-contain text-[13px] leading-[1.55]">
+            <ScrollArea data-brief-preview className="flex-1 text-[13px] leading-[1.55]">
               <Markdown text={text} />
-            </div>
+            </ScrollArea>
           )}
         </div>
         <footer className="flex items-center gap-2 border-t border-line bg-inset px-4 py-3">

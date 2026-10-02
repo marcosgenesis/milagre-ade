@@ -6,6 +6,7 @@ import { buildDiffTree, type DiffTreeNode } from "../../lib/diff-tree";
 import Tooltip from "../primitives/Tooltip";
 import { Select } from "../primitives/Select";
 import type { DiffList } from "./useDiffFiles";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 const MODES = [
   { value: "uncommitted" as const, label: "Uncommitted" },
@@ -65,14 +66,14 @@ export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile
         </div>
         {mode === "committed" && base && <span data-diff-base className="truncate px-0.5 text-[11px] text-ink-3">since <span className="font-mono">{base}</span></span>}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
+      <ScrollArea className="flex-1 py-1.5">
         {list.state === "error" && <Notice>{list.message}</Notice>}
         {list.state === "ready" && !list.isRepo && <Notice>{list.message}</Notice>}
         {list.state === "ready" && list.isRepo && mode === "committed" && list.base === null && <Notice>No base branch to compare with.</Notice>}
         {files && files.length === 0 && message && <Notice>{message}</Notice>}
         {files && files.length === 0 && !message && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
         {files && files.length > 0 && <Tree nodes={tree} depth={0} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />}
-      </div>
+      </ScrollArea>
     </aside>
   );
 }

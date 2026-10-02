@@ -8,6 +8,7 @@ import { titleSpans } from "../../lib/reply-parts";
 import { useFileOpener } from "../editor-links";
 import { CodeBlock } from "../markdown/CodeBlock";
 import { Markdown } from "../markdown/Markdown";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -83,11 +84,11 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
         <div className={rowClass}>{content}</div>
       )}
       {open && step.detail && (
-        <div id={detailId} className="max-h-96 overflow-y-auto pl-6">
+        <ScrollArea id={detailId} chainScroll className="max-h-96 pl-6">
           {step.kind === "thinking"
             ? <div className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2"><Markdown text={step.detail} /></div>
             : <CodeBlock code={step.detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />}
-        </div>
+        </ScrollArea>
       )}
     </div>
   );

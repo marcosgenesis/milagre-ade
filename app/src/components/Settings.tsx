@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import type { FilesToCopy as FilesToCopyResult } from "../electron";
+import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
 import type { PermissionMode } from "../model";
 import { updateSettings, useSettings } from "../lib/settings";
@@ -14,7 +16,7 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "appearance" | "about";
+export type SettingsSection = "general" | "appearance" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -22,7 +24,9 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
 
-export function SettingsNav({ section, onSelect, onBack }: { section: SettingsSection; onSelect: (section: SettingsSection) => void; onBack: () => void }) {
+const PROJECT_SECTION = { key: "project" as const, label: "Worktrees", icon: GitBranchIcon };
+
+export function SettingsNav({ section, projectName, onSelect, onBack }: { section: SettingsSection; projectName?: string; onSelect: (section: SettingsSection) => void; onBack: () => void }) {
   return (
     <aside aria-label="Settings navigation" className="flex h-full w-[224px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
       <div aria-hidden className="h-8 shrink-0" />
@@ -35,6 +39,10 @@ export function SettingsNav({ section, onSelect, onBack }: { section: SettingsSe
         {SECTIONS.map((item) => (
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
+      </GlideGroup>
+      <div className="mx-2 mt-2 flex h-8 items-center px-2 text-[12.5px] font-medium text-ink-3"><span className="truncate">{projectName ? `Project · ${projectName}` : "Project"}</span></div>
+      <GlideGroup>
+        <RailButton icon={<Icon icon={PROJECT_SECTION.icon} />} label={PROJECT_SECTION.label} active={section === PROJECT_SECTION.key} onClick={() => onSelect(PROJECT_SECTION.key)} />
       </GlideGroup>
     </aside>
   );
@@ -161,8 +169,99 @@ function AboutSettings() {
   );
 }
 
-export function SettingsPanel({ section }: { section: SettingsSection }) {
-  const title = SECTIONS.find((item) => item.key === section)?.label;
+/* ─────────────────────────────────────────────────────────
+ * FILES TO COPY
+ * Ignored files (env files, local secrets) a new worktree gets from
+ * the project's main checkout. .gitignore syntax; .worktreeinclude
+ * at the repo root wins. The preview runs the same matching.
+ * ───────────────────────────────────────────────────────── */
+function FilesToCopy({ projectPath }: { projectPath: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [found, setFound] = useState<FilesToCopyResult | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const pending = useRef<string | null>(null);
+  const saveTimer = useRef<number | null>(null);
+  const previewSeq = useRef(0);
+
+  const flush = () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const next = pending.current;
+    pending.current = null;
+    if (next !== null) void window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).catch(() => {});
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setText(null);
+    setFound(null);
+    setLoadError(null);
+    window.milagre.readFilesToCopy(projectPath).then((saved) => {
+      if (cancelled) return;
+      setText(saved.filesToCopy.join("\n"));
+      setFound(saved);
+    }, (error) => {
+      if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+    });
+    // Leaving Settings saves what was typed last.
+    return () => {
+      cancelled = true;
+      flush();
+    };
+  }, [projectPath]);
+
+  const edit = (value: string) => {
+    setText(value);
+    pending.current = value;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flush, 600);
+    const seq = ++previewSeq.current;
+    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(value)).then((next) => {
+      if (seq === previewSeq.current) setFound(next);
+    }, () => {});
+  };
+
+  const locked = found?.source === "worktreeinclude";
+  return (
+    <Group title="New worktrees">
+      <div className="grid gap-2 px-4 py-3">
+        <label htmlFor="files-to-copy" className="grid gap-0.5">
+          <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
+          <span className="text-[12px] text-ink-3">
+            Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
+          </span>
+        </label>
+        <textarea
+          id="files-to-copy"
+          rows={5}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          readOnly={locked}
+          disabled={text === null && !loadError}
+          value={locked ? found.worktreeInclude ?? "" : text ?? ""}
+          placeholder={DEFAULT_FILES_TO_COPY}
+          onChange={(event) => edit(event.target.value)}
+          className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
+        />
+        {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
+        {loadError ? (
+          <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
+        ) : (
+          <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
+        )}
+      </div>
+    </Group>
+  );
+}
+
+function ProjectSettings({ projectPath }: { projectPath?: string }) {
+  if (!projectPath) return <p className="mt-6 text-[13px] text-ink-3">Open a project to change its settings.</p>;
+  return <FilesToCopy projectPath={projectPath} />;
+}
+
+export function SettingsPanel({ section, projectPath }: { section: SettingsSection; projectPath?: string }) {
+  const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
@@ -170,6 +269,7 @@ export function SettingsPanel({ section }: { section: SettingsSection }) {
         {section === "general" && <GeneralSettings />}
         {section === "appearance" && <AppearanceSettings />}
         {section === "about" && <AboutSettings />}
+        {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>
     </div>
   );

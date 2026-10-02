@@ -24,6 +24,8 @@ import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
+import { isMilagreWorktree, removeFailureNotice, withoutWorktree, worktreeShared } from "./lib/archive";
+import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
@@ -74,6 +76,13 @@ function App() {
   const [branches, setBranches] = useState<string[]>([]);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
+  // A short message about something that happened off to the side (a worktree that wouldn't go).
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -228,12 +237,41 @@ function App() {
   }, [selectedSessionId, view, project?.path]);
 
   // Archiving hides the chat for good; a turn still running in it is stopped first.
-  function archiveChat(sessionId: number) {
+  // The chat is hidden first, so a worktree that won't go never keeps the archive from happening.
+  async function archiveChat(sessionId: number, mode: ArchiveMode = "hide") {
     if (!project) return;
-    const key = chatKey(project.path, sessionId);
-    if (agentRuns.runs[key]) void agentRuns.interrupt(key).catch(() => {});
+    const projectPath = project.path;
+    const key = chatKey(projectPath, sessionId);
+    const latest = stateRef.current;
+    const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
+    // Another chat may have started using the worktree since the menu looked at it.
+    const removing = (mode === "remove" || mode === "delete") && latest && worktree && !worktreeShared(latest, sessionId) ? worktree : null;
+    const stopped = agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined;
     patchChat(sessionId, { archived: true, unread: false });
     if (selectedSessionId === sessionId) startNewChat();
+    if (!removing) return;
+    // The agent must be done before its folder goes.
+    await stopped;
+    try {
+      await window.milagre.removeWorktree(removing.path, { force: mode === "delete" });
+    } catch (error) {
+      setNotice(removeFailureNotice(error, removing.path));
+      return;
+    }
+    if (projectRef.current?.path !== projectPath) return;
+    const next = stateRef.current;
+    if (next) commit(withoutWorktree(next, removing.id));
+    void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {});
+  }
+
+  // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
+  // uses it, and what it would lose.
+  async function checkArchive(sessionId: number): Promise<ArchivePlan> {
+    const latest = stateRef.current;
+    const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
+    if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots())) return { milagreOwned: false, shared: false, status: null };
+    if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null };
+    return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!) };
   }
 
   function revealChat(sessionId: number) {
@@ -468,6 +506,12 @@ function App() {
           </button>
         </div>
       )}
+      {notice && (
+        <div role="status" data-notice className="fixed inset-x-4 bottom-4 z-[80] mx-auto flex max-w-[520px] items-start gap-3 rounded-[12px] bg-surface px-4 py-3 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]">
+          <span className="min-w-0 flex-1 break-words">{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-medium text-ink-3 hover:text-ink">Dismiss</button>
+        </div>
+      )}
       <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
       <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" ? "flex" : "hidden"}`}>
       <SidebarNav
@@ -483,7 +527,8 @@ function App() {
           onRename: (id, title) => patchChat(Number(id), { title }),
           onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
           onReveal: (id) => revealChat(Number(id)),
-          onArchive: (id) => archiveChat(Number(id)),
+          onArchiveCheck: (id) => checkArchive(Number(id)),
+          onArchive: (id, mode) => void archiveChat(Number(id), mode),
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
@@ -492,12 +537,12 @@ function App() {
       </div>
       {view === "settings" && (
         <div className="flex shrink-0 py-3 pl-3">
-          <SettingsNav section={settingsSection} onSelect={setSettingsSection} onBack={() => setView("chat")} />
+          <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
         </div>
       )}
 
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        {view === "settings" && <SettingsPanel section={settingsSection} />}
+        {view === "settings" && <SettingsPanel section={settingsSection} projectPath={project.path} />}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
           <ChatComposer
             key={project.path}

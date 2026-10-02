@@ -14,7 +14,10 @@ const { createCapabilityCache } = require("./agents/capabilities.cjs");
 const { resolveExecutable } = require("./agents/environment.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
-const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches } = require("./worktrees.cjs");
+const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
+const { previewFilesToCopy } = require("./worktree-files.cjs");
+const { createProjectSettings } = require("./project-settings.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
@@ -89,8 +92,36 @@ ipcMain.handle("project:branches", (_event, projectPath) => listBranches(project
 ipcMain.handle("project:image", (_event, projectPath) => resolveProjectImage(projectPath));
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
-ipcMain.handle("worktree:create", async (_event, request) => {
-  const created = await createWorktree(request);
+// Where Milagre's worktrees live. An unpackaged build can point it elsewhere (live checks use a temporary folder).
+function worktreeRoot() {
+  return (!app.isPackaged && process.env.MILAGRE_WORKTREE_ROOT) || DEFAULT_WORKTREE_ROOT;
+}
+
+let projectSettingsStore = null;
+function projectSettings() {
+  projectSettingsStore ??= createProjectSettings(path.join(app.getPath("userData"), "project-settings.json"));
+  return projectSettingsStore;
+}
+
+ipcMain.handle("worktree:roots", async () => {
+  const root = worktreeRoot();
+  return [...new Set([root, await fs.realpath(root).catch(() => root)])];
+});
+ipcMain.handle("worktree:status", (_event, worktreePath, base) => worktreeStatus(worktreePath, base));
+ipcMain.handle("worktree:remove", (_event, worktreePath, options) => removeWorktree({ path: worktreePath, root: worktreeRoot(), force: Boolean(options?.force) }));
+ipcMain.handle("files-to-copy:read", async (_event, projectPath) => {
+  const { filesToCopy } = await projectSettings().get(projectPath);
+  return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
+});
+ipcMain.handle("files-to-copy:preview", (_event, projectPath, patterns) => previewFilesToCopy(projectPath, patterns));
+ipcMain.handle("files-to-copy:save", async (_event, projectPath, patterns) => {
+  const { filesToCopy } = await projectSettings().setFilesToCopy(projectPath, patterns);
+  return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
+});
+ipcMain.handle("worktree:create", async (_event, { projectPath, baseBranch, prompt }) => {
+  const request = { projectPath, baseBranch, prompt };
+  const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: (await projectSettings().get(projectPath)).filesToCopy });
+  if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
   if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);

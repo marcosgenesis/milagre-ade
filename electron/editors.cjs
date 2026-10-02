@@ -126,4 +126,4 @@ async function openInEditor({ root, path: requested, line, editor: editorId }, {
   }
 }
 
-module.exports = { requireWorktreeRoot, EDITORS, detectEditors, openCommand, openInEditor, resolveInside };
+module.exports = { requireWorktreeRoot, gitTopLevel, EDITORS, detectEditors, openCommand, openInEditor, resolveInside };

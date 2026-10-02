@@ -1,6 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { requireWorktreeRoot } = require("./editors.cjs");
+const { gitTopLevel, requireWorktreeRoot } = require("./editors.cjs");
 
 // The projects opened lately, for the project menu: <userData>/recent-projects.json holds a list of
 // { path, name, openedAt }, most recent first, at most MAX_RECENT long. A folder that no longer exists is
@@ -95,21 +95,26 @@ function createRecentProjects(file, { now = () => new Date() } = {}) {
   };
 }
 
-// Every way a project opens (the folder dialog, launch, a switch) puts it at the top. Only a checkout's top folder
-// goes in, since project:switch opens nothing else; a plain folder still opens, it just isn't listed. A failed save
-// never fails the open.
-async function rememberProject(store, projectPath, { checkRoot = requireWorktreeRoot } = {}) {
+// Every way a project opens (the folder dialog, launch, a switch) puts it at the top, under the path project:switch
+// will accept: the path it was opened by when that is a checkout's top folder, else the top folder of the checkout
+// it sits in (Milagre launched from a subfolder), so leaving it never strands it. A folder outside any checkout still
+// opens, it just isn't listed. Resolves to the listed path, or null. A failed save never fails the open.
+async function rememberProject(store, projectPath, { topLevel = gitTopLevel } = {}) {
+  let listed;
   try {
-    await checkRoot(projectPath);
+    if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) return null;
+    const real = await fs.realpath(projectPath);
+    const top = await fs.realpath(await topLevel(real));
+    listed = top === real ? projectPath : top;
   } catch {
-    return false;
+    return null;
   }
   try {
-    await store.add(projectPath);
-    return true;
+    await store.add(listed);
+    return listed;
   } catch (error) {
     console.warn("Milagre couldn't save the recent projects list:", error.message);
-    return false;
+    return null;
   }
 }
 

@@ -165,18 +165,30 @@ test("forgetting a project takes it off the list and leaves its folder alone", a
   }
 });
 
-test("only a checkout's top folder is remembered", async (t) => {
+test("a project is remembered under its checkout's top folder, and a folder outside any checkout isn't", async (t) => {
   const base = await tempDir(t);
-  const [repo, plain] = await folders(base, "repo", "plain");
+  const [repo, other, plain] = await folders(base, "repo", "other", "plain");
   gitRepo(repo);
-  await fs.mkdir(path.join(repo, "sub"));
+  gitRepo(other);
+  await fs.mkdir(path.join(repo, "sub", "deeper"), { recursive: true });
   const recent = createRecentProjects(path.join(base, "recent-projects.json"), { now: clock() });
 
-  assert.equal(await rememberProject(recent, repo), true);
-  for (const folder of [plain, path.join(repo, "sub"), "/", path.join(base, "missing")]) {
-    assert.equal(await rememberProject(recent, folder), false, folder);
+  assert.equal(await rememberProject(recent, repo), repo);
+  // Opened from a subfolder (a launch from there): listed as the checkout, which project:switch can open.
+  assert.equal(await rememberProject(recent, path.join(other, "sub-missing")), null);
+  await fs.mkdir(path.join(other, "packages", "app"), { recursive: true });
+  assert.equal(await rememberProject(recent, path.join(other, "packages", "app")), other);
+  assert.equal(await switchTarget(recent, other), other);
+
+  for (const folder of [plain, "/", path.join(base, "missing"), "relative", undefined]) {
+    assert.equal(await rememberProject(recent, folder), null, String(folder));
   }
-  assert.deepEqual((await recent.list()).map((entry) => entry.path), [repo]);
+  assert.deepEqual((await recent.list()).map((entry) => entry.path), [other, repo]);
+
+  // A top folder reached through a symlink keeps the path it was opened by, so the open project's row is checked.
+  const link = path.join(base, "repo-link");
+  await fs.symlink(repo, link);
+  assert.equal(await rememberProject(recent, link), link);
 });
 
 test("project:switch opens only a listed project whose real path is a checkout's top folder", async (t) => {

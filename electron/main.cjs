@@ -486,6 +486,10 @@ ipcMain.handle("chat:send", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
   return chats.send(request);
 });
+ipcMain.handle("chat:resume", (_event, projectPath, sessionId) => {
+  if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
+  return chats.resumeChat(projectPath, Number(sessionId));
+});
 ipcMain.handle("chat:handover", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
   return chats.handover(request);

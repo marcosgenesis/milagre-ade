@@ -98,6 +98,8 @@ class CodexSession {
         input: turnInput(prompt, files),
         model,
         ...(effort ? { effort } : {}),
+        // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
+        summary: "auto",
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });
@@ -285,6 +287,7 @@ class CodexSession {
     this.fileChanges.clear();
     // A command still running when the turn stopped never completes; the renderer closes its step.
     this.state.steps.clear();
+    this.state.thinkingStarts?.clear();
     const imageSets = this.imageSets;
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));

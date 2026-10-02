@@ -1,14 +1,15 @@
 import { memo, useId, useState } from "react";
 import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
+import { AiBrain01Icon, Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep, StepKind } from "../../model";
 import { titleSpans } from "../../lib/reply-parts";
 import { CodeBlock } from "../markdown/CodeBlock";
+import { Markdown } from "../markdown/Markdown";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
-const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon };
+const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon };
 // Commands show as a terminal session ("$ command", then output), edits as diffs.
 const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", edit: "diff" };
 
@@ -16,7 +17,7 @@ function Icon({ icon, size = 14 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-/** One tool call in a reply: what it did and how it went. A row with output or a diff opens to show it. */
+/** One tool call in a reply: what it did and how it went. A row with output, a diff or thinking opens to show it. */
 export const StepRow = memo(function StepRow({ step, waiting = false }: { step: ChatStep; waiting?: boolean }) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
@@ -52,7 +53,9 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
       )}
       {open && step.detail && (
         <div id={detailId} className="max-h-96 overflow-y-auto pl-6">
-          <CodeBlock code={step.detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />
+          {step.kind === "thinking"
+            ? <div className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2"><Markdown text={step.detail} /></div>
+            : <CodeBlock code={step.detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />}
         </div>
       )}
     </div>

@@ -122,6 +122,7 @@ class ChatHost {
     const { projectPath, body, images = [], files = [], provider, model } = request;
     let target = null;
     let seq;
+    let brief;
     const { state } = await this.states.update(projectPath, (latest) => {
       let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
       if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
@@ -133,6 +134,8 @@ class ChatHost {
       session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
+      // A handed-over chat's first message carries its brief; the body is only what the user typed.
+      brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
       const withSession = { ...latest, next_id: nextId, sessions: { ...latest.sessions, [session.id]: session } };
       // A running turn's reply so far is saved first, so it stays above the new message.
@@ -140,7 +143,7 @@ class ChatHost {
       this.runs = sent.runs;
       seq = ++this.seq;
       const next = sent.state;
-      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), context: null, role: "user", model };
+      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {
         ...next,
@@ -162,7 +165,7 @@ class ChatHost {
       fastMode: request.fastMode,
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
-      prompt: request.prompt || body || "Describe the attached images.",
+      prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
       images,
       resumeId: target.resumeId,
     }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
@@ -181,8 +184,9 @@ class ChatHost {
       const source = latest.sessions[sessionId];
       if (!source) throw new Error("That chat is no longer in the project.");
       if (source.provider === provider) throw new Error(`This chat already runs on ${providerName(provider)}.`);
+      // A handover still being prepared, or waiting as a draft, is opened again rather than made twice.
       const earlier = latest.sessions[source.handedOverTo];
-      if (earlier?.handoverPending) {
+      if (earlier && (earlier.handoverPending || earlier.handoverDraft !== undefined)) {
         target = earlier.id;
         return latest;
       }
@@ -213,7 +217,7 @@ class ChatHost {
       const source = state.sessions[sessionId];
       const transcript = renderTranscript(state, sessionId);
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
-      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant").at(-1)?.body ?? "";
+      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
       const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, cwd: state.worktrees[source.worktree_id].path });
       await this.settleHandover(projectPath, target, body);
     } catch (error) {
@@ -229,6 +233,17 @@ class ChatHost {
       if (!session?.handoverPending) return latest;
       const { handoverPending, ...rest } = session;
       return { ...latest, sessions: { ...latest.sessions, [target]: draft === undefined ? rest : { ...rest, handoverDraft: draft } } };
+    });
+    if (changed) this.broadcast(projectPath, state);
+    return Boolean(changed);
+  }
+
+  /** Replaces a handed-over chat's brief while it is still a draft (no messages yet). Resolves true when it changed. */
+  async setHandoverDraft(projectPath, sessionId, text) {
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const session = latest.sessions[sessionId];
+      if (session?.handoverDraft === undefined || latest.messages.some((message) => message.session_id === sessionId)) return latest;
+      return { ...latest, sessions: { ...latest.sessions, [sessionId]: { ...session, handoverDraft: text } } };
     });
     if (changed) this.broadcast(projectPath, state);
     return Boolean(changed);

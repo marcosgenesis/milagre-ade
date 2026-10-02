@@ -207,6 +207,8 @@ export interface ChatMessage {
   model?: string;
   images?: ImageAttachment[];
   files?: string[];
+  /** On the first message of a handed-over chat: the brief it was sent with, ahead of `body`. */
+  handoverBrief?: string;
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */

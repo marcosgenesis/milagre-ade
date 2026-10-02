@@ -5,6 +5,7 @@ import { Layout2ColumnIcon, LayoutTopIcon, RefreshIcon, TextWrapIcon } from "@hu
 import Tooltip from "../primitives/Tooltip";
 import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 import { useScrollFade } from "../../lib/use-scroll-fade";
+import type { DiffFileEntry } from "../../electron";
 import { DiffFile, type DiffLayout } from "./DiffFile";
 import type { Changes } from "./useChanges";
 
@@ -20,11 +21,11 @@ export function useDiffPreferences() {
   return { layout, setLayout, wrap, setWrap };
 }
 
-function ToolButton({ label, active, onClick, children, ...rest }: { label: string; active?: boolean; onClick: () => void; children: React.ReactNode } & Record<`data-${string}`, string | undefined>) {
+function ToolButton({ label, active, disabled, onClick, children, ...rest }: { label: string; active?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
     <Tooltip label={label} side="bottom" align="end">
-      <button type="button" aria-label={label} aria-pressed={active} onClick={onClick} {...rest}
-        className={`flex size-7 items-center justify-center rounded-chip transition-colors hover:bg-hover hover:text-ink ${active ? "bg-hover text-ink" : "text-ink-3"}`}>
+      <button type="button" aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick} {...rest}
+        className={`flex size-7 items-center justify-center rounded-chip transition-colors enabled:hover:bg-hover enabled:hover:text-ink disabled:opacity-40 ${active ? "bg-hover text-ink" : "text-ink-3"}`}>
         {children}
       </button>
     </Tooltip>
@@ -37,8 +38,8 @@ export function DiffToolbar({ changes, prefs }: { changes: Changes; prefs: Retur
     <div data-diff-toolbar className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
       <ToolButton label="Unified" active={prefs.layout === "unified"} onClick={() => prefs.setLayout("unified")} data-diff-layout="unified">{icon(LayoutTopIcon)}</ToolButton>
       <ToolButton label="Split" active={prefs.layout === "split"} onClick={() => prefs.setLayout("split")} data-diff-layout="split">{icon(Layout2ColumnIcon)}</ToolButton>
-      <ToolButton label="Wrap lines" active={prefs.wrap} onClick={() => prefs.setWrap(!prefs.wrap)} data-diff-wrap="">{icon(TextWrapIcon)}</ToolButton>
-      <ToolButton label="Refresh" onClick={() => void changes.refresh(true)} data-diff-refresh-all="">{icon(RefreshIcon)}</ToolButton>
+      <ToolButton label={prefs.layout === "split" ? "Split view always wraps" : "Wrap lines"} active={prefs.layout === "split" || prefs.wrap} disabled={prefs.layout === "split"} onClick={() => prefs.setWrap(!prefs.wrap)} data-diff-wrap="">{icon(TextWrapIcon)}</ToolButton>
+      <ToolButton label="Refresh" onClick={() => void changes.refresh()} data-diff-refresh-all="">{icon(RefreshIcon)}</ToolButton>
     </div>
   );
 }
@@ -57,11 +58,13 @@ export function DiffView({ changes, prefs }: { changes: Changes; prefs: ReturnTy
     node?.scrollIntoView({ block: "start" });
   }, [scrollTarget]);
 
-  const toggle = (path: string) => setCollapsed((previous) => {
+  // Stable, so a file only re-renders when its own props change.
+  const toggle = useCallback((path: string) => setCollapsed((previous) => {
     const next = new Set(previous);
     if (!next.delete(path)) next.add(path);
     return next;
-  });
+  }), []);
+  const showLarge = useCallback((file: DiffFileEntry) => load(file, true), [load]);
 
   return (
     // Slides in from the panel's side like the panel itself, and back out the same way; the chat stays hidden until it's gone.
@@ -74,8 +77,8 @@ export function DiffView({ changes, prefs }: { changes: Changes; prefs: ReturnTy
         <div className="flex flex-col gap-3">
           {files.map((file) => (
             <DiffFile key={file.path} file={file} patch={patchFor(file)} layout={prefs.layout} wrap={prefs.wrap}
-              collapsed={collapsed.has(file.path)} onToggle={() => toggle(file.path)}
-              onVisible={() => load(file)} onShowLarge={() => load(file, true)} />
+              collapsed={collapsed.has(file.path)} onToggle={toggle}
+              onVisible={load} onShowLarge={showLarge} />
           ))}
         </div>
       </div>

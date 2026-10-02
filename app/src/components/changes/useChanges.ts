@@ -2,25 +2,27 @@ import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../../electron";
 import { useDiffFiles } from "./useDiffFiles";
 
-export type ChangesTab = "chat" | "diff";
 export type Changes = ReturnType<typeof useChanges>;
 
 /**
- * Everything the Changes panel and the Diff tab share: whether the panel is open, which tab shows,
- * the mode, and the file list. `chatId` is the selected chat's key; its turn ending re-reads the list,
+ * Everything the Changes panel and the diff view share: whether the panel is open, whether the diff
+ * replaces the chat, the mode, and the file list. `chatId` is the selected chat's key; its turn ending re-reads the list,
  * the same moment the sidebar's diff stats refresh.
  */
 export function useChanges({ cwd, base, chatId, available }: { cwd: string | undefined; base: string | undefined; chatId: string | null; available: boolean }) {
   const [open, setOpen] = useState(false);
-  const [tabChoice, setTab] = useState<ChangesTab>("chat");
+  // The chat the diff was opened for; it only shows while that chat is the selected one.
+  const [diffChatId, setDiffChatId] = useState<string | null>(null);
   const [mode, setMode] = useState<DiffMode>("uncommitted");
   const [scrollTarget, setScrollTarget] = useState<{ path: string; nonce: number } | null>(null);
   const shown = open && available;
   const files = useDiffFiles({ cwd: cwd ?? "", base, mode, active: shown });
   const { refresh } = files;
 
-  // The Diff tab belongs to one chat; coming back to a chat starts on Chat.
-  useEffect(() => setTab("chat"), [chatId, shown]);
+  const diffOpen = shown && chatId !== null && diffChatId === chatId;
+
+  // Hiding the panel closes the diff; reopening it starts on the chat.
+  useEffect(() => { if (!shown) setDiffChatId(null); }, [shown]);
 
   useEffect(() => {
     if (!shown || !chatId) return;
@@ -32,10 +34,11 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   }, [shown, chatId, refresh]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
+  const closeDiff = useCallback(() => setDiffChatId(null), []);
   const selectFile = useCallback((path: string) => {
-    setTab("diff");
+    setDiffChatId(chatId);
     setScrollTarget((previous) => ({ path, nonce: (previous?.nonce ?? 0) + 1 }));
-  }, []);
+  }, [chatId]);
 
-  return { open: shown, toggle, tab: shown ? tabChoice : ("chat" as ChangesTab), setTab, mode, setMode, scrollTarget, selectFile, ...files };
+  return { open: shown, toggle, diffOpen, closeDiff, mode, setMode, scrollTarget, activePath: diffOpen ? scrollTarget?.path : undefined, selectFile, ...files };
 }

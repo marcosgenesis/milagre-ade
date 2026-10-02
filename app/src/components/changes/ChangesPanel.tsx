@@ -46,6 +46,7 @@ export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile
   const added = files?.reduce((sum, file) => sum + file.added, 0) ?? 0;
   const removed = files?.reduce((sum, file) => sum + file.removed, 0) ?? 0;
   const base = list.state === "ready" && list.isRepo ? list.base : null;
+  const message = list.state === "ready" && list.isRepo ? list.message : undefined;
 
   return (
     <aside data-changes-panel aria-label="Changes" className="flex min-h-0 w-[320px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
@@ -66,7 +67,8 @@ export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile
         {list.state === "error" && <Notice>{list.message}</Notice>}
         {list.state === "ready" && !list.isRepo && <Notice>{list.message}</Notice>}
         {list.state === "ready" && list.isRepo && mode === "committed" && list.base === null && <Notice>No base branch to compare with.</Notice>}
-        {files && files.length === 0 && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
+        {files && files.length === 0 && message && <Notice>{message}</Notice>}
+        {files && files.length === 0 && !message && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
         {files && files.length > 0 && <Tree nodes={tree} depth={0} onSelectFile={onSelectFile} activePath={activePath} />}
       </div>
     </aside>

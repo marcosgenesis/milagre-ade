@@ -35,8 +35,8 @@ export type DiffFileEntry = {
   untracked?: boolean;
 };
 
-/** `base` is the branch name `committed` compares with, null for `uncommitted` or when there is none. */
-export type DiffFilesResult = { isRepo: false; message: string } | { isRepo: true; base: string | null; files: DiffFileEntry[] };
+/** `base` is the branch name `committed` compares with, null for `uncommitted` or when there is none. `message` explains an empty list (no shared history with the base). */
+export type DiffFilesResult = { isRepo: false; message: string } | { isRepo: true; base: string | null; files: DiffFileEntry[]; message?: string };
 
 /** `patch` is empty when the file is binary or `tooLarge` (over 1 MB). */
 export type DiffFileResult = { patch: string; binary: boolean; tooLarge: boolean };

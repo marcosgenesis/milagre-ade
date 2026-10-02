@@ -107,29 +107,29 @@ function Unified({ hunks, decorations, wrap }: { hunks: DiffHunk[]; decorations:
   );
 }
 
-function Half({ line, side, decoration, wrap }: { line?: DiffLine; side: "left" | "right"; decoration?: Decorated; wrap: boolean }) {
+function Half({ line, side, decoration }: { line?: DiffLine; side: "left" | "right"; decoration?: Decorated }) {
   const border = side === "left" ? "border-r border-line" : "";
   if (!line) return <div data-diff-filler className={`min-h-5 bg-inset ${border}`} />;
   return (
     <div data-diff-cell={side} className={`flex min-h-5 min-w-0 ${TINT[line.kind]} ${border}`}>
       <Gutter value={side === "left" ? line.oldNumber : line.newNumber} />
       <span className={`w-4 shrink-0 select-none text-center ${MARKER_COLOR[line.kind]}`}>{MARKER[line.kind]}</span>
-      <Text line={line} decoration={decoration} wrap={wrap} />
+      <Text line={line} decoration={decoration} wrap />
     </div>
   );
 }
 
-function Split({ hunks, decorations, wrap }: { hunks: DiffHunk[]; decorations: Map<DiffLine, Decorated>; wrap: boolean }) {
+function Split({ hunks, decorations }: { hunks: DiffHunk[]; decorations: Map<DiffLine, Decorated> }) {
   return (
-    // One grid for the whole file keeps both columns the same width from hunk to hunk.
-    <div className={`grid min-w-full ${wrap ? "w-full grid-cols-2" : "w-max grid-cols-[minmax(50%,max-content)_minmax(50%,max-content)]"}`}>
+    // Two equal columns that always wrap: sized to the longest line, a narrow window pushed the new side off screen.
+    <div className="grid w-full grid-cols-2">
       {hunks.map((hunk, index) => (
         <Fragment key={index}>
           <div className="col-span-2"><HunkHeader hunk={hunk} /></div>
           {splitRows(hunk).map((row, rowIndex) => (
             <Fragment key={rowIndex}>
-              <Half line={row.left} side="left" decoration={row.left && decorations.get(row.left)} wrap={wrap} />
-              <Half line={row.right} side="right" decoration={row.right && decorations.get(row.right)} wrap={wrap} />
+              <Half line={row.left} side="left" decoration={row.left && decorations.get(row.left)} />
+              <Half line={row.right} side="right" decoration={row.right && decorations.get(row.right)} />
             </Fragment>
           ))}
         </Fragment>
@@ -148,9 +148,9 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, coll
   layout: DiffLayout;
   wrap: boolean;
   collapsed: boolean;
-  onToggle: () => void;
-  onVisible: () => void;
-  onShowLarge: () => void;
+  onToggle: (path: string) => void;
+  onVisible: (file: DiffFileEntry) => void;
+  onShowLarge: (file: DiffFileEntry) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [, setLoadedCount] = useState(0);
@@ -172,8 +172,8 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, coll
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (near && !patch) onVisibleRef.current();
-  }, [near, patch]);
+    if (near && !patch) onVisibleRef.current(file);
+  }, [near, patch, file]);
 
   useEffect(() => {
     if (!language || languageReady || hunks.length === 0) return;
@@ -189,13 +189,13 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, coll
 
   let body: ReactNode;
   if (file.binary) body = <Message>Binary file</Message>;
-  else if (!patch && isLarge(file)) body = <Message action={<button type="button" data-diff-show onClick={onShowLarge} className="rounded-control border border-line px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-hover">Show diff</button>}>This diff is large</Message>;
+  else if (!patch && isLarge(file)) body = <Message action={<button type="button" data-diff-show onClick={() => onShowLarge(file)} className="rounded-control border border-line px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-hover">Show diff</button>}>This diff is large</Message>;
   else if (!patch || patch.status === "loading") body = <Message>Loading…</Message>;
   else if (patch.status === "error") body = <Message>{patch.message}</Message>;
   else if (patch.binary) body = <Message>Binary file</Message>;
   else if (patch.tooLarge) body = <Message>This file's diff is too large to show</Message>;
   else if (hunks.length === 0) body = <Message>{file.status === "renamed" ? `Renamed from ${file.oldPath}` : "No content changes"}</Message>;
-  else body = layout === "split" ? <Split hunks={hunks} decorations={decorations} wrap={wrap} /> : <Unified hunks={hunks} decorations={decorations} wrap={wrap} />;
+  else body = layout === "split" ? <Split hunks={hunks} decorations={decorations} /> : <Unified hunks={hunks} decorations={decorations} wrap={wrap} />;
 
   return (
     <section ref={ref} data-diff-file={file.path} className="rounded-card border border-line bg-surface">
@@ -205,7 +205,7 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, coll
       <div className={`sticky top-0 z-10 -mx-px -mt-px ${collapsed ? "-mb-px" : ""}`}>
         <span aria-hidden className="absolute inset-x-0 top-0 h-[var(--radius-card)] bg-page" />
         <header className={`relative flex h-9 items-center gap-2 border border-line bg-surface px-3 text-[12.5px] ${collapsed ? "rounded-card" : "rounded-t-card"}`}>
-          <button type="button" aria-label={collapsed ? "Expand file" : "Collapse file"} aria-expanded={!collapsed} data-diff-collapse onClick={onToggle} className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-chip text-ink-3 hover:bg-hover hover:text-ink">
+          <button type="button" aria-label={collapsed ? "Expand file" : "Collapse file"} aria-expanded={!collapsed} data-diff-collapse onClick={() => onToggle(file.path)} className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-chip text-ink-3 hover:bg-hover hover:text-ink">
             <HugeiconsIcon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" />
           </button>
           <span className="shrink-0 font-medium text-ink">{name}</span>

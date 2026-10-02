@@ -1,4 +1,5 @@
 const childProcess = require("node:child_process");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { PATHSPEC } = require("./diffstat.cjs");
 
@@ -48,7 +49,8 @@ function createGitDiff({ execFile = childProcess.execFile, env = process.env } =
 
   /** Same rules as git-actions: the recorded base, then the remote's default branch, then a local main or master. */
   async function resolveBase(cwd, recorded) {
-    if (recorded && (await refExists(cwd, recorded))) {
+    // A leading "-" would read as an option.
+    if (recorded && !recorded.startsWith("-") && (await refExists(cwd, recorded))) {
       const full = await gitOut(cwd, ["rev-parse", "--symbolic-full-name", recorded]);
       const remote = /^refs\/remotes\/[^/]+\/(.+)$/.exec(full ?? "");
       const local = /^refs\/heads\/(.+)$/.exec(full ?? "");
@@ -83,9 +85,13 @@ function createGitDiff({ execFile = childProcess.execFile, env = process.env } =
     for (let i = 0; i < tokens.length - 1;) {
       const code = tokens[i++];
       if (!code) continue;
-      if (code[0] === "R" || code[0] === "C") {
+      if (code[0] === "R") {
         const oldPath = tokens[i++];
-        entries.push({ status: STATUSES[code[0]] ?? "modified", oldPath, path: tokens[i++] });
+        entries.push({ status: "renamed", oldPath, path: tokens[i++] });
+      } else if (code[0] === "C") {
+        // A copy is a new file here; its source is untouched.
+        i++;
+        entries.push({ status: "added", path: tokens[i++] });
       } else {
         entries.push({ status: STATUSES[code[0]] ?? "modified", path: tokens[i++] });
       }
@@ -124,7 +130,10 @@ function createGitDiff({ execFile = childProcess.execFile, env = process.env } =
   async function listDiffFiles({ cwd, base, mode } = {}) {
     if (!(await run(cwd, ["rev-parse", "--is-inside-work-tree"])).ok) return { isRepo: false, message: NOT_REPO };
     const { name, refs } = await refsFor(cwd, base, mode);
-    if (!refs) return { isRepo: true, base: name, files: [] };
+    if (!refs) {
+      // A base that resolves but meets HEAD nowhere is not the same as having no base.
+      return name ? { isRepo: true, base: name, files: [], message: `This branch shares no history with ${name}.` } : { isRepo: true, base: null, files: [] };
+    }
     const [status, numstat] = await Promise.all([
       run(cwd, ["diff", "--name-status", "-z", "-M", ...refs, ...PATHSPEC]),
       run(cwd, ["diff", "--numstat", "-z", "-M", ...refs, ...PATHSPEC]),
@@ -141,12 +150,25 @@ function createGitDiff({ execFile = childProcess.execFile, env = process.env } =
     return { isRepo: true, base: name, files: files.slice(0, FILE_LIMIT) };
   }
 
+  /** The file is one git lists as untracked (not ignored, not under .milagre) and really lives inside the folder, not behind a symlink. */
+  async function isUntrackedInside(cwd, file) {
+    const listed = await run(cwd, ["ls-files", "--others", "--exclude-standard", "-z", "--", `:(literal)${file}`, ...PATHSPEC]);
+    if (!listed.ok || !listed.stdout.split("\0").includes(file)) return false;
+    try {
+      const [root, real] = await Promise.all([fs.realpath(cwd), fs.realpath(path.join(cwd, file))]);
+      return real === root || real.startsWith(root + path.sep);
+    } catch {
+      return false;
+    }
+  }
+
   async function readDiffFile({ cwd, base, mode, path: file, oldPath, untracked } = {}) {
     checkPath(file);
     if (oldPath !== undefined && oldPath !== null) checkPath(oldPath);
     let result;
     if (untracked && mode !== "committed") {
-      result = await run(cwd, ["diff", "--no-color", "--no-ext-diff", "--no-index", "-U3", "--", "/dev/null", file]);
+      if (!(await isUntrackedInside(cwd, file))) return { patch: "", binary: false, tooLarge: false };
+      result = await run(cwd, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-index", "-U3", "--", "/dev/null", file]);
       if (result.overflow) return { patch: "", binary: false, tooLarge: true };
       // Exit code 1 means "differs"; only a missing file or a crash is a failure.
       if (!result.ok && result.code !== 1) return { patch: "", binary: false, tooLarge: false };
@@ -154,7 +176,7 @@ function createGitDiff({ execFile = childProcess.execFile, env = process.env } =
       const { refs } = await refsFor(cwd, base, mode);
       if (!refs) return { patch: "", binary: false, tooLarge: false };
       const specs = [`:(literal)${file}`, ...(oldPath && oldPath !== file ? [`:(literal)${oldPath}`] : [])];
-      result = await run(cwd, ["diff", "--no-color", "--no-ext-diff", "-M", "-U3", ...refs, "--", ...specs]);
+      result = await run(cwd, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", "-U3", ...refs, "--", ...specs]);
       if (result.overflow) return { patch: "", binary: false, tooLarge: true };
       if (!result.ok) return { patch: "", binary: false, tooLarge: false };
     }

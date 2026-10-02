@@ -225,10 +225,11 @@ function App() {
     available: view === "chat" && Boolean(selectedSession && selectedWorktree),
   });
   const diffPrefs = useDiffPreferences();
-  const diffShowing = changes.open && changes.tab === "diff";
+  const diffShowing = changes.diffOpen;
   const diffPresence = useDiffPresence(diffShowing);
+  const changesAvailable = view === "chat" && Boolean(selectedSession && selectedWorktree);
   const changesAvailableRef = useRef(false);
-  changesAvailableRef.current = view === "chat" && Boolean(selectedSession && selectedWorktree);
+  changesAvailableRef.current = changesAvailable;
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
@@ -749,7 +750,7 @@ function App() {
     <>
     <DotBackground key="app">
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
-      {changesAvailableRef.current && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+      {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
           <span>Milagre {update.version} is ready to update.</span>
@@ -798,7 +799,7 @@ function App() {
       )}
 
       <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        <DiffBar open={diffShowing} onBack={() => changes.setTab("chat")} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
+        <DiffBar open={diffShowing} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
         <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
           {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} />}
         </AnimatePresence>
@@ -903,7 +904,7 @@ function App() {
         </div>
       </main>
       <ChangesPanelSlot open={changes.open}>
-        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh(true)} onSelectFile={changes.selectFile} />
+        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} />
       </ChangesPanelSlot>
       </div>
       {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}

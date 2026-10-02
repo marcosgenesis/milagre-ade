@@ -26,7 +26,7 @@ const FILES = {
   "packages/app/src/index.ts": { status: "added", added: 2, removed: 0, patch: [
     "@@ -0,0 +1,2 @@", '+export * from "./components/Calendar/Calendar";', '+export const version = "1.0";', ""].join("\\n") },
   "README.md": { status: "modified", added: 2, removed: 1, patch: [
-    "@@ -1,4 +1,5 @@", " # Milagre", "-Old tagline", "+New tagline", "+A second line", " ", " end", ""].join("\\n") },
+    "@@ -1,4 +1,5 @@", " # Milagre", "-Old tagline", "+New tagline", "+A second line that runs long " + "and keeps going ".repeat(40), " ", " end", ""].join("\\n") },
   "assets/data/big.json": { status: "added", added: 3500, removed: 0, patch: "@@ -0,0 +1,2 @@\\n+{\\n+}\\n" },
   "assets/logo.png": { status: "modified", added: 0, removed: 0, binary: true, patch: "" },
 };
@@ -52,23 +52,25 @@ window.endTurn = () => listeners.forEach(listener => listener({ chatId: "chat-1"
 function Fixture() {
   const changes = useChanges({ cwd: "/fixture", base: "main", chatId: "chat-1", available: true });
   const prefs = useDiffPreferences();
-  const diff = changes.open && changes.tab === "diff";
+  const diff = changes.diffOpen;
   const presence = useDiffPresence(diff);
   return <div className="flex h-screen gap-3 bg-canvas p-0 text-ink">
     <div aria-hidden data-drag-strip className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
     <ChangesToggle open={changes.open} onToggle={changes.toggle} />
     <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden pr-3 pb-3">
-      <DiffBar open={diff} onBack={() => changes.setTab("chat")} trailing={<DiffToolbar changes={changes} prefs={prefs} />} />
+      <DiffBar open={diff} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={prefs} />} />
       <AnimatePresence initial={false} onExitComplete={presence.onExitComplete}>
         {diff && <DiffView key="diff" changes={changes} prefs={prefs} />}
       </AnimatePresence>
       <div data-chat-stub className={"flex-1 pt-12 px-6 text-[14px] " + (presence.occupied ? "hidden" : "")}>Chat goes here</div>
     </main>
     <ChangesPanelSlot open={changes.open}>
-      <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh(true)} onSelectFile={changes.selectFile} />
+      <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} />
     </ChangesPanelSlot>
   </div>;
 }
+// The profile outlives runs; start from default layout and wrap.
+localStorage.clear();
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 
@@ -108,7 +110,7 @@ async function browserChecks() {
     await delay(200);
     await shot("panel");
 
-    // Clicking a file opens the Diff tab and scrolls to it.
+    // Clicking a file opens the diff and scrolls to it.
     await evaluate('document.documentElement.classList.add("dark")');
     await evaluate(`document.querySelector('[data-diff-tree-file="README.md"]').click()`);
     await waitFor('!!document.querySelector("[data-diff-view]")');
@@ -152,6 +154,9 @@ async function browserChecks() {
     await evaluate(`document.querySelector('${file(CAL)}').scrollIntoView()`);
     await delay(150);
     await shot("split");
+    // Split never scrolls sideways: both halves stay on screen however long a line is.
+    assert.equal(await evaluate(`[...document.querySelectorAll("[data-diff-body]")].filter(body => body.scrollWidth > body.clientWidth + 1).length`), 0, "Split fits its card");
+    assert.equal(await evaluate('document.querySelector("[data-diff-wrap]").disabled'), true, "Wrap is fixed on in split");
     // Scrolled: the bottom fades and the file header stays pinned.
     await evaluate('document.querySelector("[data-diff-view]").scrollTo(0, 120)');
     await waitFor('document.querySelector("[data-diff-view]").hasAttribute("data-fade-top")');

@@ -46,12 +46,18 @@ class SessionManager {
   async currentEntry(request) {
     const { chatId, provider, cwd } = request;
     const existing = this.sessions.get(chatId);
-    if (existing && existing.provider === provider && existing.cwd === cwd && !existing.session.closed) return existing;
+    const tldrEnabled = request.tldrEnabled !== false;
+    const sameChat = existing && existing.provider === provider && existing.cwd === cwd;
+    // System instructions are fixed for a provider session. Resume it between turns when
+    // the preference changes, preserving its native history and any running reply.
+    if (sameChat && !existing.session.closed && (existing.tldrEnabled === tldrEnabled || existing.session.turnActive)) return existing;
+    const resumeId = sameChat && !existing.session.closed ? existing.session.nativeId ?? request.resumeId : request.resumeId;
     if (existing) await this.closeEntry(chatId, existing);
-    const entry = { provider, cwd, session: null, idleTimer: null };
+    const entry = { provider, cwd, tldrEnabled, session: null, idleTimer: null };
     entry.session = this.createSession(provider, {
       cwd,
-      resumeId: request.resumeId,
+      resumeId,
+      tldrEnabled,
       command: request.command,
       emit: (event) => this.forward(chatId, entry, event),
     });

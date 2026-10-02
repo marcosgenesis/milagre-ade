@@ -12,11 +12,12 @@ const { waitUntil } = require("./test-helpers.cjs");
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const TURN = { prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto" };
 
-function codex(t, { scenario = "reply", resumeId, command = process.execPath, interruptGraceMs } = {}) {
+function codex(t, { scenario = "reply", resumeId, tldrEnabled, command = process.execPath, interruptGraceMs } = {}) {
   const events = [];
   const session = new CodexSession({
     cwd: os.tmpdir(),
     resumeId,
+    tldrEnabled,
     command,
     clientVersion: "test",
     interruptGraceMs,
@@ -583,4 +584,17 @@ test("a crashed Codex's failure is one of Milagre's own messages", async (t) => 
   await session.startTurn(TURN);
   await ended(events);
   assert.equal(events.at(-1).notice, true);
+});
+
+
+test("TLDR can be disabled when starting or resuming Codex", async (t) => {
+  for (const resumeId of [undefined, "thread-existing"]) {
+    const { session, events } = codex(t, { tldrEnabled: false, resumeId });
+    await session.startTurn(TURN);
+    await ended(events);
+    const calls = await received(session);
+    const params = calls.find((call) => call.method === (resumeId ? "thread/resume" : "thread/start")).params;
+    assert.ok(!params.developerInstructions.includes("# tldr eval"));
+    assert.match(params.developerInstructions, /TLDR.*disabled/);
+  }
 });

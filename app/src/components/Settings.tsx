@@ -124,6 +124,9 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
           }))}
         />
       </Row>
+      <Row label="TLDR writing" description="Shape Claude and Codex updates and replies with /tldr. Applies on the next turn after the current reply finishes.">
+        <Switch label="TLDR writing" checked={settings.tldrEnabled} onChange={(tldrEnabled) => updateSettings({ tldrEnabled })} />
+      </Row>
       <Row label="Claude replies">
         <Select<ClaudeReplies>
           label="Claude replies"

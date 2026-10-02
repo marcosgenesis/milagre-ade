@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
@@ -40,8 +40,8 @@ const ACCOUNT_TIMEOUT_MS = 8000;
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, emit, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, emit, clientVersion, interruptGraceMs, createRpc });
+  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, clientVersion, interruptGraceMs, createRpc });
     // steps: ids of the tool steps started in this turn and not yet completed.
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
@@ -167,7 +167,7 @@ class CodexSession {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
     await this.checkLogin(rpc);
-    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS, config: THREAD_CONFIG };
+    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled), config: THREAD_CONFIG };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;

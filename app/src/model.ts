@@ -306,6 +306,8 @@ export interface AgentStartTurnRequest {
   fastMode?: boolean;
   /** How long Claude's replies run; Claude only, Codex ignores it. */
   replies?: "concise" | "normal";
+  /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
+  tldrEnabled?: boolean;
   prompt: string;
   images: ImageAttachment[];
   resumeId?: string;
@@ -374,7 +376,7 @@ export interface SkillOption {
   name: string;
   description: string;
   path: string;
-  scope: "workspace" | "user";
+  scope: "workspace" | "user" | "bundled";
   provider: string;
 }
 

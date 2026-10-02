@@ -264,3 +264,15 @@ test("Codex: reasoning without a summary, or that only completes, still shows", 
     { type: "step-completed", id: "rs-2", status: "done", title: "Thought" },
   ]);
 });
+
+
+test("shared agent instructions include the bundled writing rules and checklist", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const skill = fs.readFileSync(path.join(__dirname, "../bundled-skills/tldr/SKILL.md"), "utf8");
+  const checklist = fs.readFileSync(path.join(__dirname, "../bundled-skills/tldr/eval.md"), "utf8");
+  assert.ok(MILAGRE_INSTRUCTIONS.includes(skill));
+  assert.ok(MILAGRE_INSTRUCTIONS.includes(checklist));
+  assert.match(MILAGRE_INSTRUCTIONS, /progress updates and final replies/);
+  assert.match(MILAGRE_INSTRUCTIONS, /stop tldr/);
+});

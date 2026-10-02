@@ -57,6 +57,7 @@
     "appId": "com.milagre.app",
     "productName": "Milagre",
     "asar": true,
+    "asarUnpack": ["electron/bundled-skills/**/*"],
     "files": [
       "dist/**/*",
       "electron/**/*",

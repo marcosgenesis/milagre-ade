@@ -458,13 +458,13 @@ export default function SidebarNav({
   useEffect(() => {
     if (!projectPath) return;
     let live = true;
-    window.milagre?.listRecentProjects?.().then((list) => { if (live) setRecentProjects(list); }, () => {});
+    window.milagre?.listRecentProjects?.().then((list) => { if (live) setRecentProjects(Array.isArray(list) ? list : []); }, () => {});
     return () => { live = false; };
   }, [projectPath, workspaceOpen]);
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
-    window.milagre?.forgetProject?.(path).then(setRecentProjects, () => {});
+    window.milagre?.forgetProject?.(path).then((list) => { if (Array.isArray(list)) setRecentProjects(list); }, () => {});
   };
 
   const openWorkspaceMenu = (ask: SwitchTarget | null = null) => {

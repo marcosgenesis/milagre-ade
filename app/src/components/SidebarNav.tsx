@@ -341,7 +341,8 @@ function WorkspaceMenu({
                 role="menuitemradio"
                 aria-checked={row.current}
                 type="button"
-                title={row.path}
+                title={row.current ? row.path : `${row.path}\nPress Delete to remove from the list`}
+                {...(row.current ? {} : { "aria-keyshortcuts": "Delete" })}
                 onClick={() => (row.current ? onClose() : choose(target))}
                 onKeyDown={(event) => {
                   if (row.current || (event.key !== "Delete" && event.key !== "Backspace")) return;

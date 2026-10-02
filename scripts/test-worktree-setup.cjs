@@ -10,9 +10,11 @@ const { setTimeout: delay } = require("node:timers/promises");
 const fixture = `
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { createInitialState } from "/src/model";
 import "/src/styles.css";
-const state = createInitialState("shop", "/fixture");
+// The main process's reducer, so agent events are saved into the state as ChatHost saves them.
+import { applyAgentEvent } from "/@fs${require("node:path").resolve(__dirname, "../electron/shared/agent-runs.mjs")}";
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: "shop" } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } };
 state.sessions = { 2: { id: 2, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle" } };
 state.messages = [{ id: 3, session_id: 2, role: "user", body: "Previous chat", context: null }];
@@ -20,7 +22,14 @@ state.next_id = 4;
 window.calls = { saved: [], turns: [] };
 window.setupSettings = { setupCommand: "", source: "none", command: null };
 const listeners = new Set();
-window.emitAgent = (payload) => listeners.forEach((listener) => listener(payload));
+let runs = {};
+// Stands in for the main process: folds each event into the state and sends it on, with the state when it changed.
+window.emitAgent = ({ chatId, event }) => {
+  const result = applyAgentEvent(state, runs, "/fixture", chatId, event);
+  runs = result.runs;
+  if (result.changed) Object.assign(state, result.state);
+  listeners.forEach((listener) => listener({ chatId, event, ...(result.changed ? { state: structuredClone(state) } : {}) }));
+};
 window.milagre = new Proxy({
   getCurrentProject: async () => ({ path: "/fixture", name: "shop", state }),
   listBranches: async () => ["main"],
@@ -39,7 +48,16 @@ window.milagre = new Proxy({
   },
   readFilesToCopy: async () => ({ filesToCopy: [], source: "default", worktreeInclude: null, matches: [".env"] }),
   previewFilesToCopy: async () => ({ source: "default", worktreeInclude: null, matches: [".env"] }),
-  startTurn: async (request) => { window.calls.turns.push(request); return { turnId: null, steered: false }; },
+  // Stands in for the main process: it saves the message, tells the window, then starts the turn.
+  sendMessage: async (request) => {
+    const chatId = request.projectPath + "#" + request.sessionId;
+    window.emitAgent({ chatId, event: { type: "message-sent", model: request.model } });
+    const message = { id: state.next_id, session_id: request.sessionId, body: request.body, images: request.images, context: null, role: "user", model: request.model };
+    Object.assign(state, { next_id: state.next_id + 1, messages: [...state.messages, message] });
+    listeners.forEach((listener) => listener({ chatId, event: { type: "note" }, state: structuredClone(state) }));
+    window.calls.turns.push({ ...request, chatId });
+    return { sessionId: request.sessionId };
+  },
   onAgentEvent: (callback) => { listeners.add(callback); return () => listeners.delete(callback); },
   listEditors: async () => [],
   getCachedUsage: async () => ({ providers: [] }),

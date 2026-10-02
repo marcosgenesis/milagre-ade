@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "node scripts/launch-electron.cjs",
     "typecheck": "tsc --noEmit",
-    "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
+    "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs electron/shared/*.test.ts app/src/lib/*.test.ts",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",

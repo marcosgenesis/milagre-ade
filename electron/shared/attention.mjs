@@ -1,26 +1,14 @@
-import type { AgentEvent, ModelProvider } from "../model";
+// System notifications for chats that wait on the user, built by the main process, which sees every
+// project's chats (see notifications.cjs). Types: attention.d.mts.
+import { chatTitle } from "./chats.mjs";
 
-/** What a system notification says about a chat that waits on the user. */
-export interface AttentionNotice {
-  title: string;
-  subtitle?: string;
-  body: string;
-}
-
-export interface AttentionContext {
-  projectName: string;
-  worktreeName?: string;
-  chatTitle?: string;
-  provider?: ModelProvider;
-}
-
-const AGENT_NAMES: Record<ModelProvider, string> = { claude: "Claude", codex: "Codex" };
+const AGENT_NAMES = { claude: "Claude", codex: "Codex" };
 
 /**
  * The notification for an approval or question a turn waits on, e.g. "shop / fix-login - Claude needs input",
  * or null for any other event.
  */
-export function attentionNotice(event: AgentEvent, context: AttentionContext): AttentionNotice | null {
+export function attentionNotice(event, context) {
   if (event.type !== "permission-request" && event.type !== "question-request") return null;
   const where = context.worktreeName && context.worktreeName !== context.projectName ? `${context.projectName} / ${context.worktreeName}` : context.projectName;
   const agent = context.provider ? AGENT_NAMES[context.provider] : "Agent";
@@ -32,4 +20,16 @@ export function attentionNotice(event: AgentEvent, context: AttentionContext): A
   }
   const command = event.command?.split("\n")[0].trim();
   return { title: `${where} - ${agent} needs approval`, subtitle, body: command ? `Run: ${command}` : event.title };
+}
+
+/** What a notice names about a chat: its project, worktree, title and agent. */
+export function attentionContext(state, projectName, sessionId) {
+  const session = state.sessions[sessionId];
+  if (!session) return { projectName };
+  return {
+    projectName,
+    worktreeName: state.worktrees[session.worktree_id]?.name,
+    chatTitle: chatTitle(session, state.messages.filter((message) => message.session_id === session.id)),
+    provider: session.provider,
+  };
 }

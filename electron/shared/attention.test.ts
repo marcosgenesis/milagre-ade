@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentEvent } from "../model";
-import { attentionNotice } from "./attention.ts";
+import type { AgentEvent, CoordinatorState } from "../../app/src/model";
+import { attentionContext, attentionNotice } from "./attention.mjs";
 
 const context = { projectName: "rd-events", worktreeName: "new-events-structure", chatTitle: "Split the events table", provider: "claude" as const };
 const question = (text: string) => ({ id: text, header: "", question: text, options: [], multiSelect: false, allowOther: true, secret: false });
@@ -33,4 +33,14 @@ test("a chat on the project's own checkout is named by the project alone", () =>
 
 test("other events need no notification", () => {
   assert.equal(attentionNotice({ type: "turn-completed" }, context), null);
+});
+
+test("the context names a chat's worktree, title and agent, or only its project when the chat is gone", () => {
+  const state = {
+    worktrees: { 1: { id: 1, project_id: 1, path: "/work/shop-login", name: "fix-login" } },
+    sessions: { 2: { id: 2, worktree_id: 1, agent_name: "fix-login", status: "Created", provider: "codex" } },
+    messages: [{ id: 3, session_id: 2, body: "Fix the login redirect\nand more", context: null, role: "user" }],
+  } as unknown as CoordinatorState;
+  assert.deepEqual(attentionContext(state, "shop", 2), { projectName: "shop", worktreeName: "fix-login", chatTitle: "Fix the login redirect", provider: "codex" });
+  assert.deepEqual(attentionContext(state, "shop", 9), { projectName: "shop" });
 });

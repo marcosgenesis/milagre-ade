@@ -311,6 +311,10 @@ export interface AgentTask {
 }
 
 export type AgentEvent =
+  /** Milagre's own event: the user's message was saved, so a turn starts, or a running one is steered and its reply split. */
+  | { type: "message-sent"; model: string }
+  /** Milagre's own event: the user's answers to a question were saved as their message, after the reply so far. */
+  | { type: "answers-sent" }
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
@@ -330,12 +334,21 @@ export type AgentEvent =
   /** `notice`: a message Milagre wrote (it names the CLI and the fix), shown as it is; otherwise it is the agent's own error. */
   | { type: "turn-failed"; message: string; notice?: boolean; login?: boolean };
 
-export interface AgentStartTurnRequest {
-  /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */
-  chatId: string;
+/** A message for a chat. The main process saves it, then starts or steers the chat's turn. */
+export interface ChatSendRequest {
+  projectPath: string;
+  /** The chat to send to, or null for a new chat in the worktree. */
+  sessionId: number | null;
+  worktreeId: number;
+  /** The message as the chat shows it. */
+  body: string;
+  images: ImageAttachment[];
+  /** Paths of the files attached to the message. */
+  files: string[];
+  /** What the agent is sent: the body with the attached files listed. */
+  prompt: string;
   provider: ModelProvider;
   model: string;
-  cwd: string;
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
@@ -345,9 +358,6 @@ export interface AgentStartTurnRequest {
   replies?: "concise" | "normal";
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
-  prompt: string;
-  images: ImageAttachment[];
-  resumeId?: string;
 }
 
 /** A code editor found on this Mac. */
@@ -380,25 +390,7 @@ export interface CoordinatorState {
 export interface OpenProject {
   path: string;
   name: string;
-  state: CoordinatorState | null;
-}
-
-export function createInitialState(projectName: string, projectPath: string): CoordinatorState {
-  const projectId = 1;
-  return {
-    next_id: 1,
-    projects: { [projectId]: { id: projectId, name: projectName } },
-    worktrees: {},
-    sessions: {},
-    connections: {},
-    events: [],
-    messages: [],
-    approvals: [],
-    tasks: {},
-    artifacts: {},
-    outputs: [],
-    conflicts: [],
-  };
+  state: CoordinatorState;
 }
 
 export function sortedWorktrees(state: CoordinatorState) {

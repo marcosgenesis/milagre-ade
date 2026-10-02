@@ -31,27 +31,6 @@ export function worktreeShared(state: CoordinatorState, sessionId: number): bool
   return Object.values(state.sessions).some((session) => session.id !== sessionId && session.worktree_id === worktreeId && !session.archived);
 }
 
-/**
- * The state without a worktree git no longer lists, and what hung off it, as reading the project again
- * would leave it (see project-state.cjs).
- */
-export function withoutWorktree(state: CoordinatorState, worktreeId: number): CoordinatorState {
-  if (!state.worktrees[worktreeId]) return state;
-  const keep = <T,>(record: Record<string, T>, drop: (item: T) => boolean) => Object.fromEntries(Object.entries(record).filter(([, item]) => !drop(item)));
-  const sessions = keep(state.sessions, (session) => session.worktree_id === worktreeId);
-  const gone = new Set(Object.values(state.sessions).filter((session) => session.worktree_id === worktreeId).map((session) => session.id));
-  return {
-    ...state,
-    worktrees: keep(state.worktrees, (worktree) => worktree.id === worktreeId),
-    sessions,
-    connections: keep(state.connections, (connection) => connection.left_worktree_id === worktreeId || connection.right_worktree_id === worktreeId),
-    events: state.events.filter((event) => event.worktree_id !== worktreeId),
-    messages: state.messages.filter((message) => !gone.has(message.session_id)),
-    tasks: keep(state.tasks, (task) => task.worktree_id === worktreeId),
-    artifacts: keep(state.artifacts, (artifact) => artifact.worktree_id === worktreeId),
-  };
-}
-
 function plural(count: number, noun: string) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

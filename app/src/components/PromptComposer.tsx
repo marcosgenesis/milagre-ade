@@ -60,6 +60,8 @@ interface PromptComposerProps {
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -97,7 +99,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -331,7 +333,32 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
               </div>
             }
           >
-            {providerNotice && <p role="status" className="mx-1 mb-1 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">{messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}</p>}
+            {providerNotice && (
+              <div role="status" className="mx-1 mb-1 flex flex-col gap-2 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">
+                <p className="leading-snug">
+                  {messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}
+                </p>
+                {cliStatus?.[provider]?.state === "outdated" && onUpdateCli && (
+                  <div className="flex items-center justify-end pt-0.5">
+                    <button
+                      type="button"
+                      disabled={updatingCli === provider}
+                      onClick={() => onUpdateCli(provider)}
+                      className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {updatingCli === provider ? (
+                        <>
+                          <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                          <span>Updating…</span>
+                        </>
+                      ) : (
+                        <span>Update {provider === "codex" ? "Codex" : "Claude"}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {modelRows.map((model) => <PickerRow key={model.id} icon={<ProviderLogo provider={model.provider} size={14} />} label={model.name} description={model.description} selected={model.id === selectedModel.id} onClick={() => chooseModel(model)} />)}
           </PickerPanel>
         )}

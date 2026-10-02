@@ -35,22 +35,16 @@ export function handoverLinks(session: AgentSession | undefined, state: { sessio
   return links;
 }
 
-/** The id of the handover brief: the first user message of a chat that was handed over to, else undefined. */
-export function handoverBriefId(messages: ChatMessage[], handedOverFrom: number | undefined): number | undefined {
-  if (handedOverFrom == null) return undefined;
-  return messages.find((message) => message.role === "user")?.id;
-}
-
 /** What the permission mode does on `provider`, from the Codex policy and the Claude permission modes the agents start with. */
 const MODE_BEHAVIOR: Record<ModelProvider, Record<PermissionMode, string>> = {
   codex: {
-    ask: "runs commands in a sandbox that can write only to this worktree, with no network, and asks before anything but known-safe commands",
-    auto: "runs commands in a sandbox that can write only to this worktree, with no network, and asks before leaving it",
+    ask: "runs commands in a sandbox that can write to this worktree and temp folders, with no network, and asks before anything but known-safe commands",
+    auto: "runs commands in a sandbox that can write to this worktree and temp folders, with no network, and asks before leaving it",
     full: "runs commands with no sandbox and no approval prompts, so nothing limits files or network",
   },
   claude: {
-    ask: "asks before each edit and command",
-    auto: "applies edits inside this worktree without asking and still asks before commands and anything outside it",
+    ask: "asks before edits and commands your Claude settings don't already allow",
+    auto: "applies edits inside this worktree without asking and asks before most commands and anything outside it",
     full: "skips every approval prompt, so nothing limits files or network",
   },
 };

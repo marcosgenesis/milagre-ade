@@ -76,7 +76,8 @@ async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEF
   const start = await resolveBase(projectPath, baseBranch);
   // --no-track: the chat's branch must not push to, or pull from, the branch it started on.
   await git(projectPath, ["worktree", "add", "--no-track", "-b", branch, worktreePath, start]);
-  return { branch, path: worktreePath };
+  // `base` is what the chat's changes are measured against (see diffstat.cjs).
+  return { branch, path: worktreePath, base: start };
 }
 
 module.exports = { createWorktree, listBranches, slugify };

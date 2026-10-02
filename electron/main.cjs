@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
@@ -7,6 +7,7 @@ const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { guardNavigation } = require("./links.cjs");
+const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
 const { createCapabilityCache } = require("./agents/capabilities.cjs");
@@ -14,6 +15,7 @@ const { resolveExecutable } = require("./agents/environment.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
@@ -90,17 +92,47 @@ ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("worktree:create", async (_event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
+  const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
+  if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
+  const worktree = { ...listed, base: created.base };
+  project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
-  const worktree = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
-  if (!worktree) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
   return { project, worktreeId: worktree.id };
 });
+ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
+// Only a git checkout's top folder opens, so the renderer can't open arbitrary paths.
+ipcMain.handle("worktree:reveal", async (_event, worktreePath) => {
+  const { stdout } = await execFileAsync("git", ["-C", worktreePath, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  if ((await fs.realpath(stdout.trim())) !== (await fs.realpath(worktreePath))) throw new Error(`${worktreePath} is not a worktree.`);
+  const error = await shell.openPath(worktreePath);
+  if (error) throw new Error(error);
+});
+
+// Brings the window back from a notification click and opens the chat it was about.
+function openChatFromNotification(chatId) {
+  const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed());
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  if (process.platform === "darwin") app.focus({ steal: true });
+  window.focus();
+  window.webContents.send("notification:open-chat", chatId);
+}
+
+const notifier = new AttentionNotifier({
+  createNotification: ({ title, subtitle, body }) => new Notification({ title, body, ...(subtitle ? { subtitle } : {}) }),
+  isAppFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
+  openChat: openChatFromNotification,
+});
+
+ipcMain.handle("notification:attention", (_event, notice) => (Notification.isSupported() ? notifier.notify(notice) : false));
 
 const agents = new SessionManager({
   createSession: (provider, options) => (provider === "codex"
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
   send: (chatId, event) => {
+    notifier.observe(chatId, event);
     for (const window of BrowserWindow.getAllWindows()) {
       // A window can be mid-teardown while agents shut down on quit.
       if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
@@ -203,6 +235,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  notifier.closeAll();
   // The renderer saves finished turns, so running turns stop with the last window.
   void agents.closeAll();
   if (process.platform !== "darwin") app.quit();

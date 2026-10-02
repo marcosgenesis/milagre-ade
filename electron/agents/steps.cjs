@@ -2,13 +2,17 @@ const path = require("node:path");
 const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./permissions.cjs");
 
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
-// its reply. A step starts as { id, kind, title, detail? } and ends as { id, status, title?, detail? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other"
+// its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
+// { id, status, title?, detail?, durationMs? }:
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
+//   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
+//           the title shows only its name, and the renderer opens it in an editor from here
 //   status  "done" | "failed"
 //   detail  a command and its output ("$ npm test\n…"), a unified diff, or the tool's result text.
 //           The detail a step ends with replaces anything streamed into it. A read that worked keeps none.
 // A title given at the end replaces the first one, for agents that only know it then.
+// A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
 
 const MAX_OUTPUT = 20_000;
 const TRUNCATED = "… truncated";
@@ -26,6 +30,9 @@ function code(text, max = 80) {
   return `\`${flat.length > max ? `${flat.slice(0, max - 1)}…` : flat}\``;
 }
 
+// A step's file: a non-empty string, or nothing.
+const filePath = (file) => (typeof file === "string" && file ? file : undefined);
+
 const fileName = (file) => (file ? code(path.basename(String(file))) : "a file");
 
 // Drops undefined fields so steps stay plain and compare cleanly.
@@ -40,14 +47,29 @@ function blocksText(content) {
   return content.map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : "")).filter(Boolean).join("\n");
 }
 
+// --- Thinking ---
+
+const thinkingStep = (id) => ({ id: String(id), kind: "thinking", title: "Thinking" });
+
+// "Thought for 4s", "Thought for 1m 5s"; just "Thought" when the start wasn't seen.
+function thinkingEnd(id, durationMs, text) {
+  const title = durationMs === undefined ? "Thought" : `Thought for ${formatDuration(durationMs)}`;
+  return compact({ id: String(id), status: "done", title, detail: text ? capText(text) : undefined, durationMs });
+}
+
+function formatDuration(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 // --- Claude ---
 
 function claudeStep(id, name, input = {}) {
-  const step = (kind, title, detail) => compact({ id: String(id), kind, title, detail });
+  const step = (kind, title, detail, file) => compact({ id: String(id), kind, title, detail, file: filePath(file) });
   if (name === "Bash") return step("shell", `Ran ${code(input.command)}`, capOutput(`$ ${input.command ?? ""}\n`));
-  if (name === "Read") return step("read", `Read ${fileName(input.file_path)}`);
-  if (CLAUDE_EDIT_TOOLS.has(name)) return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`);
-  if (name === "Write") return step("edit", `Wrote ${fileName(input.file_path)}`);
+  if (name === "Read") return step("read", `Read ${fileName(input.file_path)}`, undefined, input.file_path);
+  if (CLAUDE_EDIT_TOOLS.has(name)) return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`, undefined, input.file_path ?? input.notebook_path);
+  if (name === "Write") return step("edit", `Wrote ${fileName(input.file_path)}`, undefined, input.file_path);
   if (name === "Grep") return step("search", `Searched for ${code(input.pattern)}${input.path ? ` in ${code(input.path)}` : ""}`);
   if (name === "Glob") return step("search", `Found files matching ${code(input.pattern)}`);
   if (name === "WebSearch") return step("search", `Searched the web for ${code(input.query)}`);
@@ -115,19 +137,19 @@ function webResults(results) {
 
 // item/started item -> step, or null for items that aren't tool calls (messages, reasoning, plans…).
 function codexStep(item) {
-  const step = (kind, title, detail) => compact({ id: String(item.id), kind, title, detail });
+  const step = (kind, title, detail, file) => compact({ id: String(item.id), kind, title, detail, file: filePath(file) });
   switch (item.type) {
     case "commandExecution": {
       const command = unwrapShell(String(item.command ?? ""));
       const action = commandAction(item);
       const detail = capOutput(`$ ${command}\n`);
-      if (action?.type === "read") return step("read", `Read ${code(action.name || path.basename(String(action.path ?? command)))}`, detail);
+      if (action?.type === "read") return step("read", `Read ${code(action.name || path.basename(String(action.path ?? command)))}`, detail, action.path);
       if (action?.type === "search") return step("search", action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`, detail);
       if (action?.type === "listFiles") return step("search", action.path ? `Listed files in ${code(action.path)}` : "Listed files", detail);
       return step("shell", `Ran ${code(command)}`, detail);
     }
     case "fileChange":
-      return step("edit", changeTitle(item.changes ?? []));
+      return step("edit", changeTitle(item.changes ?? []), undefined, item.changes?.length === 1 ? item.changes[0].path : undefined);
     case "mcpToolCall":
       return step("other", `Used ${code(item.tool)} from ${item.server}`);
     case "dynamicToolCall":
@@ -169,4 +191,4 @@ function codexStepResult(item) {
   }
 }
 
-module.exports = { MAX_OUTPUT, capOutput, claudeStep, claudeStepResult, codexStep, codexStepResult };
+module.exports = { MAX_OUTPUT, capOutput, claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep };

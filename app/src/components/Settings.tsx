@@ -4,10 +4,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
-import type { PermissionMode } from "../model";
+import { PERMISSION_MODES } from "../model";
+import type { ModelOption, PermissionMode } from "../model";
+import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
-import type { ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -100,16 +102,17 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
-function GeneralSettings() {
+function GeneralSettings({ models }: { models: ModelOption[] }) {
   const settings = useSettings();
+  const { editors, editor } = useEditors();
   return (
     <>
     <Group title="Agents">
       <Row label="Default model" description="Selected when Milagre opens">
-        <Select label="Default model" value={settings.defaultModelId} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
+        <Select label="Default model" value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
           {(["codex", "claude"] as const).map((provider) => (
             <optgroup key={provider} label={provider === "codex" ? "Codex" : "Claude"}>
-              {MODEL_CATALOG.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+              {models.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
             </optgroup>
           ))}
         </Select>
@@ -119,8 +122,30 @@ function GeneralSettings() {
           {PERMISSION_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
         </Select>
       </Row>
+      <Row label="Claude replies">
+        <Select label="Claude replies" value={settings.claudeReplies} onChange={(claudeReplies) => updateSettings({ claudeReplies: claudeReplies as ClaudeReplies })}>
+          <option value="concise">Concise</option>
+          <option value="normal">Normal</option>
+        </Select>
+      </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
+    </Group>
+    <Group title="Editor">
+      <Row label="Open files in" description={editors && editors.length === 0 ? "Install Cursor, VS Code, Zed or another editor to open files and folders" : "Used by file links in replies and tool rows, and by Open in <editor> in the chat menu"}>
+        {editors && editors.length === 0 ? (
+          <span className="text-ink-3">No editor found</span>
+        ) : (
+          <Select label="Open files in" value={editor?.id ?? ""} onChange={(editorId) => updateSettings({ editorId })}>
+            {(editors ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </Select>
+        )}
+      </Row>
+    </Group>
+    <Group title="System">
+      <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
+        <Switch label="Keep the Mac awake while agents work" checked={settings.keepAwake} onChange={(keepAwake) => updateSettings({ keepAwake })} />
       </Row>
     </Group>
     <Group title="Plan usage">
@@ -284,13 +309,13 @@ function ProjectSettings({ projectPath }: { projectPath?: string }) {
   return <FilesToCopy projectPath={projectPath} />;
 }
 
-export function SettingsPanel({ section, projectPath }: { section: SettingsSection; projectPath?: string }) {
+export function SettingsPanel({ section, projectPath, models }: { section: SettingsSection; projectPath?: string; models: ModelOption[] }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
-        {section === "general" && <GeneralSettings />}
+        {section === "general" && <GeneralSettings models={models} />}
         {section === "appearance" && <AppearanceSettings />}
         {section === "about" && <AboutSettings />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}

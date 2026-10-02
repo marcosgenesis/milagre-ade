@@ -11,11 +11,13 @@ import {
   GitBranchIcon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
+  SourceCodeIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archive";
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
+import { useEditors } from "@/lib/editors";
 import type { DiffStat } from "@/model";
 
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -48,6 +50,7 @@ export type ChatRowActions = {
   onRename?: (id: string, title: string) => void;
   onMarkUnread?: (id: string, unread: boolean) => void;
   onReveal?: (id: string) => void;
+  onOpenInEditor?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => void;
@@ -441,6 +444,7 @@ function ChatMenu({
     onClose();
     action();
   };
+  const { editor } = useEditors();
   const copy = (text: string) => run(() => void navigator.clipboard.writeText(text).catch(() => {}));
 
   const resolved = plan && plan !== "checking" ? plan : null;
@@ -466,6 +470,7 @@ function ChatMenu({
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : { key: "unread", label: "Mark as unread", icon: CircleIcon, onSelect: run(() => actions.onMarkUnread?.(item.id, true)), disabled: !actions.onMarkUnread },
     { key: "reveal", label: IS_MAC ? "Open in Finder" : "Open in file manager", icon: FolderOpenIcon, onSelect: run(() => actions.onReveal?.(item.id)), disabled: !actions.onReveal || !details.path },
+    { key: "editor", label: editor ? `Open in ${editor.name}` : "No editor found", icon: SourceCodeIcon, onSelect: run(() => actions.onOpenInEditor?.(item.id)), disabled: !editor || !actions.onOpenInEditor || !details.path },
     "divider",
     ...archiveItems,
   ];

@@ -66,33 +66,50 @@ export interface ModelOption {
   recommended?: boolean;
 }
 
+/**
+ * The maintained list: what codex-cli 0.158.0 and Claude Code 2.1.287 report, recommended model first.
+ * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
+ * CLI is missing, too old or couldn't be asked.
+ */
 export const MODEL_CATALOG: ModelOption[] = [
-  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "codex", description: "Latest workhorse model for coding and everyday work", recommended: true },
-  { id: "gpt-6-astra", name: "GPT-6 Astra", provider: "codex", description: "Frontier intelligence for the most demanding work" },
-  { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "codex", description: "Previous generation workhorse model" },
-  { id: "gpt-6-luna", name: "GPT-6 Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
-  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", provider: "codex", description: "Older generation workhorse model" },
-  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", provider: "codex", description: "Balanced intelligence and cost" },
-  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", provider: "codex", description: "Fast, cost-sensitive model" },
-  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", provider: "codex", description: "Optimized for agentic coding" },
-  { id: "gpt-5.1-codex-max", name: "GPT-5.1 Codex Max", provider: "codex", description: "Long-horizon coding and agent work" },
-  { id: "gpt-5-codex", name: "GPT-5 Codex", provider: "codex", description: "Coding-focused reasoning model" },
-  { id: "gpt-5-codex-mini", name: "GPT-5 Codex Mini", provider: "codex", description: "Smaller and faster coding model" },
-  { id: "gpt-5", name: "GPT-5", provider: "codex", description: "General-purpose reasoning model" },
-  { id: "gpt-5-mini", name: "GPT-5 mini", provider: "codex", description: "Fast model for well-defined tasks" },
-  { id: "gpt-4.1", name: "GPT-4.1", provider: "codex", description: "Strong non-reasoning model" },
-  { id: "claude-fable-5", name: "Claude Fable 5", provider: "claude", description: "High-capability general and agentic work", recommended: true },
-  { id: "claude-opus-5-5", name: "Claude Opus 5.5", provider: "claude", description: "Advanced reasoning and agentic coding" },
-  { id: "claude-opus-5", name: "Claude Opus 5", provider: "claude", description: "Most capable Claude model" },
-  { id: "claude-opus-4-8", name: "Claude Opus 4.8", provider: "claude", description: "Advanced reasoning and coding" },
-  { id: "claude-opus-4-7", name: "Claude Opus 4.7", provider: "claude", description: "Deep analysis and agentic coding" },
-  { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "claude", description: "Complex professional work" },
-  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "claude", description: "Balanced reasoning, coding, and speed" },
-  { id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "claude", description: "High-performance reasoning and efficiency" },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "claude", description: "Balanced quality and speed" },
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "claude", description: "Reliable coding and analysis" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "claude", description: "Fast and efficient" },
+  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work", recommended: true },
+  { id: "gpt-6-sol", name: "GPT-6-Sol", provider: "codex", description: "Previous generation workhorse model" },
+  { id: "gpt-6-luna", name: "GPT-6-Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
+  { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", provider: "codex", description: "Older generation workhorse model" },
+  { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", provider: "codex", description: "Older balanced model for straightforward work" },
+  { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", provider: "codex", description: "Older fast and efficient model" },
+  { id: "gpt-5.5", name: "GPT-5.5", provider: "codex", description: "Legacy coding model" },
+  { id: "claude-opus-5-5", name: "Opus 5.5", provider: "claude", description: "For complex work and everyday tasks", recommended: true },
+  { id: "claude-fable-5-1", name: "Fable 5.1", provider: "claude", description: "For your toughest challenges" },
+  { id: "claude-sonnet-5-5", name: "Sonnet 5.5", provider: "claude", description: "Most efficient for simpler tasks" },
+  { id: "claude-haiku-4-5", name: "Haiku 4.5", provider: "claude", description: "Fastest for quick answers" },
+  { id: "claude-sonnet-5", name: "Sonnet 5", provider: "claude", description: "Efficient for routine tasks" },
+  { id: "claude-opus-5", name: "Opus 5", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-fable-5", name: "Fable 5", provider: "claude", description: "Most capable for your hardest and longest-running tasks" },
+  { id: "claude-opus-4-8", name: "Opus 4.8", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-opus-4-7", name: "Opus 4.7", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-opus-4-6", name: "Opus 4.6", provider: "claude", description: "Best for everyday, complex tasks" },
+  { id: "claude-sonnet-4-6", name: "Sonnet 4.6", provider: "claude", description: "Efficient for routine tasks" },
 ];
+
+/** A model as its agent's CLI reports it (agent:models), with what it accepts. */
+export interface ReportedModel extends ModelCapability {
+  id: string;
+  name: string;
+  description: string;
+  recommended: boolean;
+}
+
+/** Each agent's reported models; null when its CLI is missing, too old, or couldn't be asked. */
+export type AgentModels = Record<ModelProvider, ReportedModel[] | null>;
+
+/** How an agent's CLI stands, for the model picker (agent:cli-status). `message` is what a turn would fail with. */
+export type CliState = "ready" | "missing" | "outdated" | "logged-out" | "broken";
+export interface CliStatus {
+  state: CliState;
+  message?: string;
+}
+export type AgentCliStatus = Record<ModelProvider, CliStatus>;
 
 export interface Project {
   id: number;
@@ -159,13 +176,13 @@ export interface ChatMessage {
   images?: ImageAttachment[];
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
-  /** The tool calls the agent made in this reply, in the order they started. */
+  /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
 }
 
-export type StepKind = "shell" | "edit" | "read" | "search" | "other";
+export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking";
 
-/** One tool call in an agent's reply: a command, an edit, a read, a search or another tool. */
+/** One tool call in an agent's reply (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
 export interface ChatStep {
   id: string;
   kind: StepKind;
@@ -173,8 +190,12 @@ export interface ChatStep {
   title: string;
   /** Saved steps are done or failed; only a reply still streaming has running ones. */
   status: "running" | "done" | "failed";
-  /** The command and its output, or a unified diff, capped at 20,000 characters. */
+  /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
+  /** The file a read or edit worked on, as the tool named it; the title shows only its name. */
+  file?: string;
+  /** How long a thinking step took. */
+  durationMs?: number;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
   offset?: number;
 }
@@ -247,16 +268,17 @@ export type AgentEvent =
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
-  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail"> }
+  | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }
-  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | ({ type: "question-request" } & QuestionRequest)
   | { type: "question-resolved"; requestId: string; outcome: QuestionOutcome }
   | { type: "turn-completed" }
   | { type: "turn-cancelled" }
-  | { type: "turn-failed"; message: string };
+  /** `notice`: a message Milagre wrote (it names the CLI and the fix), shown as it is; otherwise it is the agent's own error. */
+  | { type: "turn-failed"; message: string; notice?: boolean; login?: boolean };
 
 export interface AgentStartTurnRequest {
   /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */
@@ -267,9 +289,17 @@ export interface AgentStartTurnRequest {
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
+  /** How long Claude's replies run; Claude only, Codex ignores it. */
+  replies?: "concise" | "normal";
   prompt: string;
   images: ImageAttachment[];
   resumeId?: string;
+}
+
+/** A code editor found on this Mac. */
+export interface EditorInfo {
+  id: string;
+  name: string;
 }
 
 export interface WorktreeRequest {

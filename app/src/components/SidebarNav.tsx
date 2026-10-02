@@ -336,7 +336,8 @@ export default function SidebarNav({
             onClick={() => {
               if (!workspaceOpen && workspaceButtonRef.current) {
                 const rect = workspaceButtonRef.current.getBoundingClientRect();
-                setWorkspacePosition({ top: rect.bottom + 6, left: rect.left });
+                // Collapsed, the menu opens beside the rail instead of covering it.
+                setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
               }
               setWorkspaceOpen((open) => !open);
             }}

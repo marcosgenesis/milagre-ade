@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createWorktree } = require("./worktrees.cjs");
+const { createWorktree, renameWorktreeBranch } = require("./worktrees.cjs");
 const { GIT_TIMEOUT_MS, REMOVE_TIMEOUT_MS, removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 
 async function fixture(t) {
@@ -289,6 +289,18 @@ test("without a project nothing is removed", async (t) => {
   await assert.rejects(removeWorktree({ path: wt.path, root: fx.worktreeRoot, base: wt.base, force: false }), /No project/);
   await assert.rejects(removeWorktree({ path: wt.path, root: fx.worktreeRoot, projectPath: "", base: wt.base, force: false }), /No project/);
   assert.equal(await exists(wt.path), true);
+});
+
+test("a worktree whose branch was renamed after creation is removed with its renamed branch", async (t) => {
+  const fx = await fixture(t);
+  const wt = await fx.make("r1");
+  const renamed = await renameWorktreeBranch({ worktreePath: wt.path, branch: wt.branch, slug: "fix login redirect" });
+  assert.equal(renamed, "milagre/fix-login-redirect-r1");
+  assert.equal((await worktreeStatus(wt.path, wt.base)).branch, renamed);
+  const result = await remove(fx, wt);
+  assert.equal(await exists(wt.path), false);
+  assert.deepEqual([result.branch, result.branchDeleted], [renamed, true]);
+  assert.equal(branches(fx).some((name) => name.startsWith("milagre/")), false);
 });
 
 test("it only deletes branches Milagre made", async (t) => {

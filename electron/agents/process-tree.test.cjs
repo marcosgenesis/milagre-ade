@@ -14,7 +14,7 @@ const isAlive = (pid) => {
 };
 
 test("killTree stops a detached child and the processes it started", async () => {
-  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(grandchild.pid); setInterval(() => {}, 1000);';
+  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
   const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
   const grandchildPid = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
   assert.ok(isAlive(grandchildPid));
@@ -26,7 +26,7 @@ test("killTree stops a detached child and the processes it started", async () =>
 });
 
 test("killTree stops the rest of the group after its leader already exited", async (t) => {
-  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(grandchild.pid); setInterval(() => {}, 1000);';
+  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
   const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
   const grandchildPid = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
   t.after(() => {

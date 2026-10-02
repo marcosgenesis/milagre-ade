@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_PATTERNS = [".env*"];
 // Dependency and build folders are left out of the walk and the copy: an unanchored pattern such as the default
 // `.env*` would otherwise pick up a dependency's own files (node_modules/bottleneck/.env).
-const EXCLUDED_FOLDERS = ["node_modules", ".git", "vendor/bundle", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".turbo", ".cache"];
+const EXCLUDED_FOLDERS = ["node_modules", ".git", "vendor/bundle", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".turbo", ".cache", "Pods", ".gradle", ".expo", ".dart_tool", "coverage"];
 
 /**
  * The folders to skip for these patterns. A folder comes back in when an anchored pattern (one with a slash
@@ -21,13 +21,30 @@ const EXCLUDED_FOLDERS = ["node_modules", ".git", "vendor/bundle", ".venv", "ven
 function excludedFolders(patterns) {
   const anchored = patterns
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .map((line) => line.replace(/^!/, "").replace(/^\//, ""))
+    // A negated pattern only takes files out, so it never asks for a folder.
+    .filter((line) => line && !line.startsWith("#") && !line.startsWith("!"))
+    .map((line) => line.replace(/^\//, ""))
     .filter((line) => line.replace(/\/+$/, "").includes("/") || /^[^/]+\/$/.test(line));
   return EXCLUDED_FOLDERS.filter((folder) => !anchored.some((line) => line === `${folder}/` || line.startsWith(`${folder}/`) || line.includes(`/${folder}/`)));
 }
 
-const COPY_LIMITS ={ maxFiles: 500, maxBytes: 100 * 1024 * 1024 };
+/** Whether the real location of `directory` (or of its nearest existing ancestor) is inside `realRoot`. */
+async function staysInside(realRoot, directory) {
+  let current = directory;
+  for (;;) {
+    try {
+      const real = await fs.realpath(current);
+      return real === realRoot || real.startsWith(`${realRoot}${path.sep}`);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") return false;
+      const parent = path.dirname(current);
+      if (parent === current) return false;
+      current = parent;
+    }
+  }
+}
+
+const COPY_LIMITS = { maxFiles: 500, maxBytes: 100 * 1024 * 1024 };
 const GIT_LIMITS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 30_000 };
 
 function patternLines(text) {
@@ -123,7 +140,17 @@ async function copyFilesToWorktree({ projectPath, worktreePath, setting, limits 
       const target = path.join(worktreePath, file.path);
       if (path.relative(worktreePath, target).startsWith("..")) continue;
       try {
+        // A folder the base branch tracks as a symlink must not lead the copy out of the worktree.
+        const realWorktree = await fs.realpath(worktreePath);
+        if (!(await staysInside(realWorktree, path.dirname(target)))) {
+          notes.push(`Skipped ${file.path}: its folder leads outside the worktree.`);
+          continue;
+        }
         await fs.mkdir(path.dirname(target), { recursive: true });
+        if (!(await staysInside(realWorktree, path.dirname(target)))) {
+          notes.push(`Skipped ${file.path}: its folder leads outside the worktree.`);
+          continue;
+        }
         // Never overwrite: a file the worktree already has came from git.
         await fs.copyFile(path.join(projectPath, file.path), target, fs.constants.COPYFILE_EXCL);
         copied.push(file.path);

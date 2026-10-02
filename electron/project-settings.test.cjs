@@ -42,6 +42,22 @@ test("a damaged file reads as empty and is replaced by the next save", async (t)
   assert.deepEqual(await settings.get("/work/shop"), { filesToCopy: [".env"] });
 });
 
+test("a file that can't be read fails the save and keeps the other projects' patterns", async (t) => {
+  const { file, settings } = await store(t);
+  await settings.setFilesToCopy("/work/shop", [".env"]);
+  await settings.setFilesToCopy("/work/blog", ["*.key"]);
+  const before = await fs.readFile(file, "utf8");
+  // A directory where the file should be: reading it fails with EISDIR, not ENOENT.
+  await fs.rm(file);
+  await fs.mkdir(file);
+  await assert.rejects(settings.setFilesToCopy("/work/shop", ["new"]), /EISDIR/);
+  // Creating a worktree still works: reading is not strict.
+  assert.deepEqual(await settings.get("/work/shop"), { filesToCopy: [] });
+  await fs.rmdir(file);
+  await fs.writeFile(file, before);
+  assert.deepEqual(await settings.get("/work/blog"), { filesToCopy: ["*.key"] });
+});
+
 test("saves that overlap all land", async (t) => {
   const { settings } = await store(t);
   await Promise.all(["a", "b", "c", "d"].map((name) => settings.setFilesToCopy(`/work/${name}`, [`${name}.env`])));

@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { createWorktree, listBranches, slugify } = require("./worktrees.cjs");
-const { COPY_LIMITS, previewFilesToCopy } = require("./worktree-files.cjs");
+const { COPY_LIMITS, EXCLUDED_FOLDERS, previewFilesToCopy } = require("./worktree-files.cjs");
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-worktrees-"));
@@ -214,6 +214,45 @@ test("an anchored pattern can still ask for a file inside an excluded folder", a
   assert.deepEqual([...created.copy.copied].sort(), ["dist/config.json", "vendor/bundle/gem/.env"]);
   await fs.writeFile(path.join(fx.project, ".worktreeinclude"), "/node_modules/pkg/.env\n");
   assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, ["node_modules/pkg/.env"]);
+});
+
+test("a negated pattern never lifts an exclusion, and more build folders are skipped", async (t) => {
+  const fx = await ignoredFixture(t, { "node_modules/p1/.env": "1", "node_modules/p2/.env": "2", "Pods/x/.env": "3", ".gradle/.env": "4", ".expo/.env": "5", ".dart_tool/.env": "6", "coverage/.env": "7" });
+  assert.deepEqual((await previewFilesToCopy(fx.project, [".env*", "!node_modules/p1/.env"])).matches, [".env", ".env.local"]);
+  assert.deepEqual(EXCLUDED_FOLDERS.filter((folder) => ["Pods", ".gradle", ".expo", ".dart_tool", "coverage"].includes(folder)).length, 5);
+  assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, [".env", ".env.local"]);
+});
+
+test("the copy does not follow a folder the base branch tracks as a symlink out of the worktree", async (t) => {
+  const fx = await ignoredFixture(t);
+  fx.git("checkout", "-q", "-b", "linky");
+  await fs.symlink("../outside", path.join(fx.project, "cfg"));
+  fx.git("add", "cfg");
+  fx.git("commit", "-m", "link");
+  fx.git("checkout", "-q", "main");
+  await fs.mkdir(path.join(fx.project, "cfg", "deep"), { recursive: true });
+  await fs.writeFile(path.join(fx.project, "cfg", ".env"), "SECRET=1\n");
+  await fs.writeFile(path.join(fx.project, "cfg", "deep", ".env"), "SECRET=2\n");
+  const created = await create(fx, { baseBranch: "linky" });
+  const outside = path.join(fx.worktreeRoot, "shop", "outside");
+  assert.equal(await exists(outside), false);
+  assert.equal(await exists(path.join(outside, ".env")), false);
+  assert.deepEqual([...created.copy.copied].sort(), [".env", ".env.local"]);
+  assert.match(created.copy.notes.join("\n"), /cfg\/\.env/);
+});
+
+test("a file the base branch tracks is left as git has it", async (t) => {
+  const fx = await ignoredFixture(t);
+  fx.git("checkout", "-q", "-b", "tracks-env");
+  await fs.writeFile(path.join(fx.project, ".env"), "FROM=branch\n");
+  fx.git("add", "-f", ".env");
+  fx.git("commit", "-m", "track env");
+  fx.git("checkout", "-q", "main");
+  await fs.writeFile(path.join(fx.project, ".env"), "FROM=main-ignored\n");
+  const created = await create(fx, { baseBranch: "tracks-env" });
+  assert.equal(await fs.readFile(path.join(created.path, ".env"), "utf8"), "FROM=branch\n");
+  assert.deepEqual(created.copy.copied, [".env.local"]);
+  assert.deepEqual(created.copy.notes, []);
 });
 
 test("previewFilesToCopy lists what the effective patterns match", async (t) => {

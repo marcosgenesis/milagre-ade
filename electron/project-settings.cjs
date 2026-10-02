@@ -13,24 +13,35 @@ function normalizeFilesToCopy(value) {
 function createProjectSettings(file) {
   let queue = Promise.resolve();
 
-  async function read() {
+  // Only a missing file or damaged JSON reads as empty. Any other failure (permissions, a disk error) must not
+  // look like "no settings", or the next save would wipe every project's patterns. Reading for a worktree
+  // that is being made is not strict: it falls back to the default instead of failing the worktree.
+  async function read({ strict }) {
+    let text;
     try {
-      const parsed = JSON.parse(await fs.readFile(file, "utf8"));
+      text = await fs.readFile(file, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT" || !strict) return { projects: {} };
+      throw error;
+    }
+    try {
+      const parsed = JSON.parse(text);
       return parsed && typeof parsed === "object" && parsed.projects && typeof parsed.projects === "object" ? parsed : { projects: {} };
-    } catch {
-      return { projects: {} };
+    } catch (error) {
+      if (error instanceof SyntaxError) return { projects: {} };
+      throw error;
     }
   }
 
   return {
     async get(projectPath) {
-      const entry = (await read()).projects[path.resolve(projectPath)] ?? {};
+      const entry = (await read({ strict: false })).projects[path.resolve(projectPath)] ?? {};
       return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy) };
     },
     // Saves run one at a time; an empty list removes the setting, which brings the default back.
     setFilesToCopy(projectPath, filesToCopy) {
       const save = queue.catch(() => {}).then(async () => {
-        const data = await read();
+        const data = await read({ strict: true });
         const key = path.resolve(projectPath);
         const lines = normalizeFilesToCopy(filesToCopy);
         const entry = { ...(data.projects[key] ?? {}) };

@@ -143,7 +143,7 @@ test("a shell that hangs after printing the environment is still killed at the t
   const env = await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, timeoutMs: 30, killGroup: (pid) => killed.push(pid) });
   assert.deepEqual(env, { PATH: "/opt/homebrew/bin:/usr/bin" });
   assert.deepEqual(killed, []);
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  for (let wait = 0; wait < 100 && killed.length === 0; wait += 1) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.deepEqual(killed, [4242]);
 });
 

@@ -450,3 +450,32 @@ test("an open approval and question survive a steer and keep their steps; the tu
   assert.equal(ended.runs[key(1)], undefined);
   assert.equal(ended.state.messages.at(-1)?.steps?.[0].status, "failed");
 });
+
+test('subagent snapshots survive parent completion and late child results remain chat scoped', () => {
+  let state = base();
+  let runs = startRun({},key(1),'codex');
+  const agent = {id:'child',title:'Review',status:'running' as const,startedAt:1,updatedAt:2,transcript:[]};
+  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagent-update',agent}));
+  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'turn-completed'}));
+  assert.equal(state.sessions[1].subagents?.[0].status,'running');
+  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagent-update',agent:{...agent,status:'failed',updatedAt:3}}));
+  assert.equal(state.sessions[1].subagents?.[0].status,'failed');
+  assert.equal(state.sessions[2].subagents,undefined);
+  assert.deepEqual(runs,{});
+  assert.equal(JSON.parse(JSON.stringify(state)).sessions[1].subagents[0].title,'Review');
+});
+test('explicit subagent waiting clears when the parent resumes output', () => {
+ let state=base(), runs=startRun({},key(1),'codex');
+ ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagents-waiting',waiting:true}));
+ assert.equal(runs[key(1)].waitingForSubagents,true);
+ ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'text-delta',messageId:'m',text:'Continuing'}));
+ assert.equal(runs[key(1)].waitingForSubagents,false);
+});
+test('a rediscovered child keeps its saved transcript and original start time', () => {
+ let state=base();
+ const agent={id:'child',title:'Review',status:'unknown' as const,startedAt:1,updatedAt:2,transcript:[{id:'old',kind:'message' as const,text:'Earlier finding'}]};
+ ({state}=applyAgentEvent(state,{},PROJECT,key(1),{type:'subagent-update',agent}));
+ ({state}=applyAgentEvent(state,{},PROJECT,key(1),{type:'subagent-update',agent:{...agent,status:'running',startedAt:3,updatedAt:3,transcript:[]}}));
+ assert.equal(state.sessions[1].subagents?.[0].startedAt,1);
+ assert.equal(state.sessions[1].subagents?.[0].transcript[0].text,'Earlier finding');
+});

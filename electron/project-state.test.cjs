@@ -47,3 +47,13 @@ test("chats of a removed worktree are dropped and new worktrees get fresh ids", 
   assert.ok(Object.values(state.sessions).every((session) => session.id >= 4));
   assert.equal(new Set(Object.values(state.sessions).map((session) => session.worktree_id)).size, 2);
 });
+
+test('restored children without a live session retain output but do not claim to be running', () => {
+ const { markDisconnectedSubagents } = require('./project-state.cjs');
+ const state={sessions:{1:{subagents:[{id:'c',status:'running',updatedAt:10,transcript:[{text:'partial'}]},{id:'d',status:'completed'}]},2:{subagents:[{id:'live',status:'running'}]}}};
+ const restored=markDisconnectedSubagents(state,new Set([2]));
+ assert.equal(restored.sessions[1].subagents[0].status,'unknown');
+ assert.equal(restored.sessions[1].subagents[0].transcript[0].text,'partial');
+ assert.equal(restored.sessions[1].subagents[1].status,'completed');
+ assert.equal(restored.sessions[2].subagents[0].status,'running');
+});

@@ -1,3 +1,4 @@
+import { archiveSubagent, archiveFinishedSubagents } from "./lib/subagents";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -314,6 +315,21 @@ function App() {
     const latest = stateRef.current;
     if (!latest) return;
     const next = patchSession(latest, sessionId, patch);
+    if (next !== latest) commit(next);
+  }
+
+  function archiveChild(id: string, archived: boolean) {
+    const latest = stateRef.current;
+    const parentId = selectedSessionRef.current;
+    if (!latest || parentId === null) return;
+    commit(archiveSubagent(latest, parentId, id, archived));
+  }
+
+  function archiveFinishedChildren() {
+    const latest = stateRef.current;
+    const parentId = selectedSessionRef.current;
+    if (!latest || parentId === null) return;
+    const next = archiveFinishedSubagents(latest, parentId);
     if (next !== latest) commit(next);
   }
 
@@ -878,6 +894,10 @@ function App() {
             sendBlocked={preparing}
             streamingText={run?.text}
             streamingSteps={run?.steps}
+            subagents={selectedSession?.subagents}
+            onArchiveFinishedSubagents={archiveFinishedChildren}
+            onArchiveSubagent={archiveChild}
+            waitingForSubagents={run?.waitingForSubagents}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}

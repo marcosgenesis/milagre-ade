@@ -158,13 +158,17 @@ test("Claude: the question tool is a card, not a step", () => {
   assert.equal(mapClaudeMessage(toolUse("t1", "Bash", { command: "pwd" }), state).length, 1);
 });
 
-test("Claude: a subagent's own tool calls are not steps", () => {
+test("Claude: a subagent's own tool calls stay out of the parent reply", () => {
   const state = claudeState();
-  assert.equal(mapClaudeMessage(toolUse("agent-1", "Agent", { description: "List files", prompt: "ls" }), state).length, 1);
-  assert.deepEqual(mapClaudeMessage(toolUse("t2", "Bash", { command: "ls" }, "agent-1"), state), []);
-  assert.deepEqual(mapClaudeMessage(toolResult("t2", "README.md", { parent: "agent-1" }), state), []);
+  assert.equal(mapClaudeMessage(toolUse("agent-1", "Agent", { description: "List files", prompt: "ls" }), state).filter(e => e.type === "step-started").length, 1);
+  const childTool = mapClaudeMessage(toolUse("t2", "Bash", { command: "ls" }, "agent-1"), state);
+  assert.equal(childTool.some(e => e.type === "step-started"), false);
+  assert.equal(childTool[0].agent.transcript[0].text, "Ran `ls`");
+  const childResult = mapClaudeMessage(toolResult("t2", "README.md", { parent: "agent-1" }), state);
+  assert.equal(childResult.some(e => e.type === "step-completed"), false);
+  assert.equal(childResult[0].agent.transcript.at(-1).text, "README.md");
   const report = { status: "completed", content: [{ type: "text", text: "Found README.md" }] };
-  assert.deepEqual(mapClaudeMessage(toolResult("agent-1", [{ type: "text", text: "[Subagent hand-back] …" }], { structured: report }), state), [
+  assert.deepEqual(mapClaudeMessage(toolResult("agent-1", [{ type: "text", text: "[Subagent hand-back] …" }], { structured: report }), state).filter(e => e.type === "step-completed"), [
     { type: "step-completed", id: "agent-1", status: "done", detail: "Found README.md" },
   ]);
 });

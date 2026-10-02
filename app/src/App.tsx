@@ -26,7 +26,7 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { attentionNotice } from "./lib/attention";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
@@ -275,6 +275,7 @@ function App() {
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const asking = useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
@@ -290,7 +291,7 @@ function App() {
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
@@ -301,7 +302,7 @@ function App() {
           },
         };
       });
-  }, [state, waiting, running, pullRequests]);
+  }, [state, asking, waiting, running, pullRequests]);
   // Switching projects asks first while a turn runs here (the project menu says which chat).
   const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
   const runningChatRef = useRef(runningChat);
@@ -850,7 +851,7 @@ function App() {
   }
   commands.push(...chats.map((chat): Command => ({
     id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
-    detail: [chat.mark === "waiting" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
+    detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
     keywords: [chat.details.path, chat.details.pullRequest?.title, chat.details.pullRequest ? `#${chat.details.pullRequest.number}` : ""].filter(Boolean).join(" "),
     run: () => openChat(Number(chat.id)),
   })));

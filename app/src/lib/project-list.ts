@@ -51,8 +51,8 @@ export function switchStep(armed: SwitchTarget | null, target: SwitchTarget, tur
 
 /** The chat a switch asks about: the first (most recent) one with a turn running or waiting on you, or null. */
 export function runningChat(chats: Array<{ label: string; mark?: string }>): RunningChat | null {
-  const chat = chats.find((item) => item.mark === "running" || item.mark === "waiting");
-  return chat ? { title: chat.label, waiting: chat.mark === "waiting" } : null;
+  const chat = chats.find((item) => item.mark === "running" || item.mark === "waiting" || item.mark === "question");
+  return chat ? { title: chat.label, waiting: chat.mark !== "running" } : null;
 }
 
 export function switchQuestion(chat: RunningChat): string {

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Archive02Icon,
+  BubbleChatIcon,
   CircleIcon,
   Copy01Icon,
   FileEditIcon,
@@ -68,6 +69,7 @@ export type ChatRowActions = {
 const HIDE_ONLY: ArchivePlan = { milagreOwned: false, shared: false, status: null };
 
 const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
+  question: "Asking you",
   waiting: "Waiting for you",
   running: "Running",
   unread: "Unread",
@@ -84,8 +86,9 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
 
 /* ─────────────────────────────────────────────────────────
  * CHAT MARK
- * One slot left of the label. Waiting asks for you (accent with
- * a halo), running spins a ring, unread is a plain accent dot,
+ * One slot left of the label. A question shows a chat bubble,
+ * waiting on an approval is accent with a halo, running spins a
+ * ring, unread is a plain accent dot,
  * and an idle chat keeps a faint dot so labels stay aligned.
  * ───────────────────────────────────────────────────────── */
 function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?: boolean }) {
@@ -99,9 +102,10 @@ function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?
         data-slot="chat-mark"
         data-mark={mark}
         {...(mark === "idle" ? { "aria-hidden": true } : { role: "img", "aria-label": MARK_LABEL[mark], title: MARK_LABEL[mark] })}
-        className={mark === "running" ? "flex" : `rounded-full ${dot}`}
+        className={mark === "running" ? "flex" : mark === "question" ? "flex text-accent" : `rounded-full ${dot}`}
       >
         {mark === "running" && <SpinnerRing size={12} />}
+        {mark === "question" && <HugeiconsIcon icon={BubbleChatIcon} size={13} strokeWidth={2} color="currentColor" />}
       </span>
     </span>
   );
@@ -394,6 +398,7 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
 
 function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
   if (mark === "running") return <SpinnerRing size={12} />;
+  if (mark === "question") return <HugeiconsIcon icon={BubbleChatIcon} size={13} strokeWidth={2} color="currentColor" className="text-accent" />;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;
 }
 
@@ -433,7 +438,7 @@ function ChatMenu({
   const [plan, setPlan] = useState<ArchivePlan | "checking" | null>(null);
   const [top, setTop] = useState(position.y);
   const { details = {} } = item;
-  const running = item.mark === "running" || item.mark === "waiting";
+  const running = item.mark === "running" || item.mark === "waiting" || item.mark === "question";
 
   useLayoutEffect(() => {
     menuRef.current?.querySelector<HTMLElement>("[data-menu-row]")?.focus();

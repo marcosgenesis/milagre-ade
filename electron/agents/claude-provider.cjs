@@ -1,3 +1,4 @@
+const { settleSubagents } = require("./subagents.cjs");
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
@@ -212,6 +213,7 @@ class ClaudeSession {
         settings: { fastMode, ...(ultracode ? { ultracode: true } : {}) },
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
+        forwardSubagentText: true,
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled) },
@@ -329,6 +331,7 @@ class ClaudeSession {
     if (query !== this.query) return;
     this.query = null;
     this.closed = true;
+    settleSubagents(this.state, this.cancelRequested ? "cancelled" : "failed").forEach(event => this.emit(event));
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
     else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
@@ -351,6 +354,7 @@ class ClaudeSession {
     this.questions.cancelAll();
     // Tool calls still waiting for a result never get one, nor does thinking that was cut off.
     this.state.tools?.clear();
+    this.state.foregroundChildren?.clear();
     this.state.thinking = null;
     this.emit(event);
     markEnded();
@@ -372,6 +376,7 @@ class ClaudeSession {
   }
 
   async close() {
+    settleSubagents(this.state, "cancelled").forEach(event => this.emit(event));
     this.permissions.cancelAll();
     this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;

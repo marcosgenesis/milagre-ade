@@ -155,6 +155,7 @@ export interface AgentSession {
   provider?: ModelProvider;
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
+  subagents?: Subagent[];
   /** A name the user gave the chat; otherwise it's named after its first message. */
   title?: string;
   /** A turn ended while the chat wasn't open, or the user marked it unread. */
@@ -278,7 +279,23 @@ export type QuestionAnswers = Record<string, string[]>;
 
 export type QuestionOutcome = "answered" | "dismissed" | "cancelled";
 
+export interface Subagent {
+  id: string;
+  archived?: boolean;
+  parentId?: string;
+  title: string;
+  prompt?: string;
+  status: "initializing" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "unknown";
+  startedAt: number;
+  updatedAt: number;
+  endedAt?: number;
+  latestActivity?: string;
+  transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
+}
+
 export type AgentEvent =
+  | { type: "subagent-update"; agent: Subagent }
+  | { type: "subagents-waiting"; waiting: boolean }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }

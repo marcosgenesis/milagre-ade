@@ -92,7 +92,11 @@ function checkForUpdates() {
 
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
-ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
+// The update installs on a quit too: running chats stop first and continue once the new version opens.
+ipcMain.handle("update:install", async () => {
+  await prepareQuit();
+  autoUpdater.quitAndInstall();
+});
 
 async function discoverWorktrees(projectPath) {
   try {
@@ -155,10 +159,13 @@ async function readProject(projectPath) {
     const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
     return Boolean(entry && !entry.session.closed);
   };
-  const state = await updateProject(projectPath, (current) => {
+  let state = await updateProject(projectPath, (current) => {
     const next = reconcileState(current, projectName(projectPath), discovered);
     return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
   });
+  // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
+  await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
+  state = await states.get(projectPath);
   chatTitles.resume(projectPath, state);
   void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
   void diffs.refresh(projectPath).catch(() => {});
@@ -564,6 +571,20 @@ function createWindow() {
 
   const indexFile = path.join(__dirname, "../dist/index.html");
   const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
+  // On macOS the close button hides the window, so agents keep running; a quit closes it for real.
+  if (process.platform === "darwin") {
+    window.on("close", (event) => {
+      if (quitting) return;
+      event.preventDefault();
+      // A full-screen window hidden as is leaves a black space behind.
+      if (window.isFullScreen()) {
+        window.once("leave-full-screen", () => window.hide());
+        window.setFullScreen(false);
+      } else {
+        window.hide();
+      }
+    });
+  }
   guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
   // A reload keeps every turn running: the main process saves them, and the renderer takes the
   // turns streaming now, with their approval and question cards, from "chat:runs".
@@ -615,26 +636,43 @@ app.whenReady().then(async () => {
   autoUpdater.on("error", () => publishUpdateState({ status: "error" }));
   await checkForUpdates();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed());
+    if (window) window.show();
+    else createWindow();
   });
 });
 
+// Only a quit closes the last window on macOS; elsewhere closing it quits.
 app.on("window-all-closed", () => {
-  notifier.closeAll();
-  // No window is left to answer an approval or question, so running turns stop (and are saved) with the last one.
-  void worktreeSetups.cancelAll();
-  void agents.closeAll();
   if (process.platform !== "darwin") app.quit();
 });
 
-let agentsClosed = false;
+// Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they
+// continue on the next launch; agents run in their own process groups, so they are stopped before the app exits.
+let quitting = false;
+let quitPrepared = null;
+function prepareQuit() {
+  quitting = true;
+  quitPrepared ??= (async () => {
+    notifier.closeAll();
+    keepAwake.quit();
+    ports.close();
+    // Saved at once, so the chats resume even when stopping the agents runs out the clock.
+    await chats.suspendRunning();
+    await states.flush();
+    await Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]);
+    await states.flush();
+  })();
+  return Promise.race([quitPrepared, new Promise((resolve) => setTimeout(resolve, 5000))]);
+}
+
+let quitReady = false;
 app.on("before-quit", (event) => {
-  if (agentsClosed) return;
+  quitting = true;
+  if (quitReady) return;
   event.preventDefault();
-  agentsClosed = true;
-  keepAwake.quit();
-  ports.close();
-  // Agents run in their own process groups, so stop them before the app exits.
-  // Their cancelled turns are saved before the app exits.
-  Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
+  void prepareQuit().finally(() => {
+    quitReady = true;
+    app.quit();
+  });
 });

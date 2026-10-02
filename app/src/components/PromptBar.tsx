@@ -16,6 +16,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { ModelOption, ModelProvider } from "../model";
 import { MODEL_CATALOG } from "../model";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -87,7 +88,7 @@ export function PromptBar({
                 ))}
               </div>
               <label className="my-2 flex items-center gap-2 rounded-control border border-line px-2.5 py-2 text-ink-3"><Icon icon={Search01Icon} size={15} /><input className="w-full border-0 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models…" autoFocus /></label>
-              <div className="grid max-h-72 gap-0.5 overflow-y-auto">
+              <ScrollArea className="grid max-h-72 gap-0.5">
                 {models.map((model) => (
                   <button key={model.id} className={`flex w-full items-center gap-2 rounded-control border px-2 py-2 text-left transition-colors ${model.id === selectedModel.id ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`} onClick={() => chooseModel(model)}>
                     <span className={`flex size-7 shrink-0 items-center justify-center rounded-control ${model.provider === "claude" ? "bg-orange-tint text-orange" : "bg-accent-tint text-accent-ink"}`}><ProviderIcon provider={model.provider} size={15} /></span>
@@ -97,7 +98,7 @@ export function PromptBar({
                   </button>
                 ))}
                 {models.length === 0 && <div className="px-2 py-5 text-center text-xs text-ink-3">No models found.</div>}
-              </div>
+              </ScrollArea>
             </div>
           )}
         </div>

@@ -22,6 +22,7 @@ import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
 import { useSkills } from "./useSkills";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -317,7 +318,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
       <div ref={popoverRootRef} className="relative">
         {menu && (
           <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
-            <div className="relative max-h-64 overflow-y-auto" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
+            <ScrollArea className="relative max-h-64" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
             <span aria-hidden className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover" style={{ top: rowBox?.top ?? 0, height: rowBox?.height ?? 0, opacity: rowBox && engaged ? 1 : 0, transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease" }} />
             {rows.map((row, index) => {
               const source = menu === "at" ? SOURCES.find((item) => item.key === row.key) : undefined;
@@ -334,7 +335,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             })}
             {menu === "at" && !plusOpen && fileSearch.error && <div role="status" className="px-2 text-xs text-red">{fileSearch.error}</div>}
             {rows.length === 0 && <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">{fileSearch.loading && menu === "at" ? "Searching files..." : `No matches for "${tokenQuery}"`}</div>}
-            </div>
+            </ScrollArea>
             {menu === "slash" && skillWarnings.length > 0 && <div role="status" title={skillWarnings.join("\n")} className="px-2 py-1 text-[11px] text-ink-3">{skillWarnings.length === 1 ? skillWarnings[0] : `${skillWarnings.length} skills could not be loaded. Hover for details.`}</div>}
             <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">{menu === "at" ? "Type to search files" : skillsLoading ? "Loading skills…" : "Type to search commands & skills"}</div>
           </div>

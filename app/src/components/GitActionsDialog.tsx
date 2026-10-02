@@ -5,6 +5,7 @@ import { Alert02Icon, ArrowRight01Icon, Cancel01Icon, GitBranchIcon, LinkSquare0
 import type { ModelProvider } from "../model";
 import { formatLineCount } from "../lib/chat-list";
 import { dialogMode, gitRunNote, hookFailureMessage, prTargetLine, type DialogButton, type GitChanges, type GitChatContext, type GitRunResult, type GitStep } from "../lib/git-dialog";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -115,7 +116,7 @@ function FileList({ changes }: { changes: Extract<GitChanges, { isRepo: true }> 
         <span>{changes.files.length} {changes.files.length === 1 ? "file" : "files"} changed</span>
         <span className="tabular-nums"><span className="text-green">+{formatLineCount(added)}</span> <span className="text-red">−{formatLineCount(removed)}</span></span>
       </div>
-      <ul className="max-h-36 overflow-y-auto py-1">
+      <ScrollArea as="ul" chainScroll className="max-h-36 py-1">
         {changes.files.map((file) => (
           <li key={file.path} className="flex items-center gap-2 px-3 py-0.5 text-[12px]" title={file.path}>
             <span className={`w-3 shrink-0 font-mono font-semibold ${file.status === "added" ? "text-green" : file.status === "deleted" ? "text-red" : "text-orange"}`}>
@@ -135,7 +136,7 @@ function FileList({ changes }: { changes: Extract<GitChanges, { isRepo: true }> 
             </span>
           </li>
         ))}
-      </ul>
+      </ScrollArea>
     </div>
   );
 }
@@ -417,7 +418,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain px-4 pb-4 pt-1">
+        <ScrollArea className="grid flex-1 gap-4 px-4 pb-4 pt-1">
           {!changes && !readError && (
             <p className="flex items-center gap-2 py-6 text-[13px] text-ink-3"><Spinner /> Reading changes…</p>
           )}
@@ -502,7 +503,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
               {!finished && mode.idle && !failure && <p className="text-[12.5px] text-ink-3">{mode.idle}</p>}
             </>
           )}
-        </div>
+        </ScrollArea>
 
         <footer className="flex items-center gap-2 border-t border-line bg-inset px-4 py-3">
           <p data-footer-reason className="min-w-0 flex-1 text-[12px] text-ink-3">{!finished && !running ? footerReason : null}</p>

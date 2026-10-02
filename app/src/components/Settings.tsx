@@ -14,6 +14,7 @@ import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -452,7 +453,7 @@ function ProjectSettings({ projectPath }: { projectPath?: string }) {
 export function SettingsPanel({ section, projectPath, models, update }: { section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
-    <div className="h-full overflow-y-auto">
+    <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
@@ -460,6 +461,6 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>
-    </div>
+    </ScrollArea>
   );
 }

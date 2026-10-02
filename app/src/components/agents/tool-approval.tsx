@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { ComponentProps } from "react";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -175,8 +176,9 @@ export function ToolApproval({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={reduce ? undefined : { opacity: 0, height: 0 }}
                 transition={reduce ? { duration: 0 } : SPRING_SWAP}
-                className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
+                className="flex min-h-0 flex-1 flex-col overflow-hidden"
               >
+                <ScrollArea className="[scrollbar-gutter:stable]">
                 <div className="grid gap-2 border-t border-line bg-inset px-4 py-3">
                   {parameters.map((parameter) => (
                     <div key={parameter.id} className="grid gap-1 text-xs">
@@ -185,6 +187,7 @@ export function ToolApproval({
                     </div>
                   ))}
                 </div>
+                </ScrollArea>
               </motion.div>
             )}
           </AnimatePresence>

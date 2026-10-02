@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs electron/shared/*.test.ts app/src/lib/*.test.ts",
     "test:chat-titles": "node scripts/test-chat-titles.cjs",
+    "test:handover": "node scripts/test-handover.cjs",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",

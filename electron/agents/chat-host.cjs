@@ -1,5 +1,7 @@
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("../shared/agent-runs.mjs");
 const { patchSession } = require("../shared/project-edits.mjs");
+const { chatTitle } = require("../shared/chats.mjs");
+const { renderTranscript, providerName } = require("./handover.cjs");
 
 /** The part of an IPC error the user should read. */
 function errorMessage(error) {
@@ -23,8 +25,9 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {} }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat });
+  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, handoverTools }) {
+    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, handoverTools });
+    this.pendingHandovers = new Map();
     this.runs = {};
     this.seq = 0;
     this.openChat = null;
@@ -124,8 +127,8 @@ class ChatHost {
       const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
       let nextId = latest.next_id;
-      // A new chat takes the worktree's chat that has no messages yet, if there is one.
-      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
+      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief).
+      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
       const chatId = chatKey(projectPath, session.id);
@@ -140,7 +143,7 @@ class ChatHost {
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title ? { titlePending: true } : {}) } },
+        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
         messages: [...next.messages, message],
       };
     });
@@ -162,6 +165,82 @@ class ChatHost {
       resumeId: target.resumeId,
     }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
     return { sessionId: target.sessionId };
+  }
+
+  /**
+   * Opens a chat on the other provider in the source chat's worktree, linked both ways, and resolves with its
+   * id at once. The transcript and brief are written in the background; the brief is sent as its first message.
+   */
+  async handover(request) {
+    const { projectPath, sessionId, provider } = request;
+    if (this.runs[chatKey(projectPath, sessionId)]) throw new Error("Stop the turn or wait for it to finish to hand over.");
+    let target = null;
+    const { state } = await this.states.update(projectPath, (latest) => {
+      const source = latest.sessions[sessionId];
+      if (!source) throw new Error("That chat is no longer in the project.");
+      if (source.provider === provider) throw new Error(`This chat already runs on ${providerName(provider)}.`);
+      const earlier = latest.sessions[source.handedOverTo];
+      if (earlier?.handoverPending) {
+        target = earlier.id;
+        return latest;
+      }
+      target = latest.next_id;
+      return {
+        ...latest,
+        next_id: target + 1,
+        sessions: {
+          ...latest.sessions,
+          [sessionId]: { ...source, handedOverTo: target },
+          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: `${providerName(provider)} · ${chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId))}` },
+        },
+      };
+    });
+    const key = chatKey(projectPath, target);
+    if (!this.pendingHandovers.has(key)) {
+      this.broadcast(projectPath, state);
+      const task = this.completeHandover(request, state, target).finally(() => this.pendingHandovers.delete(key));
+      this.pendingHandovers.set(key, task);
+    }
+    return { sessionId: target };
+  }
+
+  async completeHandover(request, state, target) {
+    const { projectPath, sessionId } = request;
+    let transcriptPath = null;
+    try {
+      const source = state.sessions[sessionId];
+      const transcript = renderTranscript(state, sessionId);
+      transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
+      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant").at(-1)?.body ?? "";
+      const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, cwd: state.worktrees[source.worktree_id].path });
+      await this.send({ ...request, sessionId: target, body, prompt: body, images: [], files: [] });
+      await this.settleHandover(projectPath, target);
+    } catch (error) {
+      await this.settleHandover(projectPath, target);
+      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
+    }
+  }
+
+  /** Clears the target chat's pending mark. Resolves true when it was still set. */
+  async settleHandover(projectPath, target) {
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const session = latest.sessions[target];
+      if (!session?.handoverPending) return latest;
+      const { handoverPending, ...rest } = session;
+      return { ...latest, sessions: { ...latest.sessions, [target]: rest } };
+    });
+    if (changed) this.broadcast(projectPath, state);
+    return Boolean(changed);
+  }
+
+  /** A handover still marked pending when its project opens was cut off by a quit: it gets a note instead. */
+  async recoverHandovers(projectPath, state) {
+    for (const session of Object.values(state.sessions)) {
+      if (!session.handoverPending || this.pendingHandovers.has(chatKey(projectPath, session.id))) continue;
+      // The state passed in can be stale: a handover that finished since has nothing left to recover.
+      if (!(await this.settleHandover(projectPath, session.id))) continue;
+      await this.addNote(chatKey(projectPath, session.id), { body: "Milagre closed before this handover finished. Hand over again from the original chat.", context: "handover" });
+    }
   }
 }
 

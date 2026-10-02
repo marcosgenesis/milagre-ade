@@ -25,13 +25,14 @@ function useElapsed() {
   return total < 60 ? `${total.toFixed(1)}s` : `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
 }
 
-/** The running mark and the elapsed time. The label is only announced to screen readers. */
-export function ThinkingIndicator({ label }: { label: string }) {
+/** The running mark and the elapsed time. The label is only announced to screen readers, unless `showLabel` writes it out beside the mark. */
+export function ThinkingIndicator({ label, showLabel = false }: { label: string; showLabel?: boolean }) {
   const elapsed = useElapsed();
 
   return (
     <div role="status" aria-label={label} className="flex w-fit items-center gap-2.5 px-1 py-1">
       <RunningLogo />
+      {showLabel && <span aria-hidden className="min-w-0 truncate text-[12px] text-ink-3">{label}</span>}
       <span aria-hidden className="font-mono text-[12px] tabular-nums text-ink-3">{elapsed}</span>
     </div>
   );

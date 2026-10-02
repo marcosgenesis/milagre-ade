@@ -52,6 +52,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
+import { handoverLinks, handoverModel } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
@@ -215,7 +216,7 @@ function App() {
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
-  lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
+  lockedProviderRef.current = messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const latest = statesRef.current[projectOfKey(chatId)];
@@ -314,7 +315,7 @@ function App() {
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ sessionMessages }) => sessionMessages.length > 0);
+      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || session.handoverPending);
     return orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
@@ -622,6 +623,32 @@ function App() {
     await executeSend(body, permissionMode);
   }
 
+  async function handover(provider: ModelProvider) {
+    if (!project || selectedSessionId === null) return;
+    const target = handoverModel(selectedModel, provider, openState()?.messages ?? [], models);
+    if (!target) return;
+    const capability = capabilityFor(target, capabilities);
+    try {
+      const { sessionId } = await window.milagre.handover({
+        projectPath: project.path,
+        sessionId: selectedSessionId,
+        provider,
+        model: target.id,
+        permissionMode,
+        effort: effortFor(capability, effort),
+        ultracode: capability.ultracode && ultracode,
+        fastMode: supportsFastMode(target) && fastMode,
+        replies: getSettings().claudeReplies,
+        tldrEnabled: getSettings().tldrEnabled,
+      });
+      if (projectRef.current?.path !== project.path) return;
+      setSelectedSessionId(sessionId);
+      setSelectedModel(target);
+    } catch (error) {
+      setNotice(`Could not hand over: ${ipcError(error)}`);
+    }
+  }
+
   // Keep finished message cards out of the typing render path. Recommendations still use
   // the current model and permission mode when clicked.
   const recommendationRef = useRef<(option: string) => void>(() => {});
@@ -855,7 +882,7 @@ function App() {
               }
               : undefined}
             isSending={isSending}
-            sendBlocked={preparing}
+            sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={selectedSession?.subagents}
@@ -868,7 +895,9 @@ function App() {
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
-            lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
+            lockedProvider={messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined}
+            onHandover={(provider) => void handover(provider)}
+            handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}

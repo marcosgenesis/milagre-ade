@@ -25,6 +25,8 @@ import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { HandoverFromLabel, HandoverLinkBar } from "./Handover";
+import { handoverBriefId, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -77,6 +79,7 @@ function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }
 const MessageSection = memo(function MessageSection({
   message,
   isUser,
+  markdown = false,
   onRecommendationSelect,
   onUpdateCli,
   updatingCli,
@@ -87,6 +90,8 @@ const MessageSection = memo(function MessageSection({
 }: {
   message: AppChatMessage;
   isUser: boolean;
+  /** A user message whose body is markdown (the handover brief). */
+  markdown?: boolean;
   onRecommendationSelect: (option: string) => void;
   onUpdateCli?: (provider: ModelProvider) => void;
   updatingCli?: ModelProvider | null;
@@ -116,7 +121,9 @@ const MessageSection = memo(function MessageSection({
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
         <Attachments images={message.images} files={message.files} />
-        {isUser ? (
+        {isUser && markdown ? (
+          <div className="break-words [overflow-wrap:anywhere] [&_:first-child]:mt-0 [&_:last-child]:mb-0 [&_h1]:text-[14px] [&_h2]:text-[13px] [&_h3]:text-[13px] [&_h1]:mt-2 [&_h2]:mt-2 [&_h3]:mt-2 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1"><Markdown text={message.body} /></div>
+        ) : isUser ? (
           <UserBody body={message.body} />
         ) : recommendation ? (
           <>
@@ -188,6 +195,9 @@ interface ChatComposerProps {
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
+  /** Hands this chat over to the other provider in a new chat. */
+  onHandover?: (provider: ModelProvider) => void;
+  handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
   /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
@@ -340,6 +350,8 @@ export function ChatComposer({
   asking = false,
   runModelName,
   lockedProvider,
+  onHandover,
+  handover,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -376,7 +388,8 @@ export function ChatComposer({
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = messages.length === 0;
+  const isNewChat = messages.length === 0 && !handover?.pending;
+  const briefId = handoverBriefId(messages, handover?.from?.id);
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -415,11 +428,13 @@ export function ChatComposer({
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
           {messages.map((message) => (
             <MessageSection
               key={message.id}
               message={message}
               isUser={message.role === "user"}
+              markdown={message.id === briefId}
               onRecommendationSelect={onRecommendationSelect}
               onUpdateCli={onUpdateCli}
               updatingCli={updatingCli}
@@ -442,6 +457,12 @@ export function ChatComposer({
               <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
           )}
+          {handover?.pending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
+            </div>
+          )}
+          {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden">
@@ -493,6 +514,7 @@ export function ChatComposer({
           sendBlocked={sendBlocked}
           running={isSending}
           lockedProvider={lockedProvider}
+          onHandover={onHandover}
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}

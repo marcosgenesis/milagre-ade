@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("project:state", listener);
   },
   sendMessage: (request) => ipcRenderer.invoke("chat:send", request),
+  handover: (request) => ipcRenderer.invoke("chat:handover", request),
   patchChat: (projectPath, sessionId, patch) => ipcRenderer.invoke("chat:patch", projectPath, sessionId, patch),
   archiveSubagent: (projectPath, sessionId, id, archived) => ipcRenderer.invoke("chat:archive-subagent", projectPath, sessionId, id, archived),
   archiveFinishedSubagents: (projectPath, sessionId) => ipcRenderer.invoke("chat:archive-finished-subagents", projectPath, sessionId),

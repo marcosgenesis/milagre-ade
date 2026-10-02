@@ -172,6 +172,12 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** The chat this one was handed over to, on the other provider. */
+  handedOverTo?: number;
+  /** The chat this one was handed over from. */
+  handedOverFrom?: number;
+  /** Set while the handover brief is being written; the composer waits. */
+  handoverPending?: boolean;
 }
 
 export interface Connection {
@@ -376,6 +382,9 @@ export interface ChatSendRequest {
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
 }
+
+/** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
+export type ChatHandoverRequest = Pick<ChatSendRequest, "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {

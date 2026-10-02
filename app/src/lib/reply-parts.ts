@@ -30,17 +30,19 @@ export type ActivityEntry = { type: "text"; text: string } | { type: "step"; ste
  * A reply as its activity and its answer. The answer is the reply's last text; the activity is
  * everything else (thinking, tool steps and the text between them) in the order it happened.
  * The worktree's setup is neither: it comes back apart, to show as a row of its own before both.
+ * Generated images come back apart too, to show between the activity and the answer.
  */
-export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup: ChatStep[]; activity: ActivityEntry[]; answer: string } {
+export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; answer: string } {
   const setup = allSteps.filter((step) => step.kind === "setup");
-  const parts = replyParts(body, allSteps.filter((step) => step.kind !== "setup"));
+  const images = allSteps.filter((step) => step.kind === "image");
+  const parts = replyParts(body, allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image"));
   const answerIndex = parts.map((part) => part.type).lastIndexOf("text");
   const activity = parts.flatMap((part, index): ActivityEntry[] => {
     if (index === answerIndex) return [];
     return part.type === "text" ? [part] : part.steps.map((step) => ({ type: "step", step }));
   });
   const answer = answerIndex === -1 ? "" : (parts[answerIndex] as { text: string }).text;
-  return { setup, activity, answer };
+  return { setup, activity, images, answer };
 }
 
 /**

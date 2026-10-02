@@ -103,16 +103,40 @@ async function browserChecks() {
   assert.equal(await evaluate('document.querySelector("textarea").value'), '', 'Paths do not pollute draft text');
   assert.equal(await evaluate('document.querySelector("[aria-label=Send]").disabled'), false, 'File-only messages can send');
   await screenshot('attachments-draft');
+  // The lightbox steps through every image and video in the attachments, and zooms images.
+  const counter = String.raw`document.querySelector("dialog [aria-live]")?.textContent`;
   await click('[aria-label="Preview photo.png"]');
-  await waitFor(String.raw`!!document.querySelector("dialog[open]")`);
+  await waitFor(String.raw`document.querySelector("dialog[open] img")?.naturalWidth > 0`);
+  assert.equal(await evaluate(counter), '1 / 2');
+  assert.equal(await evaluate(`document.querySelector('[data-promptbar] [aria-label="Preview photo.png"] img').classList.contains('opacity-0')`), true, 'The open thumbnail hides behind the viewer');
+  await delay(500);
+  await screenshot('lightbox-image');
+  const doubleClick = `(() => { const img = document.querySelector('dialog img'); const r = img.getBoundingClientRect(); img.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); })()`;
+  await evaluate(doubleClick);
+  await waitFor(String.raw`document.querySelector("dialog img")?.dataset.zoom === "2.50"`);
+  await key('ArrowRight');
+  await delay(100);
+  assert.equal(await evaluate(counter), '1 / 2', 'Arrow keys pan a zoomed image instead of changing item');
+  await delay(400);
+  await screenshot('lightbox-zoomed');
+  await evaluate(doubleClick);
+  await waitFor(String.raw`document.querySelector("dialog img")?.dataset.zoom === "1.00"`);
+  await key('ArrowRight');
+  await waitFor(`${counter} === '2 / 2' && !!document.querySelector('dialog video[controls]')`);
+  assert.equal(await evaluate('document.querySelector("dialog [aria-label=Next]").disabled'), true, 'Navigation stops at the last item');
+  await key('ArrowLeft');
+  await waitFor(`${counter} === '1 / 2'`);
   await key('Escape');
   await waitFor(String.raw`!document.querySelector("dialog")`);
+  assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), 'Preview photo.png', 'Focus returns to the thumbnail');
+  assert.equal(await evaluate(`document.querySelector('[data-promptbar] [aria-label="Preview photo.png"] img').classList.contains('opacity-0')`), false);
   assert.equal(await evaluate('window.interrupted'), undefined);
   await click('[aria-label="Preview clip.mp4"]');
   await waitFor(String.raw`document.querySelector("dialog video[controls]")?.videoWidth > 0`);
   await waitFor(String.raw`document.querySelector("dialog video")?.currentTime > 0`);
   await screenshot('video-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await click('[aria-label="Send"]');
   await waitFor(String.raw`window.calls.length === 1`);
   assert.deepEqual(await evaluate('window.calls[0].images.map(i=>i.name)'), ['photo.png']);
@@ -122,6 +146,7 @@ async function browserChecks() {
   await waitFor(String.raw`!!document.querySelector("article [aria-label=\"Preview photo.png\"]")`);
   await click('article [aria-label="Preview photo.png"]');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   assert.equal(await evaluate('window.interrupted'), undefined, 'Preview Escape never stops active agent');
   await type('@src/');
   await waitFor(String.raw`document.querySelector("[aria-label=\"Project files\"]")?.textContent.includes("my app.ts")`);
@@ -145,10 +170,12 @@ async function browserChecks() {
   await waitFor(String.raw`document.querySelector('dialog img')?.naturalWidth > 0`);
   await screenshot('image-selected-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await click('[data-promptbar] [aria-label="Preview clip.mp4"]');
   await waitFor(String.raw`document.querySelector('dialog video')?.videoWidth > 0`);
   await screenshot('video-selected-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await type('Review these');
   await click('[aria-label="Send"]');
   await waitFor('window.calls.length === 2');
@@ -182,7 +209,7 @@ async function browserChecks() {
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("milagre-settings")).showDockBadge'), false, 'Notification preferences persist');
   await evaluate('window.openNotification("/other#10")');
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Notification destination")`);
-  console.log('PASS: native picker trigger, file-only send, saved attachments, image/video viewer, Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
+  console.log('PASS: native picker trigger, file-only send, saved attachments, image/video lightbox (counter, arrows, zoom, focus return), Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
   app.exit(0);
  } catch(error) { console.error(error); console.error(errors); console.error(await evaluate(`(() => { const v = document.querySelector('dialog video'); return v ? { src:v.src, error:v.error?.message, code:v.error?.code, ready:v.readyState, network:v.networkState } : null; })()`)); app.exit(1); }
 }

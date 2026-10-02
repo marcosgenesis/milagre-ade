@@ -1,8 +1,10 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
+const { realpathSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
@@ -21,6 +23,7 @@ const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { createModelCache } = require("./agents/models.cjs");
 const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
+const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
@@ -293,6 +296,18 @@ ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
+// A generated image in a chat: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), writeImage: (image) => clipboard.writeImage(image) });
+const saveImageFile = (event, file) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) });
+ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
+ipcMain.handle("image:save", (event, file) => saveImageFile(event, file));
+ipcMain.handle("image:menu", (event, file) => {
+  Menu.buildFromTemplate([
+    { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
+    { label: "Save Image…", click: () => void saveImageFile(event, file).catch(() => {}) },
+  ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
 // Installed editors are looked up once per run.
 let editorsFound = null;
 // Looked up after the login shell filled in PATH, so CLIs from a Finder launch are found.
@@ -369,8 +384,32 @@ const agents = new SessionManager({
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
   onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
+  onTurnStarted: () => ports.wake(),
   send: (chatId, event) => void chats.receive(chatId, event),
 });
+
+// lsof reports real paths (/private/var for /var).
+function realCwd(cwd) {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
+// The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
+const ports = new PortWatcher({
+  roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
+  publish: (next) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      window.webContents.send("agent:ports", next);
+    }
+  },
+});
+ipcMain.handle("agent:ports", () => ports.snapshot());
+// The renderer is untrusted: only a pid the chat's port list shows can be stopped.
+ipcMain.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
 async function startAgentTurn(request) {
   const images = decodeImages(request.images);
@@ -590,6 +629,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   agentsClosed = true;
   keepAwake.quit();
+  ports.close();
   // Agents run in their own process groups, so stop them before the app exits.
   // Their cancelled turns are saved before the app exits.
   Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());

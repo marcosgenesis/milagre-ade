@@ -226,6 +226,12 @@ test("a step starts where the reply's text has got to, streams its output, and e
   assert.equal(fold([{ type: "step-completed", id: "nope", status: "done" }], ended).runs, ended);
 });
 
+test("a step that ends with a file keeps it", () => {
+  const image = { id: "ig", kind: "image" as const, title: "Generating an image" };
+  const { runs } = fold([{ type: "step-started", step: image }, { type: "step-completed", id: "ig", status: "done", title: "Generated an image", file: "/tmp/ig.png" }]);
+  assert.equal(runs[key(1)].steps[0].file, "/tmp/ig.png");
+});
+
 test("a step that ends without a detail keeps none, and a new title replaces the first", () => {
   const read = { id: "r1", kind: "read" as const, title: "Read `app.js`", detail: "$ cat app.js\n" };
   const { runs } = fold([

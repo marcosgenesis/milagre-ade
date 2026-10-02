@@ -1,5 +1,6 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
@@ -290,6 +291,18 @@ ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
 });
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
+
+// A generated image in a chat: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), writeImage: (image) => clipboard.writeImage(image) });
+const saveImageFile = (event, file) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) });
+ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
+ipcMain.handle("image:save", (event, file) => saveImageFile(event, file));
+ipcMain.handle("image:menu", (event, file) => {
+  Menu.buildFromTemplate([
+    { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
+    { label: "Save Image…", click: () => void saveImageFile(event, file).catch(() => {}) },
+  ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
 
 // Installed editors are looked up once per run.
 let editorsFound = null;

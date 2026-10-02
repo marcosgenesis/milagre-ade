@@ -50,17 +50,18 @@ test("a reply's last text is its answer; everything before it is activity, in or
       { type: "text", text: "\n\nNow editing." },
       { type: "step", step: step("c", 23) },
     ],
+    images: [],
     answer: "\n\nDone.",
   });
 });
 
 test("a reply without steps is all answer; steps alone are all activity", () => {
-  assert.deepEqual(replyActivity("Hello"), { setup: [], activity: [], answer: "Hello" });
-  assert.deepEqual(replyActivity("", [step("a", 0)]), { setup: [], activity: [{ type: "step", step: step("a", 0) }], answer: "" });
+  assert.deepEqual(replyActivity("Hello"), { setup: [], activity: [], images: [], answer: "Hello" });
+  assert.deepEqual(replyActivity("", [step("a", 0)]), { setup: [], activity: [{ type: "step", step: step("a", 0) }], images: [], answer: "" });
 });
 
 test("text before steps that end the reply is still its answer", () => {
-  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), { setup: [], activity: [{ type: "step", step: step("a", 15) }], answer: "Running it now." });
+  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), { setup: [], activity: [{ type: "step", step: step("a", 15) }], images: [], answer: "Running it now." });
 });
 
 test("the summary counts thinking time, files, searches, commands and tools", () => {
@@ -99,9 +100,19 @@ test("the worktree setup is pulled out of the activity and left out of its summa
   assert.deepEqual(replyActivity("Done.", steps), {
     setup: [setupStep()],
     activity: [{ type: "step", step: thought("t", 0, 4_000) }, { type: "step", step: step("a", 0) }],
+    images: [],
     answer: "Done.",
   });
   assert.deepEqual(activitySummary(steps), { text: "Thought for 4s · ran 1 command", failed: 0 });
   assert.deepEqual(activitySummary([setupStep("failed")]), { text: "", failed: 0 });
-  assert.deepEqual(replyActivity("", [setupStep()]), { setup: [setupStep()], activity: [], answer: "" });
+  assert.deepEqual(replyActivity("", [setupStep()]), { setup: [setupStep()], activity: [], images: [], answer: "" });
+});
+
+test("replyActivity: generated images come back apart from the activity", () => {
+  const image: ChatStep = { id: "ig", kind: "image", title: "Generated an image", status: "done", offset: 5, file: "/tmp/ig.png" };
+  const read: ChatStep = { id: "r", kind: "read", title: "Read `a.ts`", status: "done", offset: 0 };
+  const { activity, images, answer } = replyActivity("Done. Here it is.", [read, image]);
+  assert.deepEqual(images, [image]);
+  assert.deepEqual(activity, [{ type: "step", step: read }]);
+  assert.equal(answer, "Done. Here it is.");
 });

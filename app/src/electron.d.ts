@@ -80,6 +80,12 @@ declare global {
       readPullRequests: (worktreePath: string, refs: string[]) => Promise<Array<PullRequest | null>>;
       /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
       revealInFolder: (folder: string) => Promise<void>;
+      /** Puts a generated image on the clipboard. */
+      copyImage: (file: string) => Promise<void>;
+      /** Saves a copy of a generated image where the user picks; the saved path, or null when cancelled. */
+      saveImage: (file: string) => Promise<string | null>;
+      /** The image's right-click menu: Copy Image and Save Image…. */
+      showImageMenu: (file: string) => Promise<void>;
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
       git: {
         changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;

@@ -127,6 +127,17 @@ test("Codex: MCP tools, web searches and images", () => {
   assert.deepEqual(codexStep({ type: "dynamicToolCall", id: "exec-7", tool: "lookup", arguments: {}, status: "inProgress" }), { id: "exec-7", kind: "other", title: "Used `lookup`" });
 });
 
+test("Codex: a generated image is an image step that ends with its file and prompt", () => {
+  const item = { type: "imageGeneration", id: "ig_1", status: "in_progress", revisedPrompt: null, result: "", failure: null };
+  assert.deepEqual(codexStep(item), { id: "ig_1", kind: "image", title: "Generating an image" });
+  const done = { ...item, status: "completed", revisedPrompt: "A lighthouse at dusk", result: "iVBOR", savedPath: "/home/.codex/generated_images/ig_1.png" };
+  assert.deepEqual(codexStepResult(done), { id: "ig_1", status: "done", title: "Generated an image", detail: "A lighthouse at dusk", file: "/home/.codex/generated_images/ig_1.png" });
+  const limited = { ...item, status: "failed", failure: { type: "usageLimitExceeded", limitId: "images", resetsAt: null } };
+  assert.deepEqual(codexStepResult(limited), { id: "ig_1", status: "failed", title: "Couldn't generate an image", note: "image limit reached" });
+  // Without a file or the image itself there is nothing to show.
+  assert.equal(codexStepResult({ ...item, status: "completed" }).status, "failed");
+});
+
 test("Codex: messages, reasoning and other items are not steps", () => {
   for (const type of ["agentMessage", "reasoning", "userMessage", "plan", "contextCompaction", "somethingNew"]) assert.equal(codexStep({ type, id: "x" }), null);
 });

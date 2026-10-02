@@ -2,7 +2,7 @@ import { SubagentTrack } from "./agents/SubagentTrack";
 import type { AgentPort, AgentTask, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -35,6 +35,8 @@ import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
 import { extractOutdatedProvider } from "../lib/cli-status";
+import { splitFences } from "../lib/message-fences";
+import { CodeBlock } from "./markdown/CodeBlock";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -46,6 +48,18 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
  * A reply: its activity (thinking, tool steps and the text between them) folded into one block, the images it generated, then its answer.
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
+/** What the user typed, as typed; only closed ``` fences render as code (diff comments send their snippets in them). */
+function UserBody({ body }: { body: string }) {
+  const parts = useMemo(() => splitFences(body), [body]);
+  return (
+    <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+      {parts.map((part, index) => part.kind === "text"
+        ? <Fragment key={index}>{part.text}</Fragment>
+        : <div key={index} className="whitespace-normal"><CodeBlock code={part.code} fence={part.fence || undefined} diff /></div>)}
+    </div>
+  );
+}
+
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
   const { setup, activity, images, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
@@ -103,7 +117,7 @@ const MessageSection = memo(function MessageSection({
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
         <Attachments images={message.images} files={message.files} />
         {isUser ? (
-          <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
+          <UserBody body={message.body} />
         ) : recommendation ? (
           <>
             <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />

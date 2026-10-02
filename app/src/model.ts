@@ -295,9 +295,19 @@ export interface Subagent {
   transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
 }
 
+/** One item of the agent's to-do list. */
+export interface AgentTask {
+  id: string;
+  content: string;
+  /** Present-continuous wording for while the task is in progress ("Running tests"). */
+  activeForm?: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 export type AgentEvent =
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
+  | { type: "tasks-updated"; tasks: AgentTask[] }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Archive02Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -8,6 +8,7 @@ import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import Tooltip from "../primitives/Tooltip";
+import { useAnchoredPopover } from "./useAnchoredPopover";
 
 const labels: Record<Subagent["status"], string> = { initializing: "Starting", running: "Running", waiting: "Waiting", completed: "Completed", failed: "Failed", cancelled: "Stopped", unknown: "Status unavailable" };
 function elapsed(agent: Subagent, now: number) {
@@ -45,48 +46,17 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
   const [opened, setOpened] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [archived, setArchived] = useState(false);
-  const [bounds, setBounds] = useState({ left: 12, bottom: 60, width: 420, maxHeight: 320 });
   const visible = agents.filter(agent => !agent.archived);
   const archivedCount = agents.length - visible.length;
   const rows = agents.filter(agent => Boolean(agent.archived) === archived);
   const child = rows.find(agent => agent.id === selected);
   const close = () => { setOpened(false); trigger.current?.focus(); };
 
-  useLayoutEffect(() => {
-    if (!opened) return;
-    const position = () => {
-      const rect = trigger.current?.getBoundingClientRect();
-      if (!rect) return;
-      const width = Math.min(child ? 480 : 420, window.innerWidth - 24);
-      setBounds({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8, width, maxHeight: Math.max(60, rect.top - 20) });
-    };
-    position();
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    return () => { window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
-  }, [opened, Boolean(child)]);
-
-  useEffect(() => {
-    if (!opened) return;
-    const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLButtonElement>("button")?.focus());
-    const outside = (event: PointerEvent) => {
-      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpened(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpened(false);
-      trigger.current?.focus();
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape, true);
-    return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
-  }, [opened]);
+  const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: child ? 480 : 420 });
 
   if (!agents.length) return null;
   const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
-  return <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end px-3" data-slot="subagent-track">
+  return <div className="flex" data-slot="subagent-track">
     <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface h-6 px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2">
       {visible.some(subagentActive) && <SpinnerRing size={12} />}
       Subagents <span className="tabular-nums">{visible.length}</span>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -290,42 +290,132 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
 
   const locked = found?.source === "worktreeinclude";
   return (
-    <Group title="New worktrees">
-      <div className="grid gap-2 px-4 py-3">
-        <label htmlFor="files-to-copy" className="grid gap-0.5">
-          <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
-          <span className="text-[12px] text-ink-3">
-            Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
-          </span>
-        </label>
-        <textarea
-          id="files-to-copy"
-          rows={5}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          readOnly={locked}
-          disabled={text === null && !loadError}
-          value={locked ? found.worktreeInclude ?? "" : text ?? ""}
-          placeholder={DEFAULT_FILES_TO_COPY}
-          onChange={(event) => edit(event.target.value)}
-          className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
-        />
-        {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
-        {loadError ? (
-          <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
-        ) : (
-          <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
-        )}
-        {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
-      </div>
-    </Group>
+    <div className="grid gap-2 px-4 py-3">
+      <label htmlFor="files-to-copy" className="grid gap-0.5">
+        <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
+        <span className="text-[12px] text-ink-3">
+          Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
+        </span>
+      </label>
+      <textarea
+        id="files-to-copy"
+        rows={5}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        readOnly={locked}
+        disabled={text === null && !loadError}
+        value={locked ? found.worktreeInclude ?? "" : text ?? ""}
+        placeholder={DEFAULT_FILES_TO_COPY}
+        onChange={(event) => edit(event.target.value)}
+        className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
+      />
+      {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
+      {loadError ? (
+        <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
+      ) : (
+        <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
+      )}
+      {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
+    </div>
+  );
+}
+
+const ipcMessage = (error: unknown) => (error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
+
+/* ─────────────────────────────────────────────────────────
+ * SETUP COMMAND
+ * Runs once in each new worktree, before the chat's first turn
+ * (npm ci, uv sync). "setup" in .milagre/worktree.json at the
+ * repo root wins, like .worktreeinclude does for the files.
+ * ───────────────────────────────────────────────────────── */
+function SetupCommand({ projectPath }: { projectPath: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<WorktreeSetupSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<string | null>(null);
+  const saveTimer = useRef<number | null>(null);
+
+  const flush = () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const next = pending.current;
+    pending.current = null;
+    if (next === null) return;
+    window.milagre.saveWorktreeSetup(projectPath, next).then((saved) => {
+      setResolved(saved);
+      setError(null);
+    }, (failure) => setError(`Couldn't save: ${ipcMessage(failure)}`));
+  };
+
+  // .milagre/worktree.json can change in an editor while Settings is open.
+  useEffect(() => {
+    const onFocus = () => void window.milagre.readWorktreeSetup(projectPath).then(setResolved, () => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [projectPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setText(null);
+    setResolved(null);
+    setError(null);
+    window.milagre.readWorktreeSetup(projectPath).then((saved) => {
+      if (cancelled) return;
+      setText(saved.setupCommand);
+      setResolved(saved);
+    }, (failure) => {
+      if (!cancelled) setError(`Couldn't read the setup command: ${ipcMessage(failure)}`);
+    });
+    // Leaving Settings saves what was typed last.
+    return () => {
+      cancelled = true;
+      flush();
+    };
+  }, [projectPath]);
+
+  const edit = (value: string) => {
+    setText(value);
+    pending.current = value;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flush, 600);
+  };
+
+  const locked = resolved?.source === "repo";
+  return (
+    <div className="grid gap-2 px-4 py-3">
+      <label htmlFor="setup-command" className="grid gap-0.5">
+        <span className="text-[13.5px] font-medium text-ink">Setup command</span>
+        <span className="text-[12px] text-ink-3">Runs once in each new worktree before the agent starts, e.g. npm ci.</span>
+      </label>
+      <input
+        id="setup-command"
+        type="text"
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        readOnly={locked}
+        disabled={text === null && !error}
+        value={locked ? resolved.command ?? "" : text ?? ""}
+        placeholder={locked ? "Nothing runs" : "npm ci"}
+        onChange={(event) => edit(event.target.value)}
+        className={`h-9 w-full rounded-control border border-line px-3 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
+      />
+      {locked && <p data-setup-command-locked className="text-[12px] text-ink-2">.milagre/worktree.json in the repo wins. Edit its "setup" to change the command.</p>}
+      {resolved?.note && <p data-setup-command-note className="break-words text-[12px] text-red">{resolved.note}</p>}
+      {error && <p data-setup-command-error className="break-words text-[12px] text-red">{error}</p>}
+    </div>
   );
 }
 
 function ProjectSettings({ projectPath }: { projectPath?: string }) {
   if (!projectPath) return <p className="mt-6 text-[13px] text-ink-3">Open a project to change its settings.</p>;
-  return <FilesToCopy projectPath={projectPath} />;
+  return (
+    <Group title="New worktrees">
+      <FilesToCopy projectPath={projectPath} />
+      <SetupCommand projectPath={projectPath} />
+    </Group>
+  );
 }
 
 export function SettingsPanel({ section, projectPath, models }: { section: SettingsSection; projectPath?: string; models: ModelOption[] }) {

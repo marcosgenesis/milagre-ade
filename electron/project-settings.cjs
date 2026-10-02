@@ -10,6 +10,10 @@ function normalizeFilesToCopy(value) {
   return value.filter((line) => typeof line === "string").map((line) => line.trim()).filter(Boolean);
 }
 
+function normalizeSetupCommand(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function createProjectSettings(file) {
   let queue = Promise.resolve();
 
@@ -33,30 +37,46 @@ function createProjectSettings(file) {
     }
   }
 
+  // Saves run one at a time. `change` edits the project's entry; an entry left empty is removed.
+  function update(projectPath, change) {
+    const save = queue.catch(() => {}).then(async () => {
+      const data = await read({ strict: true });
+      const key = path.resolve(projectPath);
+      const entry = { ...(data.projects[key] ?? {}) };
+      change(entry);
+      if (Object.keys(entry).length > 0) data.projects[key] = entry;
+      else delete data.projects[key];
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      const temporary = `${file}.${process.pid}.tmp`;
+      await fs.writeFile(temporary, JSON.stringify(data, null, 2));
+      await fs.rename(temporary, file);
+    });
+    queue = save;
+    return save;
+  }
+
   return {
     async get(projectPath) {
       const entry = (await read({ strict: false })).projects[path.resolve(projectPath)] ?? {};
-      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy) };
+      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand) };
     },
-    // Saves run one at a time; an empty list removes the setting, which brings the default back.
-    setFilesToCopy(projectPath, filesToCopy) {
-      const save = queue.catch(() => {}).then(async () => {
-        const data = await read({ strict: true });
-        const key = path.resolve(projectPath);
-        const lines = normalizeFilesToCopy(filesToCopy);
-        const entry = { ...(data.projects[key] ?? {}) };
+    // An empty list removes the setting, which brings the default back.
+    async setFilesToCopy(projectPath, filesToCopy) {
+      const lines = normalizeFilesToCopy(filesToCopy);
+      await update(projectPath, (entry) => {
         if (lines.length > 0) entry.filesToCopy = lines;
         else delete entry.filesToCopy;
-        if (Object.keys(entry).length > 0) data.projects[key] = entry;
-        else delete data.projects[key];
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        const temporary = `${file}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, JSON.stringify(data, null, 2));
-        await fs.rename(temporary, file);
-        return { filesToCopy: lines };
       });
-      queue = save;
-      return save;
+      return { filesToCopy: lines };
+    },
+    // An empty command removes the setting: new worktrees run nothing.
+    async setSetupCommand(projectPath, setupCommand) {
+      const command = normalizeSetupCommand(setupCommand);
+      await update(projectPath, (entry) => {
+        if (command) entry.setupCommand = command;
+        else delete entry.setupCommand;
+      });
+      return { setupCommand: command };
     },
   };
 }

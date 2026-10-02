@@ -68,7 +68,7 @@ function MessageSection({
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="h-20 w-24 rounded object-contain" /></a>)}</div>}
+        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="size-20 rounded object-contain" /></a>)}</div>}
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (

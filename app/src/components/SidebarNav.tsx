@@ -15,12 +15,14 @@ import {
   SidebarLeft01Icon,
   SidebarRight01Icon,
   SparklesIcon,
+  StopCircleIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
+import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type SwitchTarget } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
@@ -83,6 +85,12 @@ type SidebarNavProps = {
   onOpenSettings?: () => void;
   /** The project folder, for the project menu's reveal and copy path. */
   projectPath?: string;
+  /** Opens a project from the recent list in the project menu. */
+  onSwitchProject?: (path: string) => void;
+  /** The chat with a turn running in the open project: while there is one, switching projects asks first. */
+  runningChat?: string | null;
+  /** Each change opens the project menu asking about "Open project…" (⌘O while a turn runs). */
+  askToOpenProject?: number;
   onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
@@ -170,23 +178,99 @@ export function RailButton({
   );
 }
 
+// The other listed projects' avatars, looked up once per run: the lookup can ask GitHub.
+const projectImages = new Map<string, string | null>();
+
+function useProjectImages(paths: string[]) {
+  const [, setLoaded] = useState(0);
+  const key = paths.join("\n");
+  useEffect(() => {
+    let live = true;
+    for (const path of paths) {
+      if (projectImages.has(path)) continue;
+      projectImages.set(path, null);
+      window.milagre?.getProjectImage(path).then((src) => {
+        projectImages.set(path, src);
+        if (live) setLoaded((count) => count + 1);
+      }, () => {});
+    }
+    return () => { live = false; };
+  }, [key]);
+  return (path: string) => projectImages.get(path) ?? null;
+}
+
 function WorkspaceMenu({
   position,
   onClose,
   workspace,
   projectPath,
   onOpenProjectSettings,
+  projects,
+  runningChat,
+  initialAsk,
+  onSwitchProject,
+  onOpenProject,
+  onForgetProject,
 }: {
   position: { top: number; left: number };
   onClose: () => void;
   workspace: { name: string; monogram: string; image?: string | null };
   projectPath?: string;
   onOpenProjectSettings?: () => void;
+  projects: ProjectRow[];
+  runningChat: string | null;
+  /** What the menu opens asking about, if anything. */
+  initialAsk: SwitchTarget | null;
+  onSwitchProject?: (path: string) => void;
+  onOpenProject?: () => void;
+  onForgetProject?: (path: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  // While a turn runs, the project (or "Open project…") clicked first: it asks before it goes.
+  const [asking, setAsking] = useState<SwitchTarget | null>(initialAsk);
+  const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
   useLayoutEffect(() => {
-    menuRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
-  }, []);
+    const menu = menuRef.current;
+    // The question's confirm takes focus when it shows; otherwise the first row does.
+    (menu?.querySelector<HTMLElement>("[data-switch-confirm]") ?? menu?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)"))?.focus();
+  }, [asking]);
+
+  const go = (target: SwitchTarget) => {
+    onClose();
+    if (target.kind === "open") onOpenProject?.();
+    else onSwitchProject?.(target.path);
+  };
+  const choose = (target: SwitchTarget) => {
+    const step = switchStep(asking, target, runningChat);
+    if ("go" in step) go(step.go);
+    else setAsking(step.ask);
+  };
+  // Keyboard focus moves to a neighbour before the row goes.
+  const forget = (path: string, row?: HTMLElement) => {
+    if (row && document.activeElement === row) {
+      const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
+      const index = rows.indexOf(row);
+      (rows[index + 1] ?? rows[index - 1])?.focus();
+    }
+    onForgetProject?.(path);
+  };
+  const isAsking = (target: SwitchTarget) => asking !== null && runningChat !== null && sameTarget(asking, target);
+  const question = (target: SwitchTarget) => isAsking(target) && runningChat !== null && (
+    <div data-switch-question>
+      <p className="px-2 pb-1 pt-1.5 text-[12px] leading-snug text-ink-3">{switchQuestion(runningChat)}</p>
+      <button
+        data-menu-row
+        data-switch-confirm
+        role="menuitem"
+        type="button"
+        onClick={() => go(target)}
+        className="relative z-10 flex h-8 w-full items-center gap-1.5 rounded-[8px] px-2 text-left text-red outline-none focus-visible:bg-hover-2"
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center"><HugeIcon icon={StopCircleIcon} size={16} /></span>
+        <span className="min-w-0 flex-1 truncate text-[13.5px]">Stop and switch</span>
+      </button>
+    </div>
+  );
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
@@ -218,7 +302,7 @@ function WorkspaceMenu({
       aria-label={`${workspace.name} actions`}
       onKeyDown={moveFocus}
       data-workspace-menu
-      className="fixed z-50 w-64 rounded-[14px] bg-surface p-1.5 shadow-overlay"
+      className="fixed z-50 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-[14px] bg-surface p-1.5 shadow-overlay"
       style={{
         top: position.top,
         left: position.left,
@@ -246,30 +330,61 @@ function WorkspaceMenu({
           </button>
         ))}
         <div className="my-1 h-px bg-line" />
-        <button
-          data-menu-row
-          role="menuitem"
-          type="button"
-          onClick={onClose}
-          className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
-        >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
-            <WorkspaceIcon src={workspace.image} fallback={workspace.monogram} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{workspace.name}</span>
-          <span className="shrink-0 text-ink"><IconCheckmark1Small size={18} /></span>
-        </button>
+        {projects.map((row) => {
+          const target: SwitchTarget = { kind: "project", path: row.path };
+          return (
+            <div key={row.path} className="group/project relative">
+              <button
+                data-menu-row
+                data-project-row={row.path}
+                role="menuitemradio"
+                aria-checked={row.current}
+                type="button"
+                title={row.path}
+                onClick={() => (row.current ? onClose() : choose(target))}
+                onKeyDown={(event) => {
+                  if (row.current || (event.key !== "Delete" && event.key !== "Backspace")) return;
+                  event.preventDefault();
+                  forget(row.path, event.currentTarget);
+                }}
+                className={`relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking(target) ? "bg-hover-2" : ""}`}
+              >
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
+                  <WorkspaceIcon src={row.current ? workspace.image : imageOf(row.path)} fallback={row.initial} />
+                </span>
+                <span className={`min-w-0 flex-1 truncate text-[13.5px] text-ink ${row.current ? "font-medium" : "group-hover/project:pr-6"}`}>{row.name}</span>
+                {row.current && <span className="shrink-0 text-ink"><IconCheckmark1Small size={18} /></span>}
+              </button>
+              {!row.current && (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  data-forget-project={row.path}
+                  aria-label={`Remove ${row.name} from the list`}
+                  title="Remove from the list"
+                  onClick={() => forget(row.path)}
+                  className="absolute right-1.5 top-2 z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 opacity-0 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink group-hover/project:opacity-100"
+                >
+                  <IconCrossSmall size={14} />
+                </button>
+              )}
+              {question(target)}
+            </div>
+          );
+        })}
         <div className="my-1 h-px bg-line" />
         <button
           data-menu-row
+          data-open-project
           role="menuitem"
           type="button"
-          onClick={onClose}
-          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
+          onClick={() => choose({ kind: "open" })}
+          className={`relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking({ kind: "open" }) ? "bg-hover-2" : ""}`}
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">New workspace</span>
+          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
+        {question({ kind: "open" })}
       </GlideMenu>
     </div>,
     document.body,
@@ -289,6 +404,9 @@ export default function SidebarNav({
   onOpenSettings,
   projectPath,
   onOpenProjectSettings,
+  onSwitchProject,
+  runningChat = null,
+  askToOpenProject = 0,
   recents = DEFAULT_RECENTS,
   chatActions = {},
   usage,
@@ -297,6 +415,8 @@ export default function SidebarNav({
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
+  const [workspaceAsk, setWorkspaceAsk] = useState<SwitchTarget | null>(null);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
@@ -305,6 +425,38 @@ export default function SidebarNav({
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
   const visibleRecents = recents.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()));
   const workspace = { name: workspaceName, image: workspaceImage, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
+  const projects = projectPath ? projectRows({ recent: recentProjects, currentPath: projectPath, currentName: workspaceName }) : [];
+
+  // Read on mount and again each time the menu opens, so a folder that's gone drops out.
+  useEffect(() => {
+    if (!projectPath) return;
+    let live = true;
+    window.milagre?.listRecentProjects?.().then((list) => { if (live) setRecentProjects(list); }, () => {});
+    return () => { live = false; };
+  }, [projectPath, workspaceOpen]);
+
+  const forgetProject = (path: string) => {
+    setRecentProjects((list) => list.filter((project) => project.path !== path));
+    window.milagre?.forgetProject?.(path).then(setRecentProjects, () => {});
+  };
+
+  const openWorkspaceMenu = (ask: SwitchTarget | null = null) => {
+    const button = workspaceButtonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    // Collapsed, the menu opens beside the rail instead of covering it.
+    setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
+    setWorkspaceAsk(ask);
+    setWorkspaceOpen(true);
+  };
+
+  // ⌘O while a turn runs: the menu opens with "Open project…" asking first.
+  const seenAsk = useRef(askToOpenProject);
+  useEffect(() => {
+    if (askToOpenProject === seenAsk.current) return;
+    seenAsk.current = askToOpenProject;
+    openWorkspaceMenu({ kind: "open" });
+  }, [askToOpenProject]);
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -385,14 +537,7 @@ export default function SidebarNav({
             type="button"
             aria-expanded={workspaceOpen}
             aria-label={workspace.name}
-            onClick={() => {
-              if (!workspaceOpen && workspaceButtonRef.current) {
-                const rect = workspaceButtonRef.current.getBoundingClientRect();
-                // Collapsed, the menu opens beside the rail instead of covering it.
-                setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
-              }
-              setWorkspaceOpen((open) => !open);
-            }}
+            onClick={() => (workspaceOpen ? setWorkspaceOpen(false) : openWorkspaceMenu())}
             className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
           >
             <span className="sidebar-logo flex size-5 shrink-0 items-center justify-center text-ink">
@@ -406,7 +551,21 @@ export default function SidebarNav({
             </span>
           </button>
 
-          {workspaceOpen && <WorkspaceMenu position={workspacePosition} workspace={workspace} projectPath={projectPath} onOpenProjectSettings={onOpenProjectSettings} onClose={() => setWorkspaceOpen(false)} />}
+          {workspaceOpen && (
+            <WorkspaceMenu
+              position={workspacePosition}
+              workspace={workspace}
+              projectPath={projectPath}
+              onOpenProjectSettings={onOpenProjectSettings}
+              projects={projects}
+              runningChat={runningChat}
+              initialAsk={workspaceAsk}
+              onSwitchProject={onSwitchProject}
+              onOpenProject={onOpenProject}
+              onForgetProject={forgetProject}
+              onClose={() => setWorkspaceOpen(false)}
+            />
+          )}
 
         </div>
 
@@ -510,7 +669,7 @@ export default function SidebarNav({
 
         <div className={`flex border-t border-line py-1.5 ${usage ? "mt-1.5" : "mt-3"} ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}>
           <Tooltip label="Add project" shortcut="⌘O">
-            <button type="button" aria-label="Add project" onClick={onOpenProject} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
+            <button type="button" aria-label="Add project" onClick={() => (runningChat ? openWorkspaceMenu({ kind: "open" }) : onOpenProject?.())} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
               <IconFolderAdd size={17} />
             </button>
           </Tooltip>

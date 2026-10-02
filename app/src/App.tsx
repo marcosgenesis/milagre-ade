@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   ConnectionType,
   ChatMessage,
@@ -37,6 +38,8 @@ import { DotBackground } from "./components/DotBackground";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
+import { runningChatTitle } from "./lib/project-list";
+import { changeProject } from "./lib/project-switch";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
@@ -253,6 +256,11 @@ function App() {
         };
       });
   }, [state, waiting, running]);
+  // Switching projects asks first while a turn runs here (the project menu says which chat).
+  const runningChat = useMemo(() => runningChatTitle(chats), [chats]);
+  const runningChatRef = useRef(runningChat);
+  runningChatRef.current = runningChat;
+  const [askToOpenProject, setAskToOpenProject] = useState(0);
 
   // Chat row actions build on the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: Parameters<typeof patchSession>[2]) {
@@ -380,15 +388,35 @@ function App() {
     setSelectedWorktreeId(sessionId !== null ? nextState.sessions[sessionId]?.worktree_id ?? null : sortedWorktrees(nextState)[0]?.id ?? null);
   }
 
-  async function openProject() {
-    const nextProject = await window.milagre.openProject();
-    if (!nextProject) return;
-    setProject(nextProject);
+  // Rendered at once, so an agent event that arrives meanwhile can't be saved against the wrong project.
+  function adoptProject(nextProject: OpenProject) {
     const nextState = nextProject.state ?? createInitialState(nextProject.name, nextProject.path);
-    setState(nextState);
-    selectInitialChat(nextState);
-    setDraft("");
+    flushSync(() => {
+      setProject(nextProject);
+      setState(nextState);
+      selectInitialChat(nextState);
+      setDraft("");
+    });
   }
+
+  // Replaces the open project. Its running turns are stopped only once the next project has loaded (the menu
+  // asked first), and the switch waits for them, so each reply so far is saved in its own chat.
+  const switching = useRef(false);
+  async function replaceProject(load: () => Promise<OpenProject | null>) {
+    if (switching.current) return;
+    switching.current = true;
+    try {
+      await changeProject({ currentPath: projectRef.current?.path, load, stop: agentRuns.stopProject, adopt: adoptProject });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+    } finally {
+      switching.current = false;
+    }
+  }
+
+  const openProject = () => replaceProject(() => window.milagre.openProject());
+  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
 
   // Where a message goes, without building state: an open chat keeps its session, a new local chat
   // (session null) gets one from the latest state at commit time, and a new chat in "New worktree"
@@ -525,7 +553,11 @@ function App() {
         startNewChat();
       } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
-        void openProject();
+        // While a turn runs, the project menu opens and asks first.
+        if (runningChatRef.current) {
+          setView("chat");
+          setAskToOpenProject((count) => count + 1);
+        } else void openProject();
       }
     }
 
@@ -600,6 +632,9 @@ function App() {
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
         projectPath={project.path}
+        onSwitchProject={(path) => void switchProject(path)}
+        runningChat={runningChat}
+        askToOpenProject={askToOpenProject}
         onOpenProjectSettings={() => { setSettingsSection("project"); setView("settings"); }}
         usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
       />

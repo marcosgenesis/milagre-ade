@@ -19,7 +19,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
-import { ComposerNotice } from "./ComposerNotice";
+import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
@@ -491,7 +491,7 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
-        {notice && <ComposerNotice onDismiss={onDismissNotice}>{notice}</ComposerNotice>}
+        {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
         {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
         <PromptComposer

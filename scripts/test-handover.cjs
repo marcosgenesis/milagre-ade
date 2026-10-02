@@ -6,7 +6,7 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { HandoverRow, HandoverLinkBar, HandoverFromLabel, HandoverNote, HandoverBriefChip } from "/src/components/Handover";
-import { ComposerNotice } from "/src/components/ComposerNotice";
+import { Notice } from "/src/components/Notice";
 import "/src/styles.css";
 function Fixture() {
   const [opened, setOpened] = useState(null);
@@ -21,7 +21,7 @@ function Fixture() {
     <section data-shot="row"><HandoverRow provider="codex" blocked={blocked} onClick={() => setOpened("handover")} /></section>
     <section data-shot="to"><HandoverLinkBar to={{ id: 7, title: "Fix login redirect", provider: "codex" }} onOpen={setOpened} /></section>
     <section data-shot="note">{noteOpen && <HandoverNote from="codex" to="claude" permissionMode="auto" onDismiss={() => setNoteOpen(false)} />}</section>
-    <section data-shot="notice">{noticeOpen && <ComposerNotice data-plain-notice onDismiss={() => setNoticeOpen(false)}>The worktree's setup command failed.</ComposerNotice>}</section>
+    <section data-shot="notice">{noticeOpen && <Notice data-plain-notice onDismiss={() => setNoticeOpen(false)}>The worktree's setup command failed.</Notice>}</section>
     <section data-shot="brief" data-editable-brief><HandoverBriefChip brief={brief} onSave={async (text) => setBrief(text)} /></section>
     <section data-read-only-brief><HandoverBriefChip brief="# Sent brief" /></section>
     <section data-shot="from" style={{ display: "flex", flexDirection: "column" }}><HandoverFromLabel from={{ id: 3, title: "Fix login redirect" }} onOpen={setOpened} /></section>

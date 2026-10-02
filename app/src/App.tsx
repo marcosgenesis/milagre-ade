@@ -55,6 +55,8 @@ import type { SettingsSection } from "./components/Settings";
 import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
+// Notice above is editor-links' toast; this is the dismissable notice card.
+import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
@@ -856,12 +858,7 @@ function App() {
         </AnimatePresence>
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-            {notice && (
-              <div role="status" data-notice className="mx-auto mt-2 mb-1 flex w-full max-w-2xl items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay">
-                <span className="min-w-0 flex-1 break-words">{notice}</span>
-                <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-xs font-medium text-ink-3 hover:text-ink">Dismiss</button>
-              </div>
-            )}
+            {notice && <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>{notice}</NoticeCard>}
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}

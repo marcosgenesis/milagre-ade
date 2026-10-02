@@ -5,7 +5,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, Cancel01Icon, File01Icon } from "@hugeicons/core-free-icons";
 import { handoverNotes, providerLabel } from "../lib/handover";
 import { ProviderLogo } from "./ProviderLogo";
-import { ComposerNotice } from "./ComposerNotice";
+import { Notice } from "./Notice";
 import { Markdown } from "./markdown/Markdown";
 
 /** Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context. */
@@ -50,11 +50,11 @@ export function HandoverFromLabel({ from, onOpen }: { from: { id: number; title:
 /** Above the composer of a handed-over chat before its first message: what stays behind and how the permission mode behaves here. */
 export function HandoverNote({ from, to, permissionMode, onDismiss }: { from: ModelProvider; to: ModelProvider; permissionMode: PermissionMode; onDismiss: () => void }) {
   return (
-    <ComposerNotice data-handover-note onDismiss={onDismiss}>
+    <Notice data-handover-note onDismiss={onDismiss}>
       <ul className="flex flex-col gap-1">
         {handoverNotes({ from, to, permissionMode }).map((line) => <li key={line}>{line}</li>)}
       </ul>
-    </ComposerNotice>
+    </Notice>
   );
 }
 

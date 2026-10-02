@@ -220,7 +220,7 @@ function replyBody(text: string, event: AgentEvent, hasSteps: boolean) {
     const failure = event.notice ? event.message : `Agent error: ${event.message}`;
     return reply ? `${reply}\n\n${failure}` : failure;
   }
-  if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
+  if (event.type === "turn-cancelled") return reply ? `${reply}\n\nWhat should I work on instead?` : "What should I work on instead?";
   return reply || (hasSteps ? "" : "The agent finished without a reply.");
 }
 

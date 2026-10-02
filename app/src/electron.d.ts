@@ -9,6 +9,7 @@ export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downlo
 declare global {
   interface Window {
     milagre: {
+      getPathForFile: (file: File) => string;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;

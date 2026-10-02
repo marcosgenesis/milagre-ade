@@ -21,7 +21,7 @@ function Fixture() {
     body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
   }));
   return <div style={{ height: "100%", padding: 12 }}>
-    <ChatComposer messages={messages} sessions={{ "1": { id: 1, worktree_id: 1, agent_name: "main", status: "Stopped" } }}
+    <ChatComposer messages={messages}
       imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={false} sendBlocked={false}
       selectedModel={MODEL_CATALOG[0]} onModelChange={noop}
@@ -51,7 +51,7 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
-    for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 8, ""]]) {
+    for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 18, ""]]) {
       window.setContentSize(800, height);
       await evaluate(`window.setMessageCount(${count})`);
       await evaluate(`window.setDraft(${JSON.stringify(draft)})`);

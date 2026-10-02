@@ -63,6 +63,8 @@ test("starts threads and turns with Milagre's identity, instructions and policy"
   assert.equal(find("turn/start").approvalPolicy, "never");
   assert.deepEqual(find("turn/start").sandboxPolicy, { type: "dangerFullAccess" });
   assert.deepEqual(find("turn/start").input, [{ type: "text", text: "Hi", text_elements: [] }]);
+  // Reasoning summaries are what the reply's thinking steps show.
+  assert.equal(find("turn/start").summary, "auto");
 });
 
 test("Ask asks about untrusted commands, Auto only about leaving the sandbox", async (t) => {
@@ -387,7 +389,7 @@ test("a turn Codex announces that this session isn't running is ignored", async 
   assert.equal(events.filter((event) => event.type === "turn-started").length, 1);
 });
 
-test("commands and file changes become steps, in order with the reply", async (t) => {
+test("commands, reasoning and file changes become steps, in order with the reply", async (t) => {
   const { session, events } = codex(t, { scenario: "steps" });
   await session.startTurn(TURN);
   await ended(events);
@@ -395,6 +397,7 @@ test("commands and file changes become steps, in order with the reply", async (t
     { type: "step-started", step: { id: "exec-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" } },
     { type: "step-output", id: "exec-1", text: "ok 2\n" },
     { type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" },
+    { type: "step-started", step: { id: "rs-1", kind: "thinking", title: "Thinking" } },
     { type: "step-started", step: { id: "exec-2", kind: "edit", title: "Created `notes.txt`" } },
     { type: "step-completed", id: "exec-2", status: "done", title: "Created `notes.txt`", detail: "--- /repo/notes.txt\n+hello\n" },
     { type: "text-delta", messageId: "turn-1", text: "Done" },

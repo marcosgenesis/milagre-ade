@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Add01Icon,
@@ -12,20 +12,21 @@ import {
   GitForkIcon,
   LaptopIcon,
   Link01Icon,
-  Message01Icon,
 } from "@hugeicons/core-free-icons";
 import type { EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { isAttachableImage, MAX_IMAGES } from "./usePastedImages";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
-import { parseRecommendation, RecommendationCard } from "./agents/recommendation-card";
-import { StepRow } from "./agents/StepRow";
+import { RecommendationCard } from "./agents/recommendation-card";
+import { parseRecommendation } from "../lib/recommendation";
+import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
-import { replyParts } from "../lib/reply-parts";
+import { replyActivity } from "../lib/reply-parts";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -33,40 +34,32 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-function StepGroup({ steps, waitingStepIds }: { steps: ChatStep[]; waitingStepIds: string[] }) {
-  return <div className="-mx-1.5 my-1 flex flex-col">{steps.map((step) => <StepRow key={step.id} step={step} waiting={waitingStepIds.includes(step.id)} />)}</div>;
-}
-
-/** A reply's text with its tool steps where they happened. */
+/** A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer. */
 function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; waitingStepIds: string[] }) {
+  const { activity, answer } = replyActivity(body, steps);
   return (
     <>
-      {replyParts(body, steps).map((part, index) => (part.type === "text"
-        ? <Markdown key={index} text={streaming ? closeOpenMarkdown(part.text) : part.text} />
-        : <StepGroup key={index} steps={part.steps} waitingStepIds={waitingStepIds} />))}
+      <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
+      {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
     </>
   );
 }
 
 function MessageSection({
   message,
-  session,
   isUser,
-  modelName,
   onRecommendationSelect,
   streaming = false,
   waitingStepIds = [],
 }: {
   message: AppChatMessage;
-  session?: AgentSession;
   isUser: boolean;
-  modelName: string;
   onRecommendationSelect: (option: string) => void;
   streaming?: boolean;
   /** Steps whose approval card is open. */
   waitingStepIds?: string[];
 }) {
-  const recommendation = !isUser ? parseRecommendation(message.body) : null;
+  const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const steps = message.steps ?? [];
   return (
     <article
@@ -76,19 +69,16 @@ function MessageSection({
       className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,filter,transform] duration-300 ${isUser ? "items-end pl-12" : ""}`}
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
-      <div className={`flex items-center gap-1 text-[12px] leading-[1.3] ${isUser ? "justify-end" : ""}`}>
-        {!isUser && <span className="flex size-5 items-center justify-center rounded-chip bg-inset text-ink-2"><Icon icon={Message01Icon} size={12} /></span>}
-        <span className="font-medium text-ink">{isUser ? "You" : session?.agent_name ?? "Agent"}</span>
-        <span className="text-ink-2">{isUser ? modelName : "Context aware"}</span>
-      </div>
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name}><img src={image.dataUrl} alt={image.name} className="max-h-60 max-w-full rounded-lg object-contain" /></a>)}</div>}
+        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="size-20 rounded object-contain" /></a>)}</div>}
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
           <>
-            {steps.length > 0 && <StepGroup steps={steps} waitingStepIds={waitingStepIds} />}
-            <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
+            <div className={recommendation.intro ? "mt-2" : undefined}>
+              <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            </div>
           </>
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />
@@ -102,7 +92,6 @@ interface ChatComposerProps {
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
-  sessions: Record<string, AgentSession>;
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
@@ -249,7 +238,6 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messages,
-  sessions,
   draft,
   onDraftChange,
   onSend,
@@ -295,11 +283,46 @@ export function ChatComposer({
   const isNewChat = tab === "Worktrees" && messages.length === 0 && !isSending;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
+  const [dropError, setDropError] = useState("");
   useEffect(() => {
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
+
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    event.preventDefault();
+    setDropError("");
+
+    const imageSlots = Math.max(0, MAX_IMAGES - imageDraft.images.length);
+    const images: File[] = [];
+    const pathFiles: File[] = [];
+    for (const file of files) {
+      if (isAttachableImage(file) && images.length < imageSlots) images.push(file);
+      else pathFiles.push(file);
+    }
+    void imageDraft.addFiles(images);
+
+    const paths: string[] = [];
+    for (const file of pathFiles) {
+      try {
+        const path = window.milagre.getPathForFile(file);
+        if (path) paths.push(path);
+        else setDropError("Could not get a local path for one or more dropped files.");
+      } catch {
+        setDropError("Could not get a local path for one or more dropped files.");
+      }
+    }
+    if (paths.length) onDraftChange(draft ? `${draft.trimEnd()}\n${paths.join("\n")}` : paths.join("\n"));
+    event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
+  }
+
   return (
-    <div className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}>
+    <div
+      className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
+      onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+      onDrop={handleFileDrop}
+    >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && <MessageScroller
@@ -319,9 +342,7 @@ export function ChatComposer({
               <MessageSection
                 key={message.id}
                 message={message}
-                session={sessions[String(message.session_id)]}
                 isUser={message.role === "user"}
-                modelName={message.model ?? selectedModel.name}
                 onRecommendationSelect={onRecommendationSelect}
               />
             ))}
@@ -329,9 +350,7 @@ export function ChatComposer({
             {isSending && (streamingText || streamingSteps?.length) ? (
               <MessageSection
                 message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-                session={sessions[String(messages.at(-1)?.session_id)]}
                 isUser={false}
-                modelName={workingModelName}
                 onRecommendationSelect={onRecommendationSelect}
                 streaming
                 waitingStepIds={waitingStepIds}
@@ -383,6 +402,7 @@ export function ChatComposer({
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
         />
+        {dropError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{dropError}</p>}
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>
     </div>

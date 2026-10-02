@@ -15,6 +15,7 @@
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
+    "test:sidebar-usage": "node scripts/test-sidebar-usage.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
     "test:ui": "node --test \"app/src/**/*.test.ts\"",
     "release": "semantic-release",

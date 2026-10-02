@@ -128,10 +128,10 @@ export function SidebarUsage({ usage }: { usage: UsageState }) {
             {item.windows.length === 0 ? (
               <span className="sidebar-copy ml-auto text-ink-3">—</span>
             ) : (
-              <span className="sidebar-copy ml-auto flex shrink-0 items-center gap-3">
-                {/* Fixed-width columns keep each window aligned across providers; the meter shows how full it is. */}
+              <span className="sidebar-copy ml-auto flex w-[116px] shrink-0 items-center gap-3">
+                {/* Share the meter area equally; a single window spans the full width. */}
                 {item.windows.slice(0, 2).map((entry) => (
-                  <span key={entry.id} className="flex w-[52px] flex-col items-end gap-[3px]">
+                  <span key={entry.id} className="flex min-w-0 flex-1 flex-col items-end gap-[3px]">
                     <span className="flex items-baseline gap-[3px] whitespace-nowrap leading-none">
                       <span className="text-ink">{formatPercent(shownPercent(entry.usedPercent, usageDisplay))}</span>
                       <span className="text-ink-3">{entry.shortLabel}</span>

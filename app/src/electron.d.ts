@@ -2,6 +2,7 @@ export {};
 
 import type { AttentionNotice } from "./lib/attention";
 import type { WorktreeRename } from "./lib/worktree-rename";
+import type { RecentProject } from "./lib/project-list";
 import type { AgentCliStatus, AgentModels, DiffStat, EditorInfo, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
@@ -47,6 +48,12 @@ declare global {
       openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<string | null>;
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
+      /** Projects opened lately, most recent first; folders that are gone are left out. */
+      listRecentProjects: () => Promise<RecentProject[]>;
+      /** Opens a project from the recent list. Rejects for a path that isn't listed or isn't a checkout's top folder. */
+      switchProject: (projectPath: string) => Promise<OpenProject>;
+      /** Takes a project off the recent list (its folder is untouched) and resolves to the list. */
+      forgetProject: (projectPath: string) => Promise<RecentProject[]>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;
       startTurn: (request: AgentStartTurnRequest) => Promise<{ turnId: string | null; steered: boolean }>;
       respondToPermission: (chatId: string, requestId: string, decision: PermissionDecision) => Promise<boolean>;

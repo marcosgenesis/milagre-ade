@@ -63,6 +63,8 @@ test("starts threads and turns with Milagre's identity, instructions and policy"
   assert.equal(find("turn/start").approvalPolicy, "never");
   assert.deepEqual(find("turn/start").sandboxPolicy, { type: "dangerFullAccess" });
   assert.deepEqual(find("turn/start").input, [{ type: "text", text: "Hi", text_elements: [] }]);
+  // Reasoning summaries are what the reply's thinking steps show.
+  assert.equal(find("turn/start").summary, "auto");
 });
 
 test("Ask asks about untrusted commands, Auto only about leaving the sandbox", async (t) => {

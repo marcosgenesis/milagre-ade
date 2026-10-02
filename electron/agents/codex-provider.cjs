@@ -98,6 +98,8 @@ class CodexSession {
         input: turnInput(prompt, files),
         model,
         ...(effort ? { effort } : {}),
+        // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
+        summary: "auto",
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });

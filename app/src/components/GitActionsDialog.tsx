@@ -4,7 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert02Icon, ArrowRight01Icon, Cancel01Icon, GitBranchIcon, LinkSquare02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { ModelProvider } from "../model";
 import { formatLineCount } from "../lib/chat-list";
-import { dialogMode, gitRunNote, hookFailureMessage, type GitChanges, type GitChatContext, type GitRunResult, type GitStep } from "../lib/git-dialog";
+import { dialogMode, gitRunNote, hookFailureMessage, prTargetLine, type DialogButton, type GitChanges, type GitChatContext, type GitRunResult, type GitStep } from "../lib/git-dialog";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -36,12 +36,13 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 
 const FIELD = "w-full rounded-control border border-line bg-field px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-line-strong";
 
-/** A text field that stays editable while its text is generated; the spinner sits inside it. */
-function GeneratedField({ label, value, onChange, generating, multiline, rows = 3, placeholder, mono }: {
+/** A text field that stays editable while its text is generated; the spinner sits inside it. Read-only while steps run. */
+function GeneratedField({ label, value, onChange, generating, readOnly, multiline, rows = 3, placeholder, mono }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   generating: boolean;
+  readOnly: boolean;
   multiline?: boolean;
   rows?: number;
   placeholder: string;
@@ -50,6 +51,7 @@ function GeneratedField({ label, value, onChange, generating, multiline, rows = 
   const spinner = generating && !value;
   const props = {
     value,
+    readOnly,
     "aria-label": label,
     "aria-busy": spinner,
     placeholder: spinner ? "" : placeholder,
@@ -120,6 +122,12 @@ function FileList({ changes }: { changes: Extract<GitChanges, { isRepo: true }> 
               {file.status === "added" ? "A" : file.status === "deleted" ? "D" : "M"}
             </span>
             <span className="min-w-0 flex-1 truncate font-mono text-ink">{file.path}</span>
+            {file.secret && (
+              <span data-secret className="flex shrink-0 items-center gap-1 text-[11.5px] text-orange" title="This looks like a secret. Milagre won't commit it.">
+                <Icon icon={Alert02Icon} size={12} />
+                Secret?
+              </span>
+            )}
             <span className="shrink-0 tabular-nums text-ink-3">
               {file.added > 0 && <span className="text-green">+{formatLineCount(file.added)}</span>}
               {file.added > 0 && file.removed > 0 && " "}
@@ -139,13 +147,15 @@ const BUTTON_SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-control b
  * "Commit and open PR": commits the chat's folder, pushes its branch and opens a PR, with a generated,
  * editable commit message and PR text. Milagre runs git and gh itself; the agent isn't asked.
  */
-export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToAgent, onRan }: {
+export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClose, onSendToAgent, onRan }: {
   /** The chat's folder: its worktree, or the project's checkout. */
   cwd: string;
   /** The ref the worktree started from; the repo's default branch when absent. */
   base?: string;
   provider?: ModelProvider;
   chat: GitChatContext;
+  /** The chat's agent is mid-turn: committing waits for it. */
+  turnRunning: boolean;
   onClose: () => void;
   /** Sends a message to the chat: a new turn, or a steer when a turn is running. */
   onSendToAgent: (text: string) => void;
@@ -159,16 +169,42 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
   const [changes, setChanges] = useState<GitChanges | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [fields, setFields] = useState<Fields>({ commitMessage: "", prTitle: "", prBody: "" });
+  // The values a run uses are read here at click time, not from a render's closure.
+  const fieldsRef = useRef(fields);
+  fieldsRef.current = fields;
   const [generating, setGenerating] = useState(false);
-  const [generationFailed, setGenerationFailed] = useState(false);
+  /** Which fields came back without text: the note shows under them. */
+  const [generationFailed, setGenerationFailed] = useState<{ commit: boolean; pr: boolean }>({ commit: false, pr: false });
   const [steps, setSteps] = useState<StepState[]>([]);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [result, setResult] = useState<GitRunResult>({});
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
   const [finished, setFinished] = useState(false);
 
   const repo = changes?.isRepo ? changes : null;
-  const mode = repo ? dialogMode({ hasChanges: repo.hasChanges, unpushed: repo.unpushed, prOpen: Boolean(repo.pr), onBase: repo.onBase, hasOrigin: repo.hasOrigin, ghReady: repo.ghReady, ahead: repo.ahead, base: repo.base, ghMessage: repo.ghMessage, detached: !repo.branch }) : null;
+  const modeFor = (next: Extract<GitChanges, { isRepo: true }>, agentRunning: boolean) => dialogMode({
+    hasChanges: next.hasChanges,
+    unpushed: next.unpushed,
+    prOpen: Boolean(next.pr),
+    onBase: next.onBase,
+    hasOrigin: next.hasOrigin,
+    ghReady: next.ghReady,
+    ahead: next.ahead,
+    base: next.base,
+    ghMessage: next.ghMessage,
+    detached: !next.branch,
+    commitBlocked: next.commitBlocked,
+    turnRunning: agentRunning,
+  });
+  const mode = repo ? modeFor(repo, turnRunning) : null;
+
+  // Only the dialog takes input while it's open: the app behind it is inert.
+  useEffect(() => {
+    const root = document.getElementById("root");
+    root?.setAttribute("inert", "");
+    return () => root?.removeAttribute("inert");
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -189,14 +225,15 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
       void (async () => {
         const next = await load();
         if (!next?.isRepo) return;
-        const initial = dialogMode({ hasChanges: next.hasChanges, unpushed: next.unpushed, prOpen: Boolean(next.pr), onBase: next.onBase, hasOrigin: next.hasOrigin, ghReady: next.ghReady, ahead: next.ahead, base: next.base, ghMessage: next.ghMessage, detached: !next.branch });
+        // A running turn doesn't change which sections show, only which buttons work.
+        const initial = modeFor(next, false);
         if (!initial.showCommit && !initial.showPrFields) return;
         setGenerating(true);
         const text = await window.milagre.git.generate({ cwd, base, provider, chat }).catch(() => ({ ok: false as const, message: GENERATION_FAILED }));
         if (!mounted.current) return;
         setGenerating(false);
         if (!text.ok) {
-          setGenerationFailed(true);
+          setGenerationFailed({ commit: true, pr: true });
           return;
         }
         // Text the user typed while it was being written stays.
@@ -205,7 +242,8 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
           prTitle: edited.current.prTitle ? current.prTitle : text.prTitle,
           prBody: edited.current.prBody ? current.prBody : text.prBody,
         }));
-        if (!text.commitMessage && !text.prTitle) setGenerationFailed(true);
+        // A subject that kept repeating an earlier commit comes back empty.
+        setGenerationFailed({ commit: !text.commitMessage, pr: !text.prTitle });
       })();
     }
     return () => { mounted.current = false; };
@@ -247,7 +285,10 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
   }, []);
 
   async function run(stepsToRun: GitStep[]) {
-    if (!repo || running) return;
+    // A second click before React re-renders mustn't start a second run.
+    if (!repo || runningRef.current) return;
+    runningRef.current = true;
+    const { commitMessage, prTitle, prBody } = fieldsRef.current;
     setRunning(true);
     setFailure(null);
     setSteps([]);
@@ -258,9 +299,10 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
       update(step, "running");
       try {
         if (step === "commit") {
-          const committed = await window.milagre.git.commit({ cwd, message: fields.commitMessage });
+          const committed = await window.milagre.git.commit({ cwd, message: commitMessage });
           if (!committed.ok) {
             failed = true;
+            // Only a hook's complaint is something the agent can fix; a signing key isn't.
             setFailure(committed.kind === "hook" ? { message: committed.message, output: committed.output, hook: true } : { message: committed.message, output: committed.output });
           } else {
             outcome.shortSha = committed.shortSha;
@@ -276,7 +318,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
             update(step, "done", `Pushed to ${pushed.remote}/${pushed.branch}`);
           }
         } else {
-          const opened = await window.milagre.git.openPr({ cwd, base, title: fields.prTitle, body: fields.prBody });
+          const opened = await window.milagre.git.openPr({ cwd, base, title: prTitle, body: prBody });
           if (!opened.ok) {
             failed = true;
             setFailure({ message: opened.message });
@@ -302,6 +344,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
     // The folder has moved on (after a failure a commit may be in), so the list and the buttons follow it.
     if (!failed) setFinished(true);
     await load();
+    runningRef.current = false;
     setRunning(false);
     // The button that ran the steps may be gone; keep focus in the dialog.
     window.requestAnimationFrame(() => {
@@ -330,14 +373,17 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
   }
 
   const primary = mode?.primary ?? null;
-  const fieldReason = !primary || generating ? null
-    : primary.steps.includes("commit") && !fields.commitMessage.trim() ? "Write a commit message."
-      : primary.steps.includes("pr") && !fields.prTitle.trim() ? "Add a PR title."
+  const secondary = mode?.secondary ?? null;
+  // A button needs the fields its steps use; generation may still be filling them.
+  const missingField = (button: DialogButton | null) => !button ? null
+    : button.steps.includes("commit") && !fields.commitMessage.trim() ? "Write a commit message."
+      : button.steps.includes("pr") && !fields.prTitle.trim() ? "Add a PR title."
         : null;
-  const primaryReason = primary?.disabledReason ?? fieldReason;
-  const primaryDisabled = running || !primary || Boolean(primary.disabledReason) || (primary.steps.includes("commit") && !fields.commitMessage.trim()) || (primary.steps.includes("pr") && !fields.prTitle.trim());
-  const secondaryDisabled = running || !fields.commitMessage.trim();
+  const disabled = (button: DialogButton | null) => running || !button || Boolean(button.disabledReason) || Boolean(missingField(button));
+  // The reason beside the buttons: git's or the agent's state first, then a missing field.
+  const footerReason = primary?.disabledReason ?? secondary?.disabledReason ?? (generating ? null : missingField(primary));
   const showForm = !finished;
+  const prTarget = repo ? prTargetLine(repo.remotes, repo.prRepo) : null;
 
   return createPortal(
     <div
@@ -369,7 +415,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
             <p className="flex items-center gap-2 py-6 text-[13px] text-ink-3"><Spinner /> Reading changes…</p>
           )}
           {readError && <p role="alert" className="text-[13px] text-red">{readError}</p>}
-          {changes && !changes.isRepo && <p className="py-2 text-[13px] text-ink-2">This chat's folder isn't a git repository.</p>}
+          {changes && !changes.isRepo && <p className="py-2 text-[13px] text-ink-2">{changes.message ?? "This chat's folder isn't a git repository."}</p>}
 
           {repo && mode && (
             <>
@@ -385,8 +431,8 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
 
               {showForm && mode.showCommit && (
                 <Section label="Commit message">
-                  <GeneratedField label="Commit message" value={fields.commitMessage} onChange={setField("commitMessage")} generating={generating} multiline rows={3} placeholder="Describe the change" />
-                  {generationFailed && <p className="text-[12px] text-ink-3">{GENERATION_FAILED}</p>}
+                  <GeneratedField label="Commit message" value={fields.commitMessage} onChange={setField("commitMessage")} generating={generating} readOnly={running} multiline rows={3} placeholder="Describe the change" />
+                  {generationFailed.commit && !fields.commitMessage && <p className="text-[12px] text-ink-3">{GENERATION_FAILED}</p>}
                 </Section>
               )}
 
@@ -402,9 +448,10 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
                     </p>
                   ) : mode.showPrFields ? (
                     <div className="grid gap-2">
-                      <GeneratedField label="PR title" value={fields.prTitle} onChange={setField("prTitle")} generating={generating} placeholder="Title" />
-                      <GeneratedField label="PR description" value={fields.prBody} onChange={setField("prBody")} generating={generating} multiline rows={5} placeholder="What changed and why" />
-                      {generationFailed && !mode.showCommit && <p className="text-[12px] text-ink-3">{GENERATION_FAILED}</p>}
+                      <GeneratedField label="PR title" value={fields.prTitle} onChange={setField("prTitle")} generating={generating} readOnly={running} placeholder="Title" />
+                      <GeneratedField label="PR description" value={fields.prBody} onChange={setField("prBody")} generating={generating} readOnly={running} multiline rows={5} placeholder="What changed and why" />
+                      {generationFailed.pr && !fields.prTitle && !(mode.showCommit && generationFailed.commit) && <p className="text-[12px] text-ink-3">{GENERATION_FAILED}</p>}
+                      {prTarget && <p data-pr-target className="text-[12px] text-ink-2">{prTarget}</p>}
                     </div>
                   ) : (
                     <p className="rounded-control border border-line bg-inset px-3 py-2 text-[12.5px] text-ink-2">{mode.prBlocked}</p>
@@ -451,17 +498,17 @@ export function GitActionsDialog({ cwd, base, provider, chat, onClose, onSendToA
         </div>
 
         <footer className="flex items-center gap-2 border-t border-line bg-inset px-4 py-3">
-          <p className="min-w-0 flex-1 text-[12px] text-ink-3">{!finished && !running ? primaryReason : null}</p>
+          <p data-footer-reason className="min-w-0 flex-1 text-[12px] text-ink-3">{!finished && !running ? footerReason : null}</p>
           {finished || !primary ? (
             <button type="button" className={BUTTON_PRIMARY} onClick={onClose} disabled={running}>{finished ? "Done" : "Close"}</button>
           ) : (
             <>
-              {mode?.secondary && (
-                <button type="button" className={BUTTON_SECONDARY} disabled={secondaryDisabled} onClick={() => void run(mode.secondary!.steps)}>
-                  {mode.secondary.label}
+              {secondary && (
+                <button type="button" className={BUTTON_SECONDARY} disabled={disabled(secondary)} onClick={() => void run(secondary.steps)}>
+                  {secondary.label}
                 </button>
               )}
-              <button type="button" className={BUTTON_PRIMARY} disabled={primaryDisabled} onClick={() => void run(primary.steps)}>
+              <button type="button" className={BUTTON_PRIMARY} disabled={disabled(primary)} onClick={() => void run(primary.steps)}>
                 {running && <Spinner />}
                 {primary.label}
               </button>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatMessage, ChatStep } from "../model";
-import { GH_MISSING, NO_ORIGIN, dialogMode, gitChatContext, gitRunNote, hookFailureMessage, testCommandsFrom } from "./git-dialog.ts";
+import { DETACHED_COMMIT, GH_MISSING, NO_ORIGIN, TURN_RUNNING, dialogMode, gitChatContext, gitRunNote, hookFailureMessage, isGitNote, prTargetLine, testCommandsFrom } from "./git-dialog.ts";
 
 const READY = { hasChanges: true, unpushed: 0, prOpen: false, onBase: false, hasOrigin: true, ghReady: true };
 
@@ -44,12 +44,52 @@ test("a pushed branch without a PR can still open one", () => {
   assert.equal(dialogMode({ ...READY, hasChanges: false, prOpen: true }).idle, "Everything is committed and pushed.");
 });
 
-test("on the base branch the PR step is disabled with a reason", () => {
+test("on the base branch the PR step is disabled, and committing is the primary button: nothing reaches the remote in one click", () => {
   const mode = dialogMode({ ...READY, onBase: true, base: "main" });
   assert.equal(mode.prBlocked, "You're on main. Open a PR from a worktree branch.");
   assert.equal(mode.showPrFields, false);
-  assert.deepEqual(mode.primary, { label: "Commit and push", steps: ["commit", "push"], disabledReason: null });
-  assert.deepEqual(dialogMode({ ...READY, onBase: true, hasChanges: false, unpushed: 1 }).primary, { label: "Push", steps: ["push"], disabledReason: null });
+  assert.deepEqual(mode.primary, { label: "Commit only", steps: ["commit"], disabledReason: null });
+  assert.deepEqual(mode.secondary, { label: "Commit and push to main", steps: ["commit", "push"], disabledReason: null });
+  assert.deepEqual(dialogMode({ ...READY, onBase: true, base: "trunk", hasChanges: false, unpushed: 1 }).primary, { label: "Push to trunk", steps: ["push"], disabledReason: null });
+  const noOrigin = dialogMode({ ...READY, onBase: true, hasOrigin: false });
+  assert.equal(noOrigin.primary?.disabledReason, null);
+  assert.equal(noOrigin.secondary?.disabledReason, NO_ORIGIN);
+});
+
+test("mid-merge (or rebase, cherry-pick, revert) both commit buttons are disabled with git's state as the reason", () => {
+  const reason = "A merge is in progress. Finish or abort it, then commit.";
+  const mode = dialogMode({ ...READY, commitBlocked: reason });
+  assert.equal(mode.primary?.disabledReason, reason);
+  assert.equal(mode.secondary?.disabledReason, reason);
+  const onBase = dialogMode({ ...READY, onBase: true, commitBlocked: reason });
+  assert.equal(onBase.primary?.disabledReason, reason);
+  assert.equal(onBase.secondary?.disabledReason, reason);
+});
+
+test("on a detached HEAD neither commit button works", () => {
+  const mode = dialogMode({ ...READY, detached: true });
+  assert.equal(mode.primary?.disabledReason, DETACHED_COMMIT);
+  assert.equal(mode.secondary?.disabledReason, DETACHED_COMMIT);
+});
+
+test("while the agent's turn runs, committing waits but pushing and opening a PR don't", () => {
+  const mode = dialogMode({ ...READY, turnRunning: true });
+  assert.equal(mode.primary?.disabledReason, TURN_RUNNING);
+  assert.equal(mode.secondary?.disabledReason, TURN_RUNNING);
+  assert.equal(TURN_RUNNING, "The agent is still working. Wait for the turn to end or stop it.");
+  assert.deepEqual(dialogMode({ ...READY, turnRunning: true, hasChanges: false, unpushed: 1 }).primary, { label: "Push and open PR", steps: ["push", "pr"], disabledReason: null });
+  assert.deepEqual(dialogMode({ ...READY, turnRunning: true, hasChanges: false, ahead: 1 }).primary, { label: "Open PR", steps: ["pr"], disabledReason: null });
+});
+
+test("prTargetLine says where PRs open only when there are several remotes", () => {
+  assert.equal(prTargetLine(1, null), null);
+  assert.equal(prTargetLine(2, "acme/shop"), "PRs open against acme/shop.");
+  assert.match(prTargetLine(3, null) ?? "", /gh repo set-default/);
+});
+
+test("isGitNote tells the dialog's notes from agent replies", () => {
+  assert.equal(isGitNote({ id: 1, session_id: 1, body: "Committed abc1234.", context: { kind: "git-action" }, role: "assistant" }), true);
+  assert.equal(isGitNote({ id: 2, session_id: 1, body: "Done.", context: null, role: "assistant" }), false);
 });
 
 test("without origin, push and PR are disabled and only the commit runs", () => {
@@ -94,8 +134,8 @@ test("gitChatContext takes the first and the last few user messages", () => {
   });
 });
 
-test("hookFailureMessage asks the agent to fix the hook's problem", () => {
-  assert.equal(hookFailureMessage("lint: missing semicolon"), "The commit failed in a git hook. Fix the problem and tell me when it's ready:\n\nlint: missing semicolon");
+test("hookFailureMessage asks the agent to fix the hook's problem, and to leave committing to Milagre", () => {
+  assert.equal(hookFailureMessage("lint: missing semicolon"), "The commit failed in a git hook. Fix what it reports, but don't commit or push. I'll do that from Milagre.\n\nlint: missing semicolon");
 });
 
 test("gitRunNote records what the dialog did", () => {

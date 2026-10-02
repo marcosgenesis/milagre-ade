@@ -10,6 +10,8 @@ export interface GitFileChange {
   status: GitFileStatus;
   added: number;
   removed: number;
+  /** Looks like a secret (.env, a key, credentials): never committed from the dialog. */
+  secret?: boolean;
 }
 
 export interface GitPullRequest {
@@ -19,10 +21,9 @@ export interface GitPullRequest {
 }
 
 export type GitChanges =
-  | { isRepo: false }
+  | { isRepo: false; message?: string }
   | {
       isRepo: true;
-      path: string;
       /** Null when HEAD is detached. */
       branch: string | null;
       /** The branch a PR goes into. */
@@ -35,7 +36,13 @@ export type GitChanges =
       /** Commits on the branch that its base doesn't have. */
       ahead: number;
       hasOrigin: boolean;
+      /** How many remotes the repo has; with more than one, the dialog says where PRs open. */
+      remotes: number;
+      /** gh's default repo, where PRs open, when there are several remotes and one is set. */
+      prRepo: string | null;
       onBase: boolean;
+      /** Why nothing may be committed now: a merge, rebase, cherry-pick or revert, or conflicts. */
+      commitBlocked: string | null;
       ghReady: boolean;
       ghMessage: string | null;
       /** The branch's open PR. */
@@ -56,12 +63,13 @@ export interface GitChatContext {
 }
 
 export type GitTextResult =
-  | { ok: true; provider: ModelProvider; commitMessage: string; prTitle: string; prBody: string }
+  /** `repeated`: the subject kept repeating an earlier commit, so the commit message is empty. */
+  | { ok: true; provider: ModelProvider; commitMessage: string; prTitle: string; prBody: string; repeated?: boolean }
   | { ok: false; message: string };
 
 export type GitCommitResult =
   | { ok: true; sha: string; shortSha: string }
-  | { ok: false; kind: "hook" | "nothing" | "error"; message: string; output?: string };
+  | { ok: false; kind: "hook" | "signing" | "secrets" | "blocked" | "nothing" | "error"; message: string; output?: string };
 
 export type GitPushResult =
   | { ok: true; branch: string; remote: string }
@@ -75,7 +83,9 @@ export type GitStep = "commit" | "push" | "pr";
 
 export const NO_ORIGIN = "This repo has no origin remote.";
 export const DETACHED = "Check out a branch to push.";
+export const DETACHED_COMMIT = "Check out a branch to commit.";
 export const GH_MISSING = "Install the GitHub CLI (`brew install gh`) to open PRs.";
+export const TURN_RUNNING = "The agent is still working. Wait for the turn to end or stop it.";
 
 export interface DialogModeInput {
   hasChanges: boolean;
@@ -91,6 +101,10 @@ export interface DialogModeInput {
   /** Why gh can't open a PR, when it isn't ready. */
   ghMessage?: string | null;
   detached?: boolean;
+  /** Why git won't take a commit now (a merge in progress, say). */
+  commitBlocked?: string | null;
+  /** The chat's agent is mid-turn and may still be editing. */
+  turnRunning?: boolean;
 }
 
 export interface DialogButton {
@@ -115,22 +129,33 @@ export interface DialogMode {
   idle: string | null;
 }
 
-/** The dialog's sections and buttons for a folder's state. */
-export function dialogMode({ hasChanges, unpushed, prOpen, onBase, hasOrigin, ghReady, ahead = 0, base = "main", ghMessage = null, detached = false }: DialogModeInput): DialogMode {
+/**
+ * The dialog's sections and buttons for a folder's state. A button that commits is disabled mid-merge
+ * (or rebase, cherry-pick, revert), on a detached HEAD and while the agent's turn runs; one that pushes
+ * is disabled without origin. On the base branch nothing reaches the remote in one click: "Commit only"
+ * is the primary button.
+ */
+export function dialogMode({ hasChanges, unpushed, prOpen, onBase, hasOrigin, ghReady, ahead = 0, base = "main", ghMessage = null, detached = false, commitBlocked = null, turnRunning = false }: DialogModeInput): DialogMode {
   const pushBlocked = !hasOrigin ? NO_ORIGIN : detached ? DETACHED : null;
+  const commitReason = commitBlocked || (detached ? DETACHED_COMMIT : null) || (turnRunning ? TURN_RUNNING : null);
   const prBlocked = prOpen ? null : pushBlocked ?? (onBase ? `You're on ${base}. Open a PR from a worktree branch.` : !ghReady ? ghMessage || GH_MISSING : null);
   const canPr = !prOpen && !prBlocked;
-  const button = (label: string, steps: GitStep[], disabledReason: string | null = null): DialogButton => ({ label, steps, disabledReason });
+  const button = (label: string, steps: GitStep[]): DialogButton => ({
+    label,
+    steps,
+    disabledReason: (steps.includes("commit") ? commitReason : null) ?? (steps.includes("push") ? pushBlocked : null),
+  });
 
   let primary: DialogButton | null = null;
-  if (hasChanges) {
-    primary = pushBlocked ? button("Commit and push", ["commit", "push"], pushBlocked)
-      : canPr ? button("Commit, push and open PR", ["commit", "push", "pr"])
-        : button("Commit and push", ["commit", "push"]);
+  let secondary: DialogButton | null = null;
+  if (hasChanges && onBase) {
+    primary = button("Commit only", ["commit"]);
+    secondary = button(`Commit and push to ${base}`, ["commit", "push"]);
+  } else if (hasChanges) {
+    primary = canPr ? button("Commit, push and open PR", ["commit", "push", "pr"]) : button("Commit and push", ["commit", "push"]);
+    secondary = button("Commit only", ["commit"]);
   } else if (unpushed > 0) {
-    primary = pushBlocked ? button("Push", ["push"], pushBlocked)
-      : canPr ? button("Push and open PR", ["push", "pr"])
-        : button("Push", ["push"]);
+    primary = onBase ? button(`Push to ${base}`, ["push"]) : canPr ? button("Push and open PR", ["push", "pr"]) : button("Push", ["push"]);
   } else if (canPr && ahead > 0) {
     primary = button("Open PR", ["pr"]);
   }
@@ -141,9 +166,20 @@ export function dialogMode({ hasChanges, unpushed, prOpen, onBase, hasOrigin, gh
     prOpen,
     prBlocked,
     primary,
-    secondary: hasChanges ? button("Commit only", ["commit"]) : null,
+    secondary,
     idle: primary ? null : prOpen ? "Everything is committed and pushed." : "Nothing to commit or push.",
   };
+}
+
+/** The line that says where PRs open, for a repo with several remotes; null with one. */
+export function prTargetLine(remotes: number, prRepo: string | null): string | null {
+  if (remotes <= 1) return null;
+  return prRepo ? `PRs open against ${prRepo}.` : "This repo has several remotes. Run `gh repo set-default` in a terminal to choose where PRs open.";
+}
+
+/** A line the dialog saved in the chat, as opposed to an agent's reply. */
+export function isGitNote(message: ChatMessage): boolean {
+  return (message.context as { kind?: string } | null)?.kind === "git-action";
 }
 
 const TEST_COMMAND = /\b(test|tests|spec|vitest|jest|pytest|mocha|playwright|rspec|phpunit|ctest)\b/i;
@@ -174,9 +210,9 @@ export function gitChatContext(chatTitle: string, messages: ChatMessage[]): GitC
   };
 }
 
-/** The message "Send to agent" sends after a hook stops the commit. */
+/** The message "Send to agent" sends after a hook stops the commit. The agent fixes; Milagre commits. */
 export function hookFailureMessage(output: string): string {
-  return `The commit failed in a git hook. Fix the problem and tell me when it's ready:\n\n${output}`;
+  return `The commit failed in a git hook. Fix what it reports, but don't commit or push. I'll do that from Milagre.\n\n${output}`;
 }
 
 export interface GitRunResult {

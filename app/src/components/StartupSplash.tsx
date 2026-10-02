@@ -1,7 +1,17 @@
-/** The app logo assembling itself while the workspace loads: two legs, then the sparkle, which keeps twinkling. */
-export function StartupSplash({ onIntroEnd }: { onIntroEnd?: () => void }) {
+type Props = { leaving?: boolean; onIntroEnd?: () => void; onLeft?: () => void };
+
+/** The app logo assembling itself while the workspace loads: two legs, then the sparkle, which keeps twinkling.
+ * It covers the app, and once `leaving` it fades out over the app as the app's panes slide in. */
+export function StartupSplash({ leaving = false, onIntroEnd, onLeft }: Props) {
   return (
-    <div role="status" aria-label="Loading workspace" className="grid h-screen place-items-center overflow-hidden bg-page">
+    <div
+      role={leaving ? undefined : "status"}
+      aria-label={leaving ? undefined : "Loading workspace"}
+      aria-hidden={leaving || undefined}
+      data-leaving={leaving || undefined}
+      className="startup-splash-screen fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-page"
+      onAnimationEnd={(event) => { if (event.animationName === "splash-leave") onLeft?.(); }}
+    >
       <div className="startup-splash">
         <svg viewBox="-4 -4 154 154" width="64" height="64" fill="none" aria-hidden>
           <g className="startup-splash-mark">

@@ -1844,6 +1844,14 @@ code.step-shimmer {
 .startup-splash svg * { transform-box: fill-box; transform-origin: center; }
 .startup-splash-mark { fill: #0a0a0a; }
 .dark .startup-splash-mark { fill: #ffffff; }
+.startup-splash-screen[data-leaving] {
+  pointer-events: none;
+  animation: splash-leave 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.startup-splash-screen[data-leaving] .startup-splash { animation: splash-logo-leave 320ms cubic-bezier(0.4, 0, 1, 1) both; }
+/* the app's panes arrive under the fading splash: sidebar from the left, then the main pane rising */
+.app-enter > * { animation: app-enter-main 520ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both; }
+.app-enter > :first-child { animation: app-enter-sidebar 520ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
 .startup-splash-leg { animation: splash-leg 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .startup-splash-leg-right { animation-delay: 60ms; }
 .startup-splash-star {
@@ -1859,6 +1867,22 @@ code.step-shimmer {
 @keyframes splash-star-in {
   from { opacity: 0; transform: scale(0) rotate(-90deg); }
   to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes splash-leave {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes splash-logo-leave {
+  from { transform: scale(1); }
+  to { transform: scale(0.9); }
+}
+@keyframes app-enter-sidebar {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes app-enter-main {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
 }
 /* the sparkle has four-fold symmetry, so a quarter turn loops seamlessly */
 @keyframes splash-star-twinkle {

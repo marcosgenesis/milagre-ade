@@ -789,11 +789,16 @@ function App() {
     return () => window.removeEventListener("keydown", jumpToChat);
   }, [chats, view]);
 
-  // Fast loads would cut the startup animation off at the bare tile, so the splash stays until the icon is whole.
-  const [splashDone, setSplashDone] = useState(false);
+  // Fast loads would cut the startup animation off at the bare legs, so the splash stays until the logo is whole,
+  // then fades out over the app while the panes slide in. Same key in both trees keeps the logo from restarting.
+  const [splash, setSplash] = useState<"intro" | "done" | "gone">("intro");
+  const [appEntered, setAppEntered] = useState(false);
+  const splashOverlay = (leaving: boolean) => splash === "gone" ? null : (
+    <StartupSplash key="startup-splash" leaving={leaving} onIntroEnd={() => setSplash((current) => (current === "intro" ? "done" : current))} onLeft={() => setSplash("gone")} />
+  );
 
-  if (loading || !project || !state || !splashDone) {
-    return <StartupSplash onIntroEnd={() => setSplashDone(true)} />;
+  if (loading || !project || !state || splash === "intro") {
+    return <>{splashOverlay(false)}</>;
   }
 
   const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
@@ -829,7 +834,8 @@ function App() {
   })));
 
   return (
-    <DotBackground>
+    <>
+    <DotBackground key="app">
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
@@ -845,7 +851,10 @@ function App() {
           <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-medium text-ink-3 hover:text-ink">Dismiss</button>
         </div>
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
+      <div
+        className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
+        onAnimationEnd={(event) => { if (event.animationName === "app-enter-main") setAppEntered(true); }}
+      >
       <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" ? "flex" : "hidden"}`}>
       <SidebarNav
         key={project.path}
@@ -992,6 +1001,8 @@ function App() {
       )}
       <Notice />
     </DotBackground>
+    {splashOverlay(true)}
+    </>
   );
 }
 

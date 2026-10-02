@@ -178,6 +178,8 @@ export interface AgentSession {
   handedOverFrom?: number;
   /** Set while the handover brief is being written; the composer waits. */
   handoverPending?: boolean;
+  /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
+  handoverDraft?: string;
 }
 
 export interface Connection {

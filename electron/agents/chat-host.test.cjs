@@ -290,7 +290,7 @@ async function chatWithReply(host, session, saved) {
   return sessionId;
 }
 
-test("handover opens a linked chat on the other provider in the same worktree and sends it the brief", async (t) => {
+test("handover opens a linked chat on the other provider in the same worktree and keeps the brief as a draft", async (t) => {
   const briefs = [];
   const { host, manager, saved, session, created } = harness({ handoverTools: {
     writeTranscript: async ({ sessionId, markdown }) => { assert.match(markdown, /fix the login redirect/); return `/tmp/handovers/${sessionId}.md`; },
@@ -301,7 +301,6 @@ test("handover opens a linked chat on the other provider in the same worktree an
 
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", replies: "concise" });
   assert.notEqual(target, source);
-  // Linked as soon as the call resolves. (Pending may already be cleared: this brief resolves at once.)
   assert.equal(saved.get(ALPHA).sessions[source].handedOverTo, target);
   const linked = saved.get(ALPHA).sessions[target];
   assert.deepEqual({ worktree_id: linked.worktree_id, provider: linked.provider, handedOverFrom: linked.handedOverFrom }, { worktree_id: 1, provider: "codex", handedOverFrom: source });
@@ -309,14 +308,37 @@ test("handover opens a linked chat on the other provider in the same worktree an
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
   const state = saved.get(ALPHA);
   assert.equal(state.sessions[target].handoverPending, undefined);
-  assert.deepEqual(chatMessages(state, target), [{ role: "user", body: "BRIEF" }]);
+  assert.equal(state.sessions[target].handoverDraft, "BRIEF");
+  assert.deepEqual(chatMessages(state, target), []);
   assert.deepEqual(briefs.map(({ provider, lastUserMessage, cwd, transcriptPath }) => ({ provider, lastUserMessage, cwd, transcriptPath })), [{ provider: "claude", lastUserMessage: "fix the login redirect", cwd: ALPHA, transcriptPath: `/tmp/handovers/${source}.md` }]);
+  assert.equal(created.some((item) => item.provider === "codex"), false);
+  assert.equal(state.sessions[target].generatedTitle, "Codex · fix the login redirect");
+});
+
+test("sending in a handed-over chat starts the turn with the given settings and clears the draft", async (t) => {
+  const { host, manager, saved, session, created } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async () => "BRIEF" } });
+  t.after(() => manager.closeAll());
+  const source = await chatWithReply(host, session, saved);
+  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "ask" });
+  await host.pendingHandovers.get(`${ALPHA}#${target}`);
+
+  await host.send({ projectPath: ALPHA, sessionId: target, body: "BRIEF, edited", prompt: "BRIEF, edited", provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", replies: "concise", images: [], files: [] });
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[target].handoverDraft, undefined);
+  assert.deepEqual(chatMessages(state, target), [{ role: "user", body: "BRIEF, edited" }]);
   await waitUntil(() => created.some((item) => item.provider === "codex"));
   assert.equal(created.find((item) => item.provider === "codex").options.cwd, ALPHA);
   const turn = created.find((item) => item.provider === "codex").turns[0];
   assert.deepEqual({ effort: turn.effort, permissionMode: turn.permissionMode, replies: turn.replies }, { effort: "high", permissionMode: "auto", replies: "concise" });
-  assert.equal(state.sessions[target].generatedTitle, "Codex · fix the login redirect");
-  assert.equal(state.sessions[target].titlePending, undefined);
+});
+
+test("a new-chat send does not reuse a handover chat that holds a draft", async (t) => {
+  const { host, manager, states, saved } = harness();
+  t.after(() => manager.closeAll());
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverDraft: "BRIEF" } } }));
+  const { sessionId } = await host.send(message(ALPHA, "hello"));
+  assert.notEqual(sessionId, 7);
+  assert.equal(saved.get(ALPHA).sessions[7].handoverDraft, "BRIEF");
 });
 
 test("handover refuses while the source turn runs and for the same provider", async (t) => {
@@ -368,6 +390,16 @@ test("a handover left pending by a quit is closed with a note on the next open",
   assert.deepEqual(chatMessages(state, 7), [{ role: "assistant", body: "Milagre closed before this handover finished. Hand over again from the original chat." }]);
 });
 
+test("a handover that finished with a draft is not interrupted on the next open", async (t) => {
+  const { host, manager, states, saved } = harness();
+  t.after(() => manager.closeAll());
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverDraft: "BRIEF" } } }));
+  await host.recoverHandovers(ALPHA, saved.get(ALPHA));
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[7].handoverDraft, "BRIEF");
+  assert.deepEqual(chatMessages(state, 7), []);
+});
+
 test("recovery from a stale state adds no note to a handover that has since finished", async (t) => {
   const { host, manager, states, saved } = harness();
   t.after(() => manager.closeAll());
@@ -389,6 +421,7 @@ test("a new chat sent while a handover is pending doesn't land in the handover c
   release("BRIEF");
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
   const state = saved.get(ALPHA);
-  assert.deepEqual(chatMessages(state, target), [{ role: "user", body: "BRIEF" }]);
+  assert.deepEqual(chatMessages(state, target), []);
+  assert.equal(state.sessions[target].handoverDraft, "BRIEF");
   assert.equal(state.sessions[target].provider, "codex");
 });

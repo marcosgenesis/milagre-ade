@@ -17,6 +17,8 @@ function errorMessage(error) {
 // while it runs (what the commit dialog did) waits for the turn to end, so it lands after the reply. Every event
 // folded into the runs is numbered, so a window that loads mid-turn takes the runs (see `snapshot`)
 // and skips the events they already hold.
+const withoutDraft = ({ handoverDraft, ...rest }) => rest;
+
 class ChatHost {
   /**
    * `startTurn(request)` starts or steers the agent's turn (see SessionManager.startTurn);
@@ -127,8 +129,8 @@ class ChatHost {
       const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
       let nextId = latest.next_id;
-      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief).
-      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && !latest.messages.some((message) => message.session_id === item.id))
+      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief or holding it as a draft).
+      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
       const chatId = chatKey(projectPath, session.id);
@@ -143,7 +145,7 @@ class ChatHost {
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
+        sessions: { ...next.sessions, [session.id]: { ...withoutDraft(next.sessions[session.id]), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
         messages: [...next.messages, message],
       };
     });
@@ -169,7 +171,7 @@ class ChatHost {
 
   /**
    * Opens a chat on the other provider in the source chat's worktree, linked both ways, and resolves with its
-   * id at once. The transcript and brief are written in the background; the brief is sent as its first message.
+   * id at once. The transcript and brief are written in the background; the brief waits in the chat as a draft for the user to review and send.
    */
   async handover(request) {
     const { projectPath, sessionId, provider } = request;
@@ -213,21 +215,20 @@ class ChatHost {
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
       const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant").at(-1)?.body ?? "";
       const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, cwd: state.worktrees[source.worktree_id].path });
-      await this.send({ ...request, sessionId: target, body, prompt: body, images: [], files: [] });
-      await this.settleHandover(projectPath, target);
+      await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);
       await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
     }
   }
 
-  /** Clears the target chat's pending mark. Resolves true when it was still set. */
-  async settleHandover(projectPath, target) {
+  /** Clears the target chat's pending mark, keeping the brief as its draft when there is one. Resolves true when it was still set. */
+  async settleHandover(projectPath, target, draft) {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const session = latest.sessions[target];
       if (!session?.handoverPending) return latest;
       const { handoverPending, ...rest } = session;
-      return { ...latest, sessions: { ...latest.sessions, [target]: rest } };
+      return { ...latest, sessions: { ...latest.sessions, [target]: draft === undefined ? rest : { ...rest, handoverDraft: draft } } };
     });
     if (changed) this.broadcast(projectPath, state);
     return Boolean(changed);

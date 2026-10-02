@@ -2,12 +2,10 @@ const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
-const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
 const { realpathSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { detectEditors, openInEditor } = require("./editors.cjs");
 const { revealFolder } = require("./reveal.cjs");
@@ -44,6 +42,8 @@ const { attentionContext, attentionNotice } = require("./shared/attention.mjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
+const { createProjectRegistry } = require("./project-registry.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -51,7 +51,6 @@ const { createFileSearch } = require("./project-files.cjs");
 const searchFiles = createFileSearch();
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
-const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
@@ -95,19 +94,7 @@ ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
 
 async function discoverWorktrees(projectPath) {
   try {
-    const { stdout } = await execFileAsync("git", ["-C", projectPath, "worktree", "list", "--porcelain"], { encoding: "utf8" });
-    return stdout
-      .trim()
-      .split(/\n(?=worktree )/)
-      .filter(Boolean)
-      .map((block) => {
-        const worktreePath = block.match(/^worktree (.+)$/m)?.[1];
-        const branchRef = block.match(/^branch (.+)$/m)?.[1];
-        if (!worktreePath) return null;
-        const branch = branchRef?.replace(/^refs\/heads\//, "");
-        return { path: worktreePath, name: branch || path.basename(worktreePath) };
-      })
-      .filter(Boolean);
+    return await activeWorktrees(projectPath);
   } catch {
     return [];
   }
@@ -556,10 +543,14 @@ function createWindow() {
 
 let recentStore = null;
 const recentProjects = () => (recentStore ??= createRecentProjects(path.join(app.getPath("userData"), "recent-projects.json")));
+let registryStore = null;
+const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(app.getPath("userData"), "project-registry.json")));
 // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
 async function openProject(projectPath) {
-  const project = await readProject(projectPath);
-  await rememberProject(recentProjects(), projectPath);
+  const identity = await resolveProject(projectPath);
+  const project = await readProject(identity.path);
+  await projectRegistry().add(identity);
+  await rememberProject(recentProjects(), identity.path);
   return project;
 }
 
@@ -573,6 +564,8 @@ ipcMain.handle("project:open", async () => {
   return openProject(result.filePaths[0]);
 });
 ipcMain.handle("project:recent", () => recentProjects().list());
+ipcMain.handle("project:registry", () => projectRegistry().list());
+ipcMain.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
 ipcMain.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
 ipcMain.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 

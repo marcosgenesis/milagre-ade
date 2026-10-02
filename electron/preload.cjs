@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("milagre", {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   listRecentProjects: () => ipcRenderer.invoke("project:recent"),
+  listProjects: () => ipcRenderer.invoke("project:registry"),
+  setProjectPosition: (id, position) => ipcRenderer.invoke("project:position", id, position),
   switchProject: (projectPath) => ipcRenderer.invoke("project:switch", projectPath),
   forgetProject: (projectPath) => ipcRenderer.invoke("project:forget", projectPath),
   onProjectState: (callback) => {

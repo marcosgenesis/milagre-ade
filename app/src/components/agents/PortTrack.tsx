@@ -5,6 +5,7 @@ import { EthernetPortIcon, LinkSquare02Icon, StopCircleIcon } from "@hugeicons/c
 import type { AgentPort } from "../../model";
 import { portUrl } from "../../lib/ports";
 import { SpinnerRing } from "../primitives/SpinnerRing";
+import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 
@@ -46,7 +47,7 @@ export function PortTrack({ ports, onStop }: { ports?: AgentPort[]; onStop?: (pi
           <HugeiconsIcon icon={StopCircleIcon} size={14} aria-hidden />Stop all
         </button>
       </div>}
-      <ul className="min-h-0 overflow-y-auto overscroll-contain">
+      <ScrollArea as="ul">
         {ports.map(port => <li key={port.port} data-port-row data-stopping={stopping.has(port.pid) || undefined} className="group flex items-center gap-1 rounded-md pr-1 hover:bg-hover focus-within:bg-hover">
           <a href={portUrl(port)} target="_blank" rel="noopener noreferrer" title={`Open ${portUrl(port)}`} className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2 text-[13px] text-ink no-underline focus-visible:outline-2">
             <span className="w-14 shrink-0 font-mono tabular-nums">:{port.port}</span>
@@ -59,7 +60,7 @@ export function PortTrack({ ports, onStop }: { ports?: AgentPort[]; onStop?: (pi
               : <Tooltip label="Stop"><button type="button" data-port-stop aria-label={`Stop port ${port.port}`} disabled={!onStop} onClick={() => stop([port.pid])} className="flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-red focus-visible:outline-2 disabled:opacity-40"><HugeiconsIcon icon={StopCircleIcon} size={14} /></button></Tooltip>}
           </span>
         </li>)}
-      </ul>
+      </ScrollArea>
     </div>, document.body)}
   </div>;
 }

@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ListTodoIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentTask } from "../../model";
 import { SpinnerRing } from "../primitives/SpinnerRing";
+import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 
@@ -35,7 +36,7 @@ export function TaskTrack({ tasks }: { tasks?: AgentTask[] }) {
       </button>
     </Tooltip>
     {opened && createPortal(<div ref={panel} id={panelId} role="dialog" aria-label="To-do list" aria-modal="false" tabIndex={-1} data-slot="task-popover" style={bounds} className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface p-1 text-ink shadow-raised focus:outline-none">
-      <ul className="min-h-0 overflow-y-auto overscroll-contain">
+      <ScrollArea as="ul">
         {tasks.map(task => <li key={task.id} data-task-row data-status={task.status} className="flex items-start gap-2 rounded-md px-2 py-1.5 text-[13px]">
           <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-ink-3"><TaskMarker status={task.status} /></span>
           <span className={`min-w-0 break-words ${task.status === "completed" ? "text-ink-3 line-through" : ""}`}>
@@ -43,7 +44,7 @@ export function TaskTrack({ tasks }: { tasks?: AgentTask[] }) {
             {task.status === "in_progress" && task.activeForm ? task.activeForm : task.content}
           </span>
         </li>)}
-      </ul>
+      </ScrollArea>
     </div>, document.body)}
   </div>;
 }

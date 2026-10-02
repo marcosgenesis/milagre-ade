@@ -5,16 +5,18 @@ const capture = Boolean(process.env.MILAGRE_SCREENSHOT_DIR);
 const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { HandoverRow, HandoverLinkBar, HandoverFromLabel } from "/src/components/Handover";
+import { HandoverRow, HandoverLinkBar, HandoverFromLabel, HandoverNote } from "/src/components/Handover";
 import "/src/styles.css";
 function Fixture() {
   const [opened, setOpened] = useState(null);
   const [blocked, setBlocked] = useState(null);
+  const [noteOpen, setNoteOpen] = useState(true);
   window.opened = () => opened;
   window.block = setBlocked;
   return <div style={{ width: 360, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
     <section data-shot="row"><HandoverRow provider="codex" blocked={blocked} onClick={() => setOpened("handover")} /></section>
     <section data-shot="to"><HandoverLinkBar to={{ id: 7, title: "Fix login redirect", provider: "codex" }} onOpen={setOpened} /></section>
+    <section data-shot="note">{noteOpen && <HandoverNote from="codex" to="claude" permissionMode="auto" onDismiss={() => setNoteOpen(false)} />}</section>
     <section data-shot="from" style={{ display: "flex", flexDirection: "column" }}><HandoverFromLabel from={{ id: 3, title: "Fix login redirect" }} onOpen={setOpened} /></section>
   </div>;
 }
@@ -26,7 +28,7 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
-  const win = new BrowserWindow({ width: 400, height: 260, show: false, webPreferences: { backgroundThrottling: false } });
+  const win = new BrowserWindow({ width: 400, height: 420, show: false, webPreferences: { backgroundThrottling: false } });
   const evaluate = (source) => win.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) { if (await evaluate(source)) return; await delay(20); }
@@ -55,6 +57,13 @@ async function browserChecks() {
     await evaluate('document.querySelector("[data-handover-from]").click()');
     assert.equal(await evaluate("window.opened()"), 3);
     await shot("links");
+    const note = await evaluate('document.querySelector("[data-handover-note]").textContent');
+    assert.match(note, /Always allow in this chat.*stay with the Codex chat\./);
+    assert.match(note, /Subagents still running in the Codex chat keep running there\./);
+    assert.match(note, /On Claude, Auto applies edits inside this worktree/);
+    await shot("note");
+    await evaluate('document.querySelector("[data-handover-note-dismiss]").click()');
+    await waitFor('!document.querySelector("[data-handover-note]")');
     console.log("Handover checks passed.");
     app.exit(0);
   } catch (error) {

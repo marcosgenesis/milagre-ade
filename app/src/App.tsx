@@ -52,7 +52,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { handoverLinks, handoverModel } from "./lib/handover";
+import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
@@ -216,7 +216,15 @@ function App() {
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
-  lockedProviderRef.current = messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined;
+  // A handed-over chat's brief goes into the composer once, unless the user already typed something.
+  const handoverSeeded = useRef(new Set<number>());
+  const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
+  useEffect(() => {
+    if (selectedSessionId === null || handoverDraft === undefined || handoverSeeded.current.has(selectedSessionId)) return;
+    handoverSeeded.current.add(selectedSessionId);
+    setDraft((current) => (current.trim() ? current : handoverDraft));
+  }, [selectedSessionId, handoverDraft]);
+  lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const latest = statesRef.current[projectOfKey(chatId)];
@@ -315,7 +323,7 @@ function App() {
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
-      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || session.handoverPending);
+      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || isHandoverChat(session));
     return orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
@@ -895,7 +903,7 @@ function App() {
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
-            lockedProvider={messages.length > 0 || selectedSession?.handoverPending ? selectedSession?.provider : undefined}
+            lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
             onHandover={(provider) => void handover(provider)}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}

@@ -1,7 +1,7 @@
-import type { ModelProvider } from "../model";
+import type { ModelProvider, PermissionMode } from "../model";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { providerLabel } from "../lib/handover";
+import { handoverNotes, providerLabel } from "../lib/handover";
 import { ProviderLogo } from "./ProviderLogo";
 
 /** Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context. */
@@ -40,5 +40,17 @@ export function HandoverFromLabel({ from, onOpen }: { from: { id: number; title:
     <button type="button" data-handover-from onClick={() => onOpen(from.id)} className="self-end text-[11px] text-ink-3 hover:text-ink">
       Handed over from <span className="font-medium">{from.title}</span>
     </button>
+  );
+}
+
+/** Above the composer of a handed-over chat before its first message: what stays behind and how the permission mode behaves here. */
+export function HandoverNote({ from, to, permissionMode, onDismiss }: { from: ModelProvider; to: ModelProvider; permissionMode: PermissionMode; onDismiss: () => void }) {
+  return (
+    <div data-handover-note className="mb-2 flex w-full items-start gap-3 rounded-control bg-inset px-3 py-2.5 text-[12px] leading-snug text-ink-2">
+      <ul className="flex min-w-0 flex-1 flex-col gap-1">
+        {handoverNotes({ from, to, permissionMode }).map((line) => <li key={line}>{line}</li>)}
+      </ul>
+      <button type="button" data-handover-note-dismiss onClick={onDismiss} className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink">Dismiss</button>
+    </div>
   );
 }

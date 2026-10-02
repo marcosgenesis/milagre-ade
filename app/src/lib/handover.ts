@@ -1,4 +1,4 @@
-import type { AgentSession, ChatMessage, ModelOption, ModelProvider } from "../model";
+import type { AgentSession, ChatMessage, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { modelForChat } from "./agent-runs.ts";
 import { chatTitle } from "./chat-list.ts";
 
@@ -17,11 +17,16 @@ export function handoverModel(selected: ModelOption, provider: ModelProvider, pr
   return model.provider === provider ? model : undefined;
 }
 
-export type HandoverLinks = { to?: { id: number; title: string; provider: ModelProvider }; from?: { id: number; title: string }; pending: boolean };
+/** A handed-over chat that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
+export function isHandoverChat(session: AgentSession | undefined): boolean {
+  return Boolean(session?.handoverPending) || session?.handoverDraft !== undefined;
+}
+
+export type HandoverLinks = { to?: { id: number; title: string; provider: ModelProvider }; from?: { id: number; title: string }; pending: boolean; live: boolean };
 
 /** The chats a chat was handed over to and from, by title; a link to a chat no longer in the project is dropped. */
 export function handoverLinks(session: AgentSession | undefined, state: { sessions: Record<number, AgentSession>; messages: ChatMessage[] }): HandoverLinks {
-  const links: HandoverLinks = { pending: Boolean(session?.handoverPending) };
+  const links: HandoverLinks = { pending: Boolean(session?.handoverPending), live: isHandoverChat(session) };
   const titleOf = (other: AgentSession) => chatTitle(other, state.messages.filter((message) => message.session_id === other.id));
   const to = session?.handedOverTo != null ? state.sessions[session.handedOverTo] : undefined;
   const from = session?.handedOverFrom != null ? state.sessions[session.handedOverFrom] : undefined;
@@ -34,4 +39,30 @@ export function handoverLinks(session: AgentSession | undefined, state: { sessio
 export function handoverBriefId(messages: ChatMessage[], handedOverFrom: number | undefined): number | undefined {
   if (handedOverFrom == null) return undefined;
   return messages.find((message) => message.role === "user")?.id;
+}
+
+/** What the permission mode does on `provider`, from the Codex policy and the Claude permission modes the agents start with. */
+const MODE_BEHAVIOR: Record<ModelProvider, Record<PermissionMode, string>> = {
+  codex: {
+    ask: "runs commands in a sandbox that can write only to this worktree, with no network, and asks before anything but known-safe commands",
+    auto: "runs commands in a sandbox that can write only to this worktree, with no network, and asks before leaving it",
+    full: "runs commands with no sandbox and no approval prompts, so nothing limits files or network",
+  },
+  claude: {
+    ask: "asks before each edit and command",
+    auto: "applies edits inside this worktree without asking and still asks before commands and anything outside it",
+    full: "skips every approval prompt, so nothing limits files or network",
+  },
+};
+
+/** The lines of the note shown before a handed-over chat's first message: what stays behind, and how the mode behaves on the new provider. */
+export function handoverNotes({ from, to, permissionMode }: { from: ModelProvider; to: ModelProvider; permissionMode: PermissionMode }): string[] {
+  const source = providerLabel(from);
+  // The short forms of the PERMISSION_MODES names ("Ask approval", "Auto mode", "Full permission").
+  const modeName = { ask: "Ask", auto: "Auto", full: "Full" }[permissionMode];
+  return [
+    `Approvals you allowed for the whole chat ("Always allow in this chat") stay with the ${source} chat.`,
+    `Subagents still running in the ${source} chat keep running there.`,
+    `On ${providerLabel(to)}, ${modeName} ${MODE_BEHAVIOR[to][permissionMode]}.`,
+  ];
 }

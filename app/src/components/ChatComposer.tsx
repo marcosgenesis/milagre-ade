@@ -25,8 +25,8 @@ import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { HandoverFromLabel, HandoverLinkBar } from "./Handover";
-import { handoverBriefId, type HandoverLinks } from "../lib/handover";
+import { HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
+import { handoverBriefId, otherProvider, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -388,7 +388,11 @@ export function ChatComposer({
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = messages.length === 0 && !handover?.pending;
+  const isNewChat = messages.length === 0 && !handover?.live;
+  const [dismissedNotes, setDismissedNotes] = useState<number[]>([]);
+  // A handed-over chat holds its brief as a draft once the brief is ready and until the first message.
+  const noteKey = handover?.from?.id;
+  const showHandoverNote = messages.length === 0 && Boolean(handover?.live) && !handover?.pending && lockedProvider !== undefined && noteKey !== undefined && !dismissedNotes.includes(noteKey);
   const briefId = handoverBriefId(messages, handover?.from?.id);
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
@@ -504,6 +508,7 @@ export function ChatComposer({
             </button>
           </div>
         )}
+        {showHandoverNote && lockedProvider && noteKey !== undefined && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
         <PromptComposer
           imageDraft={imageDraft}

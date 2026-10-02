@@ -27,3 +27,5 @@ jobs:
         run: npm run build
       - name: Test agent runner
         run: npm run test:agent
+      - name: Test release safeguards
+        run: npm run test:release

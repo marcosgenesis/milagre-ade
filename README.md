@@ -60,7 +60,9 @@ docs: clarify setup                   # no release
 
 The release workflow creates a `vX.Y.Z` tag and a GitHub Release with generated notes, then uploads macOS DMG and ZIP installers for Intel and Apple Silicon. Installed builds check GitHub Releases at startup, download updates in the background, and ask to restart when ready. Use `npm run release:dry` to inspect what would be released without creating a tag.
 
-For production distribution, configure Apple Developer signing and notarization in GitHub Actions. Without them, macOS can show security warnings or block downloaded updates.
+Release installers require a Developer ID Application certificate and Apple notarization. The workflow checks Apple credentials before creating a release, signs and notarizes the app, and signs, notarizes and staples the DMG. It verifies signatures, notarization tickets, Gatekeeper acceptance and DMG integrity before uploading installers. See [macOS signing setup](docs/agents/macos-signing.md) for the required GitHub Actions secrets.
+
+For a local build without an Apple certificate, use `npm run package:mac:local`. This explicitly uses an ad-hoc signature and skips notarization; downloaded copies still require a manual security exception.
 
 ## Pasting images
 

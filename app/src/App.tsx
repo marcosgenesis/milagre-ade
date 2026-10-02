@@ -25,7 +25,7 @@ import {
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
-import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection } from "./lib/models";
+import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
@@ -38,7 +38,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
+import { getSettings, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
 import { renameWorktree } from "./lib/worktree-rename";
@@ -48,6 +48,7 @@ import type { UpdateState } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
+import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
@@ -72,7 +73,7 @@ function App() {
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   const [draft, setDraft] = useState("");
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(() => MODEL_CATALOG.find((model) => model.id === getSettings().defaultModelId) ?? MODEL_CATALOG[0]);
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
@@ -104,11 +105,11 @@ function App() {
     if (reported !== null) appliedDefault.current = true;
     setSelectedModel((current) => nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }));
   }, [models]);
-  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); };
+  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); updateSettings({ defaultModelId: model.id }); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
-  const [isolation, setIsolation] = useState<Isolation>("local");
+  const [isolation, setIsolation] = useState<Isolation>(() => loadChatPreferences(localStorage, "").isolation);
   const [branches, setBranches] = useState<string[]>([]);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
@@ -142,7 +143,7 @@ function App() {
       setProject(current);
       const nextState = current.state ?? createInitialState(current.name, current.path);
       setState(nextState);
-      selectInitialChat(nextState);
+      selectInitialChat(nextState, current.path);
       setLoading(false);
     });
   }, []);
@@ -177,7 +178,23 @@ function App() {
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake } = useSettings();
+  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode } = useSettings();
+
+  // Visiting an old chat can change its displayed model, but never the preference for new chats.
+  useEffect(() => {
+    if (selectedSessionId !== null) return;
+    setSelectedModel(resolveModel(models, defaultModelId, providerForId(defaultModelId)));
+    setPermissionMode(defaultPermissionMode);
+  }, [selectedSessionId, defaultModelId, defaultPermissionMode, models]);
+
+  const effectiveBaseBranch = baseBranch && branches.includes(baseBranch)
+    ? baseBranch : selectedWorktree?.name ?? branches[0] ?? "";
+
+  function restoreProjectChoices(nextState: CoordinatorState, path: string) {
+    const saved = loadChatPreferences(localStorage, path);
+    setSelectedWorktreeId(sortedWorktrees(nextState).find((tree) => tree.path === saved.worktreePath)?.id ?? sortedWorktrees(nextState)[0]?.id ?? null);
+    setBaseBranch(saved.baseBranch ?? null);
+  }
   const runningCount = Object.keys(agentRuns.runs).length;
   const previousRunningCount = useRef(runningCount);
 
@@ -193,6 +210,7 @@ function App() {
   // A running turn takes the new mode at once instead of at its next message.
   function changePermissionMode(mode: PermissionMode) {
     setPermissionMode(mode);
+    updateSettings({ defaultPermissionMode: mode });
     if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
   }
 
@@ -368,16 +386,18 @@ function App() {
   }), []);
 
   function startNewChat() {
+    if (stateRef.current && projectRef.current) restoreProjectChoices(stateRef.current, projectRef.current.path);
     setSelectedSessionId(null);
     setDraft("");
     setNewChatError(null);
     setView("chat");
   }
 
-  function selectInitialChat(nextState: CoordinatorState) {
+  function selectInitialChat(nextState: CoordinatorState, path: string) {
+    restoreProjectChoices(nextState, path);
     const sessionId = latestSessionId(nextState);
     setSelectedSessionId(sessionId);
-    setSelectedWorktreeId(sessionId !== null ? nextState.sessions[sessionId]?.worktree_id ?? null : sortedWorktrees(nextState)[0]?.id ?? null);
+    if (sessionId !== null) setSelectedWorktreeId(nextState.sessions[sessionId]?.worktree_id ?? null);
   }
 
   async function openProject() {
@@ -386,7 +406,7 @@ function App() {
     setProject(nextProject);
     const nextState = nextProject.state ?? createInitialState(nextProject.name, nextProject.path);
     setState(nextState);
-    selectInitialChat(nextState);
+    selectInitialChat(nextState, nextProject.path);
     setDraft("");
   }
 
@@ -397,12 +417,12 @@ function App() {
     if (!state || !project || !selectedWorktree) return null;
     if (selectedSession) return { session: selectedSession as AgentSession | null, worktree: selectedWorktree, createdNextId: undefined as number | undefined };
     if (isolation === "local") return { session: null, worktree: selectedWorktree, createdNextId: undefined };
-    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: baseBranch ?? selectedWorktree.name, prompt: body });
+    setBaseBranch(effectiveBaseBranch);
+    saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
+    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
     const worktree = created.project.state.worktrees[created.worktreeId];
     const session = sessionForWorktree(created.project.state, worktree.id);
     if (!session) throw new Error(`No chat session was created for ${worktree.name}.`);
-    setIsolation("local");
-    setBaseBranch(null);
     void window.milagre.listBranches(project.path).then(setBranches);
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
@@ -654,12 +674,15 @@ function App() {
             onRecommendationSelect={(option) => void executeSend(option, permissionMode)}
             worktrees={worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path }))}
             selectedWorktreeId={selectedWorktree?.id}
-            onWorktreeChange={setSelectedWorktreeId}
+            onWorktreeChange={(id) => {
+              setSelectedWorktreeId(id);
+              saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
+            }}
             isolation={isolation}
-            onIsolationChange={(next) => { setIsolation(next); setNewChatError(null); }}
+            onIsolationChange={(next) => { setIsolation(next); saveChatPreferences(localStorage, project.path, { isolation: next }); setNewChatError(null); }}
             branches={branches}
-            baseBranch={baseBranch ?? selectedWorktree?.name ?? branches[0] ?? ""}
-            onBaseBranchChange={setBaseBranch}
+            baseBranch={effectiveBaseBranch}
+            onBaseBranchChange={(branch) => { setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
             newChatError={newChatError}
             approval={pendingApproval ? (
               <PermissionCard

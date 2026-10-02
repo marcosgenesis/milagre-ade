@@ -94,7 +94,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
   return (
     <>
     <Group title="Agents">
-      <Row label="Default model" description="Selected when Milagre opens">
+      <Row label="Default model" description="Used for new chats; remembers your last selection">
         <Select
           label="Default model"
           title="Choose a model"
@@ -109,7 +109,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
           })))}
         />
       </Row>
-      <Row label="Default permission" description="Applied when Milagre opens">
+      <Row label="Default permission" description="Used for new chats; remembers your last selection">
         <Select<PermissionMode>
           label="Default permission"
           title="Agent permissions"

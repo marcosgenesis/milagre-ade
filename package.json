@@ -13,6 +13,7 @@
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
+    "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
     "test:ui": "node --test \"app/src/**/*.test.ts\"",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",

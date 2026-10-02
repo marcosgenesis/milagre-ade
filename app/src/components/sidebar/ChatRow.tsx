@@ -9,17 +9,20 @@ import {
   Folder01Icon,
   FolderOpenIcon,
   GitBranchIcon,
+  GitMergeIcon,
   GitPullRequestIcon,
+  LinkSquare02Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
   SourceCodeIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
+import Tooltip from "@/components/primitives/Tooltip";
 import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archive";
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { useEditors } from "@/lib/editors";
-import type { DiffStat } from "@/model";
+import type { DiffStat, PullRequest } from "@/model";
 
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -32,6 +35,7 @@ export type ChatDetails = {
   branch?: string;
   path?: string;
   diff?: DiffStat;
+  pullRequest?: PullRequest;
   /** The chat's last turn failed. */
   failed?: boolean;
 };
@@ -103,13 +107,13 @@ function SpinnerRing({ size, stroke = 2 }: { size: number; stroke?: number }) {
  * a halo), running spins a ring, unread is a plain accent dot,
  * and an idle chat keeps a faint dot so labels stay aligned.
  * ───────────────────────────────────────────────────────── */
-function ChatMarkDot({ mark }: { mark: ChatMark }) {
+function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?: boolean }) {
   const dot =
     mark === "waiting" ? "size-2 bg-accent ring-[3px] ring-accent-tint"
     : mark === "unread" ? "size-2 bg-accent"
     : "size-1.5 bg-ink-3 opacity-40";
   return (
-    <span className="sidebar-copy mr-2 flex size-3 shrink-0 items-center justify-center">
+    <span className={`sidebar-copy mr-2 flex size-3 shrink-0 items-center justify-center ${topAligned ? "mt-1" : ""}`}>
       <span
         data-slot="chat-mark"
         data-mark={mark}
@@ -143,6 +147,8 @@ export function ChatRow({
   actions: ChatRowActions;
 }) {
   const mark = item.mark ?? "idle";
+  const pullRequest = !collapsed ? item.details?.pullRequest : undefined;
+  const readyToMerge = pullRequest?.state === "OPEN" && pullRequest.readyToMerge;
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -208,7 +214,7 @@ export function ChatRow({
           type="button"
           onClick={onPick}
           aria-current={active ? "page" : undefined}
-          className={`sidebar-row relative z-10 mx-2 flex h-8 items-center rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+          className={`sidebar-row relative z-10 mx-2 flex ${pullRequest ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
           }`}
         >
@@ -222,15 +228,42 @@ export function ChatRow({
               <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
             )}
           </span>
-          <ChatMarkDot mark={mark} />
+          <ChatMarkDot mark={mark} topAligned={Boolean(pullRequest)} />
           <span
-            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] transition-[padding] duration-150 group-hover/row:pr-6 ${menu ? "pr-6" : ""} ${
+            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${pullRequest ? "leading-5" : ""} transition-[padding] duration-150 group-hover/row:pr-6 ${menu ? "pr-6" : ""} ${
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
             {item.label}
           </span>
         </button>
+      )}
+
+      {pullRequest && !renaming && (
+        <Tooltip
+          label={readyToMerge ? `Ready to merge · Pull request #${pullRequest.number}` : `${pullRequest.state === "MERGED" ? "Merged" : "Open"} pull request #${pullRequest.number}`}
+          side="bottom"
+          className="sidebar-copy absolute bottom-1 left-9 z-20 max-w-[calc(100%-72px)]"
+        >
+          <a
+            href={pullRequest.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${pullRequest.state === "MERGED" ? "merged " : ""}pull request #${pullRequest.number}${readyToMerge ? ", ready to merge" : ""}`}
+            data-chat-pr
+            className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span aria-hidden className={`inline-flex group-hover/pr:hidden group-focus-visible/pr:hidden ${pullRequest.state === "MERGED" ? "text-purple-500" : "text-green"}`}>
+              <HugeIcon icon={pullRequest.state === "MERGED" ? GitMergeIcon : readyToMerge ? Tick02Icon : GitPullRequestIcon} size={12} />
+            </span>
+            <span aria-hidden className="hidden group-hover/pr:inline-flex group-focus-visible/pr:inline-flex">
+              <HugeIcon icon={LinkSquare02Icon} size={12} />
+            </span>
+            <span className="truncate">#{pullRequest.number}</span>
+            {readyToMerge && <span className="shrink-0 text-green">Ready</span>}
+          </a>
+        </Tooltip>
       )}
 
       {!collapsed && !renaming && (
@@ -245,7 +278,7 @@ export function ChatRow({
             if (menu) setMenu(null);
             else openMenu(rect.left, rect.bottom + 4);
           }}
-          className={`absolute right-3 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+          className={`absolute right-3 ${pullRequest ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
             menu ? "bg-hover text-ink opacity-100" : "opacity-0"
           }`}
         >
@@ -334,6 +367,16 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
         {status && (
           <CardLine icon={<span className="flex size-4 items-center justify-center"><ChatMarkDotInline mark={mark} failed={Boolean(details.failed)} /></span>}>
             <span className={status.tone}>{status.label}</span>
+          </CardLine>
+        )}
+        {details.pullRequest && (
+          <CardLine icon={<span className={details.pullRequest.state === "MERGED" ? "text-purple-500" : "text-green"}><HugeIcon icon={details.pullRequest.state === "MERGED" ? GitMergeIcon : GitPullRequestIcon} size={14} /></span>}>
+            <span className="min-w-0 truncate leading-snug">#{details.pullRequest.number}{details.pullRequest.title ? ` · ${details.pullRequest.title}` : ""}</span>
+          </CardLine>
+        )}
+        {details.pullRequest?.state === "OPEN" && details.pullRequest.readyToMerge && (
+          <CardLine icon={<span className="text-green"><HugeIcon icon={Tick02Icon} size={14} /></span>}>
+            <span className="text-green">Ready to merge</span>
           </CardLine>
         )}
         {details.diff && (

@@ -34,6 +34,7 @@ import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
+import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -181,6 +182,7 @@ function App() {
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
   const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId);
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
+  const pullRequests = useWorktreePullRequests(project?.path ?? "", state);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -273,11 +275,12 @@ function App() {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
+            pullRequest: worktree ? pullRequests[worktree.path] ?? undefined : undefined,
             failed: lastReply?.outcome === "failed",
           },
         };
       });
-  }, [state, waiting, running]);
+  }, [state, waiting, running, pullRequests]);
 
   // Chat row actions build on the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: Parameters<typeof patchSession>[2]) {

@@ -26,6 +26,7 @@ const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
 const { createProjectSettings } = require("./project-settings.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
+const { registerGitHandlers } = require("./git-ipc.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
@@ -88,7 +89,11 @@ async function discoverWorktrees(projectPath) {
   }
 }
 
+// Projects opened in this run: the commit dialog only acts in their checkouts.
+const openedProjects = new Set();
+
 async function readProject(projectPath) {
+  openedProjects.add(projectPath);
   const name = path.basename(projectPath) || "Untitled project";
   let storedState = null;
   try {
@@ -256,6 +261,15 @@ const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => 
 
 ipcMain.handle("usage:read", () => readUsage());
 ipcMain.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));
+
+// The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
+// environment is in (gh from a Finder launch). Its one-shot text call starts the CLI agentCli found.
+registerGitHandlers(ipcMain, {
+  cli: (name) => agentCli(name),
+  ready: () => environmentReady,
+  clientVersion: app.getVersion(),
+  knownFolders: async () => (await Promise.all([...openedProjects].map(discoverWorktrees))).flat().map((worktree) => worktree.path),
+});
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);

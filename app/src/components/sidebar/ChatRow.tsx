@@ -9,7 +9,8 @@ import {
   Folder01Icon,
   FolderOpenIcon,
   GitBranchIcon,
-  MoreHorizontalIcon,
+  GitPullRequestIcon,
+  MoreVerticalIcon,
   PencilEdit02Icon,
   SourceCodeIcon,
   Tick02Icon,
@@ -51,6 +52,8 @@ export type ChatRowActions = {
   onMarkUnread?: (id: string, unread: boolean) => void;
   onReveal?: (id: string) => void;
   onOpenInEditor?: (id: string) => void;
+  /** Opens the chat with its "Commit and open PR" dialog. */
+  onCommit?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => void;
@@ -246,7 +249,7 @@ export function ChatRow({
             menu ? "bg-hover text-ink opacity-100" : "opacity-0"
           }`}
         >
-          <HugeIcon icon={MoreHorizontalIcon} size={16} />
+          <HugeIcon icon={MoreVerticalIcon} size={16} />
         </button>
       )}
 
@@ -368,7 +371,7 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
 
 /* ─────────────────────────────────────────────────────────
  * ACTIONS MENU
- * From the row's ⋯ button or a right-click. Archive hides the
+ * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
 function ChatMenu({
@@ -381,7 +384,7 @@ function ChatMenu({
 }: {
   item: SidebarRecent;
   position: { x: number; y: number };
-  /** The ⋯ button toggles the menu itself, so a press on it isn't an outside press. */
+  /** The ⋮ button toggles the menu itself, so a press on it isn't an outside press. */
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onRename: () => void;
@@ -471,6 +474,8 @@ function ChatMenu({
       : { key: "unread", label: "Mark as unread", icon: CircleIcon, onSelect: run(() => actions.onMarkUnread?.(item.id, true)), disabled: !actions.onMarkUnread },
     { key: "reveal", label: IS_MAC ? "Open in Finder" : "Open in file manager", icon: FolderOpenIcon, onSelect: run(() => actions.onReveal?.(item.id)), disabled: !actions.onReveal || !details.path },
     { key: "editor", label: editor ? `Open in ${editor.name}` : "No editor found", icon: SourceCodeIcon, onSelect: run(() => actions.onOpenInEditor?.(item.id)), disabled: !editor || !actions.onOpenInEditor || !details.path },
+    // Every chat's folder came from `git worktree list`, so a chat with a folder is in a repository.
+    { key: "commit", label: "Commit and open PR…", icon: GitPullRequestIcon, onSelect: run(() => actions.onCommit?.(item.id)), disabled: !actions.onCommit || !details.path },
     "divider",
     ...archiveItems,
   ];

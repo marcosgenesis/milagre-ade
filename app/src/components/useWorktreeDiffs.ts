@@ -11,6 +11,7 @@ const FOCUS_THROTTLE = 5000;
  * Keeps each worktree's diff stat in the project state, so the chat hover card shows it at once.
  * Re-read in the background when the project opens, when the window regains focus (edits made
  * outside Milagre), and after an agent's tool step or turn ends in one of the worktree's chats.
+ * `refresh` re-reads some worktrees at once, e.g. after a commit from the "Commit and open PR" dialog.
  */
 export function useWorktreeDiffs(projectPath: string, getState: () => CoordinatorState | null, commit: (next: CoordinatorState) => void) {
   const projectPathRef = useRef(projectPath);
@@ -79,4 +80,6 @@ export function useWorktreeDiffs(projectPath: string, getState: () => Coordinato
       pending.clear();
     };
   }, []);
+
+  return { refresh };
 }

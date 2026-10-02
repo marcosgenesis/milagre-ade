@@ -1,3 +1,4 @@
+import { ChatTitle } from "./ChatTitle";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -235,7 +236,7 @@ export function ChatRow({
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
-            {item.label}
+            <ChatTitle label={item.label} />
           </span>
         </button>
       )}

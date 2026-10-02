@@ -1,3 +1,4 @@
+const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
@@ -148,6 +149,7 @@ async function readProject(projectPath) {
     const next = reconcileState(current, projectName(projectPath), discovered);
     return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
   });
+  chatTitles.resume(projectPath, state);
   void diffs.refresh(projectPath).catch(() => {});
   return { path: projectPath, name: projectName(projectPath), state };
 }
@@ -385,6 +387,7 @@ async function startAgentTurn(request) {
 const chats = new ChatHost({
   states,
   startTurn: startAgentTurn,
+  nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
   publish: publishAgentEvent,
   broadcast: broadcastProjectState,
   isFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
@@ -395,6 +398,9 @@ const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+
+const titleModels = createChatTitleModels({ cli: agentCli, clientVersion: app.getVersion() });
+const chatTitles = new ChatTitles({ states, update: updateProject, generate: request => generateChatTitle(request, { models: titleModels }) });
 
 ipcMain.handle("usage:read", () => readUsage());
 ipcMain.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));

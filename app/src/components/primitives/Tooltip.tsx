@@ -72,7 +72,7 @@ export default function Tooltip({
           }}
         >
           {label}
-          {showHints && hint && <span data-shortcut-hint className="opacity-60">{hint}</span>}
+          {hint && <span data-shortcut-hint className="opacity-60">{hint}</span>}
         </span>,
         document.body,
       )}

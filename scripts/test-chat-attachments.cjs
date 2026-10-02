@@ -118,6 +118,14 @@ async function browserChecks() {
   await waitFor(String.raw`document.querySelector('[data-promptbar] video')?.videoWidth > 0`);
   assert.equal(await evaluate('document.querySelector("textarea").value'), '', 'Media selections stay out of the textarea');
   await screenshot('file-attachments-selected');
+  await click('[data-promptbar] [aria-label="Preview photo.png"]');
+  await waitFor(String.raw`document.querySelector('dialog img')?.naturalWidth > 0`);
+  await screenshot('image-selected-preview');
+  await key('Escape');
+  await click('[data-promptbar] [aria-label="Preview clip.mp4"]');
+  await waitFor(String.raw`document.querySelector('dialog video')?.videoWidth > 0`);
+  await screenshot('video-selected-preview');
+  await key('Escape');
   await type('Review these');
   await click('[aria-label="Send"]');
   await waitFor('window.calls.length === 2');

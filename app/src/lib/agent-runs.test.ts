@@ -262,6 +262,14 @@ test("chatsRunning lists only this project's chats with a run", () => {
   assert.deepEqual([...chatsRunning(runs, PROJECT)].sort(), [1, 4]);
 });
 
+test("chatsRunning counts a chat whose subagents outlive its turn", () => {
+  const sessions = base().sessions;
+  const agent = (id: string, status: string) => ({ id, status }) as unknown as NonNullable<CoordinatorState["sessions"][string]["subagents"]>[number];
+  sessions["1"] = { ...sessions["1"], subagents: [agent("a", "completed"), agent("b", "running")] };
+  sessions["2"] = { ...sessions["2"], subagents: [agent("c", "completed")] };
+  assert.deepEqual([...chatsRunning({}, PROJECT, sessions)], [1]);
+});
+
 const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });
 
 test("questions wait on the run, oldest first, until they're resolved", () => {

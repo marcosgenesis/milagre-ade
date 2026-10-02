@@ -1,3 +1,4 @@
+import { subagentActive } from "./subagents.ts";
 import type { AgentEvent, AgentTask, ChatMessage, ChatStep, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
@@ -48,9 +49,14 @@ export function chatsWaitingForUser(runs: AgentRuns, projectPath: string): Set<n
   return waiting;
 }
 
-/** Session ids of the project's chats with a turn running, so the sidebar can mark them. */
-export function chatsRunning(runs: AgentRuns, projectPath: string): Set<number> {
-  return new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+/**
+ * Session ids of the project's chats with a turn running, so the sidebar can mark them. Subagents
+ * can outlive the turn that started them, so a chat with one still active counts too.
+ */
+export function chatsRunning(runs: AgentRuns, projectPath: string, sessions: CoordinatorState["sessions"] = {}): Set<number> {
+  const running = new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+  for (const session of Object.values(sessions)) if (session.subagents?.some(subagentActive)) running.add(session.id);
+  return running;
 }
 
 /** The session id at the end of a chat key (after the last `#`), or NaN. */

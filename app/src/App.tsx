@@ -275,7 +275,7 @@ function App() {
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
-  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)

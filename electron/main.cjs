@@ -25,6 +25,7 @@ const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
+const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
@@ -159,6 +160,7 @@ async function readProject(projectPath) {
     return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
   });
   chatTitles.resume(projectPath, state);
+  void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
   void diffs.refresh(projectPath).catch(() => {});
   return { path: projectPath, name: projectName(projectPath), state };
 }
@@ -433,6 +435,9 @@ async function startAgentTurn(request) {
   }
 }
 
+// Built on the first handover: agentCli is declared after the chats.
+let handoverModels;
+
 const chats = new ChatHost({
   states,
   startTurn: startAgentTurn,
@@ -440,6 +445,13 @@ const chats = new ChatHost({
   publish: publishAgentEvent,
   broadcast: broadcastProjectState,
   isFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
+  handoverTools: {
+    writeTranscript: (input) => writeTranscript({ ...input, dir: path.join(app.getPath("userData"), "handovers") }),
+    brief: ({ cwd, ...input }) => generateBrief({
+      ...input,
+      changedFiles: async () => (await execFileAsync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" })).stdout.split("\n").filter(Boolean).map((line) => line.slice(3)),
+    }, { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: app.getVersion() })) }),
+  },
 });
 
 // A setup's steps show in the chat's turn like the agent's own.
@@ -466,6 +478,10 @@ registerGitHandlers(ipcMain, {
 ipcMain.handle("chat:send", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
   return chats.send(request);
+});
+ipcMain.handle("chat:handover", (_event, request) => {
+  if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
+  return chats.handover(request);
 });
 ipcMain.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? updateProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
 // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.

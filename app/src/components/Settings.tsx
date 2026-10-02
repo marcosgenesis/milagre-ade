@@ -99,7 +99,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       <Row label="Default model" description="Used for new chats; remembers your last selection">
         <Select
           label="Default model"
-          title="Choose a model"
           width={280}
           value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
           onChange={(defaultModelId) => updateSettings({ defaultModelId })}
@@ -114,7 +113,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       <Row label="Default permission" description="Used for new chats; remembers your last selection">
         <Select<PermissionMode>
           label="Default permission"
-          title="Agent permissions"
           width={340}
           value={settings.defaultPermissionMode}
           onChange={(defaultPermissionMode) => updateSettings({ defaultPermissionMode })}

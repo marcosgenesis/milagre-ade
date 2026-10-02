@@ -312,6 +312,17 @@ a {
   }
 }
 
+/* The sidebar list clips its overflow, so focus rings sit inside each control and keep its radius. */
+.sidebar-scroll :focus-visible {
+  outline-offset: -2px;
+  border-radius: revert-layer;
+}
+
+/* The collapsed rail is one 32px column: no scrollbar to squeeze it, no sideways scroll. */
+[data-sidebar-collapsed="true"] .sidebar-scroll {
+  scrollbar-width: none;
+}
+
 /* The conversation rail sits over the left edge of the transcript. When the
  * window is too narrow for the centred column to clear it, the column's left
  * padding grows so the ticks keep their own lane (36px from the edge). */

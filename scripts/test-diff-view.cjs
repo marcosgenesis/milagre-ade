@@ -13,6 +13,7 @@ import { ChangesToggle, DiffBar } from "/src/components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
 import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "/src/components/changes/DiffView";
 import { useChanges } from "/src/components/changes/useChanges";
+import { useDiffComments } from "/src/components/changes/useDiffComments";
 import "/src/styles.css";
 const listeners = new Set();
 const FILES = {
@@ -51,6 +52,7 @@ window.milagre = {
 window.endTurn = () => listeners.forEach(listener => listener({ chatId: "chat-1", event: { type: "turn-completed" } }));
 function Fixture() {
   const changes = useChanges({ cwd: "/fixture", base: "main", chatId: "chat-1", available: true });
+  const comments = useDiffComments("chat-1", changes);
   const prefs = useDiffPreferences();
   const diff = changes.diffOpen;
   const presence = useDiffPresence(diff);
@@ -60,7 +62,7 @@ function Fixture() {
     <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden pr-3 pb-3">
       <DiffBar open={diff} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={prefs} />} />
       <AnimatePresence initial={false} onExitComplete={presence.onExitComplete}>
-        {diff && <DiffView key="diff" changes={changes} prefs={prefs} />}
+        {diff && <DiffView key="diff" changes={changes} prefs={prefs} comments={comments} />}
       </AnimatePresence>
       <div data-chat-stub className={"flex-1 pt-12 px-6 text-[14px] " + (presence.occupied ? "hidden" : "")}>Chat goes here</div>
     </main>

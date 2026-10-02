@@ -22,6 +22,7 @@
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
     "test:diff-view": "node scripts/test-diff-view.cjs",
+    "test:diff-comments": "node scripts/test-diff-comments.cjs",
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
     "test:sidebar-usage": "node scripts/test-sidebar-usage.cjs",
     "test:sidebar-resize": "node scripts/test-sidebar-resize.cjs",

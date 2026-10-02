@@ -3,6 +3,9 @@ const { patchSession } = require("../shared/project-edits.mjs");
 const { chatTitle } = require("../shared/chats.mjs");
 const { renderTranscript, providerName } = require("./handover.cjs");
 
+const RESUME_BODY = "Milagre restarted. Continue where you left off.";
+const RESUME_PROMPT = "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
+
 /** The part of an IPC error the user should read. */
 function errorMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -34,6 +37,9 @@ class ChatHost {
     this.seq = 0;
     this.openChat = null;
     this.notes = new Map();
+    // The options of each chat's latest turn, so a turn a quit stops can start again the same way.
+    this.turns = new Map();
+    this.quitting = false;
   }
 
   /** The turns streaming now, in every project, and the number of the last event they hold. */
@@ -48,6 +54,8 @@ class ChatHost {
 
   /** Folds one agent event into its chat's project, then publishes it. Events are published in the order they arrive. */
   receive(chatId, event) {
+    // A turn the quit stops says so in its reply.
+    if (this.quitting && event.type === "turn-cancelled") event = { ...event, quit: true };
     const projectPath = projectOfKey(chatId);
     const sessionId = sessionIdFromKey(chatId);
     let seq;
@@ -154,11 +162,9 @@ class ChatHost {
     });
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
-    this.startTurn({
-      chatId: target.chatId,
+    const turn = {
       provider,
       model,
-      cwd: target.cwd,
       permissionMode: request.permissionMode,
       effort: request.effort,
       ultracode: request.ultracode,
@@ -166,9 +172,9 @@ class ChatHost {
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
       prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
-      images,
-      resumeId: target.resumeId,
-    }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
+    };
+    this.turns.set(target.chatId, turn);
+    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
     return { sessionId: target.sessionId };
   }
 
@@ -247,6 +253,51 @@ class ChatHost {
     });
     if (changed) this.broadcast(projectPath, state);
     return Boolean(changed);
+  }
+
+  /**
+   * Before a quit stops the agents: every chat whose turn runs is saved with what it needs to start again
+   * (`resumeTurn`), and the cancelled turns that follow say the quit stopped them. A chat whose agent never
+   * started keeps its prompt, since no session holds it yet.
+   */
+  async suspendRunning() {
+    this.quitting = true;
+    const byProject = new Map();
+    for (const chatId of Object.keys(this.runs)) {
+      const turn = this.turns.get(chatId);
+      if (!turn) continue;
+      byProject.set(projectOfKey(chatId), [...(byProject.get(projectOfKey(chatId)) ?? []), [sessionIdFromKey(chatId), turn]]);
+    }
+    await Promise.all([...byProject].map(([projectPath, chats]) => this.states.update(projectPath, (latest) => {
+      let sessions = latest.sessions;
+      for (const [sessionId, { prompt, ...turn }] of chats) {
+        const session = sessions[sessionId];
+        if (!session) continue;
+        sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, ...(session.native_session_id ? {} : { prompt }) } } };
+      }
+      return sessions === latest.sessions ? latest : { ...latest, sessions };
+    }).catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message))));
+  }
+
+  /** Chats a quit stopped mid-turn (see `suspendRunning`) continue when their project opens. */
+  async resumeInterrupted(projectPath, state) {
+    for (const session of Object.values(state.sessions)) {
+      if (!session.resumeTurn || this.runs[chatKey(projectPath, session.id)]) continue;
+      let turn = null;
+      // The state passed in can be stale: take the mark from the latest one, so a chat resumes once.
+      const { state: next, changed } = await this.states.update(projectPath, (latest) => {
+        const current = latest.sessions[session.id];
+        if (!current?.resumeTurn) return latest;
+        const { resumeTurn, ...rest } = current;
+        turn = resumeTurn;
+        return { ...latest, sessions: { ...latest.sessions, [session.id]: rest } };
+      });
+      if (!turn) continue;
+      if (changed) this.broadcast(projectPath, next);
+      const { prompt, ...options } = turn;
+      await this.send({ ...options, projectPath, sessionId: session.id, body: RESUME_BODY, prompt: prompt ?? RESUME_PROMPT, images: [], files: [] })
+        .catch((error) => console.warn(`Milagre couldn't resume a chat in ${projectPath}:`, error.message));
+    }
   }
 
   /** A handover still marked pending when its project opens was cut off by a quit: it gets a note instead. */

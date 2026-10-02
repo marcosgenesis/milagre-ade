@@ -62,6 +62,8 @@ function App() {
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const openSessionRef = useRef<number | null>(null);
+  const selectedSessionRef = useRef<number | null>(null);
+  selectedSessionRef.current = selectedSessionId;
   const [draft, setDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => MODEL_CATALOG.find((model) => model.id === getSettings().defaultModelId) ?? MODEL_CATALOG[0]);
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
@@ -243,6 +245,7 @@ function App() {
     if (!project) return Promise.resolve();
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
+    const wasOpen = selectedSessionId === sessionId;
     return runArchive({
       projectPath,
       chatId: key,
@@ -252,6 +255,11 @@ function App() {
       hide: () => {
         patchChat(sessionId, { archived: true, unread: false });
         if (selectedSessionId === sessionId) startNewChat();
+      },
+      // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
+      restore: () => {
+        patchChat(sessionId, { archived: false });
+        if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
       },
       remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
       applyRemoval: (next, removed) => {

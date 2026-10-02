@@ -15,6 +15,8 @@ export type ArchiveDeps = {
   stop: () => Promise<unknown> | undefined;
   /** Hides the chat (and leaves it if it is open). */
   hide: () => void;
+  /** Brings the chat back after `hide`, because its worktree is staying: un-archived, and reselected if it was open and nothing else was opened since. */
+  restore: () => void;
   /** Removes the worktree; main closes the chat's agent and checks again against `seen`. */
   remove: (worktree: Worktree, options: RemoveOptions) => Promise<unknown>;
   /** The state after the worktree is gone, and the chats that went with it. */
@@ -26,7 +28,7 @@ export type ArchiveDeps = {
 /**
  * Archives a chat. The chat is hidden first, so a worktree that won't go never keeps the archive from happening.
  * The worktree is removed only when the chosen mode asks for it, the menu's status is at hand, and no other chat
- * uses it by now; a refusal or an error becomes a notice and the worktree stays.
+ * uses it by now. A refusal or an error becomes a notice, the worktree stays, and the chat is restored.
  */
 export async function archiveChat(deps: ArchiveDeps, sessionId: number, mode: ArchiveMode, plan: ArchivePlan | null): Promise<"hidden" | "removed" | "kept"> {
   const latest = deps.getState();
@@ -43,7 +45,9 @@ export async function archiveChat(deps: ArchiveDeps, sessionId: number, mode: Ar
   try {
     await deps.remove(removing, { force: mode === "delete", base: removing.base!, projectPath: deps.projectPath, chatId: deps.chatId, seen: plan.status });
   } catch (error) {
-    deps.notify(removeFailureNotice(error, removing.path));
+    // The worktree stays, and with hide-only archive it would be invisible: the chat comes back with it.
+    deps.restore();
+    deps.notify(removeFailureNotice(error));
     return "kept";
   }
   // The window moved to another project meanwhile: that project's state isn't ours to change.

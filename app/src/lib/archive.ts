@@ -99,11 +99,14 @@ export function archiveChoices({ plan, running }: { plan: ArchivePlan; running: 
   };
 }
 
-/** The notice for a worktree that wouldn't go: "Couldn't remove the worktree: <git's message>. It's still at <path>." */
-export function removeFailureNotice(error: unknown, path: string): string {
+/**
+ * The notice for a worktree that wouldn't go. The worktree is kept, so the chat is brought back with it
+ * (hide-only archive would leave the worktree invisible), and the notice says so.
+ */
+export function removeFailureNotice(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   // Main refuses a removal that the worktree outgrew after the user looked at it.
-  if (raw.includes("WORKTREE_CHANGED")) return `It changed after you checked, so it's kept at ${path}.`;
+  if (raw.includes("WORKTREE_CHANGED")) return "It changed after you checked, so the chat and its worktree stay.";
   const message = raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "").replace(/^fatal: /, "").trim().replace(/[.\s]+$/, "");
-  return `Couldn't remove the worktree: ${message}. It's still at ${path}.`;
+  return `Couldn't remove the worktree: ${message}. The chat stays so you can find it.`;
 }

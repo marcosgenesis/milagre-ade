@@ -43,6 +43,7 @@ function harness(overrides: Partial<ArchiveDeps> = {}, state = baseState()) {
       return undefined;
     },
     hide: () => calls.push("hide"),
+    restore: () => calls.push("restore"),
     remove: async (worktree, options) => {
       calls.push("remove");
       removals.push({ path: worktree.path, ...options });
@@ -104,17 +105,43 @@ test("the turn winds down before the removal is asked for", async () => {
   assert.deepEqual(order, ["stopped", "remove"]);
 });
 
-test("a refusal because the worktree changed leaves it in place with a notice, and the chat stays archived", async () => {
+test("a refusal because the worktree changed keeps the worktree and brings the chat back, with a notice", async () => {
   const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: WORKTREE_CHANGED: /tmp/wt/shop/x-1 changed after it was checked."); } });
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "kept");
-  assert.deepEqual(h.notices, ["It changed after you checked, so it's kept at /tmp/wt/shop/x-1."]);
-  assert.deepEqual(h.calls, ["stop", "hide"]);
+  assert.deepEqual(h.notices, ["It changed after you checked, so the chat and its worktree stay."]);
+  assert.deepEqual(h.calls, ["stop", "hide", "restore"]);
+  assert.deepEqual(h.applied, []);
 });
 
-test("a git error becomes a notice with git's message and the path", async () => {
+test("a removal error keeps the worktree and brings the chat back, with git's message", async () => {
   const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: fatal: cannot remove a locked working tree"); } });
   assert.equal(await archiveChat(h.deps, 2, "remove", plan), "kept");
-  assert.deepEqual(h.notices, ["Couldn't remove the worktree: cannot remove a locked working tree. It's still at /tmp/wt/shop/x-1."]);
+  assert.deepEqual(h.notices, ["Couldn't remove the worktree: cannot remove a locked working tree. The chat stays so you can find it."]);
+  assert.deepEqual(h.calls, ["stop", "hide", "restore"]);
+  assert.deepEqual(h.removals, []);
+});
+
+test("a removal that succeeds keeps the chat archived", async () => {
+  const h = harness();
+  await archiveChat(h.deps, 2, "remove", { ...plan, status: { ...status, uncommitted: 0, removable: true } });
+  assert.equal(h.calls.includes("restore"), false);
+  assert.deepEqual(h.notices, []);
+});
+
+test("the hide-only cases stay archived: not Milagre's, shared, or no status", async () => {
+  const shared = baseState();
+  shared.sessions["3"] = session(3, 2);
+  for (const [h, mode, p] of [
+    [harness({}, shared), "delete", plan],
+    [harness(), "hide", { ...plan, milagreOwned: false, status: null }],
+    [harness(), "remove", { ...plan, status: null }],
+    [harness(), "remove", null],
+  ] as const) {
+    assert.equal(await archiveChat(h.deps, 2, mode, p as ArchivePlan | null), "hidden");
+    assert.deepEqual(h.calls, ["stop", "hide"]);
+    assert.deepEqual(h.removals, []);
+    assert.deepEqual(h.notices, []);
+  }
 });
 
 test("a project switched to midway keeps its state untouched", async () => {

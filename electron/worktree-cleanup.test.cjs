@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { createWorktree } = require("./worktrees.cjs");
-const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
+const { GIT_TIMEOUT_MS, REMOVE_TIMEOUT_MS, removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-cleanup-"));
@@ -267,6 +267,28 @@ test("a base that looks like a flag, or a ref that is also a folder, is read as 
   const status = await worktreeStatus(wt.path, "main");
   assert.equal(status.unpushed, 1);
   assert.equal(status.uncommitted, 1);
+});
+
+test("removing gets a long timeout, the checks a short one", async (t) => {
+  const fx = await fixture(t);
+  const wt = await fx.make("q1");
+  const { promisify } = require("node:util");
+  const real = promisify(require("node:child_process").execFile);
+  const seen = [];
+  await remove(fx, wt, { exec: (command, args, options) => { seen.push({ args: args.slice(2), timeout: options.timeout }); return real(command, args, options); } });
+  const timeoutOf = (...prefix) => seen.find((call) => prefix.every((word, index) => call.args[index] === word))?.timeout;
+  assert.equal(timeoutOf("worktree", "list"), GIT_TIMEOUT_MS);
+  assert.equal(timeoutOf("worktree", "remove"), REMOVE_TIMEOUT_MS);
+  assert.equal(timeoutOf("branch"), REMOVE_TIMEOUT_MS);
+  assert.ok(REMOVE_TIMEOUT_MS >= 5 * 60_000 && GIT_TIMEOUT_MS === 10_000);
+});
+
+test("without a project nothing is removed", async (t) => {
+  const fx = await fixture(t);
+  const wt = await fx.make("q2");
+  await assert.rejects(removeWorktree({ path: wt.path, root: fx.worktreeRoot, base: wt.base, force: false }), /No project/);
+  await assert.rejects(removeWorktree({ path: wt.path, root: fx.worktreeRoot, projectPath: "", base: wt.base, force: false }), /No project/);
+  assert.equal(await exists(wt.path), true);
 });
 
 test("it only deletes branches Milagre made", async (t) => {

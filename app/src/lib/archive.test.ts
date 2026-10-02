@@ -112,10 +112,14 @@ test("withoutWorktree drops the worktree and what hangs off it, and leaves the r
   assert.equal(withoutWorktree(initial, 99), initial);
 });
 
-test("removeFailureNotice puts git's message and the path in one line", () => {
+test("removeFailureNotice names git's message, says the chat stays, and has no path", () => {
   assert.equal(
-    removeFailureNotice(new Error("Error invoking remote method 'worktree:remove': Error: fatal: '/tmp/wt/x' contains modified or untracked files, use --force to delete it\n"), "/tmp/wt/x"),
-    "Couldn't remove the worktree: '/tmp/wt/x' contains modified or untracked files, use --force to delete it. It's still at /tmp/wt/x.",
+    removeFailureNotice(new Error("Error invoking remote method 'worktree:remove': Error: fatal: cannot remove a locked working tree\n")),
+    "Couldn't remove the worktree: cannot remove a locked working tree. The chat stays so you can find it.",
   );
-  assert.equal(removeFailureNotice("boom.", "/p"), "Couldn't remove the worktree: boom. It's still at /p.");
+  assert.equal(removeFailureNotice("boom."), "Couldn't remove the worktree: boom. The chat stays so you can find it.");
+  assert.equal(
+    removeFailureNotice(new Error("Error invoking remote method 'worktree:remove': Error: WORKTREE_CHANGED: /tmp/wt/x changed after it was checked.")),
+    "It changed after you checked, so the chat and its worktree stay.",
+  );
 });

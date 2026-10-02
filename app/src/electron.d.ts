@@ -15,6 +15,26 @@ export type FilesToCopy = { source: "worktreeinclude" | "setting" | "default"; w
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
+export type DiffMode = "uncommitted" | "committed";
+
+export type DiffFileEntry = {
+  /** The new path, relative to the chat's folder. */
+  path: string;
+  /** Renames only. */
+  oldPath?: string;
+  status: "added" | "deleted" | "modified" | "renamed";
+  added: number;
+  removed: number;
+  binary: boolean;
+  untracked?: boolean;
+};
+
+/** `base` is the branch name `committed` compares with, null for `uncommitted` or when there is none. */
+export type DiffFilesResult = { isRepo: false; message: string } | { isRepo: true; base: string | null; files: DiffFileEntry[] };
+
+/** `patch` is empty when the file is binary or `tooLarge` (over 1 MB). */
+export type DiffFileResult = { patch: string; binary: boolean; tooLarge: boolean };
+
 declare global {
   interface Window {
     milagre: {
@@ -51,6 +71,10 @@ declare global {
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
       git: {
         changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;
+        /** Files a chat's folder changed: `uncommitted` against HEAD (untracked included), `committed` since the merge-base with the base branch. */
+        diffFiles: (request: { cwd: string; base?: string; mode: DiffMode }) => Promise<DiffFilesResult>;
+        /** One file's unified patch. Rejects for a path that is absolute or climbs out of the folder. */
+        diffFile: (request: { cwd: string; base?: string; mode: DiffMode; path: string; oldPath?: string; untracked?: boolean }) => Promise<DiffFileResult>;
         /** Never rejects for a model failure: `ok: false` carries the note the dialog shows. */
         generate: (request: { cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext }) => Promise<GitTextResult>;
         commit: (request: { cwd: string; message: string }) => Promise<GitCommitResult>;

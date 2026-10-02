@@ -8,12 +8,13 @@ import { createRoot } from "react-dom/client";
 import { ChatRow } from "/src/components/sidebar/ChatRow";
 import "/src/styles.css";
 window.calls = [];
+window.checks = 0;
 // The worktree check resolves only when the check says so, to cover Enter while it is pending.
 let release;
 window.releaseCheck = () => release?.();
 const plan = { milagreOwned: true, shared: false, status: { uncommitted: 0, unpushed: 0, branch: "fix", head: "abc", removable: true } };
 const actions = {
-  onArchiveCheck: () => new Promise(resolve => { release = () => resolve(plan); }),
+  onArchiveCheck: () => (window.checks++, new Promise(resolve => { release = () => resolve(plan); })),
   onArchive: (id, mode) => window.calls.push("archive:" + mode),
   onMarkUnread: (id, unread) => window.calls.push("unread:" + unread),
   onRename: () => {},
@@ -59,29 +60,33 @@ async function browserChecks() {
     await require("node:fs/promises").writeFile(path.join(shots, name), (await win.webContents.capturePage()).toPNG());
   };
   const archiveRow = '[data-chat-menu] [role="menuitem"]:last-of-type';
-  const openArmed = async () => {
+  const openMenu = async () => {
     await click('[aria-label="Chat actions"]');
     await waitFor('document.querySelector("[data-chat-menu]")');
-    await click(archiveRow);
-    await waitFor('document.querySelector("[data-archive-choice]")');
   };
   try {
     await win.loadURL(process.argv[2]);
     await waitFor('document.querySelector("[aria-label=\\"Chat actions\\"]")');
     win.focus();
 
-    // Enter while the worktree is still being checked does nothing.
-    await openArmed();
-    await shot("checking.png");
+    // The worktree is checked as the menu opens; until then Archive is disabled and there is no checking row.
+    await openMenu();
+    assert.equal(await evaluate("window.checks"), 1, "Opening the menu starts the check");
+    assert.equal(await evaluate(`document.querySelector('${archiveRow}').textContent`), "Archive");
+    assert.ok(await evaluate(`document.querySelector('${archiveRow}').disabled`), "Archive waits for the check");
+    await shot("pending.png");
+    await click(archiveRow);
     await press("Enter");
-    assert.deepEqual(await evaluate("window.calls"), [], "Enter while checking archives nothing");
-    assert.ok(await evaluate('!!document.querySelector("[data-chat-menu]")'), "Menu stays open while checking");
+    assert.deepEqual(await evaluate("window.calls"), [], "Nothing archives before the check is back");
+    assert.equal(await evaluate('!!document.querySelector("[data-archive-choice]")'), false, "A click before the check doesn't arm");
 
-    // Once the choice shows, Enter after a mouse click confirms it.
+    // Once checked, Archive goes straight to its choice, and Enter confirms it wherever focus is.
     await evaluate("window.releaseCheck()");
-    await waitFor('document.querySelector("[data-archive-choice]:not(:disabled)")');
+    await waitFor(`!document.querySelector('${archiveRow}').disabled`);
+    await click(archiveRow);
+    assert.equal(await evaluate('document.querySelector("[data-archive-choice]")?.textContent'), "Archive and remove worktree", "No checking step after the click");
+    assert.equal(await evaluate('document.body.textContent.includes("Checking worktree")'), false);
     await shot("armed.png");
-    // Focus may have left the menu (the clicked "Archive" row is gone); Enter still confirms.
     await evaluate("document.activeElement.blur()");
     await press("Enter");
     assert.deepEqual(await evaluate("window.calls"), ["archive:remove"], "Enter confirms the archive");
@@ -89,15 +94,17 @@ async function browserChecks() {
 
     // A row reached with the arrow keys keeps Enter for itself.
     await evaluate("window.calls = []");
-    await openArmed();
+    await openMenu();
     await evaluate("window.releaseCheck()");
-    await waitFor('document.querySelector("[data-archive-choice]:not(:disabled)")');
+    await waitFor(`!document.querySelector('${archiveRow}').disabled`);
+    await click(archiveRow);
+    await waitFor('document.querySelector("[data-archive-choice]")');
     await press("Up");
     assert.equal(await evaluate("document.activeElement.textContent"), "Mark as unread");
     await press("Enter");
     assert.deepEqual(await evaluate("window.calls"), ["unread:true"], "Enter on another row runs that row only");
 
-    console.log("PASS: Enter waits for the check, confirms the armed archive wherever focus is, leaves arrowed rows alone");
+    console.log("PASS: check runs on open, Archive waits for it with no checking row, Enter confirms wherever focus is, arrowed rows keep Enter");
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 }

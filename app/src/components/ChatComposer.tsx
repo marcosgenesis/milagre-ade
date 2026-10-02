@@ -28,6 +28,7 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
+import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
@@ -44,10 +45,11 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
-  const { activity, answer } = replyActivity(body, steps);
+  const { setup, activity, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
+      {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
       {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}

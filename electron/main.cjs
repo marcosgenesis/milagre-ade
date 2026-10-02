@@ -25,6 +25,7 @@ const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
 const { createProjectSettings } = require("./project-settings.cjs");
+const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { readPullRequest } = require("./pull-request.cjs");
@@ -160,7 +161,11 @@ ipcMain.handle("worktree:remove", async (_event, worktreePath, options = {}) => 
     base,
     seen,
     force: Boolean(force),
-    closeSession: typeof chatId === "string" ? () => agents.closeChat(chatId) : undefined,
+    closeSession: typeof chatId === "string" ? async () => {
+      await worktreeSetups.cancel(chatId);
+      worktreeSetups.forget(worktreePath);
+      return agents.closeChat(chatId);
+    } : undefined,
   });
 });
 ipcMain.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -177,6 +182,17 @@ ipcMain.handle("files-to-copy:save", async (_event, projectPath, patterns) => {
   const { filesToCopy } = await projectSettings().setFilesToCopy(projectPath, patterns);
   return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
 });
+// The setup command new worktrees run: the repo's .milagre/worktree.json, else the project's setting.
+async function readSetupCommand(projectPath) {
+  const { setupCommand } = await projectSettings().get(projectPath);
+  return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
+}
+ipcMain.handle("worktree-setup:read", (_event, projectPath) => readSetupCommand(projectPath));
+ipcMain.handle("worktree-setup:save", async (_event, projectPath, command) => {
+  await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
+  return readSetupCommand(projectPath);
+});
+
 // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
 // picks one, so the chat never waits on it.
 async function nameWorktree(sender, projectPath, created, prompt) {
@@ -192,9 +208,13 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
   const request = { projectPath, baseBranch, prompt };
   await environmentReady;
+  const settings = await projectSettings().get(projectPath);
   // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
-  const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: (await projectSettings().get(projectPath)).filesToCopy });
+  const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
   if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
+  // The setup command runs before the chat's first turn (see agent:start-turn).
+  const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);
+  await worktreeSetups.prepare({ worktreePath: created.path, projectPath, resolved });
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
   if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
@@ -202,7 +222,7 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
   void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
-  return { project, worktreeId: worktree.id };
+  return { project, worktreeId: worktree.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
 ipcMain.handle("worktree:pull-request", async (_event, worktreePath) => {
@@ -276,6 +296,8 @@ const agents = new SessionManager({
   send: sendAgentEvent,
 });
 
+const worktreeSetups = new WorktreeSetups({ send: sendAgentEvent });
+
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
 
@@ -300,7 +322,13 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
     sendAgentEvent(request.chatId, failedWith(cli.problem));
     return { turnId: null, steered: false };
   }
-  return agents.startTurn({ ...request, prompt, images, command: cli.command });
+  // A new worktree's first turn waits for its setup command; one that failed tells the agent, one that was stopped stops the turn.
+  const setup = await worktreeSetups.beforeTurn(request.chatId, request.cwd);
+  if (setup.cancelled) {
+    sendAgentEvent(request.chatId, { type: "turn-cancelled" });
+    return { turnId: null, steered: false };
+  }
+  return agents.startTurn({ ...request, prompt: setup.note ? `${prompt}\n\n${setup.note}` : prompt, images, command: cli.command });
 });
 
 // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
@@ -311,7 +339,10 @@ ipcMain.handle("agent:cli-status", () => agentCliStatus());
 const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
 ipcMain.handle("agent:models", () => agentModels());
 
-ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
+ipcMain.handle("agent:interrupt", async (_event, chatId) => {
+  await worktreeSetups.cancel(chatId);
+  await agents.interrupt(chatId);
+});
 
 ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decision }) => agents.respondToPermission(chatId, requestId, decision));
 
@@ -343,7 +374,7 @@ function createWindow() {
   // waiting on an approval or question card that no longer exists.
   let loaded = false;
   window.webContents.on("did-finish-load", () => {
-    if (loaded) void agents.interruptAll().catch(() => {});
+    if (loaded) void Promise.all([worktreeSetups.cancelAll(), agents.interruptAll()]).catch(() => {});
     loaded = true;
   });
   if (!app.isPackaged) {
@@ -396,6 +427,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   notifier.closeAll();
   // The renderer saves finished turns, so running turns stop with the last window.
+  void worktreeSetups.cancelAll();
   void agents.closeAll();
   if (process.platform !== "darwin") app.quit();
 });
@@ -407,5 +439,5 @@ app.on("before-quit", (event) => {
   agentsClosed = true;
   keepAwake.quit();
   // Agents run in their own process groups, so stop them before the app exits.
-  Promise.race([agents.closeAll(), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
+  Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
 });

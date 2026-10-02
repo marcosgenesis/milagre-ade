@@ -73,4 +73,7 @@ test("the question names the chat whose turn is running", () => {
   // A turn waiting on an approval or a question is still running.
   assert.equal(runningChatTitle([{ label: "Ask", mark: "waiting" }, { label: "Fix login", mark: "running" }]), "Ask");
   assert.equal(switchQuestion("Fix login"), "A turn is running in Fix login. Switch anyway?");
+  // A chat named after a sentence keeps its own end mark instead of gaining a second one.
+  assert.equal(switchQuestion("Reply with just the word gamma."), "A turn is running in Reply with just the word gamma. Switch anyway?");
+  assert.equal(switchQuestion("Why does login fail? "), "A turn is running in Why does login fail? Switch anyway?");
 });

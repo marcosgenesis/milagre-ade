@@ -49,5 +49,7 @@ export function runningChatTitle(chats: Array<{ label: string; mark?: string }>)
 }
 
 export function switchQuestion(chat: string): string {
-  return `A turn is running in ${chat}. Switch anyway?`;
+  const name = chat.trim();
+  // A chat named after a sentence ("Fix the login.") keeps its own end mark instead of gaining a second.
+  return `A turn is running in ${name}${/[.!?…]$/.test(name) ? "" : "."} Switch anyway?`;
 }

@@ -9,7 +9,7 @@ import {
   Folder01Icon,
   FolderOpenIcon,
   GitBranchIcon,
-  MoreHorizontalIcon,
+  MoreVerticalIcon,
   PencilEdit02Icon,
   SourceCodeIcon,
   Tick02Icon,
@@ -246,7 +246,7 @@ export function ChatRow({
             menu ? "bg-hover text-ink opacity-100" : "opacity-0"
           }`}
         >
-          <HugeIcon icon={MoreHorizontalIcon} size={16} />
+          <HugeIcon icon={MoreVerticalIcon} size={16} />
         </button>
       )}
 
@@ -368,7 +368,7 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
 
 /* ─────────────────────────────────────────────────────────
  * ACTIONS MENU
- * From the row's ⋯ button or a right-click. Archive hides the
+ * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
 function ChatMenu({
@@ -381,7 +381,7 @@ function ChatMenu({
 }: {
   item: SidebarRecent;
   position: { x: number; y: number };
-  /** The ⋯ button toggles the menu itself, so a press on it isn't an outside press. */
+  /** The ⋮ button toggles the menu itself, so a press on it isn't an outside press. */
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onRename: () => void;

@@ -355,6 +355,11 @@ a {
   border-radius: 4px;
 }
 
+/* The project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
+[data-workspace-menu] :focus-visible {
+  outline: none;
+}
+
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,

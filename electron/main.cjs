@@ -30,7 +30,8 @@ const { registerGitHandlers } = require("./git-ipc.cjs");
 const { readPullRequest } = require("./pull-request.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
-const { saveProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, savesSettled, stateFile } = require("./project-store.cjs");
+const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -97,6 +98,7 @@ async function readProject(projectPath) {
   openedProjects.add(projectPath);
   const name = path.basename(projectPath) || "Untitled project";
   let storedState = null;
+  await savesSettled(projectPath);
   try {
     const contents = await fs.readFile(stateFile(projectPath), "utf8");
     storedState = JSON.parse(contents);
@@ -338,15 +340,27 @@ function createWindow() {
   }
 }
 
-ipcMain.handle("project:current", () => readProject(process.cwd()));
+let recentStore = null;
+const recentProjects = () => (recentStore ??= createRecentProjects(path.join(app.getPath("userData"), "recent-projects.json")));
+// Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
+async function openProject(projectPath) {
+  const project = await readProject(projectPath);
+  await rememberProject(recentProjects(), projectPath);
+  return project;
+}
+
+ipcMain.handle("project:current", () => openProject(process.cwd()));
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({
     title: "Open project",
     properties: ["openDirectory", "createDirectory"],
   });
   if (result.canceled || !result.filePaths[0]) return null;
-  return readProject(result.filePaths[0]);
+  return openProject(result.filePaths[0]);
 });
+ipcMain.handle("project:recent", () => recentProjects().list());
+ipcMain.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
+ipcMain.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 ipcMain.handle("project:save", (_event, projectPath, state) => saveProjectState(projectPath, state));
 
 app.whenReady().then(async () => {

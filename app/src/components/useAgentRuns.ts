@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
 import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, sessionIdFromKey, splitRunForSteer, startRun } from "../lib/agent-runs";
 import { patchSession } from "../lib/chat-list";
+import { stopTurns } from "../lib/project-switch";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
 const TURN_ENDS = new Set<AgentEvent["type"]>(["turn-completed", "turn-cancelled", "turn-failed"]);
@@ -39,8 +40,8 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
     if (chatInProject(projectPathRef.current, chatId)) apply(chatId, event);
   }), [apply]);
 
-  // Opening another project interrupts the turns still running in the one left behind and
-  // forgets them; as when the window closes, their partial replies are not saved.
+  // A switch stops the project's turns and waits for them first (stopProject). One that still hadn't ended
+  // is interrupted here and forgotten; as when the window closes, its partial reply is not saved.
   useEffect(() => {
     const left = Object.keys(runsRef.current).filter((chatId) => !chatInProject(projectPath, chatId));
     if (!left.length) return;
@@ -66,6 +67,15 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   }, [apply]);
 
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
+
+  /** The project's chats with a turn running right now (the rendered runs can lag behind an event). */
+  const runningIn = useCallback((path: string) => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId)), []);
+
+  /** Stops the project's turns and waits (5 seconds at most) until they have ended, each reply so far saved in its chat. */
+  const stopProject = useCallback((path: string) => {
+    const running = () => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId));
+    return stopTurns({ chatIds: running(), interrupt: (chatId) => window.milagre.interruptAgent(chatId), remaining: running });
+  }, []);
 
   /** Saves the reply streamed so far in a chat, so a steering message can follow it. */
   const splitForSteer = useCallback((chatId: string) => {
@@ -100,5 +110,5 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   /** Sends the answers to a question, or dismisses it (null). */
   const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
 
-  return { runs, start, interrupt, respond, answerQuestion, splitForSteer };
+  return { runs, start, interrupt, runningIn, stopProject, respond, answerQuestion, splitForSteer };
 }

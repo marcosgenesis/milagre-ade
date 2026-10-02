@@ -315,7 +315,7 @@ test("handover opens a linked chat on the other provider in the same worktree an
   assert.equal(created.find((item) => item.provider === "codex").options.cwd, ALPHA);
   const turn = created.find((item) => item.provider === "codex").turns[0];
   assert.deepEqual({ effort: turn.effort, permissionMode: turn.permissionMode, replies: turn.replies }, { effort: "high", permissionMode: "auto", replies: "concise" });
-  assert.equal(state.sessions[target].generatedTitle, "fix the login redirect");
+  assert.equal(state.sessions[target].generatedTitle, "Codex · fix the login redirect");
   assert.equal(state.sessions[target].titlePending, undefined);
 });
 

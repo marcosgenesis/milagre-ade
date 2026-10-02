@@ -191,7 +191,7 @@ class ChatHost {
         sessions: {
           ...latest.sessions,
           [sessionId]: { ...source, handedOverTo: target },
-          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId)) },
+          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: `${providerName(provider)} · ${chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId))}` },
         },
       };
     });

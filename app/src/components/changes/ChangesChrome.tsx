@@ -31,7 +31,8 @@ function useControlsClearance(open: boolean) {
   return { bar, inset };
 }
 
-export function DiffBar({ open, onBack, trailing }: { open: boolean; onBack: () => void; trailing?: React.ReactNode }) {
+/** `send` is the diff comments waiting to go to the chat; the button is there while any can. */
+export function DiffBar({ open, onBack, send, trailing }: { open: boolean; onBack: () => void; send?: { count: number; onSend: () => void }; trailing?: React.ReactNode }) {
   const reduced = useReducedMotion();
   const { bar, inset } = useControlsClearance(open);
   return (
@@ -40,11 +41,23 @@ export function DiffBar({ open, onBack, trailing }: { open: boolean; onBack: () 
         <motion.div ref={bar} key="diff-bar" data-diff-bar style={{ paddingLeft: inset }} className="absolute inset-x-3 top-[14px] z-[55] flex h-8 items-center justify-between [-webkit-app-region:no-drag]"
           initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
           transition={reduced ? { duration: 0 } : { duration: 0.2, ease: EASE_OUT }}>
-          <button type="button" data-diff-back onClick={onBack}
-            className="flex h-8 items-center gap-1.5 rounded-control bg-surface pr-3 pl-2 text-[12.5px] font-medium text-ink-2 shadow-card transition-colors hover:text-ink">
-            <HugeiconsIcon icon={ArrowLeft02Icon} size={15} strokeWidth={1.8} color="currentColor" />
-            Back
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" data-diff-back onClick={onBack}
+              className="flex h-8 items-center gap-1.5 rounded-control bg-surface pr-3 pl-2 text-[12.5px] font-medium text-ink-2 shadow-card transition-colors hover:text-ink">
+              <HugeiconsIcon icon={ArrowLeft02Icon} size={15} strokeWidth={1.8} color="currentColor" />
+              Back
+            </button>
+            <AnimatePresence initial={false}>
+              {send && send.count > 0 && (
+                <motion.button key="send" type="button" data-diff-send onClick={send.onSend}
+                  initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+                  transition={reduced ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
+                  className="h-8 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface shadow-card transition-opacity hover:opacity-85">
+                  {send.count === 1 ? "Send 1 comment" : `Send ${send.count} comments`}
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
           {trailing}
         </motion.div>
       )}

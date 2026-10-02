@@ -5,7 +5,7 @@ import type { SessionPatch, WorktreeRename } from "../../electron/shared/project
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -118,6 +118,10 @@ declare global {
       onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
+      /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
+      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
+      /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */
+      setHandoverDraft: (projectPath: string, sessionId: number, text: string) => Promise<void>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;

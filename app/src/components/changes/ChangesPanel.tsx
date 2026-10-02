@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowRight01Icon, File01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon, Comment01Icon, File01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import type { DiffFileEntry, DiffMode } from "../../electron";
 import { buildDiffTree, type DiffTreeNode } from "../../lib/diff-tree";
 import Tooltip from "../primitives/Tooltip";
@@ -33,13 +33,15 @@ export function StatusBox({ status }: { status: DiffFileEntry["status"] }) {
   return <span aria-label={label} data-status={letter} className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] font-semibold ${className}`}>{letter}</span>;
 }
 
-export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile, activePath }: {
+export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile, activePath, commentCounts }: {
   list: DiffList;
   mode: DiffMode;
   onModeChange: (mode: DiffMode) => void;
   onRefresh: () => void;
   onSelectFile: (path: string) => void;
   activePath?: string;
+  /** Diff comments per file path. */
+  commentCounts?: Record<string, number>;
 }) {
   const files = list.state === "ready" && list.isRepo ? list.files : undefined;
   const tree = useMemo(() => buildDiffTree(files ?? []), [files]);
@@ -69,7 +71,7 @@ export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile
         {list.state === "ready" && list.isRepo && mode === "committed" && list.base === null && <Notice>No base branch to compare with.</Notice>}
         {files && files.length === 0 && message && <Notice>{message}</Notice>}
         {files && files.length === 0 && !message && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
-        {files && files.length > 0 && <Tree nodes={tree} depth={0} onSelectFile={onSelectFile} activePath={activePath} />}
+        {files && files.length > 0 && <Tree nodes={tree} depth={0} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />}
       </div>
     </aside>
   );
@@ -79,11 +81,13 @@ function Notice({ children }: { children: string }) {
   return <p className="px-4 py-6 text-center text-[12px] text-ink-3">{children}</p>;
 }
 
-function Tree({ nodes, depth, onSelectFile, activePath }: { nodes: DiffTreeNode<DiffFileEntry>[]; depth: number; onSelectFile: (path: string) => void; activePath?: string }) {
-  return <>{nodes.map((node) => <TreeRow key={node.path} node={node} depth={depth} onSelectFile={onSelectFile} activePath={activePath} />)}</>;
+type TreeProps = { onSelectFile: (path: string) => void; activePath?: string; commentCounts?: Record<string, number> };
+
+function Tree({ nodes, depth, ...rest }: { nodes: DiffTreeNode<DiffFileEntry>[]; depth: number } & TreeProps) {
+  return <>{nodes.map((node) => <TreeRow key={node.path} node={node} depth={depth} {...rest} />)}</>;
 }
 
-function TreeRow({ node, depth, onSelectFile, activePath }: { node: DiffTreeNode<DiffFileEntry>; depth: number; onSelectFile: (path: string) => void; activePath?: string }) {
+function TreeRow({ node, depth, onSelectFile, activePath, commentCounts }: { node: DiffTreeNode<DiffFileEntry>; depth: number } & TreeProps) {
   const [collapsed, setCollapsed] = useState(false);
   const indent = { paddingLeft: 8 + depth * 12 };
   if (node.type === "file") {
@@ -92,6 +96,11 @@ function TreeRow({ node, depth, onSelectFile, activePath }: { node: DiffTreeNode
         className={`flex h-7 w-full items-center gap-1.5 pr-3 text-left text-[12.5px] transition-colors hover:bg-hover ${activePath === node.path ? "bg-hover" : ""}`}>
         <span className="flex size-4 shrink-0 items-center justify-center text-ink-3"><HugeiconsIcon icon={File01Icon} size={14} strokeWidth={1.6} color="currentColor" /></span>
         <span className="min-w-0 flex-1 truncate text-ink">{node.name}</span>
+        {commentCounts?.[node.path] ? (
+          <span data-diff-tree-comments={commentCounts[node.path]} aria-label={`${commentCounts[node.path]} comments`} className="flex shrink-0 items-center gap-0.5 text-[11px] text-ink-3 tabular-nums">
+            <HugeiconsIcon icon={Comment01Icon} size={12} strokeWidth={1.8} color="currentColor" />{commentCounts[node.path]}
+          </span>
+        ) : null}
         {!node.file.binary && <Counts added={node.file.added} removed={node.file.removed} />}
         <StatusBox status={node.file.status} />
       </button>
@@ -105,7 +114,7 @@ function TreeRow({ node, depth, onSelectFile, activePath }: { node: DiffTreeNode
         <span className="min-w-0 flex-1 truncate text-ink-2" dir="rtl"><bdi>{node.name}</bdi></span>
         <Counts added={node.added} removed={node.removed} />
       </button>
-      {!collapsed && <Tree nodes={node.children} depth={depth + 1} onSelectFile={onSelectFile} activePath={activePath} />}
+      {!collapsed && <Tree nodes={node.children} depth={depth + 1} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />}
     </>
   );
 }

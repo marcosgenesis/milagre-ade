@@ -2,7 +2,7 @@ import { SubagentTrack } from "./agents/SubagentTrack";
 import type { AgentPort, AgentTask, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -19,12 +19,15 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
+import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { HandoverBriefChip, HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
+import { otherProvider, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -35,6 +38,8 @@ import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
 import { extractOutdatedProvider } from "../lib/cli-status";
+import { splitFences } from "../lib/message-fences";
+import { CodeBlock } from "./markdown/CodeBlock";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -46,6 +51,18 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
  * A reply: its activity (thinking, tool steps and the text between them) folded into one block, the images it generated, then its answer.
  * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
  */
+/** What the user typed, as typed; only closed ``` fences render as code (diff comments send their snippets in them). */
+function UserBody({ body }: { body: string }) {
+  const parts = useMemo(() => splitFences(body), [body]);
+  return (
+    <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+      {parts.map((part, index) => part.kind === "text"
+        ? <Fragment key={index}>{part.text}</Fragment>
+        : <div key={index} className="whitespace-normal"><CodeBlock code={part.code} fence={part.fence || undefined} diff /></div>)}
+    </div>
+  );
+}
+
 function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
   const { setup, activity, images, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
@@ -101,9 +118,9 @@ const MessageSection = memo(function MessageSection({
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        <Attachments images={message.images} files={message.files} />
+        <Attachments images={message.images} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
         {isUser ? (
-          <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
+          message.body.trim() ? <UserBody body={message.body} /> : null
         ) : recommendation ? (
           <>
             <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
@@ -174,6 +191,13 @@ interface ChatComposerProps {
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
+  /** Hands this chat over to the other provider in a new chat. */
+  onHandover?: (provider: ModelProvider) => void;
+  /** The chat has messages, so it can be handed over. */
+  canHandover?: boolean;
+  /** A handed-over chat's brief while it waits for the first message; `chatId` is the chat's key. */
+  handoverBrief?: { chatId: string; brief: string; onSave: (text: string) => Promise<void> };
+  handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
   /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
@@ -326,6 +350,10 @@ export function ChatComposer({
   asking = false,
   runModelName,
   lockedProvider,
+  onHandover,
+  canHandover = false,
+  handoverBrief,
+  handover,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -362,7 +390,11 @@ export function ChatComposer({
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = messages.length === 0;
+  const isNewChat = messages.length === 0 && !handover?.live;
+  // The note shows with the brief, until it is sent or the note is dismissed, by chat key.
+  const [dismissedNotes, setDismissedNotes] = useState<string[]>([]);
+  const noteKey = handoverBrief?.chatId;
+  const showHandoverNote = noteKey !== undefined && lockedProvider !== undefined && !dismissedNotes.includes(noteKey);
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -401,6 +433,7 @@ export function ChatComposer({
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
           {messages.map((message) => (
             <MessageSection
               key={message.id}
@@ -428,9 +461,29 @@ export function ChatComposer({
               <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
           )}
+          {handover?.pending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
+            </div>
+          )}
+          {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
         </div>
       </MessageScroller>}
-      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden">
+        {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right. */}
+        {!isNewChat && pullRequestAction && (
+          <button
+            type="button"
+            onClick={pullRequestAction.onRun}
+            disabled={sendBlocked || isSending || imageDraft.loading}
+            className={`mr-auto inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+              ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+              : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
+          >
+            <Icon icon={GitPullRequestIcon} size={14} />
+            {pullRequestAction.label}
+          </button>
+        )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
@@ -438,39 +491,9 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
-        {notice && (
-          <div
-            role="status"
-            data-notice
-            className="mb-2 flex w-full items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay"
-            style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
-          >
-            <span className="min-w-0 flex-1 break-words">{notice}</span>
-            <button
-              type="button"
-              onClick={onDismissNotice}
-              className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+        {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
+        {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {!isNewChat && pullRequestAction && (
-          <div className="mb-2 flex px-1">
-            <button
-              type="button"
-              onClick={pullRequestAction.onRun}
-              disabled={sendBlocked || isSending || imageDraft.loading}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
-                ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
-                : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
-            >
-              <Icon icon={GitPullRequestIcon} size={14} />
-              {pullRequestAction.label}
-            </button>
-          </div>
-        )}
         <PromptComposer
           imageDraft={imageDraft}
           projectPath={projectPath}
@@ -480,6 +503,9 @@ export function ChatComposer({
           sendBlocked={sendBlocked}
           running={isSending}
           lockedProvider={lockedProvider}
+          onHandover={onHandover}
+          canHandover={canHandover}
+          handoverBrief={handoverBrief}
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}

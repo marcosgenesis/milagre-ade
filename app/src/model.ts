@@ -172,6 +172,14 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** The chat this one was handed over to, on the other provider. */
+  handedOverTo?: number;
+  /** The chat this one was handed over from. */
+  handedOverFrom?: number;
+  /** Set while the handover brief is being written; the composer waits. */
+  handoverPending?: boolean;
+  /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
+  handoverDraft?: string;
 }
 
 export interface Connection {
@@ -199,6 +207,8 @@ export interface ChatMessage {
   model?: string;
   images?: ImageAttachment[];
   files?: string[];
+  /** On the first message of a handed-over chat: the brief it was sent with, ahead of `body`. */
+  handoverBrief?: string;
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
@@ -376,6 +386,9 @@ export interface ChatSendRequest {
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
 }
+
+/** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
+export type ChatHandoverRequest = Pick<ChatSendRequest, "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {

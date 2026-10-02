@@ -18,4 +18,4 @@ Screenshots never go in the PR's own commits. They live on the `screenshots` bra
 2. Commit and push to `screenshots`.
 3. In the PR body, link each image by that commit's SHA so the link never moves: `https://raw.githubusercontent.com/marcosgenesis/milagre-ade/<sha>/<feature>/<name>.png`.
 
-`docs/screenshots/` holds older images from before this rule; don't add to it.
+The `scripts/test-*.cjs` checks save screenshots only when `MILAGRE_SCREENSHOT_DIR` is set; point it outside the repo, e.g. `$TMPDIR/<feature>`.

@@ -1,6 +1,6 @@
 // Run with npm run test:worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
 // the Setup command field in Settings, and the setup step in the chat of a new worktree, which starts without asking.
-// Screenshots go to MILAGRE_SCREENSHOT_DIR, or docs/screenshots/worktree-setup.
+// Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -70,8 +70,9 @@ async function browserChecks() {
     await waitFor(`!!(${expr})`);
     await evaluate(`(${expr}).click()`);
   }
-  const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR ?? path.resolve(__dirname, "../docs/screenshots/worktree-setup");
+  const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
+    if (!screenshotDir) return;
     await delay(300);
     fs.mkdirSync(screenshotDir, { recursive: true });
     fs.writeFileSync(path.join(screenshotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());

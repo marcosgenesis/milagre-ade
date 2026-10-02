@@ -49,8 +49,9 @@ export function formatUpdatedAgo(updatedAt: string, now: number): string {
   return `Updated ${Math.floor(elapsed / DAY)}d ago`;
 }
 
+/** The providers the sidebar shows: those with numbers. One in error keeps showing its last-known windows. */
 export function visibleProviders(snapshot: UsageSnapshot) {
-  return snapshot.providers.filter((item) => item.status !== "unavailable");
+  return snapshot.providers.filter((item) => item.status !== "unavailable" && item.windows.length > 0);
 }
 
 export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used") {

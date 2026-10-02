@@ -19,17 +19,16 @@ const INSET = 12;
 const MIN_ROOM = 160;
 
 /* The app's select: a trigger button that opens the shared picker panel.
- * A native select element opens macOS's own menu, so every choice goes through this. */
+ * A native select element opens macOS's own menu, so every choice goes through this.
+ * The panel has no heading: the row or toolbar the trigger sits in already names the choice. */
 export function Select<T extends string>({
   label,
-  title = label,
   value,
   options,
   onChange,
   width = 240,
 }: {
   label: string;
-  title?: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
@@ -121,7 +120,7 @@ export function Select<T extends string>({
       </button>
       {open && createPortal(
         <div ref={panelRef} role="listbox" aria-label={label} onKeyDown={onPanelKeyDown} className="fixed z-50" style={{ left: position.left, top: position.top, bottom: position.bottom, width }}>
-          <PickerPanel title={title} style={{ maxHeight: position.maxHeight, transformOrigin: `${position.top === undefined ? "bottom" : "top"} right` }}>
+          <PickerPanel style={{ maxHeight: position.maxHeight, transformOrigin: `${position.top === undefined ? "bottom" : "top"} right` }}>
             {options.map((option, index) => (
               <Fragment key={option.value}>
                 {option.group && option.group !== options[index - 1]?.group && (

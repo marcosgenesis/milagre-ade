@@ -1,7 +1,7 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
@@ -75,7 +75,7 @@ class ClaudeSession {
     if (this.closed) throw Object.assign(new Error("This Claude session is closed."), { sessionClosed: true });
     if (this.turnActive) return this.steer(request);
     if (!this.command) {
-      this.emit({ type: "turn-failed", message: missingCliMessage("claude") });
+      this.emit(failedWith(missingCliMessage("claude")));
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
@@ -269,7 +269,14 @@ class ClaudeSession {
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
           else if (event.type === "turn-failed" && this.resumeGone(`${event.message}\n${message.errors ?? ""}\n${message.result ?? ""}`)) this.resumeFailed();
-          else this.finishTurn(event);
+          else {
+            // A logged-out Claude Code keeps answering "not logged in" until it is restarted, so the session
+            // closes and the next message starts a fresh process. The id this run announced belongs to a chat
+            // that never got an answer; the chat forgets it (one it resumed keeps its own).
+            if (event.login && !this.resumeId) this.emit({ type: "session-reset" });
+            this.finishTurn(event);
+            if (event.login) void this.close();
+          }
         }
       }
       this.handleEnd(query, null);
@@ -291,13 +298,13 @@ class ClaudeSession {
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
     else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
-    else this.finishTurn({ type: "turn-failed", message: crashMessage("claude", error?.message || this.stderr) });
+    else this.finishTurn(failedWith(crashMessage("claude", error?.message || this.stderr)));
   }
 
   resumeFailed() {
     if (!this.turnActive) return;
     this.emit({ type: "session-reset" });
-    this.finishTurn({ type: "turn-failed", message: RESUME_FAILED_MESSAGE });
+    this.finishTurn(failedWith(RESUME_FAILED_MESSAGE));
     void this.close();
   }
 

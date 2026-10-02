@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { CodexSession } = require("./codex-provider.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage, failedWith } = require("./events.cjs");
 const { decodeImages } = require("../image-input.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
@@ -94,7 +94,7 @@ test("forgets a thread that can't be resumed", async (t) => {
   const { session, events } = codex(t, { resumeId: "missing" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events, [{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
+  assert.deepEqual(events, [{ type: "session-reset" }, failedWith(RESUME_FAILED_MESSAGE)]);
   assert.equal(session.closed, true);
 });
 
@@ -125,7 +125,7 @@ test("reports a failed turn and a crashed process", async (t) => {
   const crashed = codex(t, { scenario: "crash" });
   await crashed.session.startTurn(TURN);
   await ended(crashed.events);
-  assert.deepEqual(crashed.events.at(-1), { type: "turn-failed", message: crashMessage("codex", "boom: model unavailable") });
+  assert.deepEqual(crashed.events.at(-1), failedWith(crashMessage("codex", "boom: model unavailable")));
   assert.equal(crashed.session.closed, true);
 });
 
@@ -232,7 +232,7 @@ test("closes a session whose startup failed so the next message starts over", as
 test("a logged-out Codex fails the turn at once with the login message", async (t) => {
   const { session, events } = codex(t, { scenario: "logged-out" });
   await session.startTurn(TURN);
-  assert.deepEqual(events, [{ type: "turn-failed", message: loginMessage("codex") }]);
+  assert.deepEqual(events, [failedWith(loginMessage("codex"), { login: true })]);
   assert.equal(session.closed, true);
 });
 
@@ -247,7 +247,7 @@ test("a Codex on a provider that needs no OpenAI login isn't held up", async (t)
 test("explains a missing CLI without starting anything", async (t) => {
   const { session, events } = codex(t, { command: null });
   await session.startTurn(TURN);
-  assert.deepEqual(events, [{ type: "turn-failed", message: missingCliMessage("codex") }]);
+  assert.deepEqual(events, [failedWith(missingCliMessage("codex"))]);
 });
 
 test("gives up on an interrupt Codex never answers", async (t) => {
@@ -533,3 +533,51 @@ test("threads start and resume without the question tool when Codex rejects the 
   }
 });
 
+
+test("a Codex whose token expired mid-session closes its session, so the next message starts a fresh app-server", async (t) => {
+  const { session, events } = codex(t, { scenario: "unauthorized" });
+  await session.startTurn(TURN);
+  await ended(events);
+  await waitUntil(() => session.closed);
+  assert.deepEqual(events.at(-1), failedWith(loginMessage("codex"), { login: true }));
+  assert.equal(session.rpc.exited, true);
+});
+
+test("a 401 on a provider that needs no OpenAI login keeps Codex's own error and the session", async (t) => {
+  const { session, events } = codex(t, { scenario: "unauthorized-custom" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(events.at(-1), { type: "turn-failed", message: "unexpected status 401 Unauthorized: token expired" });
+  assert.equal(session.closed, false);
+});
+
+test("after a login failure the next message starts a fresh app-server that resumes the saved thread", async (t) => {
+  const { SessionManager } = require("./session-manager.cjs");
+  const sessions = [];
+  const sent = [];
+  const manager = new SessionManager({
+    send: (chatId, event) => sent.push(event),
+    createSession: (provider, options) => {
+      const scenario = sessions.length === 0 ? "unauthorized" : "reply";
+      const session = new CodexSession({ ...options, cwd: os.tmpdir(), clientVersion: "test", createRpc: (rpcOptions) => new CodexRpc({ ...rpcOptions, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } }) });
+      sessions.push(session);
+      return session;
+    },
+  });
+  t.after(() => Promise.all(sessions.map((session) => session.close())));
+  const request = { chatId: "chat-1", provider: "codex", cwd: os.tmpdir(), command: process.execPath, prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto", resumeId: "thread-1" };
+  await manager.startTurn(request);
+  await waitUntil(() => sent.some((event) => event.login) && sessions[0].closed);
+  await manager.startTurn(request);
+  await waitUntil(() => sent.filter(isTerminal).length === 2);
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(sent.at(-1), { type: "turn-completed" });
+  assert.equal(sent.some((event) => event.message === RESUME_FAILED_MESSAGE), false);
+});
+
+test("a crashed Codex's failure is one of Milagre's own messages", async (t) => {
+  const { session, events } = codex(t, { scenario: "crash" });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(events.at(-1).notice, true);
+});

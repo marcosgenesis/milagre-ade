@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { ClaudeSession } = require("./claude-provider.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage, failedWith } = require("./events.cjs");
 const { DISMISSED_MESSAGE, UNSHOWN_MESSAGE } = require("./questions.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
@@ -207,7 +207,7 @@ test("forgets a session that can't be resumed", async (t) => {
   const { session, events } = claude(t, { script: scripts.missing, resumeId: "gone" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.slice(1), [{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
+  assert.deepEqual(events.slice(1), [{ type: "session-reset" }, failedWith(RESUME_FAILED_MESSAGE)]);
   assert.equal(events[0].type, "turn-started");
   assert.equal(session.closed, true);
 });
@@ -235,7 +235,7 @@ test("reports a crash mid-turn", async (t) => {
   const { session, events } = claude(t, { script: scripts.crash });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.at(-1), { type: "turn-failed", message: crashMessage("claude", "Claude Code process exited with code 1") });
+  assert.deepEqual(events.at(-1), failedWith(crashMessage("claude", "Claude Code process exited with code 1")));
   assert.equal(session.closed, true);
 });
 
@@ -249,14 +249,14 @@ test("a logged-out Claude fails the turn with the login message", async (t) => {
   const { session, events } = claude(t, { script });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.at(-1), { type: "turn-failed", message: loginMessage("claude") });
+  assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
   assert.equal(events.some((event) => event.type === "text-delta"), false);
 });
 
 test("explains a missing CLI without starting anything", async (t) => {
   const { session, events, calls } = claude(t, { command: null });
   await session.startTurn(TURN);
-  assert.deepEqual(events, [{ type: "turn-failed", message: missingCliMessage("claude") }]);
+  assert.deepEqual(events, [failedWith(missingCliMessage("claude"))]);
   assert.equal(calls.queries, 0);
 });
 
@@ -265,7 +265,7 @@ test("keeps the saved session when a resumed start fails for another reason", as
   const { session, events } = claude(t, { script, resumeId: "session-1" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.slice(1), [{ type: "turn-failed", message: crashMessage("claude", "spawn EACCES") }]);
+  assert.deepEqual(events.slice(1), [failedWith(crashMessage("claude", "spawn EACCES"))]);
 });
 
 test("cancels a turn interrupted while the SDK is still loading", async (t) => {
@@ -638,4 +638,53 @@ test("a question asked after the turn was stopped is cancelled at once", async (
   assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
   assert.equal(session.answerQuestion("q-late", null), false);
+});
+
+const loggedOut = async function* () {
+  yield init;
+  yield { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
+  yield { type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" };
+};
+
+test("a logged-out Claude closes its session and forgets the id its logged-out run announced", async (t) => {
+  const { session, events } = claude(t, { script: loggedOut });
+  await session.startTurn(TURN);
+  await ended(events);
+  await waitUntil(() => session.closed);
+  assert.deepEqual(events.slice(-2), [{ type: "session-reset" }, failedWith(loginMessage("claude"), { login: true })]);
+  assert.equal(events.some((event) => event.message === RESUME_FAILED_MESSAGE), false);
+});
+
+test("a logged-out Claude that resumed a chat keeps the chat's id", async (t) => {
+  const { session, events } = claude(t, { script: loggedOut, resumeId: "session-1" });
+  await session.startTurn(TURN);
+  await ended(events);
+  await waitUntil(() => session.closed);
+  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
+});
+
+test("after a login failure the next message starts a fresh process that resumes the saved id", async (t) => {
+  const { SessionManager } = require("./session-manager.cjs");
+  const sdks = [fakeSdk(loggedOut), fakeSdk(scripts.reply)];
+  const sessions = [];
+  const sent = [];
+  const manager = new SessionManager({
+    send: (chatId, event) => sent.push(event),
+    createSession: (provider, options) => {
+      const session = new ClaudeSession({ ...options, loadSdk: sdks[sessions.length].loadSdk });
+      sessions.push(session);
+      return session;
+    },
+  });
+  t.after(() => Promise.all(sessions.map((session) => session.close())));
+  const request = { chatId: "chat-1", provider: "claude", cwd: "/repo", command: "/c/claude", prompt: "Hi", images: [], model: "claude-opus-5-5", permissionMode: "auto", resumeId: "session-1" };
+  await manager.startTurn(request);
+  await waitUntil(() => sent.filter(isTerminal).length === 1 && sessions[0].closed);
+  assert.deepEqual(sent.at(-1), failedWith(loginMessage("claude"), { login: true }));
+  await manager.startTurn(request);
+  await waitUntil(() => sent.filter(isTerminal).length === 2);
+  assert.equal(sessions.length, 2);
+  assert.equal(sdks[1].calls.options.resume, "session-1");
+  assert.deepEqual(sent.at(-1), { type: "turn-completed" });
 });

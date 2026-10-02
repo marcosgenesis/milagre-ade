@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { MILAGRE_INSTRUCTIONS, cliBrokenMessage, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, cliBrokenMessage, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage, failedWith } = require("./events.cjs");
 
 const claudeState = () => ({ sessionId: null, turnId: "turn-a", hasText: false });
 const codexState = () => ({ threadId: "thread-1", turnId: null, lastItemId: null, hasText: false });
@@ -74,18 +74,37 @@ test("Claude: a turn it can't authenticate asks to log in", () => {
   const state = claudeState();
   const notLoggedIn = { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
   assert.deepEqual(mapClaudeMessage(notLoggedIn, state), []);
-  assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }, state), [{ type: "turn-failed", message: loginMessage("claude") }]);
+  assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }, state), [failedWith(loginMessage("claude"), { login: true })]);
   assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: true, result: "Credit balance is too low" }, state), [{ type: "turn-failed", message: "Credit balance is too low" }]);
 });
 
 test("Codex: a turn it can't authenticate asks to log in, and raw API errors read as their message", () => {
-  const failed = (error) => mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-1", status: "failed", error } }, codexState());
+  const failed = (error) => mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-1", status: "failed", error } }, { ...codexState(), requiresOpenaiAuth: true });
   const unauthorized = { message: "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } } };
-  assert.deepEqual(failed(unauthorized), [{ type: "turn-failed", message: loginMessage("codex") }]);
-  assert.deepEqual(failed({ message: "Unauthorized", codexErrorInfo: "unauthorized" }), [{ type: "turn-failed", message: loginMessage("codex") }]);
+  assert.deepEqual(failed(unauthorized), [failedWith(loginMessage("codex"), { login: true })]);
+  assert.deepEqual(failed({ message: "Unauthorized", codexErrorInfo: "unauthorized" }), [failedWith(loginMessage("codex"), { login: true })]);
   const unsupported = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." } });
   assert.deepEqual(failed({ message: unsupported, codexErrorInfo: null }), [{ type: "turn-failed", message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." }]);
   assert.deepEqual(failed({ message: "stream disconnected", codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 500 } } }), [{ type: "turn-failed", message: "stream disconnected" }]);
+});
+
+test("Codex: a 401 is a login problem only where OpenAI auth is required", () => {
+  const unauthorized = { message: "unexpected status 401 Unauthorized: bad key", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } } };
+  const failed = (state) => mapCodexNotification("turn/completed", { threadId: "thread-1", turn: { id: "t-1", status: "failed", error: unauthorized } }, state);
+  const raw = [{ type: "turn-failed", message: "unexpected status 401 Unauthorized: bad key" }];
+  assert.deepEqual(failed({ ...codexState(), requiresOpenaiAuth: false }), raw);
+  assert.deepEqual(failed(codexState()), raw);
+});
+
+test("a log line's timestamp, level and module are dropped, and a killed process is named by its signal", () => {
+  const logged = "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=exec_command failed: UnknownProcessId { process_id: 52867 }";
+  assert.equal(lastLine(logged), "error=exec_command failed: UnknownProcessId { process_id: 52867 }");
+  assert.equal(lastLine("WARN something odd"), "something odd");
+  assert.equal(lastLine("Error: connect ECONNREFUSED"), "Error: connect ECONNREFUSED");
+  assert.equal(crashMessage("codex", logged, { signal: "SIGKILL" }), "Codex stopped unexpectedly: Codex exited with signal SIGKILL. Send your message again to continue this chat.");
+  assert.equal(crashMessage("codex", "", { signal: "SIGKILL" }), "Codex stopped unexpectedly: Codex exited with signal SIGKILL. Send your message again to continue this chat.");
+  assert.equal(crashMessage("codex", logged), "Codex stopped unexpectedly: error=exec_command failed: UnknownProcessId { process_id: 52867 }. Send your message again to continue this chat.");
+  assert.equal(crashMessage("codex", "boom: model unavailable", { signal: "SIGKILL" }), "Codex stopped unexpectedly: boom: model unavailable. Send your message again to continue this chat.");
 });
 
 test("Codex: a stale completion or text for another turn id is ignored", () => {

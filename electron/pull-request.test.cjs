@@ -9,12 +9,12 @@ for (const state of ["OPEN", "MERGED"]) {
     const exec = async (command, args, options) => {
       if (command === "git") return { stdout: "feature/sidebar\n" };
       assert.equal(command, "gh");
-      assert.deepEqual(args, ["pr", "list", "--head", "feature/sidebar", "--state", "all", "--limit", "1", "--json", "number,url,state,title"]);
+      assert.deepEqual(args, ["pr", "list", "--head", "feature/sidebar", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus"]);
       assert.equal(options.cwd, "/project/worktree");
       assert.ok(options.timeout > 0);
       return { stdout: JSON.stringify([{ number: 10213, url, state, title }]) };
     };
-    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title });
+    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false });
   });
 }
 
@@ -43,8 +43,28 @@ test("uses the checked-out branch for fork PRs instead of its upstream base", as
       assert.deepEqual(args, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
       return { stdout: "project-menu\n" };
     }
-    assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title"]);
+    assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus"]);
     return { stdout: JSON.stringify([{ number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title }]) };
   };
-  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title });
+  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false });
 });
+
+for (const [name, overrides, ready] of [
+  ["approved and clean", {}, true],
+  ["not yet approved", { reviewDecision: "REVIEW_REQUIRED" }, false],
+  ["changes requested", { reviewDecision: "CHANGES_REQUESTED" }, false],
+  ["no review decision", { reviewDecision: null }, false],
+  ["draft", { isDraft: true }, false],
+  ["blocked", { mergeStateStatus: "BLOCKED" }, false],
+  ["conflicts", { mergeStateStatus: "DIRTY" }, false],
+  ["outdated branch", { mergeStateStatus: "BEHIND" }, false],
+  ["non-passing checks", { mergeStateStatus: "UNSTABLE" }, false],
+  ["unknown merge status", { mergeStateStatus: "UNKNOWN" }, false],
+  ["already merged", { state: "MERGED" }, false],
+]) {
+  test(`merge readiness: ${name}`, async () => {
+    const pr = { number: 10213, url, title, state: "OPEN", isDraft: false, reviewDecision: "APPROVED", mergeStateStatus: "CLEAN", ...overrides };
+    const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
+    assert.equal(result.readyToMerge, ready);
+  });
+}

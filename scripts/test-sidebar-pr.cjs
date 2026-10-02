@@ -43,7 +43,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   const { guardNavigation } = require("../electron/links.cjs");
   await app.whenReady();
-  const window = new BrowserWindow({ width: 360, height: 240, show: false, webPreferences: { backgroundThrottling: false } });
+  const window = new BrowserWindow({ width: 600, height: 400, show: false, webPreferences: { backgroundThrottling: false } });
   const opened = [];
   guardNavigation(window.webContents, { appUrl: process.argv[2], openExternal: url => opened.push(url) });
   const evaluate = source => window.webContents.executeJavaScript(source);
@@ -81,6 +81,17 @@ async function browserChecks() {
     await delay(150);
     assert.deepEqual(opened, ["https://github.com/example/project/pull/10213"]);
     assert.equal(await evaluate('window.picks'), 0, "Opening a PR does not select the chat");
+    await evaluate('window.pr = { ...window.pr, readyToMerge: true }; window.refreshPR()');
+    await waitFor('document.querySelector("[data-chat-pr]").textContent.includes("Ready")');
+    assert.ok(await evaluate('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("ready to merge")'));
+    await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))`);
+    await waitFor('document.querySelector("[data-chat-hover-card]")?.textContent.includes("Ready to merge")');
+    assert.ok(await evaluate('[...document.querySelectorAll("[role=tooltip]")].some(node => node.textContent === "Ready to merge · Pull request #10213")'));
+    await delay(200);
+    await window.webContents.capturePage().then(image => require("node:fs").writeFileSync("/tmp/milagre-sidebar-pr-ready.png", image.toPNG()));
+    await evaluate(`document.querySelector('[data-chat-pr]').dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body }))`);
+    await evaluate('window.pr = { ...window.pr, readyToMerge: false }; window.refreshPR()');
+    await waitFor('!document.querySelector("[data-chat-pr]").textContent.includes("Ready")');
     await evaluate('window.pr = { ...window.pr, state: "MERGED" }; window.refreshPR()');
     await waitFor('document.querySelector("[data-chat-pr]").getAttribute("aria-label").includes("merged")');
     const mergedColor = await evaluate('getComputedStyle(document.querySelector("[data-chat-pr] > span")).color');

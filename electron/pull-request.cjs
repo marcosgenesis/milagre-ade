@@ -14,12 +14,15 @@ async function readPullRequest(cwd, exec = execFileAsync) {
     const branch = branchOutput.trim();
     if (!branch) return null;
     // `pr view` can infer the wrong head repository for a fork or a branch tracking main.
-    const { stdout } = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", "number,url,state,title"], options);
+    const { stdout } = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus"], options);
     const pr = JSON.parse(stdout)[0];
     if (!pr || !["OPEN", "MERGED"].includes(pr.state) || !Number.isSafeInteger(pr.number) || pr.number <= 0) return null;
     const url = new URL(pr.url);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "" };
+    // CLEAN means GitHub reports the PR mergeable with passing commit status. Unknown or blocked
+    // states must never advertise readiness, even if a reviewer has already approved.
+    const readyToMerge = pr.state === "OPEN" && pr.isDraft === false && pr.reviewDecision === "APPROVED" && pr.mergeStateStatus === "CLEAN";
+    return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge };
   } catch {
     // No PR, offline, or gh unavailable: this optional metadata never blocks a chat.
     return null;

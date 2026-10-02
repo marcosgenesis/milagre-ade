@@ -3,7 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest } = require("./permissions.cjs");
+const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
 // Outside Plan mode, Codex offers its question tool (request_user_input) only behind this feature.
@@ -83,6 +83,7 @@ class CodexSession {
 
   async beginTurn({ prompt, images = [], model, permissionMode, effort }) {
     const policy = codexPolicy(permissionMode, this.cwd);
+    this.permissions.setMode(permissionMode);
     try {
       this.starting ??= this.start(model, policy);
       await this.starting;
@@ -134,6 +135,7 @@ class CodexSession {
       if (this.closed) throw sessionClosedError();
       return this.startTurn(request);
     }
+    if (request.permissionMode) this.setPermissionMode(request.permissionMode);
     const turnId = this.state.turnId;
     // An open question waits for its answer; the message is the user's reply, so the question is dismissed.
     this.questions.dismissAll();
@@ -220,8 +222,10 @@ class CodexSession {
     // A request that arrives once its turn has stopped has nobody to ask.
     if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
     else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
-    else if (method === "item/fileChange/requestApproval") this.permissions.add(codexFileRequest(id, params, this.fileChanges.get(params.itemId)), answer);
-    else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
+    else if (method === "item/fileChange/requestApproval") {
+      const request = codexFileRequest(id, params, this.fileChanges.get(params.itemId));
+      this.permissions.add(request, answer, { inWorkspace: !params.grantRoot && request.files.length > 0 && insideRoot(this.cwd, request.files) });
+    } else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
     else {
@@ -256,6 +260,12 @@ class CodexSession {
 
   answerQuestion(requestId, answers) {
     return this.questions.answer(requestId, answers);
+  }
+
+  // Codex fixes its approval policy when a turn starts, so a switch mid-turn is applied here (see
+  // PendingPermissions); the next turn starts with the new policy.
+  setPermissionMode(permissionMode) {
+    this.permissions.setMode(permissionMode);
   }
 
   handleExit(detail) {

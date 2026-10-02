@@ -1,5 +1,5 @@
 const { isTerminal } = require("./events.cjs");
-const { USER_DECISIONS } = require("./permissions.cjs");
+const { PERMISSION_MODES, USER_DECISIONS } = require("./permissions.cjs");
 const { validAnswers } = require("./questions.cjs");
 const { capOutput } = require("./steps.cjs");
 
@@ -121,6 +121,12 @@ class SessionManager {
   answerQuestion(chatId, requestId, answers) {
     if (!validAnswers(answers)) throw new Error("Invalid answers to an agent question.");
     return this.sessions.get(chatId)?.session.answerQuestion(requestId, answers) ?? false;
+  }
+
+  // A mode switch reaches the chat's session at once, so a running turn stops asking for what it allows.
+  async setPermissionMode(chatId, mode) {
+    if (!PERMISSION_MODES.has(mode)) throw new Error(`Unknown permission mode: ${mode}`);
+    await this.sessions.get(chatId)?.session.setPermissionMode(mode);
   }
 
   async interruptAll() {

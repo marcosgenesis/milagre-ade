@@ -21,8 +21,10 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatInProject, chatKey, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
+import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
+import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
 import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
@@ -39,15 +41,11 @@ import { useUsage } from "./components/usage/useUsage";
 
 const connectionTypes: ConnectionType[] = ["Information", "Dependency", "Review", "Blocking"];
 
-// The chat with the most recent message, or none so the app opens on a new chat.
+// The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
-  return state.messages.reduce<ChatMessage | null>((latest, message) => (!latest || message.id > latest.id ? message : latest), null)?.session_id ?? null;
-}
-
-function chatTitle(messages: ChatMessage[], fallback: string) {
-  const line = messages.find((message) => message.role !== "assistant" && message.body.trim())?.body.trim().split("\n")[0] ?? "";
-  if (!line) return fallback;
-  return line.length > 60 ? `${line.slice(0, 57)}…` : line;
+  return state.messages
+    .filter((message) => !state.sessions[message.session_id]?.archived)
+    .reduce<ChatMessage | null>((latest, message) => (!latest || message.id > latest.id ? message : latest), null)?.session_id ?? null;
 }
 
 function App() {
@@ -60,6 +58,7 @@ function App() {
   stateRef.current = state;
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
+  const openSessionRef = useRef<number | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => MODEL_CATALOG.find((model) => model.id === getSettings().defaultModelId) ?? MODEL_CATALOG[0]);
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
@@ -125,7 +124,10 @@ function App() {
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
 
-  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit);
+  // The chat on screen; a turn that ends anywhere else leaves its chat unread.
+  openSessionRef.current = view === "chat" ? selectedSessionId : null;
+  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId);
+  useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -141,6 +143,12 @@ function App() {
   const pendingApproval = run?.approvals[0];
   // Approvals come first; a question shows once none is waiting.
   const pendingQuestion = pendingApproval ? undefined : run?.questions[0];
+
+  // A running turn takes the new mode at once instead of at its next message.
+  function changePermissionMode(mode: PermissionMode) {
+    setPermissionMode(mode);
+    if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
+  }
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
@@ -174,14 +182,65 @@ function App() {
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)
+      .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
       .filter(({ sessionMessages }) => sessionMessages.length > 0)
       .sort((a, b) => (b.sessionMessages.at(-1)?.id ?? 0) - (a.sessionMessages.at(-1)?.id ?? 0))
-      .map(({ session, sessionMessages }) => ({ id: String(session.id), label: chatTitle(sessionMessages, session.agent_name), waiting: waiting.has(session.id) }));
-  }, [state, waiting]);
+      .map(({ session, sessionMessages }) => {
+        const worktree = state.worktrees[session.worktree_id];
+        const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant");
+        return {
+          id: String(session.id),
+          label: chatTitle(session, sessionMessages),
+          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          unread: Boolean(session.unread),
+          details: {
+            branch: worktree?.name,
+            path: worktree?.path,
+            diff: worktree?.diff,
+            failed: lastReply?.outcome === "failed",
+          },
+        };
+      });
+  }, [state, waiting, running]);
+
+  // Chat row actions build on the latest state, so a turn that finished since the last render isn't lost.
+  function patchChat(sessionId: number, patch: Parameters<typeof patchSession>[2]) {
+    const latest = stateRef.current;
+    if (!latest) return;
+    const next = patchSession(latest, sessionId, patch);
+    if (next !== latest) commit(next);
+  }
+
+  function openChat(sessionId: number) {
+    setSelectedSessionId(sessionId);
+    setSelectedWorktreeId(stateRef.current?.sessions[sessionId]?.worktree_id ?? null);
+    setView("chat");
+  }
+
+  // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
+  useEffect(() => {
+    if (view === "chat" && selectedSessionId !== null) patchChat(selectedSessionId, { unread: false });
+  }, [selectedSessionId, view, project?.path]);
+
+  // Archiving hides the chat for good; a turn still running in it is stopped first.
+  function archiveChat(sessionId: number) {
+    if (!project) return;
+    const key = chatKey(project.path, sessionId);
+    if (agentRuns.runs[key]) void agentRuns.interrupt(key).catch(() => {});
+    patchChat(sessionId, { archived: true, unread: false });
+    if (selectedSessionId === sessionId) startNewChat();
+  }
+
+  function revealChat(sessionId: number) {
+    const latest = stateRef.current;
+    const worktree = latest?.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1];
+    if (worktree) void window.milagre.revealWorktree(worktree.path).catch(() => {});
+  }
 
   // A chat that waits on the user while Milagre is in the background gets a system notification.
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
@@ -192,7 +251,7 @@ function App() {
     const notice = attentionNotice(event, {
       projectName: current.name,
       worktreeName: session ? latest.worktrees[session.worktree_id]?.name : undefined,
-      chatTitle: session ? chatTitle(latest.messages.filter((message) => message.session_id === session.id), "") : undefined,
+      chatTitle: session ? chatTitle(session, latest.messages.filter((message) => message.session_id === session.id)) : undefined,
       provider: session?.provider,
     });
     if (notice && "requestId" in event) void window.milagre.notifyAttention({ chatId, requestId: event.requestId, ...notice }).catch(() => {});
@@ -202,10 +261,7 @@ function App() {
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const current = projectRef.current;
     const session = current && chatInProject(current.path, chatId) ? stateRef.current?.sessions[sessionIdFromKey(chatId)] : undefined;
-    if (!session) return;
-    setSelectedSessionId(session.id);
-    setSelectedWorktreeId(session.worktree_id);
-    setView("chat");
+    if (session) openChat(session.id);
   }), []);
 
   function startNewChat() {
@@ -422,10 +478,12 @@ function App() {
         onOpenProject={() => void openProject()}
         recents={chats}
         activeId={selectedSession ? String(selectedSession.id) : null}
-        onPick={(id) => {
-          setSelectedSessionId(Number(id));
-          setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null);
-          setView("chat");
+        onPick={(id) => openChat(Number(id))}
+        chatActions={{
+          onRename: (id, title) => patchChat(Number(id), { title }),
+          onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
+          onReveal: (id) => revealChat(Number(id)),
+          onArchive: (id) => archiveChat(Number(id)),
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
@@ -465,7 +523,7 @@ function App() {
             ultracode={selectedCapability.ultracode && ultracode}
             onUltracodeChange={setUltracode}
             permissionMode={permissionMode}
-            onPermissionModeChange={setPermissionMode}
+            onPermissionModeChange={changePermissionMode}
             worktreeSummary={worktrees.length > 0 ? worktrees.map((worktree) => worktree.name).join(" ↔ ") : "No Git worktrees detected"}
             connectionSummary={connection?.kind ?? "No connection"}
             eventsCount={state.events.length}

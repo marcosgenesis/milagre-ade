@@ -142,6 +142,26 @@ test("asks before running a command and passes the answer back", async (t) => {
   assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "allow-for-chat" });
 });
 
+test("switching to Full mid-turn approves the waiting command", async (t) => {
+  const { session, events } = codex(t, { scenario: "approval" });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  session.setPermissionMode("full");
+  await ended(events);
+  assert.equal(replyText(events), "decision:accept");
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "allow" });
+});
+
+test("switching to Auto mid-turn leaves a waiting command to the user", async (t) => {
+  const { session, events } = codex(t, { scenario: "approval" });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  session.setPermissionMode("auto");
+  assert.equal(session.permissions.size, 1);
+  session.respondToPermission("srv-1", "deny");
+  await ended(events);
+});
+
 test("denying declines the command", async (t) => {
   const { session, events } = codex(t, { scenario: "approval" });
   await session.startTurn(TURN);

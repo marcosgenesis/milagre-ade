@@ -309,6 +309,39 @@ test("asks before a tool runs and passes the answer back", async (t) => {
   assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "allow" });
 });
 
+test("switching to Full mid-turn reaches Claude Code and approves the waiting card", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  await session.setPermissionMode("full");
+  await ended(events);
+  assert.deepEqual(calls.modes, ["bypassPermissions"]);
+  assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { file_path: "/repo/hello.txt", content: "hi" } });
+  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "allow" });
+  // The next turn already runs in Full; nothing is set again.
+  await session.startTurn({ ...TURN, permissionMode: "full" });
+  await ended(events, 2);
+  assert.deepEqual(calls.modes, ["bypassPermissions"]);
+});
+
+test("switching to Auto mid-turn approves a waiting edit", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.asks });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await asked(events);
+  await session.setPermissionMode("auto");
+  await ended(events);
+  assert.deepEqual(calls.modes, ["acceptEdits"]);
+  assert.equal(JSON.parse(replyText(events)).behavior, "allow");
+});
+
+test("a steer carries the mode it was sent with", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.absorbs });
+  await session.startTurn({ ...TURN, permissionMode: "ask" });
+  await session.startTurn({ ...TURN, prompt: "go on", permissionMode: "full" });
+  await ended(events);
+  assert.deepEqual(calls.modes, ["bypassPermissions"]);
+});
+
 test("always allowing in this chat keeps the rule in the session", async (t) => {
   const { session, events } = claude(t, { script: scripts.asks });
   await session.startTurn({ ...TURN, permissionMode: "ask" });

@@ -15,6 +15,7 @@ const { resolveExecutable } = require("./agents/environment.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
 const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
@@ -91,10 +92,20 @@ ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("worktree:create", async (_event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
+  const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
+  if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
+  const worktree = { ...listed, base: created.base };
+  project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
-  const worktree = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
-  if (!worktree) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
   return { project, worktreeId: worktree.id };
+});
+ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
+// Only a git checkout's top folder opens, so the renderer can't open arbitrary paths.
+ipcMain.handle("worktree:reveal", async (_event, worktreePath) => {
+  const { stdout } = await execFileAsync("git", ["-C", worktreePath, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  if ((await fs.realpath(stdout.trim())) !== (await fs.realpath(worktreePath))) throw new Error(`${worktreePath} is not a worktree.`);
+  const error = await shell.openPath(worktreePath);
+  if (error) throw new Error(error);
 });
 
 // Brings the window back from a notification click and opens the chat it was about.
@@ -159,6 +170,8 @@ ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decision }) => agents.respondToPermission(chatId, requestId, decision));
 
 ipcMain.handle("agent:answer-question", (_event, { chatId, requestId, answers }) => agents.answerQuestion(chatId, requestId, answers));
+
+ipcMain.handle("agent:set-permission-mode", (_event, { chatId, mode }) => agents.setPermissionMode(chatId, mode));
 
 function createWindow() {
   const window = new BrowserWindow({

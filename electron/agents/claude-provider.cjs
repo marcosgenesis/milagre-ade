@@ -2,7 +2,7 @@ const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, claudeRequest, claudeResult } = require("./permissions.cjs");
+const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
@@ -93,14 +93,16 @@ class ClaudeSession {
   async beginTurn({ prompt, images = [], model, permissionMode, effort, ultracode = false }) {
     const turnId = randomUUID();
     Object.assign(this.state, { turnId, hasText: false });
-    const mode = CLAUDE_MODES[permissionMode] ?? "default";
+    this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, mode, effort, ultracode);
+      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
           this.model = model;
         }
+        // The user may have switched modes while Claude Code was starting.
+        const mode = CLAUDE_MODES[this.permissions.mode] ?? "default";
         if (mode !== this.mode) {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
@@ -146,6 +148,7 @@ class ClaudeSession {
     // Claude Code holds a message until the question it waits on is settled. The message is the user's
     // reply, so the question is dismissed and the message reaches Claude right away.
     this.questions.dismissAll();
+    if (request.permissionMode) await this.setPermissionMode(request.permissionMode);
     this.inbox.push(userMessage(request.prompt, request.images));
     return { turnId: this.state.turnId, steered: true };
   }
@@ -205,10 +208,11 @@ class ClaudeSession {
     const request = claudeRequest(toolName, input, options);
     return new Promise((resolve) => {
       const abort = () => this.permissions.resolve(request.requestId, "cancelled");
+      const inWorkspace = !options.blockedPath && Boolean(request.files?.length) && insideRoot(this.cwd, request.files);
       this.permissions.add(request, (decision) => {
         options.signal?.removeEventListener("abort", abort);
         resolve(claudeResult(decision, input, options.suggestions));
-      });
+      }, { inWorkspace });
       if (options.signal?.aborted) abort();
       else options.signal?.addEventListener("abort", abort, { once: true });
     });
@@ -238,6 +242,21 @@ class ClaudeSession {
 
   answerQuestion(requestId, answers) {
     return this.questions.answer(requestId, answers);
+  }
+
+  // The user switched modes, possibly mid-turn: Claude Code stops asking for what the new mode allows,
+  // and the waiting cards it allows are answered (see PendingPermissions).
+  async setPermissionMode(permissionMode) {
+    this.permissions.setMode(permissionMode);
+    const mode = CLAUDE_MODES[permissionMode] ?? "default";
+    if (!this.query || this.closed || mode === this.mode) return;
+    this.mode = mode;
+    try {
+      await this.query.setPermissionMode(mode);
+    } catch {
+      // Forget the mode so the next turn applies it again.
+      this.mode = null;
+    }
   }
 
   async readMessages(query) {

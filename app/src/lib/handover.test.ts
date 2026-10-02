@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatMessage, ModelOption } from "../model";
-import { handoverBriefId, handoverBlocker, handoverLinks, handoverModel, otherProvider } from "./handover.ts";
+import type { AgentSession, ChatMessage, ModelOption } from "../model";
+import { handoverBlocker, handoverLinks, handoverModel, handoverNotes, isHandoverChat, otherProvider } from "./handover.ts";
 
 test("the other provider", () => {
   assert.equal(otherProvider("claude"), "codex");
@@ -32,18 +32,32 @@ const sessions = {
 
 test("both chats link to each other by title", () => {
   const state = { sessions, messages: [] };
-  assert.deepEqual(handoverLinks(sessions[3], state), { to: { id: 7, title: "main", provider: "codex" }, pending: false });
-  assert.deepEqual(handoverLinks(sessions[7], state), { from: { id: 3, title: "Fix login" }, pending: true });
+  assert.deepEqual(handoverLinks(sessions[3], state), { to: { id: 7, title: "main", provider: "codex" }, pending: false, live: false });
+  assert.deepEqual(handoverLinks(sessions[7], state), { from: { id: 3, title: "Fix login" }, pending: true, live: true });
 });
 
 test("a link to a chat that is gone is dropped", () => {
-  assert.deepEqual(handoverLinks(sessions[3], { sessions: { 3: sessions[3] }, messages: [] }), { pending: false });
-  assert.deepEqual(handoverLinks(undefined, { sessions, messages: [] }), { pending: false });
+  assert.deepEqual(handoverLinks(sessions[3], { sessions: { 3: sessions[3] }, messages: [] }), { pending: false, live: false });
+  assert.deepEqual(handoverLinks(undefined, { sessions, messages: [] }), { pending: false, live: false });
 });
 
-test("the brief is the first user message of a handed-over chat only", () => {
-  const messages = [{ id: 4, role: "user" }, { id: 5, role: "assistant" }, { id: 6, role: "user" }] as ChatMessage[];
-  assert.equal(handoverBriefId(messages, 3), 4);
-  assert.equal(handoverBriefId(messages, undefined), undefined);
-  assert.equal(handoverBriefId([{ id: 5, role: "assistant" }] as ChatMessage[], 3), undefined);
+test("a chat is a handover chat while it is pending or holds a draft", () => {
+  assert.equal(isHandoverChat(undefined), false);
+  assert.equal(isHandoverChat({ handoverPending: true } as AgentSession), true);
+  assert.equal(isHandoverChat({ handoverDraft: "BRIEF" } as AgentSession), true);
+  assert.equal(isHandoverChat({ handedOverFrom: 3 } as AgentSession), false);
+  assert.equal(handoverLinks({ handoverDraft: "BRIEF" } as AgentSession, { sessions: {}, messages: [] }).live, true);
+});
+
+test("the note says what stays behind and how the mode behaves on the new provider", () => {
+  assert.deepEqual(handoverNotes({ from: "codex", to: "claude", permissionMode: "auto" }), [
+    'Approvals you allowed for the whole chat ("Always allow in this chat") stay with the Codex chat.',
+    "Subagents still running in the Codex chat keep running there.",
+    "On Claude, Auto applies edits inside this worktree without asking and asks before most commands and anything outside it.",
+  ]);
+  assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "ask" })[2], /^On Codex, Ask runs commands in a sandbox that can write to this worktree and temp folders, with no network/);
+  assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "full" })[2], /^On Codex, Full runs commands with no sandbox/);
+  assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "auto" })[2], /^On Codex, Auto runs commands in a sandbox that can write to this worktree and temp folders, with no network, and asks before leaving it\.$/);
+  assert.equal(handoverNotes({ from: "codex", to: "claude", permissionMode: "ask" })[2], "On Claude, Ask asks before edits and commands your Claude settings don't already allow.");
+  assert.match(handoverNotes({ from: "codex", to: "claude", permissionMode: "full" })[2], /^On Claude, Full skips every approval prompt/);
 });

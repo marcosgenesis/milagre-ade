@@ -31,6 +31,7 @@ import { useEditors } from "@/lib/editors";
 import type { AgentPort, DiffStat, PullRequest } from "@/model";
 import { portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 const toneClass = { red: "text-red", orange: "text-orange" } as const;
 
@@ -436,7 +437,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
           </CardLine>
         )}
         {details.pullRequests?.length ? (
-          <div data-chat-card-prs className="-mx-1 flex max-h-[148px] flex-col gap-0.5 overflow-y-auto">
+          <ScrollArea data-chat-card-prs className="-mx-1 flex max-h-[148px] flex-col gap-0.5">
             {details.pullRequests.map((pr) => {
               const blocker = pullRequestBlockers(pr)[0];
               return (
@@ -456,7 +457,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
                 </a>
               );
             })}
-          </div>
+          </ScrollArea>
         ) : null}
         {details.ports?.length ? (
           <div data-chat-card-ports className="flex min-w-0 items-start gap-2">

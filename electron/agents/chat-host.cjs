@@ -3,6 +3,9 @@ const { patchSession } = require("../shared/project-edits.mjs");
 const { chatTitle } = require("../shared/chats.mjs");
 const { renderTranscript, providerName } = require("./handover.cjs");
 
+const RESUME_BODY = "Milagre restarted. Continue where you left off.";
+const RESUME_PROMPT = "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
+
 /** The part of an IPC error the user should read. */
 function errorMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -17,6 +20,8 @@ function errorMessage(error) {
 // while it runs (what the commit dialog did) waits for the turn to end, so it lands after the reply. Every event
 // folded into the runs is numbered, so a window that loads mid-turn takes the runs (see `snapshot`)
 // and skips the events they already hold.
+const withoutDraft = ({ handoverDraft, ...rest }) => rest;
+
 class ChatHost {
   /**
    * `startTurn(request)` starts or steers the agent's turn (see SessionManager.startTurn);
@@ -32,6 +37,9 @@ class ChatHost {
     this.seq = 0;
     this.openChat = null;
     this.notes = new Map();
+    // The options of each chat's latest turn, so a turn a quit stops can start again the same way.
+    this.turns = new Map();
+    this.quitting = false;
   }
 
   /** The turns streaming now, in every project, and the number of the last event they hold. */
@@ -46,6 +54,8 @@ class ChatHost {
 
   /** Folds one agent event into its chat's project, then publishes it. Events are published in the order they arrive. */
   receive(chatId, event) {
+    // A turn the quit stops says so in its reply.
+    if (this.quitting && event.type === "turn-cancelled") event = { ...event, quit: true };
     const projectPath = projectOfKey(chatId);
     const sessionId = sessionIdFromKey(chatId);
     let seq;
@@ -120,6 +130,7 @@ class ChatHost {
     const { projectPath, body, images = [], files = [], provider, model } = request;
     let target = null;
     let seq;
+    let brief;
     const { state } = await this.states.update(projectPath, (latest) => {
       let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
       if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
@@ -127,10 +138,12 @@ class ChatHost {
       const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
       let nextId = latest.next_id;
-      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief).
-      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && !latest.messages.some((message) => message.session_id === item.id))
+      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief or holding it as a draft).
+      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
+      // A handed-over chat's first message carries its brief; the body is only what the user typed.
+      brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
       const withSession = { ...latest, next_id: nextId, sessions: { ...latest.sessions, [session.id]: session } };
       // A running turn's reply so far is saved first, so it stays above the new message.
@@ -138,38 +151,36 @@ class ChatHost {
       this.runs = sent.runs;
       seq = ++this.seq;
       const next = sent.state;
-      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), context: null, role: "user", model };
+      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...next.sessions[session.id], provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
+        sessions: { ...next.sessions, [session.id]: { ...withoutDraft(next.sessions[session.id]), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
         messages: [...next.messages, message],
       };
     });
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
-    this.startTurn({
-      chatId: target.chatId,
+    const turn = {
       provider,
       model,
-      cwd: target.cwd,
       permissionMode: request.permissionMode,
       effort: request.effort,
       ultracode: request.ultracode,
       fastMode: request.fastMode,
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
-      prompt: request.prompt || body || "Describe the attached images.",
-      images,
-      resumeId: target.resumeId,
-    }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
+      prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
+    };
+    this.turns.set(target.chatId, turn);
+    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
     return { sessionId: target.sessionId };
   }
 
   /**
    * Opens a chat on the other provider in the source chat's worktree, linked both ways, and resolves with its
-   * id at once. The transcript and brief are written in the background; the brief is sent as its first message.
+   * id at once. The transcript and brief are written in the background; the brief waits in the chat as a draft for the user to review and send.
    */
   async handover(request) {
     const { projectPath, sessionId, provider } = request;
@@ -179,8 +190,9 @@ class ChatHost {
       const source = latest.sessions[sessionId];
       if (!source) throw new Error("That chat is no longer in the project.");
       if (source.provider === provider) throw new Error(`This chat already runs on ${providerName(provider)}.`);
+      // A handover still being prepared, or waiting as a draft, is opened again rather than made twice.
       const earlier = latest.sessions[source.handedOverTo];
-      if (earlier?.handoverPending) {
+      if (earlier && (earlier.handoverPending || earlier.handoverDraft !== undefined)) {
         target = earlier.id;
         return latest;
       }
@@ -211,26 +223,81 @@ class ChatHost {
       const source = state.sessions[sessionId];
       const transcript = renderTranscript(state, sessionId);
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
-      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant").at(-1)?.body ?? "";
+      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
       const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, cwd: state.worktrees[source.worktree_id].path });
-      await this.send({ ...request, sessionId: target, body, prompt: body, images: [], files: [] });
-      await this.settleHandover(projectPath, target);
+      await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);
       await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
     }
   }
 
-  /** Clears the target chat's pending mark. Resolves true when it was still set. */
-  async settleHandover(projectPath, target) {
+  /** Clears the target chat's pending mark, keeping the brief as its draft when there is one. Resolves true when it was still set. */
+  async settleHandover(projectPath, target, draft) {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const session = latest.sessions[target];
       if (!session?.handoverPending) return latest;
       const { handoverPending, ...rest } = session;
-      return { ...latest, sessions: { ...latest.sessions, [target]: rest } };
+      return { ...latest, sessions: { ...latest.sessions, [target]: draft === undefined ? rest : { ...rest, handoverDraft: draft } } };
     });
     if (changed) this.broadcast(projectPath, state);
     return Boolean(changed);
+  }
+
+  /** Replaces a handed-over chat's brief while it is still a draft (no messages yet). Resolves true when it changed. */
+  async setHandoverDraft(projectPath, sessionId, text) {
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const session = latest.sessions[sessionId];
+      if (session?.handoverDraft === undefined || latest.messages.some((message) => message.session_id === sessionId)) return latest;
+      return { ...latest, sessions: { ...latest.sessions, [sessionId]: { ...session, handoverDraft: text } } };
+    });
+    if (changed) this.broadcast(projectPath, state);
+    return Boolean(changed);
+  }
+
+  /**
+   * Before a quit stops the agents: every chat whose turn runs is saved with what it needs to start again
+   * (`resumeTurn`), and the cancelled turns that follow say the quit stopped them. A chat whose agent never
+   * started keeps its prompt, since no session holds it yet.
+   */
+  async suspendRunning() {
+    this.quitting = true;
+    const byProject = new Map();
+    for (const chatId of Object.keys(this.runs)) {
+      const turn = this.turns.get(chatId);
+      if (!turn) continue;
+      byProject.set(projectOfKey(chatId), [...(byProject.get(projectOfKey(chatId)) ?? []), [sessionIdFromKey(chatId), turn]]);
+    }
+    await Promise.all([...byProject].map(([projectPath, chats]) => this.states.update(projectPath, (latest) => {
+      let sessions = latest.sessions;
+      for (const [sessionId, { prompt, ...turn }] of chats) {
+        const session = sessions[sessionId];
+        if (!session) continue;
+        sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, ...(session.native_session_id ? {} : { prompt }) } } };
+      }
+      return sessions === latest.sessions ? latest : { ...latest, sessions };
+    }).catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message))));
+  }
+
+  /** Chats a quit stopped mid-turn (see `suspendRunning`) continue when their project opens. */
+  async resumeInterrupted(projectPath, state) {
+    for (const session of Object.values(state.sessions)) {
+      if (!session.resumeTurn || this.runs[chatKey(projectPath, session.id)]) continue;
+      let turn = null;
+      // The state passed in can be stale: take the mark from the latest one, so a chat resumes once.
+      const { state: next, changed } = await this.states.update(projectPath, (latest) => {
+        const current = latest.sessions[session.id];
+        if (!current?.resumeTurn) return latest;
+        const { resumeTurn, ...rest } = current;
+        turn = resumeTurn;
+        return { ...latest, sessions: { ...latest.sessions, [session.id]: rest } };
+      });
+      if (!turn) continue;
+      if (changed) this.broadcast(projectPath, next);
+      const { prompt, ...options } = turn;
+      await this.send({ ...options, projectPath, sessionId: session.id, body: RESUME_BODY, prompt: prompt ?? RESUME_PROMPT, images: [], files: [] })
+        .catch((error) => console.warn(`Milagre couldn't resume a chat in ${projectPath}:`, error.message));
+    }
   }
 
   /** A handover still marked pending when its project opens was cut off by a quit: it gets a note instead. */

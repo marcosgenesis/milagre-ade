@@ -19,14 +19,15 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
+import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { HandoverFromLabel, HandoverLinkBar } from "./Handover";
-import { handoverBriefId, type HandoverLinks } from "../lib/handover";
+import { HandoverBriefChip, HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
+import { otherProvider, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -79,7 +80,6 @@ function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }
 const MessageSection = memo(function MessageSection({
   message,
   isUser,
-  markdown = false,
   onRecommendationSelect,
   onUpdateCli,
   updatingCli,
@@ -90,8 +90,6 @@ const MessageSection = memo(function MessageSection({
 }: {
   message: AppChatMessage;
   isUser: boolean;
-  /** A user message whose body is markdown (the handover brief). */
-  markdown?: boolean;
   onRecommendationSelect: (option: string) => void;
   onUpdateCli?: (provider: ModelProvider) => void;
   updatingCli?: ModelProvider | null;
@@ -120,11 +118,9 @@ const MessageSection = memo(function MessageSection({
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        <Attachments images={message.images} files={message.files} />
-        {isUser && markdown ? (
-          <div className="break-words [overflow-wrap:anywhere] [&_:first-child]:mt-0 [&_:last-child]:mb-0 [&_h1]:text-[14px] [&_h2]:text-[13px] [&_h3]:text-[13px] [&_h1]:mt-2 [&_h2]:mt-2 [&_h3]:mt-2 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1"><Markdown text={message.body} /></div>
-        ) : isUser ? (
-          <UserBody body={message.body} />
+        <Attachments images={message.images} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
+        {isUser ? (
+          message.body.trim() ? <UserBody body={message.body} /> : null
         ) : recommendation ? (
           <>
             <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
@@ -197,6 +193,10 @@ interface ChatComposerProps {
   lockedProvider?: ModelProvider;
   /** Hands this chat over to the other provider in a new chat. */
   onHandover?: (provider: ModelProvider) => void;
+  /** The chat has messages, so it can be handed over. */
+  canHandover?: boolean;
+  /** A handed-over chat's brief while it waits for the first message; `chatId` is the chat's key. */
+  handoverBrief?: { chatId: string; brief: string; onSave: (text: string) => Promise<void> };
   handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
@@ -351,6 +351,8 @@ export function ChatComposer({
   runModelName,
   lockedProvider,
   onHandover,
+  canHandover = false,
+  handoverBrief,
   handover,
   models,
   cliStatus,
@@ -388,8 +390,11 @@ export function ChatComposer({
   const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = messages.length === 0 && !handover?.pending;
-  const briefId = handoverBriefId(messages, handover?.from?.id);
+  const isNewChat = messages.length === 0 && !handover?.live;
+  // The note shows with the brief, until it is sent or the note is dismissed, by chat key.
+  const [dismissedNotes, setDismissedNotes] = useState<string[]>([]);
+  const noteKey = handoverBrief?.chatId;
+  const showHandoverNote = noteKey !== undefined && lockedProvider !== undefined && !dismissedNotes.includes(noteKey);
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -434,7 +439,6 @@ export function ChatComposer({
               key={message.id}
               message={message}
               isUser={message.role === "user"}
-              markdown={message.id === briefId}
               onRecommendationSelect={onRecommendationSelect}
               onUpdateCli={onUpdateCli}
               updatingCli={updatingCli}
@@ -487,23 +491,8 @@ export function ChatComposer({
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
-        {notice && (
-          <div
-            role="status"
-            data-notice
-            className="mb-2 flex w-full items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay"
-            style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
-          >
-            <span className="min-w-0 flex-1 break-words">{notice}</span>
-            <button
-              type="button"
-              onClick={onDismissNotice}
-              className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+        {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
+        {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
         <PromptComposer
           imageDraft={imageDraft}
@@ -515,6 +504,8 @@ export function ChatComposer({
           running={isSending}
           lockedProvider={lockedProvider}
           onHandover={onHandover}
+          canHandover={canHandover}
+          handoverBrief={handoverBrief}
           models={models}
           cliStatus={cliStatus}
           onModelPickerOpen={onModelPickerOpen}

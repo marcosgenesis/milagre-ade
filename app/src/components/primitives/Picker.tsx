@@ -1,8 +1,9 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { ScrollArea } from "./ScrollArea";
 
-/* Popover picker shared by the model, permission, and branch selectors and by Select: title,
+/* Popover picker shared by the model, permission, and branch selectors and by Select: optional title,
  * optional header slot (e.g. provider tabs), optional search, and a scrolling list. */
 export function PickerPanel({
   title,
@@ -17,7 +18,7 @@ export function PickerPanel({
   onKeyDown,
   children,
 }: {
-  title: string;
+  title?: string;
   query?: string;
   onQueryChange?: (query: string) => void;
   placeholder?: string;
@@ -58,7 +59,7 @@ export function PickerPanel({
 
   return (
     <div onKeyDown={handleKeyDown} className={`z-20 flex flex-col rounded-[10px] border border-line bg-surface p-1.5 shadow-raised ${className}`} style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", ...style }}>
-      <div className="shrink-0 px-2 pb-2 pt-1"><strong className="text-sm text-ink">{title}</strong></div>
+      {title && <div className="shrink-0 px-2 pb-2 pt-1"><strong className="text-sm text-ink">{title}</strong></div>}
       {header}
       {onQueryChange && (
         <label className="my-2 flex shrink-0 items-center gap-2 rounded-control border border-line px-2.5 py-2 text-ink-3">
@@ -66,10 +67,10 @@ export function PickerPanel({
           <input className="w-full border-0 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={placeholder} autoFocus />
         </label>
       )}
-      <div className="grid max-h-64 min-h-0 grid-cols-1 content-start gap-0.5 overflow-y-auto">
+      <ScrollArea className="grid max-h-64 grid-cols-1 content-start gap-0.5">
         {children}
         {isEmpty && <div className="px-2 py-5 text-center text-xs text-ink-3">{emptyLabel}</div>}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

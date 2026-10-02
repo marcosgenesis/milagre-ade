@@ -28,6 +28,11 @@ test("the transcript has a header, both roles and one line per tool step, withou
   assert.doesNotMatch(text, /Thought|another chat/);
 });
 
+test("a handed-over chat's first message is in the transcript as its brief and what the user typed", () => {
+  const handed = { ...state, messages: [{ id: 4, session_id: 3, role: "user", body: "Start with the tests.", handoverBrief: "BRIEF", context: null }] };
+  assert.match(renderTranscript(handed, 3), /## User\n\nBRIEF\n\nStart with the tests\.\n$/);
+});
+
 test("transcripts are filed by a hash of the project and the session id", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "handover-"));
   const file = transcriptPath(dir, "/projects/alpha", 3);

@@ -35,7 +35,8 @@ function renderTranscript(state, sessionId) {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
       parts.push(`## Assistant${message.model ? ` (${message.model})` : ""}`, [steps.join("\n"), message.body].filter(Boolean).join("\n\n"));
     } else {
-      parts.push("## User", message.body);
+      // A handed-over chat's first message was sent as its brief followed by what the user typed.
+      parts.push("## User", [message.handoverBrief, message.body].filter((part) => part?.trim()).join("\n\n"));
     }
   }
   return `${parts.join("\n\n")}\n`;

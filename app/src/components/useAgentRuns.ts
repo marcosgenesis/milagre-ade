@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
-import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, sessionIdFromKey, splitRunForSteer, startRun } from "../lib/agent-runs";
+import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, recordAnswers, sessionIdFromKey, splitRunForSteer, startRun } from "../lib/agent-runs";
 import { patchSession } from "../lib/chat-list";
 import { stopTurns } from "../lib/project-switch";
+import { answerSummary } from "../lib/question-answers";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
 const TURN_ENDS = new Set<AgentEvent["type"]>(["turn-completed", "turn-cancelled", "turn-failed"]);
@@ -107,8 +108,36 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
 
   const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => send(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [send]);
 
-  /** Sends the answers to a question, or dismisses it (null). */
-  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
+  /**
+   * Sends the answers to a question, or dismisses it (null). The answers show in the chat as the user's
+   * message right away, so whatever the agent streams next lands below them; they are taken back if they don't arrive.
+   */
+  const answerQuestion = useCallback(async (chatId: string, requestId: string, answers: QuestionAnswers | null) => {
+    const request = runsRef.current[chatId]?.questions.find((item) => item.requestId === requestId);
+    const state = getStateRef.current();
+    let messageId: number | null = null;
+    if (answers && request && state) {
+      const recorded = recordAnswers(state, runsRef.current, projectPathRef.current, chatId, answerSummary(request.questions, answers));
+      messageId = recorded.messageId;
+      if (messageId !== null) {
+        runsRef.current = recorded.runs;
+        setRuns(recorded.runs);
+        commitRef.current(recorded.state);
+      }
+    }
+    const takeBack = () => {
+      const latest = getStateRef.current();
+      if (messageId !== null && latest) commitRef.current({ ...latest, messages: latest.messages.filter((message) => message.id !== messageId) });
+    };
+    try {
+      const accepted = await send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers));
+      if (!accepted) takeBack();
+      return accepted;
+    } catch (error) {
+      takeBack();
+      throw error;
+    }
+  }, [send]);
 
   return { runs, start, interrupt, runningIn, stopProject, respond, answerQuestion, splitForSteer };
 }

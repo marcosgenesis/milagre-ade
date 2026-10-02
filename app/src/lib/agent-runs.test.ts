@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, ChatStep, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
-import { applyAgentEvent, capOutput, chatInProject, chatsRunning, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
+import { applyAgentEvent, capOutput, chatInProject, chatsRunning, chatsWaitingForUser, chatKey, clearAnswered, markAnswered, modelForChat, recordAnswers, sentDecision, sentReply, sessionIdFromKey, startRun, splitRunForSteer } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 
 const PROJECT = "/work/app";
@@ -478,4 +478,29 @@ test('a rediscovered child keeps its saved transcript and original start time', 
  ({state}=applyAgentEvent(state,{},PROJECT,key(1),{type:'subagent-update',agent:{...agent,status:'running',startedAt:3,updatedAt:3,transcript:[]}}));
  assert.equal(state.sessions[1].subagents?.[0].startedAt,1);
  assert.equal(state.sessions[1].subagents?.[0].transcript[0].text,'Earlier finding');
+});
+
+test("answers to a question join the chat as the user's message, after the reply so far", () => {
+  const state = base();
+  const runs: AgentRuns = { [key(1)]: { text: "Which color? ", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
+  const recorded = recordAnswers(state, runs, PROJECT, key(1), "Red");
+  assert.deepEqual(recorded.state.messages.map(({ id, role, body }) => ({ id, role, body })), [
+    { id: 10, role: "assistant", body: "Which color?" },
+    { id: 11, role: "user", body: "Red" },
+  ]);
+  assert.equal(recorded.messageId, 11);
+  assert.equal(recorded.state.next_id, 12);
+  assert.deepEqual(recorded.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {}, split: true });
+
+  // Nothing streamed yet: only the answers are added, and the run still knows it was split.
+  const empty: AgentRuns = { [key(1)]: { ...runs[key(1)], text: "" } };
+  const alone = recordAnswers(state, empty, PROJECT, key(1), "Red");
+  assert.deepEqual(alone.state.messages.map(({ role, body }) => ({ role, body })), [{ role: "user", body: "Red" }]);
+  assert.equal(alone.runs[key(1)].split, true);
+
+  for (const [testRuns, chatId, body] of [[runs, key(1), ""], [{}, key(1), "Red"], [runs, chatKey("/work/other", 1), "Red"]] as Array<[AgentRuns, string, string]>) {
+    const unchanged = recordAnswers(state, testRuns, PROJECT, chatId, body);
+    assert.equal(unchanged.messageId, null);
+    assert.equal(unchanged.state, state);
+  }
 });

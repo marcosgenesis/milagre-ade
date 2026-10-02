@@ -265,6 +265,24 @@ export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, proje
   };
 }
 
+/**
+ * Shows the user's answers to a question as their message: the reply so far is saved first (as for a
+ * steering message), so the answers sit between what the agent asked and what it does next.
+ * `messageId` is the new message's id, so it can be taken back if the answers don't reach the agent.
+ */
+export function recordAnswers(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: CoordinatorState; runs: AgentRuns; messageId: number | null } {
+  const sessionId = sessionIdFromKey(chatId);
+  const run = runs[chatId];
+  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, messageId: null };
+  const split = splitRunForSteer(state, runs, projectPath, chatId);
+  const message: ChatMessage = { id: split.state.next_id, session_id: sessionId, body, context: null, role: "user", model: run.model };
+  return {
+    state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
+    runs: split.changed ? split.runs : { ...runs, [chatId]: { ...run, split: true } },
+    messageId: message.id,
+  };
+}
+
 /** The model to use for a chat. A chat bound to a provider never runs another provider's model. */
 export function modelForChat(selected: ModelOption, provider: ModelProvider | undefined, messages: ChatMessage[], catalog: ModelOption[]): ModelOption {
   if (!provider || selected.provider === provider) return selected;

@@ -50,7 +50,7 @@ export type ChatRowActions = {
   onReveal?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
-  onArchive?: (id: string, mode: ArchiveMode) => void;
+  onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => void;
 };
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
@@ -443,7 +443,8 @@ function ChatMenu({
   };
   const copy = (text: string) => run(() => void navigator.clipboard.writeText(text).catch(() => {}));
 
-  const confirm = plan && plan !== "checking" ? archiveChoices({ plan, running }) : null;
+  const resolved = plan && plan !== "checking" ? plan : null;
+  const confirm = resolved ? archiveChoices({ plan: resolved, running }) : null;
   const archiveItems: Array<MenuEntry> = !archiveArmed
     ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: armArchive, disabled: !actions.onArchive }]
     : confirm
@@ -451,7 +452,7 @@ function ChatMenu({
           key: `archive-${choice.mode}`,
           label: choice.label,
           icon: Archive02Icon,
-          onSelect: run(() => actions.onArchive?.(item.id, choice.mode)),
+          onSelect: run(() => resolved && actions.onArchive?.(item.id, choice.mode, resolved)),
           danger: choice.tone === "danger",
           archiveChoice: true,
         }))

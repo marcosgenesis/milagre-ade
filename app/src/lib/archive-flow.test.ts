@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { AgentSession, ChatMessage, CoordinatorState } from "../model";
+import { archiveChat } from "./archive-flow.ts";
+import type { ArchiveDeps } from "./archive-flow.ts";
+import type { ArchivePlan } from "./archive.ts";
+
+const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}) => ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
+const baseState = (): CoordinatorState => ({
+  next_id: 10,
+  projects: {},
+  worktrees: {
+    "1": { id: 1, project_id: 1, path: "/work/shop", name: "main" },
+    "2": { id: 2, project_id: 1, path: "/tmp/wt/shop/x-1", name: "milagre/x-1", base: "main" },
+  },
+  sessions: { "1": session(1, 1), "2": session(2, 2) },
+  connections: {},
+  events: [],
+  messages: [{ id: 1, session_id: 2, body: "hi", context: null, role: "user" } as ChatMessage],
+  approvals: [],
+  tasks: {},
+  artifacts: {},
+  outputs: [],
+  conflicts: [],
+});
+
+const status = { uncommitted: 2, unpushed: 0, branch: "milagre/x-1", head: "abc", removable: false };
+const plan: ArchivePlan = { milagreOwned: true, shared: false, status };
+
+function harness(overrides: Partial<ArchiveDeps> = {}, state = baseState()) {
+  const calls: string[] = [];
+  const notices: string[] = [];
+  const applied: Array<{ next: CoordinatorState; removed: { worktreeId: number; sessionIds: number[] } }> = [];
+  const removals: unknown[] = [];
+  let project = "/work/shop";
+  const deps: ArchiveDeps = {
+    projectPath: "/work/shop",
+    chatId: "/work/shop#2",
+    getState: () => state,
+    currentProjectPath: () => project,
+    stop: () => {
+      calls.push("stop");
+      return undefined;
+    },
+    hide: () => calls.push("hide"),
+    remove: async (worktree, options) => {
+      calls.push("remove");
+      removals.push({ path: worktree.path, ...options });
+    },
+    applyRemoval: (next, removed) => {
+      calls.push("apply");
+      applied.push({ next, removed });
+    },
+    refreshBranches: () => calls.push("branches"),
+    notify: (message) => notices.push(message),
+    ...overrides,
+  };
+  return { deps, calls, notices, applied, removals, switchProject: () => { project = "/work/blog"; } };
+}
+
+test("the chat is hidden before anything is removed, then the worktree goes and the state follows", async () => {
+  const h = harness();
+  assert.equal(await archiveChat(h.deps, 2, "delete", plan), "removed");
+  assert.deepEqual(h.calls, ["stop", "hide", "remove", "apply", "branches"]);
+  assert.deepEqual(h.removals, [{ path: "/tmp/wt/shop/x-1", force: true, base: "main", projectPath: "/work/shop", chatId: "/work/shop#2", seen: status }]);
+  assert.deepEqual(Object.keys(h.applied[0].next.worktrees), ["1"]);
+  assert.deepEqual(h.applied[0].removed, { worktreeId: 2, sessionIds: [2] });
+});
+
+test("the safe remove asks for no force", async () => {
+  const h = harness();
+  await archiveChat(h.deps, 2, "remove", { ...plan, status: { ...status, uncommitted: 0, removable: true } });
+  assert.equal((h.removals[0] as { force: boolean }).force, false);
+});
+
+test("hide only hides the chat", async () => {
+  const h = harness();
+  assert.equal(await archiveChat(h.deps, 2, "hide", plan), "hidden");
+  assert.deepEqual(h.calls, ["stop", "hide"]);
+});
+
+test("a worktree another chat started using since the menu was checked is only hidden from", async () => {
+  const state = baseState();
+  state.sessions["3"] = session(3, 2);
+  const h = harness({}, state);
+  assert.equal(await archiveChat(h.deps, 2, "delete", plan), "hidden");
+  assert.deepEqual(h.calls, ["stop", "hide"]);
+});
+
+test("no status from the menu, or no base, means nothing is removed", async () => {
+  const h = harness();
+  assert.equal(await archiveChat(h.deps, 2, "remove", { ...plan, status: null }), "hidden");
+  assert.equal(await archiveChat(h.deps, 2, "remove", null), "hidden");
+  assert.deepEqual(h.removals, []);
+});
+
+test("the turn winds down before the removal is asked for", async () => {
+  const order: string[] = [];
+  const h = harness({
+    stop: () => new Promise((resolve) => setTimeout(() => { order.push("stopped"); resolve(undefined); }, 10)),
+    remove: async () => { order.push("remove"); },
+  });
+  await archiveChat(h.deps, 2, "delete", plan);
+  assert.deepEqual(order, ["stopped", "remove"]);
+});
+
+test("a refusal because the worktree changed leaves it in place with a notice, and the chat stays archived", async () => {
+  const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: WORKTREE_CHANGED: /tmp/wt/shop/x-1 changed after it was checked."); } });
+  assert.equal(await archiveChat(h.deps, 2, "delete", plan), "kept");
+  assert.deepEqual(h.notices, ["It changed after you checked, so it's kept at /tmp/wt/shop/x-1."]);
+  assert.deepEqual(h.calls, ["stop", "hide"]);
+});
+
+test("a git error becomes a notice with git's message and the path", async () => {
+  const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: fatal: cannot remove a locked working tree"); } });
+  assert.equal(await archiveChat(h.deps, 2, "remove", plan), "kept");
+  assert.deepEqual(h.notices, ["Couldn't remove the worktree: cannot remove a locked working tree. It's still at /tmp/wt/shop/x-1."]);
+});
+
+test("a project switched to midway keeps its state untouched", async () => {
+  const h = harness();
+  h.deps.remove = async () => { h.calls.push("remove"); h.switchProject(); };
+  assert.equal(await archiveChat(h.deps, 2, "delete", plan), "removed");
+  assert.deepEqual(h.calls, ["stop", "hide", "remove"]);
+  assert.deepEqual(h.applied, []);
+});

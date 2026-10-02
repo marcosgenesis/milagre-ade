@@ -24,7 +24,8 @@ import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
-import { isMilagreWorktree, removeFailureNotice, withoutWorktree, worktreeShared } from "./lib/archive";
+import { isMilagreWorktree, worktreeShared } from "./lib/archive";
+import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
@@ -236,32 +237,32 @@ function App() {
     if (view === "chat" && selectedSessionId !== null) patchChat(selectedSessionId, { unread: false });
   }, [selectedSessionId, view, project?.path]);
 
-  // Archiving hides the chat for good; a turn still running in it is stopped first.
-  // The chat is hidden first, so a worktree that won't go never keeps the archive from happening.
-  async function archiveChat(sessionId: number, mode: ArchiveMode = "hide") {
-    if (!project) return;
+  // Archiving hides the chat for good; a turn still running in it is stopped first. The steps and their order
+  // live in lib/archive-flow.ts, which is passed what it touches.
+  function archiveChat(sessionId: number, mode: ArchiveMode, plan: ArchivePlan | null) {
+    if (!project) return Promise.resolve();
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
-    const latest = stateRef.current;
-    const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
-    // Another chat may have started using the worktree since the menu looked at it.
-    const removing = (mode === "remove" || mode === "delete") && latest && worktree && !worktreeShared(latest, sessionId) ? worktree : null;
-    const stopped = agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined;
-    patchChat(sessionId, { archived: true, unread: false });
-    if (selectedSessionId === sessionId) startNewChat();
-    if (!removing) return;
-    // The agent must be done before its folder goes.
-    await stopped;
-    try {
-      await window.milagre.removeWorktree(removing.path, { force: mode === "delete" });
-    } catch (error) {
-      setNotice(removeFailureNotice(error, removing.path));
-      return;
-    }
-    if (projectRef.current?.path !== projectPath) return;
-    const next = stateRef.current;
-    if (next) commit(withoutWorktree(next, removing.id));
-    void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {});
+    return runArchive({
+      projectPath,
+      chatId: key,
+      getState: () => stateRef.current,
+      currentProjectPath: () => projectRef.current?.path,
+      stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
+      hide: () => {
+        patchChat(sessionId, { archived: true, unread: false });
+        if (selectedSessionId === sessionId) startNewChat();
+      },
+      remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
+      applyRemoval: (next, removed) => {
+        commit(next);
+        // A removal that drops the open chat or the picked worktree moves the selection on.
+        setSelectedSessionId((current) => (current !== null && removed.sessionIds.includes(current) ? null : current));
+        setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
+      },
+      refreshBranches: () => void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {}),
+      notify: setNotice,
+    }, sessionId, mode, plan);
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -528,7 +529,7 @@ function App() {
           onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
           onReveal: (id) => revealChat(Number(id)),
           onArchiveCheck: (id) => checkArchive(Number(id)),
-          onArchive: (id, mode) => void archiveChat(Number(id), mode),
+          onArchive: (id, mode, plan) => void archiveChat(Number(id), mode, plan),
         }}
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}

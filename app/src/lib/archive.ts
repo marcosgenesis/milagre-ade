@@ -1,10 +1,10 @@
 import type { CoordinatorState, Worktree } from "../model";
 
 /** What archiving a chat would lose from its worktree, as `worktree:status` reports it. */
-export type WorktreeStatus = { uncommitted: number; unpushed: number; branch: string | null; removable: boolean };
+export type WorktreeStatus = { uncommitted: number; unpushed: number; branch: string | null; head: string; removable: boolean };
 
 /** How an archive goes: only hide the chat, or also remove its worktree (`delete` discards what it holds). */
-export type ArchiveMode = "hide" | "keep" | "remove" | "delete";
+export type ArchiveMode = "hide" | "remove" | "delete";
 
 /** Everything the menu needs to offer the right choices for one chat. */
 export type ArchivePlan = { milagreOwned: boolean; shared: boolean; status: WorktreeStatus | null };
@@ -24,12 +24,11 @@ export function isMilagreWorktree(worktree: Worktree | undefined, roots: string[
   return Boolean(worktree?.base) && isInsideRoots(worktree!.path, roots);
 }
 
-/** Whether another chat that isn't archived still has messages in the chat's worktree. */
+/** Whether another chat that isn't archived, even an empty one, uses the chat's worktree. */
 export function worktreeShared(state: CoordinatorState, sessionId: number): boolean {
   const worktreeId = state.sessions[sessionId]?.worktree_id;
   if (worktreeId === undefined) return false;
-  const used = new Set(state.messages.map((message) => message.session_id));
-  return Object.values(state.sessions).some((session) => session.id !== sessionId && session.worktree_id === worktreeId && !session.archived && used.has(session.id));
+  return Object.values(state.sessions).some((session) => session.id !== sessionId && session.worktree_id === worktreeId && !session.archived);
 }
 
 /**
@@ -63,13 +62,26 @@ export function lossReason(status: WorktreeStatus): string {
     ...(status.uncommitted > 0 ? [plural(status.uncommitted, "uncommitted file")] : []),
     ...(status.unpushed > 0 ? [plural(status.unpushed, "unpushed commit")] : []),
   ];
+  // A detached HEAD is never removed safely: its commits belong to no branch.
+  if (parts.length === 0) return "Its HEAD is detached, so what it holds isn't on a branch";
   return `${parts.join(" and ")} will be lost`;
+}
+
+/** The loss line and how to avoid it: "2 uncommitted files will be lost. Commit them first to keep them." */
+export function deleteNote(status: WorktreeStatus): string {
+  const pointer = status.uncommitted > 0 && status.unpushed > 0 ? "Commit and push them first to keep them."
+    : status.uncommitted > 0 ? "Commit them first to keep them."
+    : status.unpushed > 0 ? "Push them first to keep them."
+    : "Check out a branch first to keep it.";
+  return `${lossReason(status)}. ${pointer}`;
 }
 
 /**
  * The confirm step after "Archive". A chat whose worktree isn't Milagre's, is shared, or can't be checked
- * only hides. A clean one offers removing the worktree. A dirty one offers keeping it, or deleting it with
- * a line saying what goes.
+ * only hides, and a check that failed never offers deletion. A clean worktree offers removing it. One with unsaved
+ * work offers only deleting it, with a line saying what goes and how to keep it. There is no "keep": archive
+ * only hides and nothing lists archived chats, so a kept worktree would be invisible and orphaned. Dismissing
+ * the menu leaves the chat as it is.
  */
 export function archiveChoices({ plan, running }: { plan: ArchivePlan; running: boolean }): { choices: ArchiveChoice[]; reason: string | null } {
   const { milagreOwned, shared, status } = plan;
@@ -81,16 +93,17 @@ export function archiveChoices({ plan, running }: { plan: ArchivePlan; running: 
   }
   return {
     choices: [
-      { mode: "keep", label: running ? "Stop and archive, keep worktree" : "Archive, keep worktree", tone: "plain" },
       { mode: "delete", label: running ? "Stop, archive and delete worktree" : "Archive and delete worktree", tone: "danger" },
     ],
-    reason: lossReason(status),
+    reason: deleteNote(status),
   };
 }
 
 /** The notice for a worktree that wouldn't go: "Couldn't remove the worktree: <git's message>. It's still at <path>." */
 export function removeFailureNotice(error: unknown, path: string): string {
   const raw = error instanceof Error ? error.message : String(error);
+  // Main refuses a removal that the worktree outgrew after the user looked at it.
+  if (raw.includes("WORKTREE_CHANGED")) return `It changed after you checked, so it's kept at ${path}.`;
   const message = raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "").replace(/^fatal: /, "").trim().replace(/[.\s]+$/, "");
   return `Couldn't remove the worktree: ${message}. It's still at ${path}.`;
 }

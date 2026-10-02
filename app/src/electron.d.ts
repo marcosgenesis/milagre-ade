@@ -22,8 +22,12 @@ declare global {
       getWorktreeRoots: () => Promise<string[]>;
       /** What archiving would lose from a worktree. Rejects when git can't tell. */
       getWorktreeStatus: (worktreePath: string, base: string) => Promise<WorktreeStatus>;
-      /** Removes a worktree Milagre made and its branch; `force` discards what it holds. Rejects with git's message. */
-      removeWorktree: (worktreePath: string, options: { force: boolean }) => Promise<{ removed: boolean; branch: string | null; branchDeleted: boolean }>;
+      /**
+       * Removes a worktree Milagre made and its branch; `force` discards what it holds. Main closes the chat's agent
+       * and checks again against `seen`, the status the user saw. Rejects with git's message, or a message that
+       * says the worktree changed after it was checked.
+       */
+      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; branch: string | null; branchDeleted: boolean }>;
       /** The project's saved "Files to copy" patterns, with what the effective patterns match now. */
       readFilesToCopy: (projectPath: string) => Promise<FilesToCopy & { filesToCopy: string[] }>;
       /** What patterns would match, without saving them. `.worktreeinclude` still wins. */

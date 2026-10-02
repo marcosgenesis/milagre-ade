@@ -179,8 +179,11 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   const [text, setText] = useState<string | null>(null);
   const [found, setFound] = useState<FilesToCopyResult | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const pending = useRef<string | null>(null);
+  const current = useRef("");
   const saveTimer = useRef<number | null>(null);
+  const previewTimer = useRef<number | null>(null);
   const previewSeq = useRef(0);
 
   const flush = () => {
@@ -188,8 +191,27 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     saveTimer.current = null;
     const next = pending.current;
     pending.current = null;
-    if (next !== null) void window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).catch(() => {});
+    if (next === null) return;
+    window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).then(
+      () => setSaveError(null),
+      (error) => setSaveError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error)),
+    );
   };
+
+  // The preview runs shortly after typing stops; only the latest answer is shown.
+  const refreshPreview = () => {
+    const seq = ++previewSeq.current;
+    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then((next) => {
+      if (seq === previewSeq.current) setFound(next);
+    }, () => {});
+  };
+
+  // .worktreeinclude can change in an editor while Settings is open.
+  useEffect(() => {
+    const onFocus = () => refreshPreview();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [projectPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +220,8 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     setLoadError(null);
     window.milagre.readFilesToCopy(projectPath).then((saved) => {
       if (cancelled) return;
-      setText(saved.filesToCopy.join("\n"));
+      current.current = saved.filesToCopy.join("\n");
+      setText(current.current);
       setFound(saved);
     }, (error) => {
       if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
@@ -206,19 +229,19 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
+      if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
       flush();
     };
   }, [projectPath]);
 
   const edit = (value: string) => {
     setText(value);
+    current.current = value;
     pending.current = value;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(flush, 600);
-    const seq = ++previewSeq.current;
-    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(value)).then((next) => {
-      if (seq === previewSeq.current) setFound(next);
-    }, () => {});
+    if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
+    previewTimer.current = window.setTimeout(refreshPreview, 300);
   };
 
   const locked = found?.source === "worktreeinclude";
@@ -250,6 +273,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
         ) : (
           <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
         )}
+        {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
       </div>
     </Group>
   );

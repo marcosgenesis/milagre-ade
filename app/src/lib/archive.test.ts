@@ -4,8 +4,8 @@ import type { AgentSession, ChatMessage, CoordinatorState, Worktree } from "../m
 import { archiveChoices, isInsideRoots, isMilagreWorktree, lossReason, removeFailureNotice, withoutWorktree, worktreeShared } from "./archive.ts";
 import type { ArchivePlan, WorktreeStatus } from "./archive.ts";
 
-const clean: WorktreeStatus = { uncommitted: 0, unpushed: 0, branch: "milagre/x", removable: true };
-const dirty: WorktreeStatus = { uncommitted: 3, unpushed: 2, branch: "milagre/x", removable: false };
+const clean: WorktreeStatus = { uncommitted: 0, unpushed: 0, branch: "milagre/x", head: "abc", removable: true };
+const dirty: WorktreeStatus = { uncommitted: 3, unpushed: 2, branch: "milagre/x", head: "abc", removable: false };
 const plan = (patch: Partial<ArchivePlan> = {}): ArchivePlan => ({ milagreOwned: true, shared: false, status: clean, ...patch });
 const labels = (result: ReturnType<typeof archiveChoices>) => result.choices.map((choice) => choice.label);
 
@@ -16,14 +16,24 @@ test("a clean Milagre worktree offers one item that removes it", () => {
   assert.deepEqual(labels(archiveChoices({ plan: plan(), running: true })), ["Stop, archive and remove worktree"]);
 });
 
-test("a dirty Milagre worktree offers keep or delete, with what would be lost", () => {
+test("a worktree with unsaved work offers only delete, with what would be lost and how to keep it", () => {
   const result = archiveChoices({ plan: plan({ status: dirty }), running: false });
-  assert.deepEqual(result.choices.map((choice) => [choice.mode, choice.label, choice.tone]), [
-    ["keep", "Archive, keep worktree", "plain"],
-    ["delete", "Archive and delete worktree", "danger"],
-  ]);
-  assert.equal(result.reason, "3 uncommitted files and 2 unpushed commits will be lost");
-  assert.deepEqual(labels(archiveChoices({ plan: plan({ status: dirty }), running: true })), ["Stop and archive, keep worktree", "Stop, archive and delete worktree"]);
+  assert.deepEqual(result.choices.map((choice) => [choice.mode, choice.label, choice.tone]), [["delete", "Archive and delete worktree", "danger"]]);
+  assert.equal(result.reason, "3 uncommitted files and 2 unpushed commits will be lost. Commit and push them first to keep them.");
+  assert.deepEqual(labels(archiveChoices({ plan: plan({ status: dirty }), running: true })), ["Stop, archive and delete worktree"]);
+  assert.equal(archiveChoices({ plan: plan({ status: { ...dirty, unpushed: 0, uncommitted: 2 } }), running: false }).reason, "2 uncommitted files will be lost. Commit them first to keep them.");
+  assert.equal(archiveChoices({ plan: plan({ status: { ...dirty, uncommitted: 0, unpushed: 1 } }), running: false }).reason, "1 unpushed commit will be lost. Push them first to keep them.");
+  const detached = archiveChoices({ plan: plan({ status: { ...dirty, uncommitted: 0, unpushed: 0, branch: null } }), running: false });
+  assert.equal(detached.reason, "Its HEAD is detached, so what it holds isn't on a branch. Check out a branch first to keep it.");
+  // Nothing offers to keep the worktree.
+  for (const status of [dirty, clean]) assert.equal(labels(archiveChoices({ plan: plan({ status }), running: false })).some((label) => /keep/i.test(label)), false);
+});
+
+test("a check that failed never offers deletion", () => {
+  for (const running of [false, true]) {
+    const result = archiveChoices({ plan: plan({ status: null }), running });
+    assert.deepEqual(result.choices.map((choice) => choice.mode), ["hide"]);
+  }
 });
 
 test("a worktree that isn't Milagre's, is shared, or can't be checked only hides the chat", () => {
@@ -81,12 +91,12 @@ const state = (): CoordinatorState => ({
   conflicts: [],
 });
 
-test("worktreeShared: another unarchived chat with messages in the same worktree", () => {
+test("worktreeShared: any other unarchived chat in the same worktree, even an empty one", () => {
   const initial = state();
   assert.equal(worktreeShared(initial, 2), true);
   assert.equal(worktreeShared(initial, 4), false);
   assert.equal(worktreeShared({ ...initial, sessions: { ...initial.sessions, 3: session(3, 2, { archived: true }) } }, 2), false);
-  assert.equal(worktreeShared({ ...initial, messages: initial.messages.filter((item) => item.session_id !== 3) }, 2), false);
+  assert.equal(worktreeShared({ ...initial, messages: initial.messages.filter((item) => item.session_id !== 3) }, 2), true);
   assert.equal(worktreeShared(initial, 99), false);
 });
 

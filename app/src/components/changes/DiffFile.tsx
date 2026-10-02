@@ -105,7 +105,14 @@ function AddButton({ commenting, hunk, line, side }: { commenting: Commenting; h
   );
 }
 
-const Selected = () => <span aria-hidden className="pointer-events-none absolute inset-0 bg-accent-tint opacity-70" />;
+// A neutral wash under the text (rows are isolated, so -z-10 sits above the row's tint but below its text) and a
+// black bar on the left edge, as GitHub marks selected lines.
+const Selected = () => (
+  <>
+    <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-ink/[0.07]" />
+    <span aria-hidden data-diff-selected-bar className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-ink" />
+  </>
+);
 
 function Unified({ hunks, decorations, wrap, commenting }: { hunks: DiffHunk[]; decorations: Map<DiffLine, Decorated>; wrap: boolean; commenting: Commenting }) {
   return (
@@ -118,7 +125,7 @@ function Unified({ hunks, decorations, wrap, commenting }: { hunks: DiffHunk[]; 
             return (
               <Fragment key={lineIndex}>
                 <div data-diff-row={line.kind} data-selected={selected ? "" : undefined} onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk: index, line: lineIndex })}
-                  className={`group/row relative flex min-h-5 ${TINT[line.kind]}`}>
+                  className={`group/row relative isolate flex min-h-5 ${TINT[line.kind]}`}>
                   <Gutter value={line.oldNumber} />
                   <Gutter value={line.newNumber} />
                   <span className={`w-4 shrink-0 select-none text-center ${MARKER_COLOR[line.kind]}`}>{MARKER[line.kind]}</span>
@@ -143,7 +150,7 @@ function Half({ line, side, decoration, commenting, hunk, index }: { line?: Diff
   const selected = commenting.selected(hunk, index, column);
   return (
     <div data-diff-cell={side} data-selected={selected ? "" : undefined} onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk, line: index, side: column })}
-      className={`group/row relative flex min-h-5 min-w-0 ${TINT[line.kind]} ${border}`}>
+      className={`group/row relative isolate flex min-h-5 min-w-0 ${TINT[line.kind]} ${border}`}>
       <Gutter value={side === "left" ? line.oldNumber : line.newNumber} />
       <span className={`w-4 shrink-0 select-none text-center ${MARKER_COLOR[line.kind]}`}>{MARKER[line.kind]}</span>
       <Text line={line} decoration={decoration} wrap />

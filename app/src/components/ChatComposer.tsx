@@ -89,7 +89,9 @@ function MessageSection({
         ) : recommendation ? (
           <>
             <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
-            <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            <div className={recommendation.intro ? "mt-2" : undefined}>
+              <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            </div>
           </>
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />

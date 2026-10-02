@@ -4,7 +4,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
 // its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
 // { id, status, title?, detail?, durationMs? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup"
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
 //   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
 //           the title shows only its name, and the renderer opens it in an editor from here
@@ -13,6 +13,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 //           The detail a step ends with replaces anything streamed into it. A read that worked keeps none.
 // A title given at the end replaces the first one, for agents that only know it then.
 // A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
+// An image step is an image the agent generated: it ends with the image's file and the prompt it was made from as its detail.
 
 // Command output keeps its end, where results and errors are (capOutput); diffs and other details keep their start.
 const { MAX_OUTPUT, capOutput } = require("../shared/agent-runs.mjs");
@@ -154,6 +155,8 @@ function codexStep(item) {
       return step("search", webSearchTitle(item));
     case "imageView":
       return step("read", `Viewed ${fileName(item.path)}`);
+    case "imageGeneration":
+      return step("image", "Generating an image");
     default:
       return null;
   }
@@ -182,6 +185,12 @@ function codexStepResult(item) {
     }
     case "webSearch":
       return compact({ id, status: "done", title: webSearchTitle(item), detail: webResults(item.results) });
+    case "imageGeneration": {
+      // Codex reports "completed", or "failed" with a failure such as a used-up limit; result is the image as base64.
+      const failed = item.status === "failed" || Boolean(item.failure) || (!item.savedPath && !item.result);
+      const note = item.failure?.type === "usageLimitExceeded" ? "image limit reached" : undefined;
+      return compact({ id, status: failed ? "failed" : "done", title: failed ? "Couldn't generate an image" : "Generated an image", note, detail: item.revisedPrompt ? capText(item.revisedPrompt) : undefined, file: filePath(item.savedPath) });
+    }
     default:
       return { id, status: item.status === "failed" ? "failed" : "done" };
   }

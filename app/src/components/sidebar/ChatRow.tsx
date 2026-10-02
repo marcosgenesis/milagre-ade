@@ -536,8 +536,8 @@ function ChatMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [archiveArmed, setArchiveArmed] = useState(false);
-  // What the confirm step offers: unknown until the worktree has been looked at.
-  const [plan, setPlan] = useState<ArchivePlan | "checking" | null>(null);
+  // What the confirm step offers: null until the worktree has been looked at.
+  const [plan, setPlan] = useState<ArchivePlan | null>(actions.onArchiveCheck ? null : HIDE_ONLY);
   const [top, setTop] = useState(position.y);
   const { details = {} } = item;
   const running = item.mark === "running" || item.mark === "waiting" || item.mark === "question";
@@ -556,16 +556,18 @@ function ChatMenu({
     if (archiveArmed) menu.querySelector<HTMLElement>("[data-archive-choice]:not(:disabled)")?.focus();
   }, [position.y, archiveArmed, plan]);
 
-  const armArchive = () => {
-    setArchiveArmed(true);
-    if (!actions.onArchiveCheck) {
-      setPlan(HIDE_ONLY);
-      return;
-    }
-    setPlan("checking");
+  // The worktree is checked as the menu opens, so "Archive" goes straight to its choice instead of
+  // flashing a checking row. Archive stays disabled until the check is back.
+  useEffect(() => {
+    if (!actions.onArchiveCheck || !actions.onArchive) return;
+    let live = true;
     // A worktree that can't be checked only hides the chat, as before.
-    actions.onArchiveCheck(item.id).then(setPlan, () => setPlan(HIDE_ONLY));
-  };
+    actions.onArchiveCheck(item.id).then((next) => live && setPlan(next), () => live && setPlan(HIDE_ONLY));
+    return () => {
+      live = false;
+    };
+    // Checked once per opening; the menu remounts each time it opens.
+  }, []);
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -594,20 +596,34 @@ function ChatMenu({
   const { editor } = useEditors();
   const copy = (text: string) => run(() => void navigator.clipboard.writeText(text).catch(() => {}));
 
-  const resolved = plan && plan !== "checking" ? plan : null;
-  const confirm = resolved ? archiveChoices({ plan: resolved, running }) : null;
-  const archiveItems: Array<MenuEntry> = !archiveArmed
-    ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: armArchive, disabled: !actions.onArchive }]
-    : confirm
-      ? confirm.choices.map((choice) => ({
-          key: `archive-${choice.mode}`,
-          label: choice.label,
-          icon: Archive02Icon,
-          onSelect: run(() => resolved && actions.onArchive?.(item.id, choice.mode, resolved)),
-          danger: choice.tone === "danger",
-          archiveChoice: true,
-        }))
-      : [{ key: "archive-checking", label: "Checking worktree…", icon: Archive02Icon, onSelect: () => {}, disabled: true, archiveChoice: true }];
+  const confirm = archiveArmed && plan ? archiveChoices({ plan, running }) : null;
+  const archiveItems: Array<MenuEntry> = !confirm || !plan
+    ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: () => setArchiveArmed(true), disabled: !actions.onArchive || !plan }]
+    : confirm.choices.map((choice) => ({
+        key: `archive-${choice.mode}`,
+        label: choice.label,
+        icon: Archive02Icon,
+        onSelect: run(() => actions.onArchive?.(item.id, choice.mode, plan)),
+        danger: choice.tone === "danger",
+        archiveChoice: true,
+      }));
+
+  // Enter confirms the armed archive wherever focus is, since a mouse click on "Archive" leaves it on the page.
+  // A row focused with the arrow keys keeps Enter for itself.
+  const confirmEntry = archiveItems.length === 1 && archiveItems[0].archiveChoice && !archiveItems[0].disabled ? archiveItems[0] : null;
+  useEffect(() => {
+    if (!confirmEntry) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.matches("[data-menu-row]") && !active.matches("[data-archive-choice]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      confirmEntry.onSelect();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [confirmEntry]);
 
   const items: Array<MenuEntry | "divider"> = [
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },

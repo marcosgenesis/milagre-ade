@@ -1,5 +1,6 @@
 const { active: activeSubagent, settleSubagents } = require("./subagents.cjs");
 const fs = require("node:fs/promises");
+const { mkdirSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
@@ -31,6 +32,19 @@ async function writeImages(images) {
     paths.push(file);
   }
   return { paths, cleanup: () => fs.rm(directory, { recursive: true, force: true }) };
+}
+
+// A generated image Codex didn't save is only base64 in the item; it is written out so the chat can show it.
+function saveGeneratedImage(item, directory = path.join(os.tmpdir(), "milagre-generated-images")) {
+  if (item?.type !== "imageGeneration" || item.savedPath || typeof item.result !== "string" || !item.result) return item;
+  try {
+    const file = path.join(directory, `${String(item.id).replace(/[^\w.-]/g, "_")}.png`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(file, Buffer.from(item.result, "base64"));
+    return { ...item, savedPath: file };
+  } catch {
+    return item;
+  }
 }
 
 const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
@@ -230,6 +244,7 @@ class CodexSession {
     // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
     if (method === "turn/started" && !this.turnActive) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
+    if (method === "item/completed" && params.item?.type === "imageGeneration") params = { ...params, item: saveGeneratedImage(params.item) };
     const events = mapCodexNotification(method, params, this.state);
     if (events.some(event => event.type === "subagent-update")) this.scheduleSubagents();
     if (!events.some(isTerminal)) {
@@ -411,4 +426,4 @@ class CodexSession {
   }
 }
 
-module.exports = { CodexSession, codexPolicy };
+module.exports = { CodexSession, codexPolicy, saveGeneratedImage };

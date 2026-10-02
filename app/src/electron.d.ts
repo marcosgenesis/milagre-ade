@@ -1,6 +1,6 @@
 export {};
 
-import type { ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { DiffStat, ModelCapabilities, AgentEvent, AgentStartTurnRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error"; version: string | null; progress: number };
 
@@ -12,6 +12,10 @@ declare global {
       getProjectImage: (projectPath: string) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number }>;
+      /** Lines the worktree adds and removes against its base, or null outside a repository. */
+      readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
+      /** Opens the worktree's folder in Finder. */
+      revealWorktree: (worktreePath: string) => Promise<void>;
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       saveProject: (projectPath: string, state: CoordinatorState) => Promise<void>;

@@ -37,7 +37,7 @@ test("createWorktree branches from the base outside the project", async (t) => {
   const worktreeRoot = path.join(root, "worktrees");
   const created = await createWorktree({ projectPath: project, baseBranch: "release/v2", prompt: "Add a checkout page", root: worktreeRoot, suffix: "ab12" });
 
-  assert.deepEqual(created, { branch: "milagre/add-a-checkout-page-ab12", path: path.join(worktreeRoot, "shop", "add-a-checkout-page-ab12") });
+  assert.deepEqual(created, { branch: "milagre/add-a-checkout-page-ab12", path: path.join(worktreeRoot, "shop", "add-a-checkout-page-ab12"), base: "release/v2" });
   assert.equal((await fs.readFile(path.join(created.path, "README.md"), "utf8")), "shop\n");
   assert.match(git("worktree", "list", "--porcelain"), /branch refs\/heads\/milagre\/add-a-checkout-page-ab12/);
   assert.equal(git("rev-parse", created.branch).trim(), git("rev-parse", "release/v2").trim());

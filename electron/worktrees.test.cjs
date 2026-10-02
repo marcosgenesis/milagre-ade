@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createWorktree, listBranches, slugify } = require("./worktrees.cjs");
+const { createWorktree, listBranches, renameWorktreeBranch, slugify } = require("./worktrees.cjs");
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-worktrees-"));
@@ -49,6 +49,20 @@ test("createWorktree falls back to a generic name and reports git errors", async
   const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "", root: worktreeRoot, suffix: "zz99" });
   assert.equal(created.branch, "milagre/chat-zz99");
   await assert.rejects(createWorktree({ projectPath: project, baseBranch: "missing", prompt: "x", root: worktreeRoot, suffix: "q1" }), /missing/);
+});
+
+test("renameWorktreeBranch renames a running worktree's branch and keeps its folder", async (t) => {
+  const { root, project, git } = await fixture(t);
+  const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "the sidebar thing is broken", root: path.join(root, "worktrees"), suffix: "ef56" });
+
+  assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug: "Fix sidebar collapse" }), "milagre/fix-sidebar-collapse-ef56");
+  assert.equal(execFileSync("git", ["-C", created.path, "branch", "--show-current"], { encoding: "utf8" }).trim(), "milagre/fix-sidebar-collapse-ef56");
+  assert.match(git("worktree", "list", "--porcelain"), /the-sidebar-thing-is-broken-ef56\nHEAD [0-9a-f]+\nbranch refs\/heads\/milagre\/fix-sidebar-collapse-ef56/);
+
+  // Nothing to do, or the old branch is already gone.
+  assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: "milagre/fix-sidebar-collapse-ef56", slug: "fix-sidebar-collapse" }), null);
+  assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: "milagre/fix-sidebar-collapse-ef56", slug: "" }), null);
+  assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug: "other-name" }), null);
 });
 
 // A project cloned from a remote whose main has since moved on; the local main is one commit behind.

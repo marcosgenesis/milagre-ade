@@ -25,6 +25,8 @@ window.emitAgent = event => {
   window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event, ...(ended ? { state: { ...state } } : {}) }));
 };
 window.milagre = new Proxy({
+ // The main process always answers with a map of chat id to ports; null would crash the ports hook.
+ getAgentPorts: async () => ({}),
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
  getCurrentProject: async () => ({ path: '/fixture', name: 'Milagre', state }),
@@ -189,13 +191,14 @@ async function browserChecks() {
   await evaluate(`(() => { const dt = new DataTransfer(); dt.items.add(new File([Uint8Array.from(atob(window.imageBytes), c=>c.charCodeAt(0))], 'pasted.png', {type:'image/png'})); document.querySelector('textarea').dispatchEvent(new ClipboardEvent('paste', { bubbles:true, cancelable:true, clipboardData:dt })); })()`);
   await waitFor(String.raw`document.querySelector('[data-promptbar] img')?.src.startsWith('data:image/png')`);
   await chooseFiles([['discard.txt','text/plain']]);
-  await key('2', { metaKey: true });
+  // Sidebar chats keep creation order, newest first: Other chat (session 5) is ⌘1, Attachment test (session 3) is ⌘2.
+  await key('1', { metaKey: true });
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Other chat")`);
   assert.equal(await evaluate('!!document.querySelector("[data-promptbar] [aria-label=Attachments]")'), false, 'Switching chats in same worktree clears attachments');
   await evaluate('window.emitAgent({type:"text-delta", messageId:"test", text:"Done"}); window.emitAgent({type:"turn-completed"})');
   await waitFor(String.raw`window.notices.length === 1`);
   await waitFor(String.raw`window.synced.at(-1)?.unread.includes("/fixture#3")`);
-  await key('1', { metaKey: true });
+  await key('2', { metaKey: true });
   await waitFor(String.raw`!window.synced.at(-1)?.unread.includes("/fixture#3")`);
   await delay(250);
   require('node:fs').writeFileSync('/tmp/milagre-attachments.png', (await window.webContents.capturePage()).toPNG());

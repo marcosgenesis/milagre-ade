@@ -31,9 +31,9 @@ The approach follows [Paseo](https://github.com/getpaseo/paseo) (Apache-2.0), wh
 6. As a user, I want Cancel (or Escape) to stop the current turn without losing the chat.
 7. As a user, I want to send a message while the agent works, so I can steer it without stopping the turn.
 8. As a user, I want two chats to run agents at the same time.
-9. As a user, I want the model picker to list the Codex models my account can actually use.
-10. As a user who opens Milagre from Finder, I want it to find the `claude` and `codex` CLIs installed in my shell.
-11. As a user, I want a clear message when a CLI is missing, not logged in, or crashes, and the next message to recover on its own.
+9. As a user, I want the model picker to list the models each CLI reports, so I only pick models my account can use.
+10. As a user who opens Milagre from Finder or the Dock, I want it to find the `claude` and `codex` CLIs installed in my shell, and agents to get my shell's environment so `node`, `git`, `gh` and the rest work in their commands.
+11. As a user, I want a clear message when a CLI is missing, too old, not logged in, or crashes, and the next message to recover on its own.
 12. As a user, when an agent asks me to choose between options, I want to tap an option on a card, type my own answer, or dismiss the question, and have the agent carry on from my answer in the same turn.
 
 ## Implementation Decisions
@@ -47,7 +47,9 @@ The agent host lives in the Electron main process, which already owns processes 
 - `codex-provider.cjs`: Codex session on top of `codex-rpc.cjs`.
 - `codex-rpc.cjs`: newline-delimited JSON-RPC client for `codex app-server`. It handles requests, notifications and server-to-client requests.
 - `events.cjs`: the event shapes (JSDoc) plus pure functions that map each provider's raw messages to Milagre events.
-- `environment.cjs`: imports the login-shell `PATH` at startup and resolves the `claude` and `codex` binaries.
+- `environment.cjs`: imports the login shell's environment at startup and resolves binaries on the resulting `PATH` (see Environment).
+- `cli.cjs`: finds each agent's CLI and checks its version, once per app run (see Environment).
+- `models.cjs`: asks each CLI for its models, once per app run (see Models).
 - `process-tree.cjs`: tree-kills a session's process group, sending SIGTERM and then SIGKILL after 2 s.
 
 `electron/agent-runner.cjs` and the CLI-argument half of `electron/image-input.cjs` are removed once both providers are in place. Image validation (`decodeImages`) stays.
@@ -92,11 +94,11 @@ Text deltas and step output are batched in main into 50 ms windows before sendin
 
 Renderer to main:
 
-- `agent:start-turn { chatId, provider, model, cwd, permissionMode, prompt, images, resumeId? }`. It resolves once the turn starts; results arrive as events.
+- `agent:start-turn { chatId, provider, model, cwd, permissionMode, prompt, images, resumeId? }`. It resolves once the turn starts; results arrive as events. It rejects with the message to show when the provider's CLI is missing, too old or doesn't start, and the renderer shows that as the turn's failure.
 - `agent:respond-permission { chatId, requestId, decision }`
 - `agent:answer-question { chatId, requestId, answers }`. It resolves to whether the question was still open.
 - `agent:interrupt { chatId }`
-- `agent:models`: returns `{ codex: ModelOption[], claude: ModelOption[] }`.
+- `agent:models`: returns `{ codex: ReportedModel[] | null, claude: ReportedModel[] | null }`, where `ReportedModel = { id, name, description, recommended, efforts, defaultEffort?, ultracode }`. `null` means the CLI is missing, too old, or couldn't be asked. It replaces `agent:capabilities`.
 
 `agent:send` and `agent:cancel` are removed.
 
@@ -108,7 +110,7 @@ Renderer to main:
 - **Timeouts.** Turns, permission waits and question waits have none. Claude Code's dialog deadline (`dialogExpiry`, `CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS`) doesn't apply to `canUseTool`: a question held there for 15 s under a 3 s deadline stayed open. Only control calls are bounded: the `turn/start` acknowledgement at 90 s, and interrupt at 3 s before falling back to a tree-kill.
 - **Idle sessions.** A session with no turn for 10 minutes is closed. Its saved native id lets the next message resume it.
 - **Shutdown.** On app quit every session is closed and its process tree killed. The renderer saves finished turns, so closing the last window on macOS (where the app stays open) also interrupts running turns and closes the sessions. They resume on the next message.
-- **Crashes.** If an agent process exits mid-turn, the session emits `turn-failed` and is dropped. The next message starts a new process that resumes the saved native id.
+- **Crashes.** If an agent process exits mid-turn, the session emits `turn-failed` and is dropped. The next message starts a new process that resumes the saved native id. Killing Claude Code 2.1.287 or codex-cli 0.158.0 with SIGKILL mid-reply ended the turn at once, and the next message resumed the chat and recalled a word from before the crash. The failure reads "Claude Code stopped unexpectedly: <reason>. Send your message again to continue this chat." (or "Codex stopped unexpectedly: …"), where the reason is the last line the process printed.
 
 ### Claude provider
 
@@ -118,7 +120,8 @@ Renderer to main:
   - `pathToClaudeCodeExecutable`: the resolved user binary, so Milagre uses the same CLI and login as the terminal
   - `systemPrompt: { type: "preset", preset: "claude_code", append }`, where `append` is the instruction text Milagre prepends to every prompt today ("You are an agent inside Milagre…")
   - `settingSources: ["user", "project", "local"]`, so CLAUDE.md and settings still apply
-- **Version.** The SDK is pinned to an exact version whose minor matches the supported Claude Code CLI (SDK `0.3.x` goes with CLI `2.1.x`). At session start, Milagre checks `claude --version` and reports a clear error below the minimum.
+- **Version.** The SDK is pinned to an exact version whose minor matches the supported Claude Code CLI (SDK `0.3.x` goes with CLI `2.1.x`). The minimum Claude Code is the release the pinned SDK is built against, its package.json `claudeCodeVersion`: 2.1.286 for SDK 0.3.286. Below it, a turn fails with the update message (see Environment).
+- **Not logged in.** Claude Code answers a turn it can't authenticate with a reply of its own, "Not logged in · Please run /login", on an assistant message marked `error: "authentication_failed"`, then a `result` with `is_error: true`. That turn fails with the login message (see Environment).
 - **Images.** Images are sent as base64 `image` content blocks, as today.
 - **Mapping.**
   - `stream_event` `text_delta` becomes `text-delta`.
@@ -148,6 +151,7 @@ Renderer to main:
 ### Codex provider
 
 - **Startup.** Spawn `codex app-server` detached. Send `initialize { clientInfo: { name: "milagre", version } }`, then the `initialized` notification.
+- **Login.** Before the first thread, the provider calls `account/read { refreshToken: false }`. A logged-out Codex answers `{ account: null, requiresOpenaiAuth: true }` at once, while a turn would retry for about 15 s and fail with a raw "401 Unauthorized". So `account: null` with `requiresOpenaiAuth: true` fails the turn with the login message and closes the session. A provider that needs no OpenAI login (`requiresOpenaiAuth: false`), or an error from `account/read`, doesn't hold the turn up. A turn that fails with `codexErrorInfo` `"unauthorized"` or an HTTP status of 401 also shows the login message. A failed turn whose message is a raw JSON API error shows its `error.message`.
 - **Threads.** The first turn calls `thread/start { model, cwd, approvalPolicy, sandbox, developerInstructions, config }`. Later turns reuse the thread. After a restart the provider calls `thread/resume` with the same parameters, with `thread/unarchive` as a fallback. `config` is `{ features: { default_mode_request_user_input: true } }`, which lets Codex ask questions outside Plan mode (see Questions).
 - **Turns.** `turn/start { threadId, input, model, approvalPolicy, sandboxPolicy, cwd }`. Images are written to a temporary file and sent as `{ type: "localImage", path }`. The file is deleted when the turn ends.
 - **Mapping.**
@@ -180,7 +184,7 @@ Renderer to main:
 
   The exact behaviour of `untrusted` and `on-request` for file changes is verified against the CLI during implementation.
 - **Interrupt.** `turn/interrupt { threadId, turnId }`.
-- **Protocol types.** Only the subset of the app-server protocol used here is relied on, and it is documented in `codex-rpc.cjs`. Field access is defensive, because the protocol is marked experimental. The minimum supported Codex version is 0.158.0, checked with `codex --version`.
+- **Protocol types.** Only the subset of the app-server protocol used here is relied on, and it is documented in `codex-rpc.cjs`. Field access is defensive, because the protocol is marked experimental. The minimum supported Codex version is 0.158.0, checked with `codex --version`. Every method, notification and server request Milagre uses is present back to at least 0.130.0, so presence can't set the floor. 0.158.0 is the release Milagre's approvals, questions, steering and tool rows were verified against.
 
 ### Steering
 
@@ -235,11 +239,49 @@ When an agent asks the user to choose, the turn waits on a question card instead
   - They remain the path for agents that ask in their reply: a Codex without the question tool, or a model that prefers text.
   - Question cards answer a tool call in the middle of a turn. The two share no code, and neither replaces the other.
 
+### Environment
+
+- **Login environment.** An app opened from Finder or the Dock gets launchd's environment: `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, with no `LANG` and nothing the user's shell sets. Neither CLI is found, and Codex installed with npm under nvm can't start even by its full path (`env: node: No such file or directory`).
+  - At startup, `$SHELL -i -l -c` runs `/usr/bin/printf '%s' <mark>; /usr/bin/env -0; /usr/bin/printf '%s' <mark>`, where the mark is random. Only text between the two marks is read, so whatever rc files print is ignored. `-i` is needed: on the test Mac, `-l` alone missed the folders of both CLIs, which `.zshrc` adds.
+  - Supported shells are zsh, bash, fish, sh, dash and ksh. For other shells, no import is attempted.
+  - The shell is given 10 s. A shell that hangs has its process group killed. The import counts as failed when the shell can't start, hangs, or exits without printing both marks (an rc file that `exec`s something else).
+  - The whole environment is imported, not only `PATH`. Login, config and tool variables live there (`ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `LANG`, `JAVA_HOME`, `ANDROID_HOME`, proxies), and agents should see what they see in a terminal.
+    - Variables the app already has keep their value (`HOME`, `TMPDIR`, `SSH_AUTH_SOCK` from launchd).
+    - `PWD`, `OLDPWD`, `SHLVL` and `_` are skipped.
+  - `PATH` is merged in order, keeping each folder's first position and dropping empty entries: the shell's folders, then the app's, then these install folders where they exist:
+    - `~/.local/bin` (Claude Code's native installer) and `~/.claude/local` (its older local npm install);
+    - `/opt/homebrew/bin` and `/usr/local/bin`;
+    - nvm's default node bin, where npm puts Codex;
+    - `~/.volta/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims`, `~/.npm-global/bin`, `~/Library/pnpm`, `~/.bun/bin`.
+  - The import runs once, in the background, as the main process loads. Windows open without waiting for it, and the first CLI check waits for it. Windows doesn't run it.
+- **CLI check.** Before a provider's first turn in an app run, `cli.cjs` resolves its CLI on the merged `PATH` and runs `--version`, which prints `2.1.287 (Claude Code)` and `codex-cli 0.158.0`. The first `x.y.z` in that output is the version.
+  - The minimums are Claude Code 2.1.286 and Codex 0.158.0. A version that can't be read is accepted.
+  - A CLI that passes is remembered for the app run. One that is missing, too old or doesn't start is checked again on the next message, so installing, updating, or logging in needs no restart.
+- **Messages.** The turn fails with the message, and the chat shows it as `Agent error: <message>`. The picker shows no hint.
+  - Missing: "Milagre couldn't find Claude Code. Install it with `curl -fsSL https://claude.ai/install.sh | bash`, then send your message again." For Codex: "Milagre couldn't find Codex. Install it with `npm install -g @openai/codex`, then send your message again."
+  - Too old: "Milagre needs Claude Code 2.1.286 or later, and you have 2.1.200. Run `claude update` in a terminal, then send your message again." For Codex the command is `codex update`.
+  - Doesn't start: "Codex (/path/to/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal, then send your message again."
+  - Not logged in: "Claude Code isn't logged in. Run `claude auth login` in a terminal, then send your message again." For Codex the command is `codex login`.
+  - Crashed: see Session lifecycle.
+
 ### Models
 
-- **Codex.** `agent:models` lists Codex models through `model/list` on a short-lived `codex app-server`. The result is cached for the app session and falls back to the current hardcoded list on failure.
-- **Claude.** Models stay a maintained list in `app/src/model.ts`.
-- **Picker.** The model picker reads both lists from `agent:models`.
+- **Both lists come from the CLIs.** `agent:models` asks each CLI once per app run, on the CLI that passed its check.
+  - **Claude:** `supportedModels()` on an idle query.
+  - **Codex:** `model/list` on a short-lived `codex app-server`, page by page, without hidden models.
+  - A lookup that fails or comes back empty gives `null`, and is tried again on the next call.
+  - The maintained list in `app/src/model.ts` mirrors what codex-cli 0.158.0 and Claude Code 2.1.287 report. It is shown while the lists load, and for an agent whose CLI is missing, too old or couldn't be asked.
+- **Why Claude's list too.** Claude Code 2.1.287 reports Fable 5.1, which the old maintained list lacked. The old list offered `claude-sonnet-4-5`, which Claude Code no longer lists. A logged-out Claude reports fewer models. The lookup already ran for effort levels, so the list costs nothing more.
+- **Claude rows.** `supportedModels()` lists aliases (`default`, `opus`, `fable`, `sonnet`, `haiku`) and then older models by id.
+  - Each alias becomes the model it resolves to (`resolvedModel`), so a chat keeps its model when an alias moves on.
+  - `default` only marks the recommended model.
+  - A `[1m]` suffix and a date suffix are dropped (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`), and duplicates are kept once.
+- **Names and order.** The names and descriptions are the CLI's own: "Opus 5.5", "GPT-6-Astra". Trailing periods are dropped. Each provider's recommended model comes first (Codex's `isDefault`, Claude's `default`), then the CLI's order. Codex's upgrade fields are ignored for now.
+- **Models no longer offered.** On codex-cli 0.158.0 with a ChatGPT account, an unlisted model fails the turn: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." That model was the old list's default. So once the lists arrive:
+  - a selected model that isn't offered gives way to its provider's recommended model;
+  - until the user picks a model, the picker shows the Settings default when the lists have it;
+  - a chat bound to a provider falls back to that provider's recommended model when its last model is gone.
+- **Picker.** The model picker and the Settings default-model menu read the merged list. Effort levels come from the same lookup.
 
 ### Persistence
 
@@ -277,7 +319,7 @@ The work ships as five stacked pull requests, each usable on its own:
 1. **Sessions and streaming text.** Session manager, both providers without approvals, the event stream, resume, cancel, and the persistence fields. Ask keeps today's pre-run check in this step, so it never becomes less strict.
 2. **Real approvals and steering.** Permission requests, the approval card, the mode mapping, removal of the prompt regex, and steering a running turn.
 3. **Tool steps.** Step events, tool rows, and saving steps.
-4. **Models and environment.** `model/list`, login-shell `PATH`, version checks, and missing-CLI errors.
+4. **Models and environment.** Both model lists from the CLIs (`model/list`, `supportedModels()`), the login-shell environment, version checks, and the missing, too old, not logged in and crash messages.
 5. **Question cards.** `AskUserQuestion` and Codex's `request_user_input` become question cards: the question events, `agent:answer-question`, the Codex thread `config`, cancel and steering rules, the card, Escape, and the new instructions. It builds on step 2 and needs neither step 3 nor step 4.
 
 ## Testing Decisions
@@ -291,6 +333,11 @@ The work ships as five stacked pull requests, each usable on its own:
   - `questions.cjs` is pure and tested directly: the mapping both ways for each agent, the bookkeeping, and the answer check.
   - The providers are tested with the fake `query()` and the fake app-server: answering, dismissing, interrupting, withdrawal, steering, and a question asked after the turn stopped.
   - The card's answer rules live in `app/src/lib/question-answers.ts` and are tested with Node.
+- **Environment, CLI check and models.**
+  - `environment.cjs` is tested with a fake spawn: marks amid rc-file noise, a hung shell, a shell that prints nothing, and unsupported shells. One real `bash -i -l -c` run against a temporary home also checks the command line itself. The `PATH` merge, the install folders and nvm's default node are pure and tested directly.
+  - `cli.cjs` is tested with fake resolvers and version runs. One test reads the SDK's package.json, so bumping the SDK without the Claude minimum fails.
+  - `models.cjs` maps recorded `supportedModels()` rows and `model/list` entries, and pages through the fake app-server.
+  - The renderer's merge rules live in `app/src/lib/models.ts` and are tested with Node.
 - **Renderer.** Headless Chromium checks with a stubbed bridge that emits event sequences. They cover streaming, tool rows, the approval card, cancel, and two chats running at once.
 - **Manual.** Before each pull request is merged, run a real Claude and a real Codex turn in Electron covering resume after restart, an approval in Ask mode, a question card, and cancel.
 
@@ -306,7 +353,8 @@ The work ships as five stacked pull requests, each usable on its own:
 ## Further Notes
 
 - **Protocol stability.** The Codex app-server protocol is experimental. Pinning a minimum version and reading fields defensively limits breakage. A version check failure must explain what to update.
-- **Claude version skew.** Using the user's Claude binary with a pinned SDK can drift when the CLI updates. The version check catches a CLI that is too old. A newer CLI is expected to stay compatible within the same major version.
+- **Claude version skew.** Using the user's Claude binary with a pinned SDK can drift when the CLI updates. The version check catches a CLI that is too old. A newer CLI is expected to stay compatible within the same major version. Without the check, Claude Code 2.0.77 failed every turn that set an effort level with only "Claude Code process exited with code 1" (its stderr: `unknown option '--effort'`). Claude Code 2.1.200 accepted every control call Milagre makes, but it was never verified with approvals, questions or steering.
+- **Codex models depend on the CLI version.** codex-cli 0.160.0 lists `gpt-6.1-sol` as its default, while 0.158.0 lists `gpt-6-astra` and has no `gpt-6.1-sol`. That is why the picker reads the installed CLI's list instead of a maintained one.
 - **Session transcripts.** Claude Code and Codex keep their own session transcripts (under `~/.claude` and `~/.codex`). Resuming depends on them, so Milagre does not delete them.
 - **Attribution.** Codex is initialised with `clientInfo.name = "milagre"`, so its usage is attributed honestly.
 - **Codex's question tool is a feature under development.** `default_mode_request_user_input` is listed as "under development" in codex-cli 0.158.0. If a later Codex drops or renames it, the thread `config` is ignored, Codex asks in its reply again, and recommendation cards still apply.

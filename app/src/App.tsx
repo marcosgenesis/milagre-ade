@@ -216,14 +216,8 @@ function App() {
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
-  // A handed-over chat's brief goes into the composer once, unless the user already typed something.
-  const handoverSeeded = useRef(new Set<number>());
+  // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
-  useEffect(() => {
-    if (selectedSessionId === null || handoverDraft === undefined || handoverSeeded.current.has(selectedSessionId)) return;
-    handoverSeeded.current.add(selectedSessionId);
-    setDraft((current) => (current.trim() ? current : handoverDraft));
-  }, [selectedSessionId, handoverDraft]);
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
@@ -560,7 +554,9 @@ function App() {
   const ipcError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
-    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
+    // The brief is sent with the main process's copy of the draft, so the message may be empty.
+    const briefAttached = handoverDraft !== undefined;
+    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
     setPreparing(true);
     setNewChatError(null);
 
@@ -588,7 +584,8 @@ function App() {
         body,
         images,
         files,
-        prompt: attachmentPrompt(body, files),
+        // With the brief there is no fallback text for an empty message: the brief is the prompt.
+        prompt: briefAttached && !body ? (files.length ? `Attached files:\n${files.join("\n")}` : "") : attachmentPrompt(body, files),
         provider: model.provider,
         model: model.id,
         permissionMode: mode,
@@ -627,7 +624,7 @@ function App() {
 
   async function sendMessage() {
     const body = draft.trim();
-    if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+    if ((!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
 
@@ -905,6 +902,12 @@ function App() {
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
             onHandover={(provider) => void handover(provider)}
+            canHandover={messages.length > 0}
+            handoverBrief={project && selectedSession && handoverDraft !== undefined ? {
+              chatId: chatKey(project.path, selectedSession.id),
+              brief: handoverDraft,
+              onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
+            } : undefined}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}

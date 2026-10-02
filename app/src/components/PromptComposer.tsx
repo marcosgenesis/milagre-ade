@@ -16,8 +16,8 @@ import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-sta
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
-import { HandoverRow } from "./Handover";
-import { handoverBlocker, otherProvider } from "../lib/handover";
+import { HandoverBriefChip, HandoverRow } from "./Handover";
+import { handoverBlocker, otherProvider, providerLabel } from "../lib/handover";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
@@ -58,6 +58,10 @@ interface PromptComposerProps {
   lockedProvider?: ModelProvider;
   /** Opens a new chat on the other provider with this chat's context. */
   onHandover?: (provider: ModelProvider) => void;
+  /** The chat has messages, so the model picker offers a handover instead of the provider tabs. A locked draft chat does not. */
+  canHandover?: boolean;
+  /** A handed-over chat's brief, attached to its first message: it can be sent with no text, and edited before. */
+  handoverBrief?: { brief: string; onSave: (text: string) => Promise<void> };
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
   /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
@@ -103,7 +107,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, onHandover, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, onHandover, canHandover = false, handoverBrief, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -154,7 +158,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
       : [];
   const providerNotice = cliNotice(cliStatus?.[provider]);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
-  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0;
+  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0 || handoverBrief !== undefined;
 
   useEffect(() => {
     setActive(0);
@@ -332,7 +336,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             className={`absolute w-[360px] ${anchorClass}`}
             style={anchorStyle}
             header={
-              lockedProvider !== undefined && onHandover ? (
+              lockedProvider !== undefined && onHandover && canHandover ? (
                 <HandoverRow
                   provider={otherProvider(lockedProvider)}
                   blocked={handoverBlocker({ running, cli: cliMessage(cliStatus?.[otherProvider(lockedProvider)]) ?? null })}
@@ -426,13 +430,13 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
         <div className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line bg-surface transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}>
           <input ref={fileInputRef} type="file" multiple hidden aria-label="Choose attachments" onChange={event => { void imageDraft.attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-          <Attachments images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} />
+          <Attachments images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} leading={handoverBrief && <HandoverBriefChip brief={handoverBrief.brief} onSave={handoverBrief.onSave} />} />
           {imageDraft.loading && <div role="status" className="px-2 text-xs text-ink-3">Loading images…</div>}
           {imageDraft.error && <div role="alert" className="px-2 text-xs text-red">{imageDraft.error}</div>}
 
           <div className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
-            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px] placeholder-shown:whitespace-nowrap placeholder:truncate"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
+            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : handoverBrief && lockedProvider ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is` : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px] placeholder-shown:whitespace-nowrap placeholder:truncate"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}

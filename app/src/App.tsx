@@ -142,6 +142,28 @@ function App() {
   const [newChatError, setNewChatError] = useState<string | null>(null);
   // A short message about something that happened off to the side (a worktree that wouldn't go).
   const [notice, setNotice] = useState<string | null>(null);
+  const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
+
+  const handleUpdateCli = async (provider: ModelProvider) => {
+    setUpdatingCli(provider);
+    try {
+      const result = await window.milagre.updateCli(provider);
+      if (result.status) {
+        setCliStatus((previous) => (previous ? { ...previous, [provider]: result.status! } : previous));
+      }
+      refreshCliStatus();
+      if (result.ok) {
+        setNotice(`${provider === "codex" ? "Codex" : "Claude Code"} updated to version ${result.version ?? "latest"} successfully!`);
+      } else {
+        setNotice(result.error ?? `Failed to update ${provider === "codex" ? "Codex" : "Claude Code"}.`);
+      }
+    } catch (error) {
+      setNotice(`Error updating ${provider === "codex" ? "Codex" : "Claude Code"}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setUpdatingCli(null);
+    }
+  };
+
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 12_000);
@@ -870,16 +892,10 @@ function App() {
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-          <span>Milagre {update.version} está pronto para atualizar.</span>
+          <span>Milagre {update.version} is ready to update.</span>
           <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-            Atualizar e reiniciar
+            Update and restart
           </button>
-        </div>
-      )}
-      {notice && (
-        <div role="status" data-notice className="fixed inset-x-4 bottom-4 z-[80] mx-auto flex max-w-[520px] items-start gap-3 rounded-[12px] bg-surface px-4 py-3 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]">
-          <span className="min-w-0 flex-1 break-words">{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-medium text-ink-3 hover:text-ink">Dismiss</button>
         </div>
       )}
       <div
@@ -925,7 +941,17 @@ function App() {
       )}
 
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        {view === "settings" && <SettingsPanel section={settingsSection} projectPath={project.path} models={models} />}
+        {view === "settings" && (
+          <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+            {notice && (
+              <div role="status" data-notice className="mx-auto mt-2 mb-1 flex w-full max-w-2xl items-center justify-between gap-3 rounded-[12px] border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay">
+                <span className="min-w-0 flex-1 break-words">{notice}</span>
+                <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-xs font-medium text-ink-3 hover:text-ink">Dismiss</button>
+              </div>
+            )}
+            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} />
+          </div>
+        )}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
@@ -962,6 +988,8 @@ function App() {
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}
+            onUpdateCli={handleUpdateCli}
+            updatingCli={updatingCli}
             selectedModel={selectedModel}
             onModelChange={chooseModel}
             capability={selectedCapability}
@@ -999,6 +1027,8 @@ function App() {
             findOpen={findOpen}
             findSignal={findSignal}
             onFindClose={() => setFindOpen(false)}
+            notice={notice}
+            onDismissNotice={() => setNotice(null)}
             approval={pendingApproval ? (
               <PermissionCard
                 key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}

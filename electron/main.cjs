@@ -13,7 +13,8 @@ const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
-const { createCliCache } = require("./agents/cli.cjs");
+const { createCliCache, inspectCli } = require("./agents/cli.cjs");
+const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { createModelCache } = require("./agents/models.cjs");
@@ -341,6 +342,13 @@ ipcMain.handle("agent:start-turn", async (_event, request) => {
 // after 5 minutes, a problem on every call.
 const agentCliStatus = createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
 ipcMain.handle("agent:cli-status", () => agentCliStatus());
+ipcMain.handle("agent:update-cli", async (_event, provider) => {
+  const result = await runCliUpdate(provider);
+  agentCli.invalidate(provider);
+  agentCliStatus.invalidate(provider);
+  const status = await agentCliStatus();
+  return { ...result, status: status[provider] };
+});
 
 const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
 ipcMain.handle("agent:models", () => agentModels());

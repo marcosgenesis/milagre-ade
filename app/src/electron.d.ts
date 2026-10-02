@@ -89,6 +89,8 @@ declare global {
       getModels: () => Promise<AgentModels>;
       /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
       getCliStatus: () => Promise<AgentCliStatus>;
+      /** Runs update for the specified CLI agent and refreshes status. */
+      updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent }) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;

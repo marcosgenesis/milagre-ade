@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cliMessage, cliNotice, cliTabLabel, messageParts } from "./cli-status.ts";
+import { cliMessage, cliNotice, cliTabLabel, extractOutdatedProvider, messageParts } from "./cli-status.ts";
 
 test("a CLI with a problem gets a short tab label, and one that runs gets none", () => {
   assert.equal(cliTabLabel({ state: "missing", message: "m" }), "Not installed");
@@ -36,4 +36,16 @@ test("backtick spans become code", () => {
     { text: "curl -fsSL https://claude.ai/install.sh | bash", code: true },
   ]);
   assert.deepEqual(messageParts("No code here."), [{ text: "No code here.", code: false }]);
+});
+
+test("extractOutdatedProvider detects outdated provider from message", () => {
+  assert.equal(
+    extractOutdatedProvider("Milagre needs Claude Code 2.1.286 or later, and you have 2.1.285. Run `claude update` in a terminal, then send your message again."),
+    "claude"
+  );
+  assert.equal(
+    extractOutdatedProvider("Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal, then send your message again."),
+    "codex"
+  );
+  assert.equal(extractOutdatedProvider("Regular chat response"), null);
 });

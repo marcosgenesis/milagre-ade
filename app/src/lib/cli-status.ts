@@ -1,4 +1,4 @@
-import type { CliState, CliStatus } from "../model";
+import type { CliState, CliStatus, ModelProvider } from "../model";
 
 const TAB_LABELS: Record<Exclude<CliState, "ready">, string> = {
   missing: "Not installed",
@@ -29,3 +29,15 @@ export function cliNotice(status: CliStatus | null | undefined): string | null {
 export function messageParts(message: string): Array<{ text: string; code: boolean }> {
   return message.split(/`([^`]*)`/).flatMap((text, index) => (text ? [{ text, code: index % 2 === 1 }] : []));
 }
+
+/** Detects if a message text is an outdated CLI error and returns which provider it refers to. */
+export function extractOutdatedProvider(message: string): ModelProvider | null {
+  if (/(?:Claude Code|claude update)/i.test(message) && /(?:needs Claude Code|Run `?claude update`?)/i.test(message)) {
+    return "claude";
+  }
+  if (/(?:Codex|codex update)/i.test(message) && /(?:needs Codex|Run `?codex update`?)/i.test(message)) {
+    return "codex";
+  }
+  return null;
+}
+

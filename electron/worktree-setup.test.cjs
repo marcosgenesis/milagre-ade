@@ -84,7 +84,8 @@ test("the setup step reads as a shell step with how it ended", () => {
   assert.deepEqual(done, { type: "step-completed", id: "s1", status: "done", title: "Set up worktree: `npm ci` in 12s", detail: "$ npm ci\nadded 3 packages\n", durationMs: 12_400 });
   const failed = setupCompleted("s1", "npm ci", { status: "failed", exitCode: 1, output: "boom\n", durationMs: 2000 });
   assert.equal(failed.status, "failed");
-  assert.equal(failed.title, "Set up worktree: `npm ci` failed after 2s");
+  assert.equal(failed.title, "Set up worktree: `npm ci` exited with code 1 after 2s");
+  assert.equal(setupCompleted("s1", "npm ci", { status: "failed", exitCode: null, error: "spawn ENOENT", output: "", durationMs: 10 }).title, "Set up worktree: `npm ci` failed after 1s");
   assert.equal(failed.detail, "$ npm ci\nboom\n\nExited with code 1");
 });
 

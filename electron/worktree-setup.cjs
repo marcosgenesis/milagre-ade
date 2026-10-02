@@ -171,7 +171,8 @@ function setupStarted(id, command) {
 
 function setupCompleted(id, command, result, timeoutMs = SETUP_TIMEOUT_MS) {
   const took = formatDuration(result.durationMs);
-  const end = { done: `in ${took}`, cancelled: `stopped after ${took}`, "timed-out": `timed out after ${formatDuration(timeoutMs)}` }[result.status] ?? `failed after ${took}`;
+  const failed = result.exitCode !== null && result.exitCode !== undefined ? `exited with code ${result.exitCode} after ${took}` : `failed after ${took}`;
+  const end = { done: `in ${took}`, cancelled: `stopped after ${took}`, "timed-out": `timed out after ${formatDuration(timeoutMs)}` }[result.status] ?? failed;
   const why = result.status === "failed" ? `\n${result.error ?? (result.exitCode !== null ? `Exited with code ${result.exitCode}` : `Stopped by ${result.signal}`)}` : "";
   return { type: "step-completed", id, status: result.status === "done" ? "done" : "failed", title: `Set up worktree: ${code(command)} ${end}`, detail: capOutput(`$ ${command}\n${result.output}${why}`), durationMs: result.durationMs };
 }

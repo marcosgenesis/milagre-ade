@@ -363,3 +363,19 @@ test("a handover left pending by a quit is closed with a note on the next open",
   assert.equal(state.sessions[7].handoverPending, undefined);
   assert.deepEqual(chatMessages(state, 7), [{ role: "assistant", body: "Milagre closed before this handover finished. Hand over again from the original chat." }]);
 });
+
+test("a new chat sent while a handover is pending doesn't land in the handover chat", async (t) => {
+  let release;
+  const { host, manager, saved, session } = harness({ handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => { release = resolve; }) } });
+  t.after(() => manager.closeAll());
+  const source = await chatWithReply(host, session, saved);
+  const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await waitUntil(() => release);
+  const fresh = await host.send(message(ALPHA, "new work"));
+  assert.notEqual(fresh.sessionId, target);
+  release("BRIEF");
+  await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  const state = saved.get(ALPHA);
+  assert.deepEqual(chatMessages(state, target), [{ role: "user", body: "BRIEF" }]);
+  assert.equal(state.sessions[target].provider, "codex");
+});

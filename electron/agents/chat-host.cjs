@@ -126,8 +126,8 @@ class ChatHost {
       const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
       let nextId = latest.next_id;
-      // A new chat takes the worktree's chat that has no messages yet, if there is one.
-      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !latest.messages.some((message) => message.session_id === item.id))
+      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief).
+      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && !latest.messages.some((message) => message.session_id === item.id))
         ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
       const chatId = chatKey(projectPath, session.id);

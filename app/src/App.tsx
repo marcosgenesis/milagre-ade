@@ -43,6 +43,7 @@ import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
+import { handoverModel } from "./lib/handover";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
@@ -588,8 +589,8 @@ function App() {
 
   async function handover(provider: ModelProvider) {
     if (!project || selectedSessionId === null) return;
-    const target = modelForChat(selectedModel, provider, messages, models);
-    if (target.provider !== provider) return;
+    const target = handoverModel(selectedModel, provider, openState()?.messages ?? [], models);
+    if (!target) return;
     const capability = capabilityFor(target, capabilities);
     try {
       const { sessionId } = await window.milagre.handover({

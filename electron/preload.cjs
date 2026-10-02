@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("worktree:renamed", listener);
   },
   readDiffStat: (worktreePath, base) => ipcRenderer.invoke("worktree:diffstat", worktreePath, base),
-  revealWorktree: (worktreePath) => ipcRenderer.invoke("worktree:reveal", worktreePath),
+  revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),
     generate: (request) => ipcRenderer.invoke("git:generate", request),

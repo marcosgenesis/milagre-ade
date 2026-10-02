@@ -41,8 +41,8 @@ declare global {
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
-      /** Opens the worktree's folder in Finder. */
-      revealWorktree: (worktreePath: string) => Promise<void>;
+      /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
+      revealInFolder: (folder: string) => Promise<void>;
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
       git: {
         changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;

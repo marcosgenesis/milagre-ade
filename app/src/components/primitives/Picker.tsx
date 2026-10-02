@@ -2,7 +2,7 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 
-/* Popover picker shared by the model, permission, and branch selectors: title,
+/* Popover picker shared by the model, permission, and branch selectors and by Select: title,
  * optional header slot (e.g. provider tabs), optional search, and a scrolling list. */
 export function PickerPanel({
   title,
@@ -47,9 +47,9 @@ export function PickerPanel({
   );
 }
 
-export function PickerRow({ icon, label, description, selected, onClick }: { icon: ReactNode; label: string; description?: string; selected: boolean; onClick: () => void }) {
+export function PickerRow({ icon, label, description, selected, onClick, option = false }: { icon?: ReactNode; label: string; description?: string; selected: boolean; onClick: () => void; option?: boolean }) {
   return (
-    <button type="button" onClick={onClick} className={`relative z-10 flex w-full items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}>
+    <button type="button" data-picker-row role={option ? "option" : undefined} aria-selected={option ? selected : undefined} onClick={onClick} className={`relative z-10 flex w-full items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}>
       {icon}
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <strong className="shrink-0 text-xs font-medium text-ink">{label}</strong>

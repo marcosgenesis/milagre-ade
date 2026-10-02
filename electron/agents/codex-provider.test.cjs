@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { CodexSession } = require("./codex-provider.cjs");
+const { CodexSession, saveGeneratedImage } = require("./codex-provider.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage, failedWith } = require("./events.cjs");
 const { decodeImages } = require("../image-input.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
@@ -631,4 +631,18 @@ test('child history falls back to paginated threads when full reads are rejected
  }};
  await session.refreshSubagents();
  assert.equal(events.filter(e=>e.type==='subagent-update').at(-1)?.agent.transcript[0].text,'Paged result');
+});
+
+test("a generated image Codex didn't save is written out from its base64", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-ig-test-"));
+  try {
+    const item = { type: "imageGeneration", id: "ig/1", status: "completed", result: Buffer.from("png bytes").toString("base64") };
+    const saved = saveGeneratedImage(item, directory);
+    assert.equal(saved.savedPath, path.join(directory, "ig_1.png"));
+    assert.equal(fs.readFileSync(saved.savedPath, "utf8"), "png bytes");
+    const already = { ...item, savedPath: "/elsewhere.png" };
+    assert.equal(saveGeneratedImage(already, directory), already);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -1,7 +1,7 @@
 import { memo, useId, useState } from "react";
 import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AiBrain01Icon, Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
+import { AiBrain01Icon, Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, Image01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep, StepKind } from "../../model";
 import { fileSpanIndex } from "../../lib/file-links";
 import { titleSpans } from "../../lib/reply-parts";
@@ -11,7 +11,7 @@ import { Markdown } from "../markdown/Markdown";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
-const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon, setup: CommandLineIcon };
+const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon, setup: CommandLineIcon, image: Image01Icon };
 // Commands show as a terminal session ("$ command", then output), edits as diffs.
 const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", setup: "console", edit: "diff" };
 

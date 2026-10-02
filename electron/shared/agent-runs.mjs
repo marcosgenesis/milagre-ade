@@ -52,7 +52,7 @@ function updateStep(run, id, update) {
 
 /** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
 function endStep({ detail: _streamed, ...step }, end) {
-  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.note === undefined ? {} : { note: end.note }), ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
+  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.note === undefined ? {} : { note: end.note }), ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }), ...(end.file === undefined ? {} : { file: end.file }) };
 }
 
 /**

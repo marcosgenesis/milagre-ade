@@ -15,13 +15,56 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // names the chat and asks to notify. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
 class AttentionNotifier {
-  constructor({ createNotification, isAppFocused, openChat }) {
-    Object.assign(this, { createNotification, isAppFocused, openChat });
+  constructor({ createNotification, isAppFocused, openChat, setBadge = () => {} }) {
+    Object.assign(this, { createNotification, isAppFocused, openChat, setBadge });
+    this.previews = new Map();
+    this.completed = new Map();
+    this.completionNotifications = new Map();
+    this.unread = new Set();
+    this.activeChatId = null;
+    this.notifyOnCompletion = true;
+    this.showDockBadge = true;
     // Requests the agents wait on, by key, with the notification shown for each (or null).
     this.open = new Map();
   }
 
+  sync({ projectPath, activeChatId = null, unread = [], notifyOnCompletion = true, showDockBadge = true } = {}) {
+    this.activeChatId = typeof activeChatId === 'string' ? activeChatId : null;
+    this.notifyOnCompletion = notifyOnCompletion === true;
+    this.showDockBadge = showDockBadge === true;
+    if (typeof projectPath === 'string') {
+      const prefix = `${projectPath}#`;
+      for (const id of this.unread) if (id.startsWith(prefix)) this.unread.delete(id);
+      if (Array.isArray(unread)) for (const id of unread) if (typeof id === 'string' && id.startsWith(prefix)) this.unread.add(id);
+      for (const [id, notification] of this.completionNotifications) {
+        if (id.startsWith(prefix) && !this.unread.has(id)) { notification.close(); this.completionNotifications.delete(id); }
+      }
+    }
+    this.updateBadge();
+  }
+
+  updateBadge() {
+    const chats = new Set(this.unread);
+    for (const key of this.open.keys()) chats.add(key.slice(0, key.lastIndexOf('\n')));
+    this.setBadge(this.showDockBadge && chats.size ? String(chats.size) : '');
+  }
+
   observe(chatId, event) {
+    if (event.type === 'turn-started') {
+      this.previews.delete(chatId);
+      this.completed.delete(chatId);
+    } else if (event.type === 'text-delta') {
+      this.previews.set(chatId, ((this.previews.get(chatId) || '') + event.text).slice(-MAX_BODY));
+    }
+    if (isTerminal(event)) {
+      if (event.type !== 'turn-cancelled') this.completed.set(chatId, {
+        failed: event.type === 'turn-failed',
+        body: event.type === 'turn-failed' ? event.message : this.previews.get(chatId) || 'Turn completed.',
+      });
+      else this.completed.delete(chatId);
+      this.previews.delete(chatId);
+      if (this.completed.size > 100) this.completed.delete(this.completed.keys().next().value);
+    }
     if (event.type === "permission-request" || event.type === "question-request") {
       const key = keyOf(chatId, event.requestId);
       if (!this.open.has(key)) this.open.set(key, null);
@@ -30,6 +73,7 @@ class AttentionNotifier {
     } else if (isTerminal(event)) {
       for (const key of [...this.open.keys()]) if (key.startsWith(`${chatId}\n`)) this.close(key);
     }
+    this.updateBadge();
   }
 
   // The renderer is untrusted input: it can only notify about a request an agent is waiting on.
@@ -43,6 +87,18 @@ class AttentionNotifier {
     return true;
   }
 
+  notifyCompletion({ chatId, title, subtitle } = {}) {
+    const result = this.completed.get(chatId);
+    this.completed.delete(chatId);
+    if (!result || !this.notifyOnCompletion || (this.isAppFocused() && this.activeChatId === chatId)) return false;
+    const notification = this.createNotification({ title: `${capped(title, MAX_TITLE) || 'Milagre'} - ${result.failed ? 'Turn failed' : 'Turn completed'}`, subtitle: capped(subtitle, MAX_TITLE), body: capped(result.body, MAX_BODY) });
+    this.completionNotifications.get(chatId)?.close();
+    this.completionNotifications.set(chatId, notification);
+    notification.on('click', () => this.openChat(chatId));
+    notification.show();
+    return true;
+  }
+
   close(key) {
     const notification = this.open.get(key);
     this.open.delete(key);
@@ -51,6 +107,11 @@ class AttentionNotifier {
 
   closeAll() {
     for (const key of [...this.open.keys()]) this.close(key);
+    for (const notification of this.completionNotifications.values()) notification.close();
+    this.completionNotifications.clear();
+    this.completed.clear();
+    this.previews.clear();
+    this.setBadge('');
   }
 }
 

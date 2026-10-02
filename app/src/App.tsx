@@ -26,6 +26,7 @@ import {
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { attachmentPrompt } from "./lib/media";
 import { attentionNotice } from "./lib/attention";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
@@ -189,20 +190,20 @@ function App() {
   const secondSession = state && secondWorktree ? sessionForWorktree(state, secondWorktree.id) : undefined;
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
-  const imageDraft = usePastedImages(selectedWorktree?.path ?? project?.path ?? "");
+  const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
   lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
   // The chat on screen; a turn that ends anywhere else leaves its chat unread.
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
-  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId);
+  const agentRuns = useAgentRuns(project?.path ?? "", () => stateRef.current, commit, (sessionId) => openSessionRef.current === sessionId && document.hasFocus());
   const worktreeDiffs = useWorktreeDiffs(project?.path ?? "", () => stateRef.current, commit);
   const pullRequests = useWorktreePullRequests(project?.path ?? "", state);
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
-  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode } = useSettings();
+  const { showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge } = useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
@@ -428,12 +429,39 @@ function App() {
   // The main process keeps the Mac awake while a turn runs, if the setting says so.
   useEffect(() => { void window.milagre.setKeepAwake(keepAwake).catch(() => {}); }, [keepAwake]);
 
+  const unreadChatIds = state && project ? Object.values(state.sessions).filter(session => session.unread && !session.archived).map(session => chatKey(project.path, session.id)) : [];
+  useEffect(() => {
+    if (!project) return;
+    void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
+  }, [project?.path, view, selectedSessionId, JSON.stringify(unreadChatIds), notifyOnCompletion, showDockBadge]);
+
+  // A reply that arrived while the app was in the background becomes read when its chat regains focus.
+  useEffect(() => {
+    const read = () => {
+      const id = openSessionRef.current;
+      const latest = stateRef.current;
+      const current = projectRef.current;
+      if (id === null || !latest?.sessions[id]?.unread || !current) return;
+      const next = patchSession(latest, id, { unread: false });
+      stateRef.current = next;
+      setState(next);
+      void window.milagre.saveProject(current.path, next);
+    };
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, []);
+
   // A chat that waits on the user while Milagre is in the background gets a system notification.
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
     const current = projectRef.current;
     const latest = stateRef.current;
-    if (!current || !latest || !getSettings().notifyWhenWaiting || !chatInProject(current.path, chatId)) return;
+    if (!current || !latest || !chatInProject(current.path, chatId)) return;
     const session = latest.sessions[sessionIdFromKey(chatId)];
+    if (!session || session.archived) return;
+    if (event.type === "turn-completed" || event.type === "turn-failed") {
+      void window.milagre.notifyCompletion({ chatId, title: current.name, subtitle: chatTitle(session, latest.messages.filter(message => message.session_id === session.id)) }).catch(() => {});
+    }
+    if (!getSettings().notifyWhenWaiting) return;
     const notice = attentionNotice(event, {
       projectName: current.name,
       worktreeName: session ? latest.worktrees[session.worktree_id]?.name : undefined,
@@ -457,11 +485,16 @@ function App() {
     void window.milagre.listBranches(rename.projectPath).then(setBranches);
   }), []);
 
-  // Clicking a notification opens its chat.
+  const pendingNotificationChat = useRef<string | null>(null);
+  // Clicking a notification opens its chat, using the usual switch confirmation if another project is running.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const current = projectRef.current;
     const session = current && chatInProject(current.path, chatId) ? stateRef.current?.sessions[sessionIdFromKey(chatId)] : undefined;
-    if (session) openChat(session.id);
+    if (session) { openChat(session.id); return; }
+    const separator = chatId.lastIndexOf("#");
+    if (separator <= 0) return;
+    pendingNotificationChat.current = chatId;
+    void switchProject(chatId.slice(0, separator));
   }), []);
 
   function startNewChat() {
@@ -476,7 +509,10 @@ function App() {
 
   function selectInitialChat(nextState: CoordinatorState, path: string) {
     restoreProjectChoices(nextState, path);
-    const sessionId = latestSessionId(nextState);
+    const target = pendingNotificationChat.current;
+    const targetId = target && chatInProject(path, target) ? sessionIdFromKey(target) : null;
+    const sessionId = targetId !== null && nextState.sessions[targetId] ? targetId : latestSessionId(nextState);
+    pendingNotificationChat.current = null;
     setSelectedSessionId(sessionId);
     if (sessionId !== null) setSelectedWorktreeId(nextState.sessions[sessionId]?.worktree_id ?? null);
   }
@@ -492,6 +528,7 @@ function App() {
       selectInitialChat(nextState, nextProject.path);
       setDraft("");
       setGitDialog(null);
+      setView("chat");
     });
   }
 
@@ -546,8 +583,8 @@ function App() {
     return { session: session as AgentSession | null, worktree, createdNextId: created.project.state.next_id };
   }
 
-  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
-    if ((!body && !images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files) {
+    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     // A switch is stopping this project's turns: a new one would start behind the stop. The draft stays.
     if (!switcher.canSend()) return;
     setPreparing(true);
@@ -591,6 +628,7 @@ function App() {
       session_id: chatSession.id,
       body,
       images,
+      files,
       context: null,
       role: "user" as const,
       model: model.id,
@@ -618,7 +656,7 @@ function App() {
       fastMode: supportsFastMode(model) && fastMode,
       replies: getSettings().claudeReplies,
       tldrEnabled: getSettings().tldrEnabled,
-      prompt: body || "Describe the attached images.",
+      prompt: attachmentPrompt(body, files),
       images,
       resumeId: chatSession.native_session_id,
     });
@@ -626,7 +664,7 @@ function App() {
 
   async function sendMessage() {
     const body = draft.trim();
-    if ((!body && !imageDraft.images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+    if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
 

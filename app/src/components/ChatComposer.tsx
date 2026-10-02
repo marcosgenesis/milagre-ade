@@ -14,7 +14,7 @@ import {
   Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { isAttachableImage, MAX_IMAGES } from "./usePastedImages";
+import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -70,7 +70,7 @@ const MessageSection = memo(function MessageSection({
       style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
-        {message.images && message.images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{message.images.map((image) => <a key={image.id} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name} className="rounded-lg border border-line bg-inset p-1"><img src={image.dataUrl} alt={image.name} className="size-20 rounded object-contain" /></a>)}</div>}
+        <Attachments images={message.images} files={message.files} />
         {isUser ? (
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
@@ -297,7 +297,6 @@ export function ChatComposer({
   const isNewChat = tab === "Worktrees" && messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
-  const [dropError, setDropError] = useState("");
   useEffect(() => {
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
@@ -306,28 +305,7 @@ export function ChatComposer({
     const files = Array.from(event.dataTransfer.files);
     if (!files.length) return;
     event.preventDefault();
-    setDropError("");
-
-    const imageSlots = Math.max(0, MAX_IMAGES - imageDraft.images.length);
-    const images: File[] = [];
-    const pathFiles: File[] = [];
-    for (const file of files) {
-      if (isAttachableImage(file) && images.length < imageSlots) images.push(file);
-      else pathFiles.push(file);
-    }
-    void imageDraft.addFiles(images);
-
-    const paths: string[] = [];
-    for (const file of pathFiles) {
-      try {
-        const path = window.milagre.getPathForFile(file);
-        if (path) paths.push(path);
-        else setDropError("Could not get a local path for one or more dropped files.");
-      } catch {
-        setDropError("Could not get a local path for one or more dropped files.");
-      }
-    }
-    if (paths.length) onDraftChange(draft ? `${draft.trimEnd()}\n${paths.join("\n")}` : paths.join("\n"));
+    void imageDraft.attachFiles(files);
     event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
   }
 
@@ -421,7 +399,6 @@ export function ChatComposer({
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
         />
-        {dropError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{dropError}</p>}
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>
     </div>

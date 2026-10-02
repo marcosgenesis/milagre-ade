@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
+    "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",

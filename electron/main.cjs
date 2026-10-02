@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
@@ -35,6 +35,10 @@ const { createRecentProjects, rememberProject, switchTarget } = require("./recen
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
+const { createFileSearch } = require("./project-files.cjs");
+const searchFiles = createFileSearch();
+const { createMediaHandler } = require("./media.cjs");
+protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
@@ -109,6 +113,11 @@ async function readProject(projectPath) {
   return { path: projectPath, name, state };
 }
 
+ipcMain.handle("project:files", async (_event, root, query) => {
+  const known = (await Promise.all([...openedProjects].map(discoverWorktrees))).flat();
+  if (!known.some(worktree => worktree.path === root)) throw new Error("Choose an open project's worktree.");
+  return searchFiles(root, query);
+});
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
 ipcMain.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
 // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
@@ -232,8 +241,11 @@ const notifier = new AttentionNotifier({
   createNotification: ({ title, subtitle, body }) => new Notification({ title, body, ...(subtitle ? { subtitle } : {}) }),
   isAppFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
   openChat: openChatFromNotification,
+  setBadge: value => app.dock?.setBadge(value),
 });
 
+ipcMain.handle("notification:state", (_event, state) => notifier.sync(state));
+ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupported() ? notifier.notifyCompletion(notice) : false);
 ipcMain.handle("notification:attention", (_event, notice) => (Notification.isSupported() ? notifier.notify(notice) : false));
 
 // While any chat's turn runs the Mac stays awake (the screen can still sleep). On until the renderer
@@ -364,6 +376,7 @@ ipcMain.handle("project:forget", (_event, projectPath) => recentProjects().forge
 ipcMain.handle("project:save", (_event, projectPath, state) => saveProjectState(projectPath, state));
 
 app.whenReady().then(async () => {
+  protocol.handle("milagre-media", createMediaHandler((url, options) => net.fetch(url, options)));
   app.setName("Milagre");
   if (process.platform === "darwin" && app.dock) {
     const appIcon = nativeImage.createFromPath(appIconPath);

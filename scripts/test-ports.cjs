@@ -12,6 +12,7 @@ import { ChatRow } from "/src/components/sidebar/ChatRow";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
+window.stopped = [];
 function Fixture() {
   const [ports, setPorts] = useState([
     { port: 5173, pid: 4211, command: "node", address: "127.0.0.1" },
@@ -19,6 +20,11 @@ function Fixture() {
     { port: 54321, pid: 4402, command: "postgres", address: "::1" },
   ]);
   window.setPorts = setPorts;
+  const stopPort = (pid) => new Promise((resolve) => setTimeout(() => {
+    window.stopped.push(pid);
+    setPorts((current) => current.filter((port) => port.pid !== pid));
+    resolve(true);
+  }, 400));
   window.setDark = (dark) => document.documentElement.classList.toggle("dark", dark);
   const [model] = useState(MODEL_CATALOG[0]);
   const messages = [
@@ -34,7 +40,7 @@ function Fixture() {
     <div style={{ flex: 1, minWidth: 0, padding: 12 }}>
       <ChatComposer messages={messages}
         imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-        projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false} tasks={tasks} ports={ports} subagents={[]}
+        projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false} tasks={tasks} ports={ports} onStopPort={stopPort} subagents={[]}
         models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
         capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
         fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
@@ -84,14 +90,13 @@ async function realProcessCheck() {
     await delay(300);
     await watcher.poll();
     assert.deepEqual(watcher.snapshot()["/fixture#1"]?.map((port) => port.pid), [server], "An orphaned server stays with its chat");
-    process.kill(server, "SIGKILL");
-    await delay(300);
-    await watcher.poll();
+    assert.equal(await watcher.stopPort("/fixture#1", server), true, "Stop ends the orphaned server");
+    assert.throws(() => process.kill(server, 0), /ESRCH/, "The server process is gone");
     assert.deepEqual(watcher.snapshot(), {}, "A stopped server leaves the list");
     assert.equal(watcher.timer, null, "Nothing left to watch stops polling");
     console.log(`PASS: real ps/lsof run found port ${ports[0].port}, ignored the agent's own listener, kept the orphan, dropped it once stopped`);
   } finally {
-    watcher.stop();
+    watcher.close();
     try { process.kill(-agent.pid, "SIGKILL"); } catch {}
     for (const pids of Object.values(watcher.snapshot())) for (const { pid } of pids) try { process.kill(pid, "SIGKILL"); } catch {}
   }
@@ -152,6 +157,27 @@ async function browserChecks() {
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor('!document.querySelector("[data-slot=port-popover]")');
 
+    // Stop: the row shows a spinner until the port is gone, then leaves the list.
+    await evaluate(`document.querySelector("${pill}").click()`);
+    await waitFor('!!document.querySelector("[data-slot=port-popover]")');
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-port-stop]").parentElement.parentElement).opacity'), "0", "Stop is hidden until the row is hovered");
+    // A hidden window has no hover or focus, so show the second row as hovered for the screenshot.
+    await evaluate('window.setDark(true)');
+    await evaluate('(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = "var(--color-hover)"; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = "1"; })()');
+    await screenshot("ports-stop-hover-dark");
+    await evaluate('(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = ""; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = ""; })()');
+    await evaluate('document.querySelector("[data-port-row]:nth-child(2) [data-port-stop]").click()');
+    await waitFor('!!document.querySelector("[data-port-row][data-stopping] [role=status]")');
+    await screenshot("ports-stopping-dark");
+    await waitFor('document.querySelectorAll("[data-port-row]").length === 2');
+    assert.deepEqual(await evaluate("window.stopped"), [4380]);
+    assert.equal(await evaluate(`document.querySelector("${pill}").textContent`), "Ports 2");
+    await evaluate('document.querySelector("[data-port-stop-all]").click()');
+    await waitFor('!document.querySelector("[data-slot=port-track]") && !document.querySelector("[data-slot=port-popover]")');
+    assert.deepEqual(await evaluate("window.stopped.sort()"), [4211, 4380, 4402]);
+    await evaluate(`window.setPorts([{ port: 5173, pid: 4211, command: "node", address: "127.0.0.1" }, { port: 8081, pid: 4380, command: "node", address: "*" }, { port: 54321, pid: 4402, command: "postgres", address: "::1" }])`);
+    await waitFor('!!document.querySelector("[data-slot=port-track]")');
+
     // The sidebar hover card lists the chat's ports.
     await evaluate('window.setDark(true)');
     await evaluate(`${firstRow}.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }))`);
@@ -172,7 +198,7 @@ async function browserChecks() {
     await evaluate(`${firstRow}.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }))`);
     await waitFor('!!document.querySelector("[data-chat-hover-card]")');
     assert.equal(await evaluate('!!document.querySelector("[data-chat-card-ports]")'), false);
-    console.log("PASS: Ports pill beside the to-do list, rows and links, light and dark, Escape, opens in the browser, hover card ports, hidden when empty");
+    console.log("PASS: Ports pill beside the to-do list, rows and links, Stop and Stop all, light and dark, Escape, opens in the browser, hover card ports, hidden when empty");
     app.exit(0);
   } catch (error) {
     console.error(error);

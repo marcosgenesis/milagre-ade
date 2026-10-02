@@ -163,6 +163,8 @@ interface ChatComposerProps {
   tasks?: AgentTask[];
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
+  /** Stops the command listening on one of the chat's ports. */
+  onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
   /** The running turn is waiting on the user's answer to a question. */
@@ -317,6 +319,7 @@ export function ChatComposer({
   waitingForSubagents = false,
   tasks,
   ports,
+  onStopPort,
   waitingStepIds,
   asking = false,
   runModelName,
@@ -426,7 +429,7 @@ export function ChatComposer({
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
-        <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} />
+        <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>

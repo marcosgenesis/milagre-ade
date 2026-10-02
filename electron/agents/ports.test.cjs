@@ -90,3 +90,45 @@ test("a server whose shell exited unseen is adopted by the chats in its worktree
   assert.deepEqual([...groups], [["/a#1", new Set([299])]]);
   assert.deepEqual([...chatProcesses(ps, roots, groups).get("/a#1")].sort(), [110, 111, 112, 300, 301]);
 });
+
+test("stopping a port ends its command's group, and only a pid the chat shows", async () => {
+  const signals = [];
+  let alive = true;
+  const watcher = new PortWatcher({
+    roots: () => new Map([["/a#1", { pid: 100 }]]),
+    publish: () => {},
+    pollMs: 60_000,
+    graceMs: 200,
+    exec: async (command) => (command === "ps" ? (alive ? PS : PS.replace(/^.*\b11[012]\b.*$/gm, "")) : alive ? LSOF : ""),
+    kill: (target, signal) => {
+      signals.push([target, signal]);
+      if (signal === "SIGTERM") alive = false;
+      if (signal === 0 && !alive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+    },
+  });
+  await watcher.poll();
+  assert.equal(await watcher.stopPort("/a#1", 101), false, "the agent's own MCP server isn't the chat's to stop");
+  assert.equal(await watcher.stopPort("/b#2", 111), false, "another chat can't stop it");
+  assert.deepEqual(signals, []);
+  assert.equal(await watcher.stopPort("/a#1", 111), true);
+  assert.deepEqual(signals[0], [-110, "SIGTERM"], "the whole command's group gets SIGTERM");
+  assert.ok(!signals.some(([, signal]) => signal === "SIGKILL"), "no SIGKILL when SIGTERM was enough");
+  assert.deepEqual(watcher.snapshot(), {}, "the list is fresh once it resolves");
+  watcher.close();
+});
+
+test("a port that ignores SIGTERM gets SIGKILL", async () => {
+  const signals = [];
+  const watcher = new PortWatcher({
+    roots: () => new Map([["/a#1", { pid: 100 }]]),
+    publish: () => {},
+    pollMs: 60_000,
+    graceMs: 100,
+    exec: async (command) => (command === "ps" ? PS : LSOF),
+    kill: (target, signal) => signals.push([target, signal]),
+  });
+  await watcher.poll();
+  await watcher.stopPort("/a#1", 111);
+  assert.deepEqual(signals.at(-1), [-110, "SIGKILL"]);
+  watcher.close();
+});

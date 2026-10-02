@@ -110,6 +110,8 @@ declare global {
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
+      /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */
+      stopAgentPort: (chatId: string, pid: number) => Promise<boolean>;
       /** Every chat's listening ports, each time any of them change. */
       onAgentPorts: (callback: (ports: AgentPorts) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;

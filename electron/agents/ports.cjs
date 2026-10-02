@@ -146,9 +146,10 @@ const run = (command, args) => new Promise((resolve) => {
  * whenever they change.
  */
 class PortWatcher {
-  constructor({ roots, publish, pollMs = POLL_MS, exec = run }) {
-    Object.assign(this, { roots, publish, pollMs, exec });
+  constructor({ roots, publish, pollMs = POLL_MS, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000 }) {
+    Object.assign(this, { roots, publish, pollMs, exec, kill, graceMs });
     this.groups = new Map();
+    this.processes = new Map();
     this.ports = {};
     this.timer = null;
     this.polling = false;
@@ -166,9 +167,35 @@ class PortWatcher {
     this.timer.unref?.();
   }
 
-  stop() {
+  close() {
     clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * Stops what listens on one of a chat's ports: the whole command it belongs to (its process group,
+   * so `npm run dev` goes with its server), or the process alone when its group is the agent's own.
+   * Only a pid the chat's list shows is stopped. SIGTERM first, SIGKILL if it is still there after
+   * the grace period. Resolves with whether there was something to stop.
+   */
+  async stopPort(chatId, pid) {
+    if (!this.ports[chatId]?.some((port) => port.pid === pid)) return false;
+    const pgid = this.processes.get(pid)?.pgid;
+    const target = pgid && this.groups.get(chatId)?.has(pgid) ? -pgid : pid;
+    const signal = (name) => {
+      try {
+        this.kill(target, name);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!signal("SIGTERM")) return false;
+    const deadline = Date.now() + this.graceMs;
+    while (Date.now() < deadline && signal(0)) await new Promise((resolve) => setTimeout(resolve, 50));
+    if (signal(0)) signal("SIGKILL");
+    await this.poll();
+    return true;
   }
 
   async poll() {
@@ -179,6 +206,7 @@ class PortWatcher {
       const roots = this.roots();
       if (roots.size || this.groups.size) {
         const processes = parsePs(await this.exec("ps", ["-axo", "pid=,ppid=,pgid=,comm="]));
+        this.processes = new Map(processes.map((row) => [row.pid, row]));
         const known = new Set([...this.groups.values()].flatMap((set) => [...set]));
         const strays = [...roots.values()].some((root) => root.cwd) ? orphans(processes).filter((row) => !known.has(row.pgid)) : [];
         if (strays.length) adoptOrphans(processes, parseCwds(await this.exec("lsof", ["-a", "-d", "cwd", "-p", strays.map((row) => row.pid).join(","), "-F", "pn"])), roots, this.groups);

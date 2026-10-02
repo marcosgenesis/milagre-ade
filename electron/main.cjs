@@ -393,6 +393,8 @@ const ports = new PortWatcher({
   },
 });
 ipcMain.handle("agent:ports", () => ports.snapshot());
+// The renderer is untrusted: only a pid the chat's port list shows can be stopped.
+ipcMain.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
 async function startAgentTurn(request) {
   const images = decodeImages(request.images);
@@ -598,7 +600,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   agentsClosed = true;
   keepAwake.quit();
-  ports.stop();
+  ports.close();
   // Agents run in their own process groups, so stop them before the app exits.
   // Their cancelled turns are saved before the app exits.
   Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());

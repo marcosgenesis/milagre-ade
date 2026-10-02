@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("agent:event", listener);
   },
   getAgentPorts: () => ipcRenderer.invoke("agent:ports"),
+  stopAgentPort: (chatId, pid) => ipcRenderer.invoke("agent:stop-port", chatId, pid),
   onAgentPorts: (callback) => {
     const listener = (_event, ports) => callback(ports);
     ipcRenderer.on("agent:ports", listener);

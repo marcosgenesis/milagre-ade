@@ -1,3 +1,4 @@
+import { ChatTitle } from "./ChatTitle";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -24,6 +25,7 @@ import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archive";
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
+import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { DiffStat, PullRequest } from "@/model";
 import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
@@ -41,7 +43,8 @@ export type ChatDetails = {
   branch?: string;
   path?: string;
   diff?: DiffStat;
-  pullRequest?: PullRequest;
+  /** PRs the chat created or merged, then its worktree branch's PR, in the order they were made. */
+  pullRequests?: PullRequest[];
   /** The chat's last turn failed. */
   failed?: boolean;
 };
@@ -80,6 +83,10 @@ const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
 };
 
 const HOVER_CARD_DELAY = 500;
+/** Time to cross from the row to the card before it closes, so its PR links can be clicked. */
+const HOVER_CARD_GRACE = 250;
+/** PR chips the row has room for; the rest are a count, and the hover card lists them all. */
+const ROW_PR_LIMIT = 2;
 const HOVER_CARD_WIDTH = 256;
 const MENU_WIDTH = 240;
 
@@ -147,9 +154,10 @@ export function ChatRow({
   shortcutHint?: string;
 }) {
   const mark = item.mark ?? "idle";
-  const pullRequest = !collapsed ? item.details?.pullRequest : undefined;
-  const blocker = pullRequestBlockers(pullRequest)[0];
-  const readyToMerge = pullRequest?.state === "OPEN" && pullRequest.readyToMerge && !blocker;
+  const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
+  const hasPullRequests = pullRequests.length > 0;
+  const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
+  const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -167,7 +175,8 @@ export function ChatRow({
   };
   const showCardSoon = () => {
     clearHover();
-    if (menu || renaming) return;
+    // Back on the row from the card: the card stays as it is.
+    if (menu || renaming || card) return;
     hoverTimer.current = window.setTimeout(() => {
       const row = rowRef.current;
       if (!row) return;
@@ -179,6 +188,12 @@ export function ChatRow({
     }, HOVER_CARD_DELAY);
   };
 
+  // Leaving the row or the card gives the pointer time to reach the other one.
+  const hideCardSoon = () => {
+    clearHover();
+    if (card) hoverTimer.current = window.setTimeout(() => setCard(null), HOVER_CARD_GRACE);
+  };
+
   useEffect(() => clearHover, []);
 
   const openMenu = (x: number, y: number) => {
@@ -187,11 +202,12 @@ export function ChatRow({
   };
 
   return (
+    <>
     <div
       ref={rowRef}
       className="group/row relative"
       onPointerEnter={showCardSoon}
-      onPointerLeave={hideCard}
+      onPointerLeave={hideCardSoon}
       onPointerDown={hideCard}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -215,7 +231,7 @@ export function ChatRow({
           type="button"
           onClick={onPick}
           aria-current={active ? "page" : undefined}
-          className={`sidebar-row relative z-10 mx-2 flex ${pullRequest ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+          className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
           }`}
         >
@@ -229,43 +245,26 @@ export function ChatRow({
               <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
             )}
           </span>
-          <ChatMarkDot mark={mark} topAligned={Boolean(pullRequest)} />
+          <ChatMarkDot mark={mark} topAligned={hasPullRequests} />
           <span
-            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${pullRequest ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-10" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-10" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
-            {item.label}
+            <ChatTitle label={item.label} />
           </span>
         </button>
       )}
 
-      {pullRequest && !renaming && (
-        <Tooltip
-          label={blocker ? `${BLOCKERS[blocker].long} · Pull request #${pullRequest.number}` : readyToMerge ? `Ready to merge · Pull request #${pullRequest.number}` : `${pullRequest.state === "MERGED" ? "Merged" : "Open"} pull request #${pullRequest.number}`}
-          side="bottom"
-          className="sidebar-copy absolute bottom-1 left-9 z-20 max-w-[calc(100%-72px)]"
-        >
-          <a
-            href={pullRequest.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Open ${pullRequest.state === "MERGED" ? "merged " : ""}pull request #${pullRequest.number}${blocker ? `, ${BLOCKERS[blocker].short.toLowerCase()}` : readyToMerge ? ", ready to merge" : ""}`}
-            data-chat-pr
-            className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <span aria-hidden className={`inline-flex group-hover/pr:hidden group-focus-visible/pr:hidden ${pullRequest.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : "text-green"}`}>
-              <HugeIcon icon={pullRequest.state === "MERGED" ? GitMergeIcon : readyToMerge ? Tick02Icon : GitPullRequestIcon} size={12} />
+      {hasPullRequests && !renaming && (
+        <div data-chat-prs className="sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2">
+          {shownPullRequests.map((pr) => <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />)}
+          {hiddenPullRequests > 0 && (
+            <span data-chat-pr-more aria-label={`${hiddenPullRequests} more pull request${hiddenPullRequests === 1 ? "" : "s"}`} className="shrink-0 text-[12px] leading-4 tabular-nums text-ink-3">
+              +{hiddenPullRequests}
             </span>
-            <span aria-hidden className="hidden group-hover/pr:inline-flex group-focus-visible/pr:inline-flex">
-              <HugeIcon icon={LinkSquare02Icon} size={12} />
-            </span>
-            <span className="truncate">#{pullRequest.number}</span>
-            {blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
-            {readyToMerge && <span className="shrink-0 text-green">Ready</span>}
-          </a>
-        </Tooltip>
+          )}
+        </div>
       )}
 
       {shortcutHint && !renaming && !menu && <kbd aria-hidden="true" data-shortcut-hint
@@ -284,7 +283,7 @@ export function ChatRow({
             if (menu) setMenu(null);
             else openMenu(rect.left, rect.bottom + 4);
           }}
-          className={`absolute right-3 ${pullRequest ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+          className={`absolute right-3 ${hasPullRequests ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
             menu ? "bg-hover text-ink opacity-100" : "opacity-0"
           }`}
         >
@@ -292,7 +291,6 @@ export function ChatRow({
         </button>
       )}
 
-      {card && !menu && createPortal(<ChatHoverCard item={item} position={card} />, document.body)}
       {menu && (
         <ChatMenu
           item={item}
@@ -304,6 +302,54 @@ export function ChatRow({
         />
       )}
     </div>
+    {/* Outside the row, so presses in the card don't reach the row's handlers through the portal. */}
+    {card && !menu && createPortal(<ChatHoverCard item={item} position={card} onPointerEnter={clearHover} onPointerLeave={hideCardSoon} onOpenLink={hideCard} />, document.body)}
+    </>
+  );
+}
+
+/** Merged is purple, a blocked PR takes its first blocker's tone, other open PRs are green. */
+function prTone(pr: PullRequest) {
+  const blocker = pullRequestBlockers(pr)[0];
+  return pr.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : "text-green";
+}
+
+function prIcon(pr: PullRequest) {
+  return pr.state === "MERGED" ? GitMergeIcon : isReadyToMerge(pr) ? Tick02Icon : GitPullRequestIcon;
+}
+
+const isReadyToMerge = (pr: PullRequest) => pr.state === "OPEN" && pr.readyToMerge && pullRequestBlockers(pr).length === 0;
+
+/** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
+function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
+  const blocker = pullRequestBlockers(pr)[0];
+  const readyToMerge = isReadyToMerge(pr);
+  return (
+    <Tooltip
+      label={blocker ? `${BLOCKERS[blocker].long} · Pull request #${pr.number}` : readyToMerge ? `Ready to merge · Pull request #${pr.number}` : `${pr.state === "MERGED" ? "Merged" : "Open"} pull request #${pr.number}`}
+      side="bottom"
+      className="min-w-0"
+    >
+      <a
+        href={pr.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open ${pr.state === "MERGED" ? "merged " : ""}pull request #${pr.number}${blocker ? `, ${BLOCKERS[blocker].short.toLowerCase()}` : readyToMerge ? ", ready to merge" : ""}`}
+        data-chat-pr
+        className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span aria-hidden className={`inline-flex group-hover/pr:hidden group-focus-visible/pr:hidden ${prTone(pr)}`}>
+          <HugeIcon icon={prIcon(pr)} size={12} />
+        </span>
+        <span aria-hidden className="hidden group-hover/pr:inline-flex group-focus-visible/pr:inline-flex">
+          <HugeIcon icon={LinkSquare02Icon} size={12} />
+        </span>
+        <span className="truncate">#{pr.number}</span>
+        {labelled && blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
+        {labelled && readyToMerge && <span className="shrink-0 text-green">Ready</span>}
+      </a>
+    </Tooltip>
   );
 }
 
@@ -345,22 +391,31 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (title: str
 
 /* ─────────────────────────────────────────────────────────
  * HOVER CARD
- * Opens beside the sidebar after a short rest on a row. All of
- * it is already in the project state (the diff stat is cached by
+ * Opens beside the sidebar after a short rest on a row, and stays
+ * while the pointer is on it so its PRs can be opened. All of it is
+ * already in the project state (the diff stat is cached by
  * useWorktreeDiffs), so it never waits on git.
  * ───────────────────────────────────────────────────────── */
-function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { top: number; left: number; flip: boolean } }) {
+function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenLink }: {
+  item: SidebarRecent;
+  position: { top: number; left: number; flip: boolean };
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+  /** A PR in the card was opened; the card closes. */
+  onOpenLink: () => void;
+}) {
   const { details = {} } = item;
-  const blockers = pullRequestBlockers(details.pullRequest);
   const mark = item.mark ?? "idle";
   const status = mark !== "idle" ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : mark === "waiting" ? "text-orange" : "text-accent-ink" }
     : details.failed ? { label: "Last turn failed", tone: "text-red" }
     : null;
   return (
     <div
-      role="tooltip"
       data-chat-hover-card
-      className="pointer-events-none fixed z-[60] rounded-[12px] bg-surface p-3 shadow-overlay"
+      aria-label={item.label}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      className="fixed z-[60] rounded-[12px] bg-surface p-3 shadow-overlay"
       style={{
         left: position.left,
         width: HOVER_CARD_WIDTH,
@@ -376,21 +431,29 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
             <span className={status.tone}>{status.label}</span>
           </CardLine>
         )}
-        {details.pullRequest && (
-          <CardLine icon={<span className={details.pullRequest.state === "MERGED" ? "text-purple-500" : blockers[0] ? toneClass[BLOCKERS[blockers[0]].tone] : "text-green"}><HugeIcon icon={details.pullRequest.state === "MERGED" ? GitMergeIcon : GitPullRequestIcon} size={14} /></span>}>
-            <span className="min-w-0 truncate leading-snug">#{details.pullRequest.number}{details.pullRequest.title ? ` · ${details.pullRequest.title}` : ""}</span>
-          </CardLine>
-        )}
-        {blockers.map((blocker) => (
-          <CardLine key={blocker} icon={<span className={toneClass[BLOCKERS[blocker].tone]}><HugeIcon icon={GitPullRequestIcon} size={14} /></span>}>
-            <span className={toneClass[BLOCKERS[blocker].tone]}>{BLOCKERS[blocker].long}</span>
-          </CardLine>
-        ))}
-        {details.pullRequest?.state === "OPEN" && details.pullRequest.readyToMerge && blockers.length === 0 && (
-          <CardLine icon={<span className="text-green"><HugeIcon icon={Tick02Icon} size={14} /></span>}>
-            <span className="text-green">Ready to merge</span>
-          </CardLine>
-        )}
+        {details.pullRequests?.length ? (
+          <div data-chat-card-prs className="-mx-1 flex max-h-[148px] flex-col gap-0.5 overflow-y-auto">
+            {details.pullRequests.map((pr) => {
+              const blocker = pullRequestBlockers(pr)[0];
+              return (
+                <a
+                  key={pr.url}
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-chat-card-pr
+                  onClick={onOpenLink}
+                  className="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-0.5 text-ink-2 no-underline hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  <span className={`flex size-4 shrink-0 items-center justify-center ${prTone(pr)}`}><HugeIcon icon={prIcon(pr)} size={14} /></span>
+                  <span className="min-w-0 flex-1 truncate leading-snug"><span className="tabular-nums">#{pr.number}</span>{pr.title ? ` · ${pr.title}` : ""}</span>
+                  {blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
+                  {isReadyToMerge(pr) && <span className="shrink-0 text-green">Ready to merge</span>}
+                </a>
+              );
+            })}
+          </div>
+        ) : null}
         {details.diff && (
           <CardLine icon={<HugeIcon icon={FileEditIcon} size={14} />}>
             {details.diff.added === 0 && details.diff.removed === 0 ? (
@@ -448,8 +511,8 @@ function ChatMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [archiveArmed, setArchiveArmed] = useState(false);
-  // What the confirm step offers: unknown until the worktree has been looked at.
-  const [plan, setPlan] = useState<ArchivePlan | "checking" | null>(null);
+  // What the confirm step offers: null until the worktree has been looked at.
+  const [plan, setPlan] = useState<ArchivePlan | null>(actions.onArchiveCheck ? null : HIDE_ONLY);
   const [top, setTop] = useState(position.y);
   const { details = {} } = item;
   const running = item.mark === "running" || item.mark === "waiting" || item.mark === "question";
@@ -468,16 +531,18 @@ function ChatMenu({
     if (archiveArmed) menu.querySelector<HTMLElement>("[data-archive-choice]:not(:disabled)")?.focus();
   }, [position.y, archiveArmed, plan]);
 
-  const armArchive = () => {
-    setArchiveArmed(true);
-    if (!actions.onArchiveCheck) {
-      setPlan(HIDE_ONLY);
-      return;
-    }
-    setPlan("checking");
+  // The worktree is checked as the menu opens, so "Archive" goes straight to its choice instead of
+  // flashing a checking row. Archive stays disabled until the check is back.
+  useEffect(() => {
+    if (!actions.onArchiveCheck || !actions.onArchive) return;
+    let live = true;
     // A worktree that can't be checked only hides the chat, as before.
-    actions.onArchiveCheck(item.id).then(setPlan, () => setPlan(HIDE_ONLY));
-  };
+    actions.onArchiveCheck(item.id).then((next) => live && setPlan(next), () => live && setPlan(HIDE_ONLY));
+    return () => {
+      live = false;
+    };
+    // Checked once per opening; the menu remounts each time it opens.
+  }, []);
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -506,20 +571,34 @@ function ChatMenu({
   const { editor } = useEditors();
   const copy = (text: string) => run(() => void navigator.clipboard.writeText(text).catch(() => {}));
 
-  const resolved = plan && plan !== "checking" ? plan : null;
-  const confirm = resolved ? archiveChoices({ plan: resolved, running }) : null;
-  const archiveItems: Array<MenuEntry> = !archiveArmed
-    ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: armArchive, disabled: !actions.onArchive }]
-    : confirm
-      ? confirm.choices.map((choice) => ({
-          key: `archive-${choice.mode}`,
-          label: choice.label,
-          icon: Archive02Icon,
-          onSelect: run(() => resolved && actions.onArchive?.(item.id, choice.mode, resolved)),
-          danger: choice.tone === "danger",
-          archiveChoice: true,
-        }))
-      : [{ key: "archive-checking", label: "Checking worktree…", icon: Archive02Icon, onSelect: () => {}, disabled: true, archiveChoice: true }];
+  const confirm = archiveArmed && plan ? archiveChoices({ plan, running }) : null;
+  const archiveItems: Array<MenuEntry> = !confirm || !plan
+    ? [{ key: "archive", label: "Archive", icon: Archive02Icon, onSelect: () => setArchiveArmed(true), disabled: !actions.onArchive || !plan }]
+    : confirm.choices.map((choice) => ({
+        key: `archive-${choice.mode}`,
+        label: choice.label,
+        icon: Archive02Icon,
+        onSelect: run(() => actions.onArchive?.(item.id, choice.mode, plan)),
+        danger: choice.tone === "danger",
+        archiveChoice: true,
+      }));
+
+  // Enter confirms the armed archive wherever focus is, since a mouse click on "Archive" leaves it on the page.
+  // A row focused with the arrow keys keeps Enter for itself.
+  const confirmEntry = archiveItems.length === 1 && archiveItems[0].archiveChoice && !archiveItems[0].disabled ? archiveItems[0] : null;
+  useEffect(() => {
+    if (!confirmEntry) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.matches("[data-menu-row]") && !active.matches("[data-archive-choice]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      confirmEntry.onSelect();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [confirmEntry]);
 
   const items: Array<MenuEntry | "divider"> = [
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },

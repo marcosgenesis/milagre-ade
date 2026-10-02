@@ -1,3 +1,4 @@
+const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
@@ -31,7 +32,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { readPullRequest } = require("./pull-request.cjs");
+const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
 const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
@@ -155,6 +156,7 @@ async function readProject(projectPath) {
     const next = reconcileState(current, projectName(projectPath), discovered);
     return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
   });
+  chatTitles.resume(projectPath, state);
   void diffs.refresh(projectPath).catch(() => {});
   return { path: projectPath, name: projectName(projectPath), state };
 }
@@ -283,6 +285,10 @@ ipcMain.handle("worktree:pull-request", async (_event, worktreePath) => {
   await environmentReady;
   return readPullRequest(worktreePath);
 });
+ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
+  await environmentReady;
+  return readPullRequests(worktreePath, refs);
+});
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
@@ -404,6 +410,7 @@ async function startAgentTurn(request) {
 const chats = new ChatHost({
   states,
   startTurn: startAgentTurn,
+  nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
   publish: publishAgentEvent,
   broadcast: broadcastProjectState,
   isFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
@@ -414,6 +421,9 @@ const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+
+const titleModels = createChatTitleModels({ cli: agentCli, clientVersion: app.getVersion() });
+const chatTitles = new ChatTitles({ states, update: updateProject, generate: request => generateChatTitle(request, { models: titleModels }) });
 
 ipcMain.handle("usage:read", () => readUsage());
 ipcMain.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));

@@ -19,25 +19,33 @@ function register(overrides = {}) {
     push: record("push", { ok: true, branch: "milagre/x", remote: "origin" }),
     openPr: record("openPr", { ok: true, url: "https://github.com/a/b/pull/1", number: 1 }),
   };
+  const diff = {
+    listDiffFiles: record("listDiffFiles", { isRepo: true, base: "main", files: [] }),
+    readDiffFile: record("readDiffFile", { patch: "", binary: false, tooLarge: false }),
+  };
   const prompts = [];
   const models = { claude: async ({ prompt }) => { prompts.push(prompt); return '{"commitMessage":"fix: x","prTitle":"Fix x","prBody":"Fixes x."}'; }, codex: null };
-  registerGitHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, { cli: async () => ({ command: null, problem: "missing" }), actions, models, ...overrides });
+  registerGitHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, { cli: async () => ({ command: null, problem: "missing" }), actions, diff, models, ...overrides });
   const invoke = (channel, ...args) => handlers.get(channel)({}, ...args);
   return { handlers, calls, invoke, prompts };
 }
 
 test("the dialog's channels reach the git actions", async () => {
   const { handlers, calls, invoke } = register();
-  assert.deepEqual([...handlers.keys()].sort(), ["git:changes", "git:commit", "git:generate", "git:open-pr", "git:push"]);
+  assert.deepEqual([...handlers.keys()].sort(), ["git:changes", "git:commit", "git:diff-file", "git:diff-files", "git:generate", "git:open-pr", "git:push"]);
   await invoke("git:changes", { cwd: "/repo/wt", base: "main" });
   await invoke("git:commit", { cwd: "/repo/wt", message: "fix: x" });
   await invoke("git:push", { cwd: "/repo/wt" });
   await invoke("git:open-pr", { cwd: "/repo/wt", base: "main", title: "Fix x", body: "Fixes x." });
+  await invoke("git:diff-files", { cwd: "/repo/wt", base: "main", mode: "committed" });
+  await invoke("git:diff-file", { cwd: "/repo/wt", base: "main", mode: "uncommitted", path: "a.ts", oldPath: "b.ts", untracked: false });
   assert.deepEqual(calls, [
     { name: "readChanges", request: { cwd: "/repo/wt", base: "main" } },
     { name: "commit", request: { cwd: "/repo/wt", message: "fix: x" } },
     { name: "push", request: { cwd: "/repo/wt" } },
     { name: "openPr", request: { cwd: "/repo/wt", base: "main", title: "Fix x", body: "Fixes x." } },
+    { name: "listDiffFiles", request: { cwd: "/repo/wt", base: "main", mode: "committed" } },
+    { name: "readDiffFile", request: { cwd: "/repo/wt", base: "main", mode: "uncommitted", path: "a.ts", oldPath: "b.ts", untracked: false } },
   ]);
 });
 
@@ -80,7 +88,7 @@ test("the channels only act in a chat's known folder", async (t) => {
   await fs.symlink(chat, path.join(root, "link"));
   await invoke("git:commit", { cwd: path.join(root, "link"), message: "fix: x" });
   assert.equal(calls.length, 1);
-  for (const channel of ["git:changes", "git:generate", "git:commit", "git:push", "git:open-pr"]) {
+  for (const channel of ["git:changes", "git:generate", "git:commit", "git:push", "git:open-pr", "git:diff-files", "git:diff-file"]) {
     await assert.rejects(async () => invoke(channel, { cwd: elsewhere, message: "x", title: "x", body: "" }), new RegExp(NOT_A_CHAT_FOLDER));
   }
   assert.equal(calls.length, 1);

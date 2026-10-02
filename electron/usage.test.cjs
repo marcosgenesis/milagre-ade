@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
+const fsSync = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createUsageReader, readClaudeUsage, readCodexUsage } = require("./usage.cjs");
+const { createUsageStore } = require("./usage-cache.cjs");
 
 const TOKEN = "sk-ant-oat01-SECRET-TOKEN";
 const NOW = Date.parse("2026-10-01T19:30:00Z");
@@ -129,7 +133,7 @@ test("reports an expired sign-in without calling the API", async () => {
 
 const FAILURES = [
   ["HTTP 401", json(401, { error: "unauthorized" }), "Claude sign-in expired. Running any Claude agent refreshes it."],
-  ["HTTP 429", json(429, {}), "Claude is rate limiting usage checks. Try again in a minute."],
+  ["HTTP 429", json(429, {}), "Claude is rate limiting usage checks."],
   ["HTTP 500", json(500, {}), "Claude usage failed (HTTP 500)."],
   ["unreadable JSON", { ok: true, status: 200, json: async () => { throw new SyntaxError(`Unexpected token near ${TOKEN}`); } }, "Claude returned an unreadable usage response."],
   ["no windows", json(200, { limits: [] }), "Claude returned no usage windows."],
@@ -329,5 +333,157 @@ test("reports unavailable for Codex accounts without ChatGPT plan limits", async
     const result = await readCodexUsage(codexDeps(child).deps);
     assert.deepEqual([result.status, result.message], ["unavailable", "Codex plan limits need a ChatGPT sign-in."]);
     assert.ok(!child.sent.includes("account/rateLimits/read"));
+  }
+});
+
+// Backoff and last-good fallback.
+const RATE_LIMIT_MESSAGE = "Claude is rate limiting usage checks.";
+const MIN = 60_000;
+
+function rateLimited(retryAfter) {
+  return { ...json(429, {}), headers: { get: (name) => (name.toLowerCase() === "retry-after" ? retryAfter ?? null : null) } };
+}
+
+test("a 429 reports Retry-After seconds as retryAfterMs", async () => {
+  const result = await readClaudeUsage(setup({ response: rateLimited("120") }).deps);
+  assert.deepEqual([result.status, result.windows, result.message, result.retryAfterMs], ["error", [], RATE_LIMIT_MESSAGE, 120_000]);
+});
+
+test("a 429 defaults to 5 minutes and caps at 30", async () => {
+  for (const [header, expected] of [[undefined, 5 * MIN], ["soon", 5 * MIN], ["-3", 5 * MIN], ["999999", 30 * MIN]]) {
+    const result = await readClaudeUsage(setup({ response: rateLimited(header) }).deps);
+    assert.equal(result.retryAfterMs, expected, String(header));
+  }
+  // A response without any headers object still works.
+  assert.equal((await readClaudeUsage(setup({ response: json(429, {}) }).deps)).retryAfterMs, 5 * MIN);
+});
+
+test("a 429 parses an HTTP-date Retry-After", async () => {
+  const result = await readClaudeUsage(setup({ response: rateLimited(new Date(NOW + 90_000).toUTCString()) }).deps);
+  assert.equal(result.retryAfterMs, 90_000);
+  const past = await readClaudeUsage(setup({ response: rateLimited(new Date(NOW - 90_000).toUTCString()) }).deps);
+  assert.equal(past.retryAfterMs, 5 * MIN);
+});
+
+function claudeReader({ responses, store = createUsageStore(), clock }) {
+  const queue = [...responses];
+  const fetchCalls = [];
+  const { deps } = setup();
+  const time = clock ?? { now: NOW };
+  const now = () => time.now;
+  const readUsage = createUsageReader({
+    now,
+    store,
+    readClaude: () => readClaudeUsage({ ...deps, now, fetchImpl: async (url) => { fetchCalls.push(url); return queue.shift(); } }),
+    readCodex: async () => ({ provider: "codex", status: "unavailable", windows: [], updatedAt: new Date(now()).toISOString(), message: "Codex CLI not found." }),
+  });
+  return { readUsage, fetchCalls, time };
+}
+const claudeOf = (snapshot) => snapshot.providers.find((item) => item.provider === "claude");
+
+test("while blocked by a 429 the API is not called, and it is called again afterwards", async () => {
+  const { readUsage, fetchCalls, time } = claudeReader({ responses: [rateLimited("120"), json(200, USAGE_BODY)] });
+  assert.equal(claudeOf(await readUsage()).status, "error");
+  time.now = NOW + 119_000;
+  const blocked = claudeOf(await readUsage());
+  assert.deepEqual([blocked.status, blocked.message, fetchCalls.length], ["error", RATE_LIMIT_MESSAGE, 1]);
+  time.now = NOW + 120_000;
+  assert.equal(claudeOf(await readUsage()).status, "ok");
+  assert.equal(fetchCalls.length, 2);
+});
+
+test("after an ok read, a 429 returns the earlier windows with the original updatedAt", async () => {
+  const { readUsage, time } = claudeReader({ responses: [json(200, USAGE_BODY), rateLimited("60")] });
+  const good = claudeOf(await readUsage());
+  time.now = NOW + 10 * MIN;
+  const limited = claudeOf(await readUsage());
+  assert.equal(limited.status, "error");
+  assert.equal(limited.message, RATE_LIMIT_MESSAGE);
+  assert.equal(limited.updatedAt, good.updatedAt);
+  assert.deepEqual(limited.windows, good.windows);
+  // Still served from the cache while blocked.
+  time.now += 30_000;
+  assert.deepEqual(claudeOf(await readUsage()).windows, good.windows);
+});
+
+test("a fresh reader falls back to a persisted ok result after a 429", async () => {
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "usage-cache-"));
+  const file = path.join(dir, "usage-cache.json");
+  try {
+    const writer = createUsageStore({ file });
+    const first = claudeReader({ responses: [json(200, USAGE_BODY)], store: writer });
+    const good = claudeOf(await first.readUsage());
+    await writer.idle();
+    const second = claudeReader({ responses: [rateLimited("60")], store: createUsageStore({ file }), clock: { now: NOW + 5 * MIN } });
+    const limited = claudeOf(await second.readUsage());
+    assert.deepEqual([limited.status, limited.updatedAt, limited.windows], ["error", good.updatedAt, good.windows]);
+  } finally {
+    fsSync.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a persisted block survives a restart", async () => {
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "usage-cache-"));
+  const file = path.join(dir, "usage-cache.json");
+  try {
+    const writer = createUsageStore({ file });
+    const first = claudeReader({ responses: [json(200, USAGE_BODY), rateLimited("600")], store: writer });
+    await first.readUsage();
+    first.time.now = NOW + MIN;
+    await first.readUsage();
+    await writer.idle();
+    const second = claudeReader({ responses: [], store: createUsageStore({ file }), clock: { now: NOW + 2 * MIN } });
+    const result = claudeOf(await second.readUsage());
+    assert.deepEqual([result.status, second.fetchCalls.length, result.windows.length], ["error", 0, 3]);
+  } finally {
+    fsSync.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fallback drops windows whose reset time has passed", async () => {
+  const { readUsage, time } = claudeReader({ responses: [json(200, USAGE_BODY), rateLimited("60")] });
+  await readUsage();
+  time.now = Date.parse("2026-10-01T21:00:00Z");
+  const limited = claudeOf(await readUsage());
+  assert.deepEqual(limited.windows.map((item) => item.id), ["weekly", "weekly:fable"]);
+});
+
+test("with no last good result a 429 is returned as is", async () => {
+  const { readUsage } = claudeReader({ responses: [rateLimited("60")] });
+  const result = claudeOf(await readUsage());
+  assert.deepEqual([result.status, result.windows, result.message], ["error", [], RATE_LIMIT_MESSAGE]);
+});
+
+test("a corrupt or missing cache file starts empty without throwing", async () => {
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "usage-cache-"));
+  try {
+    for (const contents of ["{not json", "[]", JSON.stringify({ claude: { last: { windows: "nope" }, blocked: { until: "x" } } })]) {
+      const file = path.join(dir, "usage-cache.json");
+      fsSync.writeFileSync(file, contents);
+      const store = createUsageStore({ file });
+      assert.equal(store.get("claude").last, null);
+      assert.equal(store.get("claude").blocked, null);
+    }
+    const store = createUsageStore({ file: path.join(dir, "missing.json") });
+    assert.equal(store.get("codex").last, null);
+  } finally {
+    fsSync.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the persisted cache contains no credentials", async () => {
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "usage-cache-"));
+  const file = path.join(dir, "usage-cache.json");
+  try {
+    const store = createUsageStore({ file });
+    const { readUsage } = claudeReader({ responses: [json(200, USAGE_BODY)], store });
+    await readUsage();
+    await store.idle();
+    const written = fsSync.readFileSync(file, "utf8");
+    assert.ok(written.includes('"windows"'));
+    assert.ok(!written.includes(TOKEN));
+    assert.ok(!written.includes("accessToken"));
+  } finally {
+    fsSync.rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -20,12 +20,13 @@ const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createUsageReader } = require("./usage.cjs");
+const { createUsageStore } = require("./usage-cache.cjs");
 
 const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
-const readUsage = createUsageReader();
+const readUsage = createUsageReader({ store: createUsageStore({ file: path.join(app.getPath("userData"), "usage-cache.json") }) });
 
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };

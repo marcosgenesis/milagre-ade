@@ -1,0 +1,77 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const fs = require("node:fs");
+const path = require("node:path");
+const { MIN_VERSIONS, createCliCache, inspectCli, isAtLeast, parseVersion, runVersion } = require("./cli.cjs");
+const { cliBrokenMessage, cliTooOldMessage, missingCliMessage } = require("./events.cjs");
+
+test("reads the version each CLI prints", () => {
+  assert.deepEqual(parseVersion("2.1.287 (Claude Code)\n"), [2, 1, 287]);
+  assert.deepEqual(parseVersion("codex-cli 0.158.0\n"), [0, 158, 0]);
+  assert.deepEqual(parseVersion("codex-cli 0.160.0-alpha.2"), [0, 160, 0]);
+  assert.equal(parseVersion("Claude Code"), null);
+});
+
+test("compares versions part by part", () => {
+  assert.equal(isAtLeast([2, 1, 286], "2.1.286"), true);
+  assert.equal(isAtLeast([2, 1, 285], "2.1.286"), false);
+  assert.equal(isAtLeast([2, 2, 0], "2.1.286"), true);
+  assert.equal(isAtLeast([2, 0, 77], "2.1.286"), false);
+  assert.equal(isAtLeast([0, 157, 9], "0.158.0"), false);
+  assert.equal(isAtLeast([0, 160, 0], "0.158.0"), true);
+  assert.equal(isAtLeast([1, 0, 0], "0.158.0"), true);
+});
+
+test("the Claude minimum is the Claude Code release the pinned SDK is built against", () => {
+  const sdk = JSON.parse(fs.readFileSync(path.join(__dirname, "../../node_modules/@anthropic-ai/claude-agent-sdk/package.json"), "utf8"));
+  assert.equal(MIN_VERSIONS.claude, sdk.claudeCodeVersion);
+});
+
+test("runs --version and keeps the last line of a failure", async () => {
+  const calls = [];
+  const ok = (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(null, "codex-cli 0.158.0\n", "");
+  };
+  assert.deepEqual(await runVersion("/bin/codex", { execFileImpl: ok }), { output: "codex-cli 0.158.0\n" });
+  assert.deepEqual(calls, [{ file: "/bin/codex", args: ["--version"], options: { encoding: "utf8", timeout: 10000 } }]);
+  const broken = (file, args, options, callback) => callback(Object.assign(new Error("Command failed: /bin/codex --version"), { code: 127 }), "", "env: node: No such file or directory\n");
+  assert.deepEqual(await runVersion("/bin/codex", { execFileImpl: broken }), { error: "env: node: No such file or directory" });
+});
+
+test("a missing, outdated or broken CLI comes with the message the turn fails with", async () => {
+  const resolve = async (name) => (name === "codex" ? null : "/Users/x/.local/bin/claude");
+  assert.deepEqual(await inspectCli("codex", { resolve }), { command: null, version: null, problem: missingCliMessage("codex") });
+  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), { command: "/Users/x/.local/bin/claude", version: "2.1.200", problem: cliTooOldMessage("claude", "2.1.200", "2.1.286") });
+  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ error: "Killed: 9" }) }), { command: "/Users/x/.local/bin/claude", version: null, problem: cliBrokenMessage("claude", "/Users/x/.local/bin/claude", "Killed: 9") });
+});
+
+test("a current CLI, or one whose version can't be read, is used as is", async () => {
+  const resolve = async () => "/opt/homebrew/bin/codex";
+  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli 0.158.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.158.0" });
+  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli dev build" }) }), { command: "/opt/homebrew/bin/codex", version: null });
+});
+
+test("each CLI is inspected once per run, after the environment, until it has a problem", async () => {
+  const order = [];
+  let release;
+  const environment = new Promise((resolve) => { release = resolve; });
+  const statuses = { claude: [{ command: "/c", version: "2.1.287" }], codex: [{ command: null, version: null, problem: "missing" }, { command: "/x", version: "0.158.0" }] };
+  const cli = createCliCache({
+    ready: () => environment.then(() => order.push("environment")),
+    inspect: async (name) => {
+      order.push(name);
+      return statuses[name].shift();
+    },
+  });
+  const first = Promise.all([cli("claude"), cli("claude"), cli("codex")]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, []);
+  release();
+  const [claude, again, codex] = await first;
+  assert.equal(claude, again);
+  assert.equal(codex.problem, "missing");
+  assert.deepEqual(await cli("codex"), { command: "/x", version: "0.158.0" });
+  assert.deepEqual(await cli("claude"), { command: "/c", version: "2.1.287" });
+  assert.deepEqual(order, ["environment", "environment", "claude", "codex", "environment", "codex"]);
+});

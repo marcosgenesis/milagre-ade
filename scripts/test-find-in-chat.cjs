@@ -42,9 +42,7 @@ function Fixture() {
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
-      worktreeSummary="main" connectionSummary="No connection" eventsCount={0} firstWorktreeName="main"
-      firstAgentRunning={false} secondAgentRunning={false} onToggleFirst={noop} onToggleSecond={noop}
-      onCycleConnection={noop} onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
+      onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
       isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null}
       findOpen={findOpen} findSignal={findSignal} onFindClose={() => setFindOpen(false)} />
   </div>;
@@ -55,9 +53,9 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 const appFixture = `
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { createInitialState } from "/src/model";
 import "/src/styles.css";
-const state = createInitialState("Fixture", "/fixture");
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: "Fixture" } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } };
 state.sessions = {
   3: { id: 3, worktree_id: 1, agent_name: "Chat one", provider: "claude", status: "Idle" },
@@ -69,6 +67,7 @@ state.messages = [
 ];
 state.next_id = 7;
 window.interrupts = [];
+window.agentListeners = new Set();
 window.milagre = new Proxy({
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
   listBranches: async () => ["main"],
@@ -77,8 +76,13 @@ window.milagre = new Proxy({
   readUsage: async () => ({ providers: [] }),
   getUpdateState: async () => ({ status: "idle" }),
   listRecentProjects: async () => [],
-  startTurn: async () => null,
   interruptAgent: async (chatId) => { window.interrupts.push(chatId); },
+  // Stands in for the main process: it saves the message and starts the turn, which the window streams.
+  onAgentEvent: (callback) => { window.agentListeners.add(callback); return () => window.agentListeners.delete(callback); },
+  sendMessage: async (request) => {
+    window.agentListeners.forEach((listener) => listener({ chatId: request.projectPath + "#" + request.sessionId, event: { type: "message-sent", model: request.model } }));
+    return { sessionId: request.sessionId };
+  },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
 // Opens a sidebar chat by its title.
 window.openChatWith = (title) => [...document.querySelectorAll("button")].find((el) => el.textContent.includes(title))?.click();
@@ -168,7 +172,8 @@ async function browserChecks() {
     await evaluate('(() => { const i = document.querySelector("textarea[aria-label=Prompt]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(i, "go"); i.dispatchEvent(new Event("input", { bubbles: true })); })()');
     await waitFor('!document.querySelector("[aria-label=Send]").disabled');
     await evaluate('document.querySelector("[aria-label=Send]").click()');
-    await waitFor('document.body.textContent.includes("Working with")');
+    // The working indicator names the model only to screen readers.
+    await waitFor('!!document.querySelector(\'[role=status][aria-label^="Working with"]\')');
     key("F", ["meta"]);
     await waitFor(bar);
     await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');

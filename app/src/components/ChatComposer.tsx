@@ -15,7 +15,6 @@ import {
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
-  Link01Icon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
@@ -187,16 +186,6 @@ interface ChatComposerProps {
   onFastModeChange: (on: boolean) => void;
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
-  worktreeSummary: string;
-  connectionSummary: string;
-  eventsCount: number;
-  firstWorktreeName: string;
-  secondWorktreeName?: string;
-  firstAgentRunning: boolean;
-  secondAgentRunning: boolean;
-  onToggleFirst: () => void;
-  onToggleSecond: () => void;
-  onCycleConnection: () => void;
   onRecommendationSelect: (option: string) => void;
   approval?: ReactNode;
   worktrees: Array<{ id: number; name: string; path: string }>;
@@ -344,16 +333,6 @@ export function ChatComposer({
   onFastModeChange,
   permissionMode,
   onPermissionModeChange,
-  worktreeSummary,
-  connectionSummary,
-  eventsCount,
-  firstWorktreeName,
-  secondWorktreeName,
-  firstAgentRunning,
-  secondAgentRunning,
-  onToggleFirst,
-  onToggleSecond,
-  onCycleConnection,
   onRecommendationSelect,
   approval,
   worktrees,
@@ -372,10 +351,9 @@ export function ChatComposer({
   onDismissNotice,
 }: ChatComposerProps) {
   const root = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState("Worktrees");
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
-  const isNewChat = tab === "Worktrees" && messages.length === 0;
+  const isNewChat = messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -413,51 +391,35 @@ export function ChatComposer({
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
-        {tab === "Worktrees" ? (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            {messages.map((message) => (
-              <MessageSection
-                key={message.id}
-                message={message}
-                isUser={message.role === "user"}
-                onRecommendationSelect={onRecommendationSelect}
-                onUpdateCli={onUpdateCli}
-                updatingCli={updatingCli}
-                cliStatus={cliStatus}
-              />
-            ))}
+        <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          {messages.map((message) => (
+            <MessageSection
+              key={message.id}
+              message={message}
+              isUser={message.role === "user"}
+              onRecommendationSelect={onRecommendationSelect}
+              onUpdateCli={onUpdateCli}
+              updatingCli={updatingCli}
+              cliStatus={cliStatus}
+            />
+          ))}
 
-            {isSending && (streamingText || streamingSteps?.length) ? (
-              <MessageSection
-                message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-                isUser={false}
-                onRecommendationSelect={onRecommendationSelect}
-                streaming
-                asking={asking}
-                waitingStepIds={waitingStepIds}
-              />
-            ) : null}
-            {isSending && (
-              <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-            <div className="flex items-center gap-2 text-[13px] text-ink"><Icon icon={Link01Icon} size={15} /><span className="font-medium">Shared context</span><span className="ml-auto text-[12px] text-ink-3">{eventsCount} events</span></div>
-            <div className="rounded-control bg-inset p-3 text-[13px] leading-6 text-ink-2">
-              <p>{worktreeSummary}</p>
-              <p className="mt-2">Connection: {connectionSummary}</p>
+          {isSending && (streamingText || streamingSteps?.length) ? (
+            <MessageSection
+              message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
+              isUser={false}
+              onRecommendationSelect={onRecommendationSelect}
+              streaming
+              asking={asking}
+              waitingStepIds={waitingStepIds}
+            />
+          ) : null}
+          {isSending && (
+            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+              <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
-            <p className="text-[12px] text-ink-3">Messages sent from this chat can use the context shared by both worktrees.</p>
-            <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-3">
-              {firstWorktreeName !== "No worktree" && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleFirst}>{firstAgentRunning ? "Stop" : "Start"} {firstWorktreeName}</button>}
-              {secondWorktreeName && <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onToggleSecond}>{secondAgentRunning ? "Stop" : "Start"} {secondWorktreeName}</button>}
-              <button type="button" className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover" onClick={onCycleConnection}>Link as {connectionSummary.toLowerCase()}</button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />

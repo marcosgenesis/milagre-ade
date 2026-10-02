@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { archiveSubagent, archiveFinishedSubagents } from "./subagents.ts";
-import { applyAgentEvent } from "./agent-runs.ts";
-import type { CoordinatorState, Subagent } from "../model";
+import { archiveSubagent, archiveFinishedSubagents } from "./project-edits.mjs";
+import { applyAgentEvent } from "./agent-runs.mjs";
+import type { CoordinatorState, Subagent } from "../../app/src/model";
 const child: Subagent = { id: "child", title: "Review auth", status: "running", startedAt: 1, updatedAt: 2, transcript: [{ id: "m", kind: "message", text: "Partial review" }] };
 const base = (): CoordinatorState => ({ next_id: 10, sessions: { 1: { id: 1, worktree_id: 2, agent_name: "main", status: "Created", provider: "claude", subagents: [child] } }, projects: {}, worktrees: {}, messages: [], connections: {}, events: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] });
 test("archiving a child preserves its output and survives later provider updates", () => {

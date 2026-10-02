@@ -18,6 +18,7 @@ function emptyState(projectName) {
   };
 }
 
+/** The state matched with the worktrees git lists now; a state that already matches is returned as is. */
 function reconcileState(rawState, projectName, discoveredWorktrees) {
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
@@ -49,7 +50,7 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
   const tasks = Object.fromEntries(Object.entries(state.tasks ?? {}).filter(([, task]) => validWorktreeIds.has(task.worktree_id)));
   const artifacts = Object.fromEntries(Object.entries(state.artifacts ?? {}).filter(([, artifact]) => validWorktreeIds.has(artifact.worktree_id)));
 
-  return {
+  const next = {
     ...state,
     next_id: nextId,
     projects: { 1: { id: 1, name: projectName } },
@@ -61,14 +62,18 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     tasks,
     artifacts,
   };
+  return rawState && JSON.stringify(next) === JSON.stringify(rawState) ? rawState : next;
 }
 
-// A saved running flag is not proof of a live provider after an app restart.
+// A saved running flag is not proof of a live provider after an app restart. A state with nothing to mark is returned as is.
 function markDisconnectedSubagents(state, liveSessionIds) {
-  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id,
-    liveSessionIds.has(Number(id)) || !session.subagents ? session : { ...session, subagents: session.subagents.map(agent =>
-      ["running", "initializing", "waiting"].includes(agent.status) ? { ...agent, status: "unknown", endedAt: agent.updatedAt, latestActivity: "Session disconnected. Last received activity is shown below." } : agent) }
-  ]));
+  const running = (agent) => ["running", "initializing", "waiting"].includes(agent.status);
+  const stale = Object.entries(state.sessions).filter(([id, session]) => !liveSessionIds.has(Number(id)) && session.subagents?.some(running));
+  if (!stale.length) return state;
+  const sessions = { ...state.sessions };
+  for (const [id, session] of stale) {
+    sessions[id] = { ...session, subagents: session.subagents.map((agent) => (running(agent) ? { ...agent, status: "unknown", endedAt: agent.updatedAt, latestActivity: "Session disconnected. Last received activity is shown below." } : agent)) };
+  }
   return { ...state, sessions };
 }
 

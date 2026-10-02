@@ -30,7 +30,7 @@ const plan: ArchivePlan = { milagreOwned: true, shared: false, status };
 function harness(overrides: Partial<ArchiveDeps> = {}, state = baseState()) {
   const calls: string[] = [];
   const notices: string[] = [];
-  const applied: Array<{ next: CoordinatorState; removed: { worktreeId: number; sessionIds: number[] } }> = [];
+  const applied: Array<{ worktreeId: number; sessionIds: number[] }> = [];
   const removals: unknown[] = [];
   let project = "/work/shop";
   const deps: ArchiveDeps = {
@@ -48,9 +48,9 @@ function harness(overrides: Partial<ArchiveDeps> = {}, state = baseState()) {
       calls.push("remove");
       removals.push({ path: worktree.path, ...options });
     },
-    applyRemoval: (next, removed) => {
+    applyRemoval: (removed) => {
       calls.push("apply");
-      applied.push({ next, removed });
+      applied.push(removed);
     },
     refreshBranches: () => calls.push("branches"),
     notify: (message) => notices.push(message),
@@ -64,8 +64,7 @@ test("the chat is hidden before anything is removed, then the worktree goes and 
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "removed");
   assert.deepEqual(h.calls, ["stop", "hide", "remove", "apply", "branches"]);
   assert.deepEqual(h.removals, [{ path: "/tmp/wt/shop/x-1", force: true, base: "main", projectPath: "/work/shop", chatId: "/work/shop#2", seen: status }]);
-  assert.deepEqual(Object.keys(h.applied[0].next.worktrees), ["1"]);
-  assert.deepEqual(h.applied[0].removed, { worktreeId: 2, sessionIds: [2] });
+  assert.deepEqual(h.applied[0], { worktreeId: 2, sessionIds: [2] });
 });
 
 test("the safe remove asks for no force", async () => {

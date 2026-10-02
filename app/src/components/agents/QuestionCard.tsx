@@ -4,7 +4,7 @@ import type { KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentQuestion, QuestionAnswers, QuestionRequest } from "../../model";
-import { arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
+import { advancesOnPick, arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
 import type { QuestionDrafts } from "../../lib/question-answers";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
 
@@ -26,7 +26,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
   const [active, setActive] = useState(0);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
-  // Next moves to another question and the panel remounts, so focus would fall to the page: put it in the new panel.
+  // Next, or a pick that moves on, and the panel remounts, so focus would fall to the page: put it in the new panel.
   const focusPanel = useRef(false);
   const questions = request.questions;
   const count = questions.length;
@@ -44,6 +44,11 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
     // One single-choice question: the tap is the answer.
     const done = draftAnswers(questions, next);
     if (sendsOnPick(questions) && done) onAnswer(done);
+    // Several questions: a single-choice pick is the answer to this one, so move on. The last one waits for Send.
+    else if (advancesOnPick(questions, active)) {
+      focusPanel.current = true;
+      setActive(nextTab(count, active));
+    }
   }
 
   function advance() {

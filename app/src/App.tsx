@@ -31,6 +31,12 @@ import type { SessionPatch } from "../../electron/shared/project-edits.mjs";
 import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
+import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
+import { ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
+import { AnimatePresence } from "motion/react";
+import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "./components/changes/DiffView";
+import { useChanges } from "./components/changes/useChanges";
 import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
@@ -213,6 +219,18 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const changes = useChanges({
+    cwd: selectedWorktree?.path,
+    base: selectedWorktree?.base,
+    chatId: project && selectedSession ? chatKey(project.path, selectedSession.id) : null,
+    available: view === "chat" && Boolean(selectedSession && selectedWorktree),
+  });
+  const diffPrefs = useDiffPreferences();
+  const diffShowing = changes.diffOpen;
+  const diffPresence = useDiffPresence(diffShowing);
+  const changesAvailable = view === "chat" && Boolean(selectedSession && selectedWorktree);
+  const changesAvailableRef = useRef(false);
+  changesAvailableRef.current = changesAvailable;
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
@@ -612,6 +630,9 @@ function App() {
         if (event.key.toLowerCase() === "t") {
           event.preventDefault();
           toggleTheme();
+        } else if (event.key.toLowerCase() === "d" && changesAvailableRef.current) {
+          event.preventDefault();
+          changes.toggle();
         }
         return;
       }
@@ -730,6 +751,7 @@ function App() {
     <>
     <DotBackground key="app">
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
+      {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
           <span>Milagre {update.version} is ready to update.</span>
@@ -777,7 +799,11 @@ function App() {
         </div>
       )}
 
-      <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+      <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+        <DiffBar open={diffShowing} onBack={changes.closeDiff} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
+        <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} />}
+        </AnimatePresence>
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {notice && (
@@ -789,7 +815,8 @@ function App() {
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
-        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
+        {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out both" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
             key={project.path}
@@ -877,6 +904,9 @@ function App() {
           </EditorLinks>
         </div>
       </main>
+      <ChangesPanelSlot open={changes.open}>
+        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} />
+      </ChangesPanelSlot>
       </div>
       {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (

@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("milagre", {
   revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),
+    diffFiles: (request) => ipcRenderer.invoke("git:diff-files", request),
+    diffFile: (request) => ipcRenderer.invoke("git:diff-file", request),
     generate: (request) => ipcRenderer.invoke("git:generate", request),
     commit: (request) => ipcRenderer.invoke("git:commit", request),
     push: (request) => ipcRenderer.invoke("git:push", request),

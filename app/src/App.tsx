@@ -546,6 +546,7 @@ function App() {
       ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
       fastMode: supportsFastMode(model) && fastMode,
       replies: getSettings().claudeReplies,
+      tldrEnabled: getSettings().tldrEnabled,
       prompt: body || "Describe the attached images.",
       images,
       resumeId: chatSession.native_session_id,

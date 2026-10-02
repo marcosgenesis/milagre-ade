@@ -384,3 +384,39 @@ test("a question is sent right after the text before it", async (t) => {
   created[0].emit({ type: "question-resolved", requestId: "q-1", outcome: "dismissed" });
   assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "question-request", "question-resolved"]);
 });
+
+
+test("TLDR changes resume the same chat with new instructions between turns", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  assert.equal(created[0].options.tldrEnabled, true);
+  created[0].nativeId = "thread-current";
+  await manager.startTurn(request("1", { tldrEnabled: false, resumeId: "thread-stale" }));
+  assert.equal(created.length, 2);
+  assert.equal(created[0].closed, true);
+  assert.equal(created[1].options.resumeId, "thread-current");
+  assert.equal(created[1].options.tldrEnabled, false);
+  await manager.startTurn(request("1", { tldrEnabled: false }));
+  assert.equal(created.length, 2);
+  created[1].nativeId = "thread-current";
+  await manager.startTurn(request("1", { tldrEnabled: true }));
+  assert.equal(created.length, 3);
+  assert.equal(created[2].options.resumeId, "thread-current");
+  assert.equal(created[2].options.tldrEnabled, true);
+});
+
+test("TLDR changes leave a running turn alone and apply once it finishes", async (t) => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].turnActive = true;
+  created[0].nativeId = "thread-current";
+  await manager.startTurn(request("1", { tldrEnabled: false }));
+  assert.equal(created.length, 1);
+  assert.equal(created[0].closed, false);
+  created[0].turnActive = false;
+  await manager.startTurn(request("1", { tldrEnabled: false }));
+  assert.equal(created.length, 2);
+  assert.equal(created[1].options.tldrEnabled, false);
+});

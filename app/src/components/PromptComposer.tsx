@@ -167,9 +167,9 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const menu: "at" | "slash" | null = plusOpen ? "at" : token?.kind ?? null;
   const tokenQuery = plusOpen ? "" : token?.query ?? "";
   const { skills, warnings: skillWarnings, loading: skillsLoading } = useSkills(projectPath, menu === "slash");
-  const skillRows = ["workspace", "user"].flatMap((scope) => skills.filter((skill) => skill.scope === scope).map((skill) => ({
+  const skillRows = ["bundled", "workspace", "user"].flatMap((scope) => skills.filter((skill) => skill.scope === scope).map((skill) => ({
     key: `skill:${skill.name}`, name: `/${skill.name}`, desc: skill.description,
-    group: scope === "workspace" ? "Workspace skills" : "User skills", source: skill.provider, path: skill.path,
+    group: scope === "bundled" ? "Milagre skills" : scope === "workspace" ? "Workspace skills" : "User skills", source: skill.provider, path: skill.path,
   })));
   const commands: MenuRow[] = [
     ...COMMANDS.filter((command) => !skills.some((skill) => skill.name.toLowerCase() === command.key)).map((command) => ({ ...command, group: "Milagre skills" })),

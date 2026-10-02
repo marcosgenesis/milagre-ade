@@ -26,7 +26,7 @@ test("discovers workspace and user skills from every supported directory", async
       await skill(base, provider, `${path.basename(base)}-${provider.slice(1)}`, "# Instructions");
     }
   }
-  const result = await discoverSkills(project, { home });
+  const result = await discoverSkills(project, { home, bundledDirectory: null });
   assert.equal(result.skills.length, 8);
   assert.equal(result.skills.filter((item) => item.scope === "workspace").length, 4);
   assert.deepEqual(result.warnings, []);
@@ -36,7 +36,7 @@ test("parses YAML names, quoted descriptions and multiline descriptions", async 
   const { project, home, skill } = await fixture(t);
   await skill(project, ".agents", "folder", '---\nname: "custom:review"\ndescription: >-\n  Review code:\n  find bugs\n---\nBody');
   await skill(home, ".claude", "quoted", '---\ndescription: "Check: code"\n---\nBody');
-  const { skills } = await discoverSkills(project, { home });
+  const { skills } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.equal(skills[0].name, "custom:review");
   assert.equal(skills[0].description, "Review code: find bugs");
   assert.equal(skills[1].description, "Check: code");
@@ -47,7 +47,7 @@ test("workspace overrides user skills and directory precedence is deterministic"
   await skill(home, ".agents", "review", "User");
   await skill(project, ".claude", "review", "Claude");
   const preferred = await skill(project, ".agents", "review", "Workspace");
-  const { skills } = await discoverSkills(project, { home });
+  const { skills } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.equal(skills.length, 1);
   assert.equal(skills[0].path, preferred);
 });
@@ -59,7 +59,7 @@ test("follows nested and symlinked skill directories without looping or duplicat
   await fs.symlink(root, path.join(root, "cycle"), "dir");
   await fs.mkdir(path.join(home, ".claude"), { recursive: true });
   await fs.symlink(root, path.join(home, ".claude", "skills"), "dir");
-  const { skills, warnings } = await discoverSkills(project, { home });
+  const { skills, warnings } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.equal(skills.length, 1);
   assert.equal(skills[0].path, file);
   assert.deepEqual(warnings, []);
@@ -67,11 +67,11 @@ test("follows nested and symlinked skill directories without looping or duplicat
 
 test("missing directories are harmless and malformed or oversized skills do not hide valid skills", async (t) => {
   const { project, home, skill } = await fixture(t);
-  assert.deepEqual(await discoverSkills(project, { home }), { skills: [], warnings: [] });
+  assert.deepEqual(await discoverSkills(project, { home, bundledDirectory: null }), { skills: [], warnings: [] });
   await skill(project, ".agents", "bad", '---\nname: [broken\n---\nBody');
   await skill(project, ".agents", "large", "x".repeat(256 * 1024 + 1));
   await skill(project, ".agents", "valid", "Valid");
-  const { skills, warnings } = await discoverSkills(project, { home });
+  const { skills, warnings } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.deepEqual(skills.map((item) => item.name), ["valid"]);
   assert.equal(warnings.length, 2);
 });
@@ -80,8 +80,8 @@ test("changing workspaces does not reuse skills from the previous workspace", as
   const { root, project, home, skill } = await fixture(t);
   await skill(project, ".agents", "first", "First");
   await skill(home, ".agents", "shared", "Shared");
-  await discoverSkills(project, { home });
-  const { skills } = await discoverSkills(path.join(root, "second"), { home });
+  await discoverSkills(project, { home, bundledDirectory: null });
+  const { skills } = await discoverSkills(path.join(root, "second"), { home, bundledDirectory: null });
   assert.deepEqual(skills.map((item) => item.name), ["shared"]);
 });
 
@@ -90,13 +90,13 @@ test("expands requested skills once, preserving arguments and reference director
   const file = await skill(home, ".gemini", "review", "Review the diff. Read references/checklist.md.");
   await skill(project, ".agents", "unused", "DO NOT INCLUDE THIS");
   const prompt = "/review src/main.ts\nAlso /review";
-  const expanded = await expandSkillPrompt(project, prompt, { home });
+  const expanded = await expandSkillPrompt(project, prompt, { home, bundledDirectory: null });
   assert.ok(expanded.startsWith(prompt));
   assert.ok(expanded.includes(`Resolve relative references from: ${path.dirname(file)}`));
   assert.equal(expanded.split("Review the diff.").length, 2);
   assert.ok(!expanded.includes("DO NOT INCLUDE THIS"));
   await fs.writeFile(file, "Updated instructions");
-  assert.ok((await expandSkillPrompt(project, "/review", { home })).includes("Updated instructions"));
+  assert.ok((await expandSkillPrompt(project, "/review", { home, bundledDirectory: null })).includes("Updated instructions"));
 });
 
 test("does not treat paths, URLs, inline code or fenced code as invocations", async (t) => {
@@ -104,22 +104,47 @@ test("does not treat paths, URLs, inline code or fenced code as invocations", as
   await skill(project, ".agents", "review", "Instructions");
   const prompt = "Open /review/file and https://host/review. ` /review `\n```sh\n/review\n```\n~~~\n/review\n~~~";
   assert.deepEqual([...skillCommands(prompt)], []);
-  assert.equal(await expandSkillPrompt(project, prompt, { home }), prompt);
-  assert.equal(await expandSkillPrompt(project, "/unknown", { home }), "/unknown");
+  assert.equal(await expandSkillPrompt(project, prompt, { home, bundledDirectory: null }), prompt);
+  assert.equal(await expandSkillPrompt(project, "/unknown", { home, bundledDirectory: null }), "/unknown");
 });
 
 test("rejects relative workspace paths and limits combined skill context", async (t) => {
   const { project, home, skill } = await fixture(t);
-  await assert.rejects(discoverSkills("relative", { home }), /absolute workspace/);
+  await assert.rejects(discoverSkills("relative", { home, bundledDirectory: null }), /absolute workspace/);
   await skill(project, ".agents", "one", "a".repeat(150 * 1024));
   await skill(project, ".agents", "two", "b".repeat(150 * 1024));
-  await assert.rejects(expandSkillPrompt(project, "/one /two", { home }), /too large/);
+  await assert.rejects(expandSkillPrompt(project, "/one /two", { home, bundledDirectory: null }), /too large/);
 });
 
 test("tolerates unquoted colons in descriptions used by installed skills", async (t) => {
   const { project, home, skill } = await fixture(t);
   await skill(home, ".agents", "shipit", "---\nname: shipit\ndescription: Open a PR. Usage: /shipit [draft]\nargument-hint: [draft] [skip-checks]\n---\nInstructions");
-  const { skills, warnings } = await discoverSkills(project, { home });
+  const { skills, warnings } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.deepEqual(warnings, []);
   assert.equal(skills[0].description, "Open a PR. Usage: /shipit [draft]");
+});
+
+
+test("bundles tldr with its checklist for machines without installed skills", async (t) => {
+  const { project, home } = await fixture(t);
+  const { skills, warnings } = await discoverSkills(project, { home });
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(skills.map(({ name, scope, provider }) => ({ name, scope, provider })), [
+    { name: "tldr", scope: "bundled", provider: "milagre" },
+  ]);
+  const expanded = await expandSkillPrompt(project, "/tldr Rewrite this paragraph", { home });
+  assert.ok(expanded.startsWith("/tldr Rewrite this paragraph"));
+  assert.ok(expanded.includes(await fs.readFile(skills[0].path, "utf8")));
+  assert.ok((await fs.readFile(path.join(path.dirname(skills[0].path), "eval.md"), "utf8")).includes("# tldr eval"));
+});
+
+test("installed tldr overrides the bundled slash skill without duplicates", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  const file = await skill(home, ".agents", "tldr", "My custom writing rules");
+  const { skills } = await discoverSkills(project, { home });
+  assert.equal(skills.filter((item) => item.name === "tldr").length, 1);
+  assert.equal(skills.find((item) => item.name === "tldr").path, file);
+  const expanded = await expandSkillPrompt(project, "/tldr", { home });
+  assert.ok(expanded.includes("My custom writing rules"));
+  assert.ok(!expanded.includes("Two passes fused"));
 });

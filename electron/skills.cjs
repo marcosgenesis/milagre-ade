@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const { parse } = require("yaml");
+const { BUNDLED_SKILLS_DIRECTORY } = require("./bundled-skills.cjs");
 
 const SKILL_DIRECTORIES = [".agents", ".claude", ".gemini", ".codex"];
 const MAX_SKILL_BYTES = 256 * 1024;
@@ -42,7 +43,7 @@ function metadata(content, file) {
   return { name, description };
 }
 
-async function discoverSkills(projectPath, { home = os.homedir() } = {}) {
+async function discoverSkills(projectPath, { home = os.homedir(), bundledDirectory = BUNDLED_SKILLS_DIRECTORY } = {}) {
   if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("An absolute workspace path is required");
   const skills = new Map();
   const visited = new Set();
@@ -87,6 +88,7 @@ async function discoverSkills(projectPath, { home = os.homedir() } = {}) {
   for (const [base, scope] of [[projectPath, "workspace"], [home, "user"]]) {
     for (const directory of SKILL_DIRECTORIES) await walk(path.join(base, directory, "skills"), scope, directory.slice(1));
   }
+  if (bundledDirectory) await walk(bundledDirectory, "bundled", "milagre");
   return { skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name)), warnings };
 }
 

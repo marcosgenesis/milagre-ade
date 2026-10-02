@@ -1,7 +1,7 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
+const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 
@@ -53,8 +53,8 @@ function userMessage(prompt, images = []) {
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class ClaudeSession {
-  constructor({ cwd, resumeId, command, emit, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
-    Object.assign(this, { cwd, resumeId, command, emit, loadSdk, spawnImpl, interruptGraceMs });
+  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
+    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, loadSdk, spawnImpl, interruptGraceMs });
     this.state = { sessionId: resumeId ?? null, turnId: null, hasText: false };
     this.query = null;
     this.inbox = null;
@@ -214,7 +214,7 @@ class ClaudeSession {
         includePartialMessages: true,
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
-        systemPrompt: { type: "preset", preset: "claude_code", append: MILAGRE_INSTRUCTIONS },
+        systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled) },
         canUseTool: (toolName, input, options) => (toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options)),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.

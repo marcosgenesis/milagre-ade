@@ -146,10 +146,10 @@ function fakeSdk(script) {
   return { calls, loadSdk: async () => ({ query }) };
 }
 
-function claude(t, { script = scripts.reply, resumeId, command = "/usr/local/bin/claude", interruptGraceMs } = {}) {
+function claude(t, { script = scripts.reply, resumeId, tldrEnabled, command = "/usr/local/bin/claude", interruptGraceMs } = {}) {
   const sdk = fakeSdk(script);
   const events = [];
-  const session = new ClaudeSession({ cwd: "/repo", resumeId, command, emit: (event) => events.push(event), loadSdk: sdk.loadSdk, interruptGraceMs });
+  const session = new ClaudeSession({ cwd: "/repo", resumeId, tldrEnabled, command, emit: (event) => events.push(event), loadSdk: sdk.loadSdk, interruptGraceMs });
   t.after(() => session.close());
   return { session, events, calls: sdk.calls };
 }
@@ -792,4 +792,16 @@ test("a login failure on a later turn keeps the chat's id, and only a fresh logg
   await waitUntil(() => session.closed);
   assert.equal(events.some((event) => event.type === "session-reset"), false);
   assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
+});
+
+
+test("TLDR can be disabled when starting or resuming Claude", async (t) => {
+  for (const resumeId of [undefined, "session-existing"]) {
+    const { session, events, calls } = claude(t, { tldrEnabled: false, resumeId });
+    await session.startTurn(TURN);
+    await ended(events);
+    assert.ok(!calls.options.systemPrompt.append.includes("# tldr eval"));
+    assert.match(calls.options.systemPrompt.append, /TLDR.*disabled/);
+    assert.equal(calls.options.resume, resumeId);
+  }
 });

@@ -25,7 +25,16 @@
 
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
-const MILAGRE_INSTRUCTIONS = "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did. When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.";
+const { bundledWritingInstructions } = require("../bundled-skills.cjs");
+const TLDR_INSTRUCTIONS = bundledWritingInstructions();
+function milagreInstructions(tldrEnabled = true) {
+  return [
+    "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
+    tldrEnabled ? TLDR_INSTRUCTIONS : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
+    "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
+  ].join("\n\n");
+}
+const MILAGRE_INSTRUCTIONS = milagreInstructions();
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 
@@ -240,4 +249,4 @@ function codexReasoning(method, item, state) {
   return [...started, { type: "step-completed", ...thinkingEnd(id, startedAt === undefined ? undefined : now(state) - startedAt, summary) }];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, cliBrokenMessage, failedWith, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+module.exports = { MILAGRE_INSTRUCTIONS, milagreInstructions, RESUME_FAILED_MESSAGE, cliBrokenMessage, failedWith, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage };

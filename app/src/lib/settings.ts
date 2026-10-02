@@ -22,6 +22,8 @@ export interface AppSettings {
   editorId: string;
   /** Applies to Claude only; Codex is unchanged. */
   claudeReplies: ClaudeReplies;
+  /** Apply TLDR writing rules to both providers. */
+  tldrEnabled: boolean;
 }
 
 const STORAGE_KEY = "milagre-settings";
@@ -29,7 +31,7 @@ const LEGACY_THEME_KEY = "milagre-theme";
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
 const USAGE_DISPLAYS: UsageDisplay[] = ["used", "remaining"];
 const CLAUDE_REPLIES: ClaudeReplies[] = ["concise", "normal"];
-const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, keepAwake: true, editorId: "", claudeReplies: "concise" };
+const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true };
 
 function load(): AppSettings {
   try {
@@ -47,6 +49,7 @@ function load(): AppSettings {
       notifyWhenWaiting: typeof saved.notifyWhenWaiting === "boolean" ? saved.notifyWhenWaiting : DEFAULTS.notifyWhenWaiting,
       keepAwake: typeof saved.keepAwake === "boolean" ? saved.keepAwake : DEFAULTS.keepAwake,
       editorId: typeof saved.editorId === "string" ? saved.editorId : DEFAULTS.editorId,
+      tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
     };
   } catch {

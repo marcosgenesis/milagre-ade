@@ -4,8 +4,14 @@ export type RecentProject = { path: string; name: string; openedAt: string };
 /** One project row in the project menu. */
 export type ProjectRow = { path: string; name: string; initial: string; current: boolean };
 
-/** What a click in the project menu asks for: another listed project, or the folder dialog. */
-export type SwitchTarget = { kind: "project"; path: string } | { kind: "open" };
+/**
+ * What a click in the project menu asks for: another listed project, the folder dialog, or a project already
+ * picked in the dialog while a turn started (the switch stopped to ask about it).
+ */
+export type SwitchTarget = { kind: "project"; path: string } | { kind: "open" } | { kind: "loaded"; path: string; name: string };
+
+/** The chat a switch asks about, and whether it waits on an approval or a question rather than working. */
+export type RunningChat = { title: string; waiting: boolean };
 
 /** The letter shown for a project without an avatar. */
 export function projectInitial(name: string): string {
@@ -32,24 +38,27 @@ export function projectRows({ recent, currentPath, currentName }: { recent: Rece
 }
 
 export function sameTarget(a: SwitchTarget, b: SwitchTarget): boolean {
-  return a.kind === "open" ? b.kind === "open" : b.kind === "project" && a.path === b.path;
+  return a.kind === b.kind && (a.kind === "open" || a.path === (b as { path: string }).path);
 }
 
 /**
  * What a click in the project menu does. With no turn running it goes at once. While one runs, the first click
  * asks (`armed` is what was asked about) and a second click on the same choice goes; a different choice asks again.
  */
-export function switchStep(armed: SwitchTarget | null, target: SwitchTarget, runningChat: string | null): { go: SwitchTarget } | { ask: SwitchTarget } {
-  return runningChat === null || (armed !== null && sameTarget(armed, target)) ? { go: target } : { ask: target };
+export function switchStep(armed: SwitchTarget | null, target: SwitchTarget, turnRunning: boolean): { go: SwitchTarget } | { ask: SwitchTarget } {
+  return !turnRunning || (armed !== null && sameTarget(armed, target)) ? { go: target } : { ask: target };
 }
 
 /** The chat a switch asks about: the first (most recent) one with a turn running or waiting on you, or null. */
-export function runningChatTitle(chats: Array<{ label: string; mark?: string }>): string | null {
-  return chats.find((chat) => chat.mark === "running" || chat.mark === "waiting")?.label ?? null;
+export function runningChat(chats: Array<{ label: string; mark?: string }>): RunningChat | null {
+  const chat = chats.find((item) => item.mark === "running" || item.mark === "waiting");
+  return chat ? { title: chat.label, waiting: chat.mark === "waiting" } : null;
 }
 
-export function switchQuestion(chat: string): string {
-  const name = chat.trim();
-  // A chat named after a sentence ("Fix the login.") keeps its own end mark instead of gaining a second.
+export function switchQuestion(chat: RunningChat): string {
+  const name = chat.title.trim();
+  // A chat named after a sentence ("Fix the login.") keeps its own end mark instead of gaining a second; as the
+  // subject of "is waiting for you" it loses a final period.
+  if (chat.waiting) return `${name.replace(/[.…]+$/, "")} is waiting for you. Switch anyway?`;
   return `A turn is running in ${name}${/[.!?…]$/.test(name) ? "" : "."} Switch anyway?`;
 }

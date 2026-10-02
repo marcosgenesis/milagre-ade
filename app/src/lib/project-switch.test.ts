@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyAgentEvent, chatInProject, chatKey, startRun } from "./agent-runs.ts";
-import { changeProject, stopTurns } from "./project-switch.ts";
+import { changeProject, createProjectSwitcher, stopTurns } from "./project-switch.ts";
 import type { CoordinatorState } from "../model";
 
 const instant = async () => {};
@@ -49,17 +49,67 @@ test("a turn that won't end doesn't hold the switch past the timeout", async () 
   assert.equal(waited, 1000);
 });
 
-test("a switch stops the open project's turns only once the new project has loaded, then opens it", async () => {
+test("a turn that starts during the stop wait is stopped too, and the switch waits for it", async () => {
+  const running = new Set(["/a#1"]);
   const calls: string[] = [];
-  const opened = await changeProject({
-    currentPath: "/a",
-    load: async () => { calls.push("load"); return { path: "/b" }; },
-    stop: async (projectPath) => { calls.push(`stop ${projectPath}`); },
-    adopt: (project) => { calls.push(`adopt ${project.path}`); },
+  let waits = 0;
+  const ended = await stopTurns({
+    chatIds: [...running],
+    interrupt: async (chatId) => { calls.push(`interrupt ${chatId}`); },
+    remaining: () => [...running],
+    sleep: async () => {
+      waits += 1;
+      // The first wait: chat 1 ends and a turn starts in chat 4 (one the agent began itself). Then chat 4 ends.
+      if (waits === 1) {
+        running.delete("/a#1");
+        running.add("/a#4");
+      } else running.delete("/a#4");
+    },
   });
 
-  assert.deepEqual(opened, { path: "/b" });
-  assert.deepEqual(calls, ["load", "stop /a", "adopt /b"]);
+  assert.equal(ended, true);
+  assert.deepEqual(calls, ["interrupt /a#1", "interrupt /a#4"]);
+});
+
+// What a switch touches, recorded in order. `running` is whether a turn runs in the open project.
+function fakes(overrides: { running?: () => boolean; load?: () => Promise<{ path: string } | null>; stop?: (path: string) => Promise<void>; asked?: boolean } = {}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    options: {
+      currentPath: "/a",
+      load: overrides.load ?? (async () => { calls.push("load"); return { path: "/b" }; }),
+      mayStop: () => overrides.asked === true || !(overrides.running?.() ?? false),
+      ask: (project: { path: string }) => { calls.push(`ask ${project.path}`); },
+      stop: overrides.stop ?? (async (path: string) => { calls.push(`stop ${path}`); }),
+      adopt: (project: { path: string }) => { calls.push(`adopt ${project.path}`); },
+    },
+  };
+}
+
+test("a switch stops the open project's turns only once the new project has loaded, then opens it", async () => {
+  // The user was asked (or nothing ran): the turns are stopped, then the project shows.
+  for (const [label, overrides] of [["asked", { running: () => true, asked: true }], ["nothing running", {}]] as const) {
+    const { calls, options } = fakes(overrides);
+    assert.deepEqual(await changeProject(options), { path: "/b" }, label);
+    assert.deepEqual(calls, ["load", "stop /a", "adopt /b"], label);
+  }
+});
+
+test("a turn that starts while the dialog is open makes the switch ask instead of stopping it", async () => {
+  let running = false;
+  const { calls, options } = fakes({
+    running: () => running,
+    // The dialog is not modal: a message is sent from the window while it is open.
+    load: async () => {
+      calls.push("load");
+      running = true;
+      return { path: "/b" };
+    },
+  });
+
+  assert.equal(await changeProject(options), null);
+  assert.deepEqual(calls, ["load", "ask /b"]);
 });
 
 test("a cancelled dialog, the same project or a refused switch leaves the turns running", async () => {
@@ -67,20 +117,54 @@ test("a cancelled dialog, the same project or a refused switch leaves the turns 
     ["cancelled", async () => null],
     ["same project", async () => ({ path: "/a" })],
   ] as const) {
-    const calls: string[] = [];
-    const opened = await changeProject({ currentPath: "/a", load, stop: async (path) => { calls.push(`stop ${path}`); }, adopt: (project) => { calls.push(`adopt ${project.path}`); } });
-    assert.equal(opened, null, label);
+    const { calls, options } = fakes({ running: () => true, asked: true, load });
+    assert.equal(await changeProject(options), null, label);
     assert.deepEqual(calls, [], label);
   }
 
-  const calls: string[] = [];
-  await assert.rejects(changeProject({
-    currentPath: "/a",
-    load: async () => { throw new Error("That folder isn't a project"); },
-    stop: async (path) => { calls.push(`stop ${path}`); },
-    adopt: (project: { path: string }) => { calls.push(`adopt ${project.path}`); },
-  }), /That folder isn't a project/);
+  const { calls, options } = fakes({ running: () => true, asked: true, load: async () => { throw new Error("That folder isn't a project"); } });
+  await assert.rejects(changeProject(options), /That folder isn't a project/);
   assert.deepEqual(calls, []);
+});
+
+test("sends are refused while the turns are stopped for a switch, and go again once it is over", async () => {
+  const switcher = createProjectSwitcher();
+  const seen: string[] = [];
+  const { options } = fakes({
+    load: async () => {
+      // While the dialog is open the window keeps working (a turn started now makes the switch ask).
+      seen.push(`dialog: ${switcher.canSend()}`);
+      return { path: "/b" };
+    },
+    stop: async () => {
+      // A message sent during the stop wait would start a turn behind the stop: it is refused.
+      seen.push(`stop wait: ${switcher.canSend()}`);
+    },
+  });
+
+  await switcher.change(options);
+
+  assert.deepEqual(seen, ["dialog: true", "stop wait: false"]);
+  assert.equal(switcher.canSend(), true);
+
+  // A switch that fails while stopping lets sends go again too.
+  const failing = fakes({ stop: async () => { throw new Error("boom"); } });
+  await assert.rejects(switcher.change(failing.options), /boom/);
+  assert.equal(switcher.canSend(), true);
+});
+
+test("one switch at a time: a second one while the first runs is ignored", async () => {
+  const switcher = createProjectSwitcher();
+  let finishLoad: (project: { path: string }) => void = () => {};
+  const first = fakes({ load: () => new Promise((resolve) => { finishLoad = resolve; }) });
+  const second = fakes();
+
+  const running = switcher.change(first.options);
+  assert.equal(await switcher.change(second.options), undefined);
+  assert.deepEqual(second.calls, []);
+  finishLoad({ path: "/b" });
+  assert.deepEqual(await running, { path: "/b" });
+  assert.deepEqual(first.calls, ["stop /a", "adopt /b"]);
 });
 
 function state(chatIds: number[]): CoordinatorState {

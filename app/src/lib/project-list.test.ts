@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectRows, runningChatTitle, switchQuestion, switchStep, type RecentProject } from "./project-list.ts";
+import { projectRows, runningChat, switchQuestion, switchStep, type RecentProject } from "./project-list.ts";
 
 const recent: RecentProject[] = [
   { path: "/code/milagre-ade", name: "milagre-ade", openedAt: "2026-10-02T10:00:00.000Z" },
@@ -46,34 +46,43 @@ test("a switch asks first only while a turn is running", () => {
   const happiergym = { kind: "project", path: "/code/happiergym" } as const;
   const rdMobile = { kind: "project", path: "/code/rd-mobile" } as const;
   const open = { kind: "open" } as const;
+  const loaded = { kind: "loaded", path: "/code/picked", name: "picked" } as const;
 
   // Nothing running: every click goes at once.
-  assert.deepEqual(switchStep(null, happiergym, null), { go: happiergym });
-  assert.deepEqual(switchStep(null, open, null), { go: open });
+  assert.deepEqual(switchStep(null, happiergym, false), { go: happiergym });
+  assert.deepEqual(switchStep(null, open, false), { go: open });
 
   // A turn running: the first click asks, a second click on the same choice goes.
-  assert.deepEqual(switchStep(null, happiergym, "Fix login"), { ask: happiergym });
-  assert.deepEqual(switchStep(happiergym, { kind: "project", path: "/code/happiergym" }, "Fix login"), { go: happiergym });
-  assert.deepEqual(switchStep(null, open, "Fix login"), { ask: open });
-  assert.deepEqual(switchStep(open, open, "Fix login"), { go: open });
+  assert.deepEqual(switchStep(null, happiergym, true), { ask: happiergym });
+  assert.deepEqual(switchStep(happiergym, { kind: "project", path: "/code/happiergym" }, true), { go: happiergym });
+  assert.deepEqual(switchStep(null, open, true), { ask: open });
+  assert.deepEqual(switchStep(open, open, true), { go: open });
+  // A project picked in the dialog while a turn started is asked about the same way.
+  assert.deepEqual(switchStep(loaded, { kind: "loaded", path: "/code/picked", name: "picked" }, true), { go: loaded });
 
   // Picking something else after the question asks about that instead.
-  assert.deepEqual(switchStep(happiergym, rdMobile, "Fix login"), { ask: rdMobile });
-  assert.deepEqual(switchStep(happiergym, open, "Fix login"), { ask: open });
-  assert.deepEqual(switchStep(open, happiergym, "Fix login"), { ask: happiergym });
+  assert.deepEqual(switchStep(happiergym, rdMobile, true), { ask: rdMobile });
+  assert.deepEqual(switchStep(happiergym, open, true), { ask: open });
+  assert.deepEqual(switchStep(open, happiergym, true), { ask: happiergym });
+  assert.deepEqual(switchStep(loaded, open, true), { ask: open });
 
   // The turn ended after the question: the next click goes where it points.
-  assert.deepEqual(switchStep(happiergym, rdMobile, null), { go: rdMobile });
+  assert.deepEqual(switchStep(happiergym, rdMobile, false), { go: rdMobile });
 });
 
-test("the question names the chat whose turn is running", () => {
-  assert.equal(runningChatTitle([]), null);
-  assert.equal(runningChatTitle([{ label: "Idle", mark: "idle" }, { label: "Read", mark: "unread" }, { label: "Plain" }]), null);
-  assert.equal(runningChatTitle([{ label: "Read", mark: "unread" }, { label: "Fix login", mark: "running" }, { label: "Ask", mark: "waiting" }]), "Fix login");
-  // A turn waiting on an approval or a question is still running.
-  assert.equal(runningChatTitle([{ label: "Ask", mark: "waiting" }, { label: "Fix login", mark: "running" }]), "Ask");
-  assert.equal(switchQuestion("Fix login"), "A turn is running in Fix login. Switch anyway?");
+test("the question names the chat whose turn is running, or that waits for you", () => {
+  assert.equal(runningChat([]), null);
+  assert.equal(runningChat([{ label: "Idle", mark: "idle" }, { label: "Read", mark: "unread" }, { label: "Plain" }]), null);
+  assert.deepEqual(runningChat([{ label: "Read", mark: "unread" }, { label: "Fix login", mark: "running" }, { label: "Ask", mark: "waiting" }]), { title: "Fix login", waiting: false });
+  // A turn waiting on an approval or a question is still running; the most recent chat is named.
+  assert.deepEqual(runningChat([{ label: "Ask", mark: "waiting" }, { label: "Fix login", mark: "running" }]), { title: "Ask", waiting: true });
+
+  assert.equal(switchQuestion({ title: "Fix login", waiting: false }), "A turn is running in Fix login. Switch anyway?");
   // A chat named after a sentence keeps its own end mark instead of gaining a second one.
-  assert.equal(switchQuestion("Reply with just the word gamma."), "A turn is running in Reply with just the word gamma. Switch anyway?");
-  assert.equal(switchQuestion("Why does login fail? "), "A turn is running in Why does login fail? Switch anyway?");
+  assert.equal(switchQuestion({ title: "Reply with just the word gamma.", waiting: false }), "A turn is running in Reply with just the word gamma. Switch anyway?");
+  assert.equal(switchQuestion({ title: "Why does login fail? ", waiting: false }), "A turn is running in Why does login fail? Switch anyway?");
+
+  // Waiting on an approval or a question.
+  assert.equal(switchQuestion({ title: "Fix login", waiting: true }), "Fix login is waiting for you. Switch anyway?");
+  assert.equal(switchQuestion({ title: "Reply with just the word gamma.", waiting: true }), "Reply with just the word gamma is waiting for you. Switch anyway?");
 });

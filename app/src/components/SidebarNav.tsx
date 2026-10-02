@@ -22,7 +22,7 @@ import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
-import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type SwitchTarget } from "@/lib/project-list";
+import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type RunningChat, type SwitchTarget } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
@@ -74,7 +74,8 @@ const DEFAULT_RECENTS: SidebarRecent[] = [
 type SidebarNavProps = {
   workspaceName?: string;
   workspaceImage?: string | null;
-  onOpenProject?: () => void;
+  /** Runs the folder dialog; `confirmed` when the menu asked first about a running turn and the user said go. */
+  onOpenProject?: (confirmed?: boolean) => void;
   activeTitle?: string | null;
   /** Controlled selection of a recent by id; takes precedence over title matching. */
   activeId?: string | null;
@@ -85,12 +86,14 @@ type SidebarNavProps = {
   onOpenSettings?: () => void;
   /** The project folder, for the project menu's reveal and copy path. */
   projectPath?: string;
-  /** Opens a project from the recent list in the project menu. */
-  onSwitchProject?: (path: string) => void;
-  /** The chat with a turn running in the open project: while there is one, switching projects asks first. */
-  runningChat?: string | null;
-  /** Each change opens the project menu asking about "Open project…" (⌘O while a turn runs). */
-  askToOpenProject?: number;
+  /** Opens a project from the recent list in the project menu; `confirmed` as for onOpenProject. */
+  onSwitchProject?: (path: string, confirmed: boolean) => void;
+  /** Opens the project picked in the dialog that the menu then asked about (a turn started while it was open). */
+  onOpenPicked?: (path: string) => void;
+  /** The chat with a turn running (or waiting on you) in the open project: while there is one, switching asks first. */
+  runningChat?: RunningChat | null;
+  /** Each new request opens the project menu asking about its target (⌘O while a turn runs, or a turn that started while the dialog was open). */
+  askToSwitch?: { seq: number; target: SwitchTarget } | null;
   onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
@@ -210,6 +213,7 @@ function WorkspaceMenu({
   initialAsk,
   onSwitchProject,
   onOpenProject,
+  onOpenPicked,
   onForgetProject,
 }: {
   position: { top: number; left: number };
@@ -218,11 +222,12 @@ function WorkspaceMenu({
   projectPath?: string;
   onOpenProjectSettings?: () => void;
   projects: ProjectRow[];
-  runningChat: string | null;
+  runningChat: RunningChat | null;
   /** What the menu opens asking about, if anything. */
   initialAsk: SwitchTarget | null;
-  onSwitchProject?: (path: string) => void;
-  onOpenProject?: () => void;
+  onSwitchProject?: (path: string, confirmed: boolean) => void;
+  onOpenProject?: (confirmed?: boolean) => void;
+  onOpenPicked?: (path: string) => void;
   onForgetProject?: (path: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -235,13 +240,16 @@ function WorkspaceMenu({
     (menu?.querySelector<HTMLElement>("[data-switch-confirm]") ?? menu?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)"))?.focus();
   }, [asking]);
 
+  // With a turn running, a choice only goes once the question was answered: the switch may stop it.
   const go = (target: SwitchTarget) => {
     onClose();
-    if (target.kind === "open") onOpenProject?.();
-    else onSwitchProject?.(target.path);
+    const confirmed = runningChat !== null;
+    if (target.kind === "open") onOpenProject?.(confirmed);
+    else if (target.kind === "project") onSwitchProject?.(target.path, confirmed);
+    else onOpenPicked?.(target.path);
   };
   const choose = (target: SwitchTarget) => {
-    const step = switchStep(asking, target, runningChat);
+    const step = switchStep(asking, target, runningChat !== null);
     if ("go" in step) go(step.go);
     else setAsking(step.ask);
   };
@@ -256,6 +264,9 @@ function WorkspaceMenu({
     onForgetProject?.(path);
   };
   const isAsking = (target: SwitchTarget) => asking !== null && runningChat !== null && sameTarget(asking, target);
+  // The project picked in the dialog sits under "Open project…". If its turn ended meanwhile, it just opens.
+  const picked = asking?.kind === "loaded" ? asking : null;
+  const openTarget: SwitchTarget = picked ?? { kind: "open" };
   const question = (target: SwitchTarget) => isAsking(target) && runningChat !== null && (
     <div data-switch-question>
       <p className="px-2 pb-1 pt-1.5 text-[12px] leading-snug text-ink-3">{switchQuestion(runningChat)}</p>
@@ -381,12 +392,25 @@ function WorkspaceMenu({
           role="menuitem"
           type="button"
           onClick={() => choose({ kind: "open" })}
-          className={`relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking({ kind: "open" }) ? "bg-hover-2" : ""}`}
+          className={`relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking(openTarget) ? "bg-hover-2" : ""}`}
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
-        {question({ kind: "open" })}
+        {question(openTarget)}
+        {picked && runningChat === null && (
+          <button
+            data-menu-row
+            data-open-picked
+            role="menuitem"
+            type="button"
+            onClick={() => go(picked)}
+            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><HugeIcon icon={FolderOpenIcon} size={16} /></span>
+            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open {picked.name}</span>
+          </button>
+        )}
       </GlideMenu>
     </div>,
     document.body,
@@ -407,8 +431,9 @@ export default function SidebarNav({
   projectPath,
   onOpenProjectSettings,
   onSwitchProject,
+  onOpenPicked,
   runningChat = null,
-  askToOpenProject = 0,
+  askToSwitch = null,
   recents = DEFAULT_RECENTS,
   chatActions = {},
   usage,
@@ -452,13 +477,13 @@ export default function SidebarNav({
     setWorkspaceOpen(true);
   };
 
-  // ⌘O while a turn runs: the menu opens with "Open project…" asking first.
-  const seenAsk = useRef(askToOpenProject);
+  // ⌘O while a turn runs, or a turn that started while the dialog was open: the menu opens asking first.
+  const seenAsk = useRef(askToSwitch?.seq ?? 0);
   useEffect(() => {
-    if (askToOpenProject === seenAsk.current) return;
-    seenAsk.current = askToOpenProject;
-    openWorkspaceMenu({ kind: "open" });
-  }, [askToOpenProject]);
+    if (!askToSwitch || askToSwitch.seq === seenAsk.current) return;
+    seenAsk.current = askToSwitch.seq;
+    openWorkspaceMenu(askToSwitch.target);
+  }, [askToSwitch]);
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -564,6 +589,7 @@ export default function SidebarNav({
               initialAsk={workspaceAsk}
               onSwitchProject={onSwitchProject}
               onOpenProject={onOpenProject}
+              onOpenPicked={onOpenPicked}
               onForgetProject={forgetProject}
               onClose={() => setWorkspaceOpen(false)}
             />

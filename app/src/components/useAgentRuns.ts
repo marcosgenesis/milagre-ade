@@ -68,6 +68,9 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
 
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
 
+  /** The project's chats with a turn running right now (the rendered runs can lag behind an event). */
+  const runningIn = useCallback((path: string) => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId)), []);
+
   /** Stops the project's turns and waits (5 seconds at most) until they have ended, each reply so far saved in its chat. */
   const stopProject = useCallback((path: string) => {
     const running = () => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId));
@@ -107,5 +110,5 @@ export function useAgentRuns(projectPath: string, getState: () => CoordinatorSta
   /** Sends the answers to a question, or dismisses it (null). */
   const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
 
-  return { runs, start, interrupt, stopProject, respond, answerQuestion, splitForSteer };
+  return { runs, start, interrupt, runningIn, stopProject, respond, answerQuestion, splitForSteer };
 }

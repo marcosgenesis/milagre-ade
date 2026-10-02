@@ -38,8 +38,8 @@ import { DotBackground } from "./components/DotBackground";
 import SidebarNav from "./components/SidebarNav";
 import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
-import { runningChatTitle } from "./lib/project-list";
-import { changeProject } from "./lib/project-switch";
+import { runningChat as chatToAskAbout, type SwitchTarget } from "./lib/project-list";
+import { createProjectSwitcher } from "./lib/project-switch";
 import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
@@ -257,10 +257,15 @@ function App() {
       });
   }, [state, waiting, running]);
   // Switching projects asks first while a turn runs here (the project menu says which chat).
-  const runningChat = useMemo(() => runningChatTitle(chats), [chats]);
+  const runningChat = useMemo(() => chatToAskAbout(chats), [chats]);
   const runningChatRef = useRef(runningChat);
   runningChatRef.current = runningChat;
-  const [askToOpenProject, setAskToOpenProject] = useState(0);
+  // Opens the project menu asking about a switch: ⌘O while a turn runs, or a turn that started during the dialog.
+  const [askToSwitch, setAskToSwitch] = useState<{ seq: number; target: SwitchTarget } | null>(null);
+  const askInMenu = (target: SwitchTarget) => {
+    setView("chat");
+    setAskToSwitch((previous) => ({ seq: (previous?.seq ?? 0) + 1, target }));
+  };
 
   // Chat row actions build on the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: Parameters<typeof patchSession>[2]) {
@@ -399,24 +404,39 @@ function App() {
     });
   }
 
-  // Replaces the open project. Its running turns are stopped only once the next project has loaded (the menu
-  // asked first), and the switch waits for them, so each reply so far is saved in its own chat.
-  const switching = useRef(false);
-  async function replaceProject(load: () => Promise<OpenProject | null>) {
-    if (switching.current) return;
-    switching.current = true;
+  // Replaces the open project (lib/project-switch). Its running turns are stopped only once the next project has
+  // loaded and only if the menu asked (`confirmed`); a turn that started while the dialog was open makes the menu ask
+  // instead. The switch waits for the turns, so each reply so far is saved in its own chat, and sends wait it out.
+  const [switcher] = useState(createProjectSwitcher);
+  const pickedProject = useRef<OpenProject | null>(null);
+  async function replaceProject(load: () => Promise<OpenProject | null>, confirmed: boolean, askAbout: (next: OpenProject) => SwitchTarget) {
+    const currentPath = projectRef.current?.path;
     try {
-      await changeProject({ currentPath: projectRef.current?.path, load, stop: agentRuns.stopProject, adopt: adoptProject });
+      await switcher.change({
+        currentPath,
+        load,
+        mayStop: () => confirmed || !currentPath || agentRuns.runningIn(currentPath).length === 0,
+        ask: (next) => askInMenu(askAbout(next)),
+        stop: agentRuns.stopProject,
+        adopt: adoptProject,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setNotice(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
-    } finally {
-      switching.current = false;
     }
   }
 
-  const openProject = () => replaceProject(() => window.milagre.openProject());
-  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
+  // A project picked in the dialog that the menu then asks about is kept, so confirming doesn't open the dialog again.
+  const openProject = (confirmed = false) => replaceProject(() => window.milagre.openProject(), confirmed, (next) => {
+    pickedProject.current = next;
+    return { kind: "loaded", path: next.path, name: next.name };
+  });
+  const switchProject = (projectPath: string, confirmed = false) => replaceProject(() => window.milagre.switchProject(projectPath), confirmed, (next) => ({ kind: "project", path: next.path }));
+  const openPicked = (projectPath: string) => {
+    const picked = pickedProject.current;
+    pickedProject.current = null;
+    if (picked?.path === projectPath) void replaceProject(async () => picked, true, () => ({ kind: "open" }));
+  };
 
   // Where a message goes, without building state: an open chat keeps its session, a new local chat
   // (session null) gets one from the latest state at commit time, and a new chat in "New worktree"
@@ -437,6 +457,8 @@ function App() {
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images) {
     if ((!body && !images.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+    // A switch is stopping this project's turns: a new one would start behind the stop. The draft stays.
+    if (!switcher.canSend()) return;
     setPreparing(true);
     setNewChatError(null);
 
@@ -554,10 +576,8 @@ function App() {
       } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
         // While a turn runs, the project menu opens and asks first.
-        if (runningChatRef.current) {
-          setView("chat");
-          setAskToOpenProject((count) => count + 1);
-        } else void openProject();
+        if (runningChatRef.current) askInMenu({ kind: "open" });
+        else void openProject();
       }
     }
 
@@ -617,7 +637,7 @@ function App() {
         fill
         workspaceName={project.name}
         workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
-        onOpenProject={() => void openProject()}
+        onOpenProject={(confirmed) => void openProject(confirmed)}
         recents={chats}
         activeId={selectedSession ? String(selectedSession.id) : null}
         onPick={(id) => openChat(Number(id))}
@@ -632,9 +652,10 @@ function App() {
         onNewChat={startNewChat}
         onOpenSettings={() => setView("settings")}
         projectPath={project.path}
-        onSwitchProject={(path) => void switchProject(path)}
+        onSwitchProject={(path, confirmed) => void switchProject(path, confirmed)}
+        onOpenPicked={openPicked}
         runningChat={runningChat}
-        askToOpenProject={askToOpenProject}
+        askToSwitch={askToSwitch}
         onOpenProjectSettings={() => { setSettingsSection("project"); setView("settings"); }}
         usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
       />

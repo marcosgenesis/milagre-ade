@@ -221,6 +221,18 @@ test("a signing failure is reported as git says it, not as a hook failure", asyn
   assert.equal(result.output, undefined);
 });
 
+test("hook output that says \"assigning\" is still a hook failure, not a signing one", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  const hooks = run(worktree, "rev-parse", "--git-path", "hooks");
+  await fs.mkdir(path.resolve(worktree, hooks), { recursive: true });
+  await fs.writeFile(path.resolve(worktree, hooks, "pre-commit"), "#!/bin/sh\necho 'checkout.js:3 error: assigning to a constant (no-const-assign)' >&2\nexit 1\n", { mode: 0o755 });
+  await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
+
+  const result = await actions.commit({ cwd: worktree, message: "feat: checkout" });
+  assert.equal(result.kind, "hook");
+  assert.match(result.output, /assigning to a constant/);
+});
+
 for (const [operation, start] of [
   ["merge", ({ worktree, fail }) => fail(worktree, "merge", "main")],
   ["cherry-pick", ({ worktree, fail }) => fail(worktree, "cherry-pick", "main")],
@@ -309,6 +321,19 @@ test("commit refuses secret-looking files and puts the index back as it was", as
   await fs.writeFile(path.join(worktree, ".gitignore"), ".env.local\n");
   assert.equal((await actions.commit({ cwd: worktree, message: "feat: checkout" })).ok, true);
   assert.deepEqual(run(worktree, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), [".gitignore", "README.md", "checkout.js"]);
+});
+
+test("a file renamed to a secret-looking name is refused too", async (t) => {
+  const { worktree, run, actions } = await fixture(t);
+  await fs.writeFile(path.join(worktree, "settings.txt"), "API_KEY=sk-live-123\n");
+  run(worktree, "add", "settings.txt");
+  run(worktree, "commit", "-m", "chore: settings");
+  run(worktree, "mv", "settings.txt", ".env");
+  const head = run(worktree, "rev-parse", "HEAD");
+
+  const result = await actions.commit({ cwd: worktree, message: "chore: move settings" });
+  assert.deepEqual(result, { ok: false, kind: "secrets", message: "These look like secrets and would be committed: .env. Add them to .gitignore, or commit them yourself if you mean to." });
+  assert.equal(run(worktree, "rev-parse", "HEAD"), head);
 });
 
 test("push publishes the branch and sets its upstream", async (t) => {
@@ -537,6 +562,21 @@ test("readTextContext names secret-looking files and lockfiles but never shows t
     { path: "deploy.pem", reason: "secret" },
     { path: "package-lock.json", reason: "lockfile" },
   ]);
+});
+
+test("one big untracked file can't crowd the others out of the diff", async (t) => {
+  const { worktree, actions } = await fixture(t);
+  // Sorted first, so it's read first.
+  await fs.writeFile(path.join(worktree, "a-big.txt"), `${"x".repeat(99)}\n`.repeat(2000));
+  await fs.writeFile(path.join(worktree, "b-small.js"), "export const small = 'SMALL-FILE-CONTENT';\n");
+  await fs.writeFile(path.join(worktree, "c-small.js"), "export const other = 'OTHER-FILE-CONTENT';\n");
+  const context = await actions.readTextContext({ cwd: worktree, base: "main" });
+  assert.match(context.diff, /\[a-big\.txt is cut off here\.\]/);
+  assert.match(context.diff, /SMALL-FILE-CONTENT/);
+  assert.match(context.diff, /OTHER-FILE-CONTENT/);
+  // The big file got a quarter of the budget, not all of it.
+  const big = context.diff.slice(0, context.diff.indexOf("[a-big.txt is cut off here.]"));
+  assert.ok(big.length < 10_500, String(big.length));
 });
 
 test("readTextContext reads no more of a large untracked file than the diff can hold", async (t) => {

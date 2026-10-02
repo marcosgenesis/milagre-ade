@@ -31,7 +31,8 @@ const HOOKS = ["pre-commit", "prepare-commit-msg", "commit-msg"];
 // Git's own reasons a commit can fail; anything else with a commit hook installed is the hook's.
 const GIT_COMMIT_ERRORS = /Please tell me who you are|Author identity unknown|nothing to commit|empty commit message|unable to auto-detect email|could not lock|index\.lock/i;
 // A signing key that can't sign (gpg, ssh) is not something the agent can fix.
-const SIGNING_ERRORS = /gpg failed|signing/i;
+// Narrow on purpose: hook output saying "assigning" or "designing" is still the hook's.
+const SIGNING_ERRORS = /gpg failed|failed to sign|signing (failed|key)/i;
 // What git leaves behind while a merge, rebase, cherry-pick or revert waits to be finished.
 const OPERATIONS = [
   ["MERGE_HEAD", "merge"],
@@ -307,7 +308,8 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
     if (!added.ok) return { ok: false, kind: "error", message: capOutput(added.stderr || added.stdout) };
     // A .milagre path staged earlier (by an agent, say) isn't the chat's work either.
     await git(cwd, hasHead ? ["reset", "-q", "--", ".milagre"] : ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".milagre"]);
-    const secrets = (await gitList(cwd, ["diff", "--cached", "--name-only", "-z", "--diff-filter=AM"])).filter(looksSecret);
+    // Without rename detection a `git mv x .env` is an added .env, not a rename that slips past the filter.
+    const secrets = (await gitList(cwd, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=AM"])).filter(looksSecret);
     if (secrets.length) {
       if (before) {
         await git(cwd, ["read-tree", before]);
@@ -415,9 +417,10 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env 
       if (untracked.length) stat = [stat, ...untracked.map((file) => ` ${file.path} (new file, ${file.added} lines)`)].filter(Boolean).join("\n");
       for (const file of untracked) {
         if (hidden.has(file.path)) continue;
-        const budget = DIFF_LIMIT - diff.length;
-        if (budget <= 0) break;
-        diff += (await newFileDiff(cwd, file.path, budget)) ?? "";
+        const remaining = DIFF_LIMIT - diff.length;
+        if (remaining <= 0) break;
+        // A quarter of what's left each, so one big file can't crowd out the rest.
+        diff += (await newFileDiff(cwd, file.path, Math.floor(remaining / 4))) ?? "";
       }
     }
     const lines = async (args) => ((await gitOut(cwd, args)) ?? "").split("\n").map((line) => line.trim()).filter(Boolean);

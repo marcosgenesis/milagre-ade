@@ -199,6 +199,12 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
   });
   const mode = repo ? modeFor(repo, turnRunning) : null;
 
+  // A failure shows below the form, so bring it into view.
+  const failureRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (failure) failureRef.current?.scrollIntoView({ block: "nearest" });
+  }, [failure]);
+
   // Only the dialog takes input while it's open: the app behind it is inert.
   useEffect(() => {
     const root = document.getElementById("root");
@@ -227,7 +233,8 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
         if (!next?.isRepo) return;
         // A running turn doesn't change which sections show, only which buttons work.
         const initial = modeFor(next, false);
-        if (!initial.showCommit && !initial.showPrFields) return;
+        // Mid-merge (or rebase…) nothing can be committed yet, and the diff holds conflict markers.
+        if (next.commitBlocked || (!initial.showCommit && !initial.showPrFields)) return;
         setGenerating(true);
         const text = await window.milagre.git.generate({ cwd, base, provider, chat }).catch(() => ({ ok: false as const, message: GENERATION_FAILED }));
         if (!mounted.current) return;
@@ -471,7 +478,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
               )}
 
               {failure && (
-                <div role="alert" data-git-failure className="grid gap-2 rounded-control border border-red/25 bg-red-tint px-3 py-2.5">
+                <div ref={failureRef} role="alert" data-git-failure className="grid gap-2 rounded-control border border-red/25 bg-red-tint px-3 py-2.5">
                   {/* Git's and gh's own output keeps its lines; a one-line reason reads as text. */}
                   {failure.output || failure.message.includes("\n") ? (
                     <>

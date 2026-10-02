@@ -42,6 +42,7 @@ const thought = (id: string, offset: number, durationMs?: number): ChatStep => (
 test("a reply's last text is its answer; everything before it is activity, in order", () => {
   const body = "Checking.\n\nNow editing.\n\nDone.";
   assert.deepEqual(replyActivity(body, [thought("t", 0), step("a", 9), step("c", 23)]), {
+    setup: [],
     activity: [
       { type: "step", step: thought("t", 0) },
       { type: "text", text: "Checking." },
@@ -54,12 +55,12 @@ test("a reply's last text is its answer; everything before it is activity, in or
 });
 
 test("a reply without steps is all answer; steps alone are all activity", () => {
-  assert.deepEqual(replyActivity("Hello"), { activity: [], answer: "Hello" });
-  assert.deepEqual(replyActivity("", [step("a", 0)]), { activity: [{ type: "step", step: step("a", 0) }], answer: "" });
+  assert.deepEqual(replyActivity("Hello"), { setup: [], activity: [], answer: "Hello" });
+  assert.deepEqual(replyActivity("", [step("a", 0)]), { setup: [], activity: [{ type: "step", step: step("a", 0) }], answer: "" });
 });
 
 test("text before steps that end the reply is still its answer", () => {
-  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), { activity: [{ type: "step", step: step("a", 15) }], answer: "Running it now." });
+  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), { setup: [], activity: [{ type: "step", step: step("a", 15) }], answer: "Running it now." });
 });
 
 test("the summary counts thinking time, files, searches, commands and tools", () => {
@@ -89,4 +90,18 @@ test("a reply that only thought surfaces its last thinking; one that wrote anyth
   const narrated = replyActivity("Checking.", [withDetail("t1", "Hm."), step("a", 9)]);
   assert.equal(unspokenThought(narrated.activity, narrated.answer), "");
   assert.equal(unspokenThought(replyActivity("", [step("a", 0)]).activity, ""), "");
+});
+
+const setupStep = (status: ChatStep["status"] = "done"): ChatStep => ({ id: "setup", kind: "setup", title: "Ran setup `npm ci`", note: "3s", status, offset: 0 });
+
+test("the worktree setup is pulled out of the activity and left out of its summary", () => {
+  const steps = [setupStep(), thought("t", 0, 4_000), step("a", 0)];
+  assert.deepEqual(replyActivity("Done.", steps), {
+    setup: [setupStep()],
+    activity: [{ type: "step", step: thought("t", 0, 4_000) }, { type: "step", step: step("a", 0) }],
+    answer: "Done.",
+  });
+  assert.deepEqual(activitySummary(steps), { text: "Thought for 4s · ran 1 command", failed: 0 });
+  assert.deepEqual(activitySummary([setupStep("failed")]), { text: "", failed: 0 });
+  assert.deepEqual(replyActivity("", [setupStep()]), { setup: [setupStep()], activity: [], answer: "" });
 });

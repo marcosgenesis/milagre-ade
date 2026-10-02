@@ -130,16 +130,18 @@ function setupNote(command, result, timeoutMs = SETUP_TIMEOUT_MS) {
   return `Note: the worktree setup command \`${command}\` ${failureReason(result, timeoutMs)}.${tail ? ` Last output:\n${tail}` : ""}`;
 }
 
+// The setup is its own kind of step: the chat shows it as a row of its own, not as one of the agent's tool calls.
 function setupStarted(id, command) {
-  return { type: "step-started", step: { id, kind: "shell", title: `Set up worktree: ${code(command)}`, detail: `$ ${command}\n` } };
+  return { type: "step-started", step: { id, kind: "setup", title: `Running setup ${code(command)}`, detail: `$ ${command}\n` } };
 }
 
 function setupCompleted(id, command, result, timeoutMs = SETUP_TIMEOUT_MS) {
   const took = formatDuration(result.durationMs);
   const failed = result.exitCode !== null && result.exitCode !== undefined ? `exited with code ${result.exitCode} after ${took}` : `failed after ${took}`;
-  const end = { done: `in ${took}`, cancelled: `stopped after ${took}`, "timed-out": `timed out after ${formatDuration(timeoutMs)}` }[result.status] ?? failed;
+  const note = { done: took, cancelled: `stopped after ${took}`, "timed-out": `timed out after ${formatDuration(timeoutMs)}` }[result.status] ?? failed;
   const why = result.status === "failed" ? `\n${result.error ?? (result.exitCode !== null ? `Exited with code ${result.exitCode}` : `Stopped by ${result.signal}`)}` : "";
-  return { type: "step-completed", id, status: result.status === "done" ? "done" : "failed", title: `Set up worktree: ${code(command)} ${end}`, detail: capOutput(`$ ${command}\n${result.output}${why}`), durationMs: result.durationMs };
+  const ok = result.status === "done";
+  return { type: "step-completed", id, status: ok ? "done" : "failed", title: `${ok ? "Ran setup" : "Setup failed"} ${code(command)}`, note, detail: capOutput(`$ ${command}\n${result.output}${why}`), durationMs: result.durationMs };
 }
 
 /**

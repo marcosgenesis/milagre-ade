@@ -62,13 +62,15 @@ test("the note for the agent names the command, why it failed, and the last 40 l
   assert.equal(outputTail("\u001b[31mred\u001b[0m", 5), "red");
 });
 
-test("the setup step reads as a shell step with how it ended", () => {
+test("the setup step is a setup step with how it ended", () => {
   const done = setupCompleted("s1", "npm ci", { status: "done", exitCode: 0, output: "added 3 packages\n", durationMs: 12_400 });
-  assert.deepEqual(done, { type: "step-completed", id: "s1", status: "done", title: "Set up worktree: `npm ci` in 12s", detail: "$ npm ci\nadded 3 packages\n", durationMs: 12_400 });
+  assert.deepEqual(done, { type: "step-completed", id: "s1", status: "done", title: "Ran setup `npm ci`", note: "12s", detail: "$ npm ci\nadded 3 packages\n", durationMs: 12_400 });
   const failed = setupCompleted("s1", "npm ci", { status: "failed", exitCode: 1, output: "boom\n", durationMs: 2000 });
   assert.equal(failed.status, "failed");
-  assert.equal(failed.title, "Set up worktree: `npm ci` exited with code 1 after 2s");
-  assert.equal(setupCompleted("s1", "npm ci", { status: "failed", exitCode: null, error: "spawn ENOENT", output: "", durationMs: 10 }).title, "Set up worktree: `npm ci` failed after 1s");
+  assert.equal(failed.title, "Setup failed `npm ci`");
+  assert.equal(failed.note, "exited with code 1 after 2s");
+  assert.equal(setupCompleted("s1", "npm ci", { status: "failed", exitCode: null, error: "spawn ENOENT", output: "", durationMs: 10 }).note, "failed after 1s");
+  assert.equal(setupCompleted("s1", "npm ci", { status: "timed-out", exitCode: null, output: "", durationMs: 10 }, 600_000).note, "timed out after 10m 0s");
   assert.equal(failed.detail, "$ npm ci\nboom\n\nExited with code 1");
 });
 
@@ -109,11 +111,13 @@ test("cancelling a chat's setup stops the tree and the turn reports it", async (
   const pid = Number(await fs.readFile(path.join(dir, "child.pid"), "utf8"));
   assert.equal(alive(pid), false);
   assert.equal(events[0].event.type, "step-started");
-  assert.equal(events[0].event.step.title, "Set up worktree: `sleep 30 & echo $! > child.pid; wait`");
+  assert.equal(events[0].event.step.title, "Running setup `sleep 30 & echo $! > child.pid; wait`");
+  assert.equal(events[0].event.step.kind, "setup");
   const end = events.at(-1).event;
   assert.equal(end.type, "step-completed");
   assert.equal(end.status, "failed");
-  assert.match(end.title, /stopped after/);
+  assert.equal(end.title, "Setup failed `sleep 30 & echo $! > child.pid; wait`");
+  assert.match(end.note, /stopped after/);
   // It ran once: the next turn finds nothing to run.
   assert.deepEqual(await setups.beforeTurn("chat#1", dir), { cancelled: false, note: "" });
 });

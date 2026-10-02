@@ -4,7 +4,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
 // its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
 // { id, status, title?, detail?, durationMs? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking"
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
 //   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
 //           the title shows only its name, and the renderer opens it in an editor from here

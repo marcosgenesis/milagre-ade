@@ -130,24 +130,50 @@ async function browserChecks() {
     console.log("PASS: the first message in a new worktree starts the turn without asking");
 
     const chatId = await evaluate(`window.calls.turns[0].chatId`);
-    await emit(chatId, { type: "step-started", step: { id: "setup-1", kind: "shell", title: "Set up worktree: `npm ci`", detail: "$ npm ci\n" } });
+    await emit(chatId, { type: "step-started", step: { id: "setup-1", kind: "setup", title: "Running setup `npm ci`", detail: "$ npm ci\n" } });
     await emit(chatId, { type: "step-output", id: "setup-1", text: "npm warn deprecated inflight@1.0.6\n" });
-    await waitFor(`document.querySelector('[data-slot="step"][data-status="running"]')?.textContent.includes('Set up worktree')`);
+    await waitFor(`document.querySelector('[data-slot="step"][data-status="running"]')?.textContent.includes('Running setup')`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-slot="step"][data-status="running"]').closest('[data-slot="activity"]')`), false);
     // The reply fades in; let it settle so the shot shows the row as it reads.
     await delay(900);
     await screenshot("setup-running");
-    console.log("PASS: the setup shows as a running step at the start of the reply");
+    console.log("PASS: the setup shows as a running row of its own at the start of the reply");
 
     await emit(chatId, { type: "step-output", id: "setup-1", text: "npm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n" });
-    await emit(chatId, { type: "step-completed", id: "setup-1", status: "failed", title: "Set up worktree: `npm ci` exited with code 1 after 4s", detail: "$ npm ci\nnpm warn deprecated inflight@1.0.6\nnpm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n\nExited with code 1", durationMs: 4200 });
+    await emit(chatId, { type: "step-completed", id: "setup-1", status: "failed", title: "Setup failed `npm ci`", note: "exited with code 1 after 4s", detail: "$ npm ci\nnpm warn deprecated inflight@1.0.6\nnpm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n\nExited with code 1", durationMs: 4200 });
     await emit(chatId, { type: "turn-started", turnId: "t1" });
     await emit(chatId, { type: "text-delta", messageId: "t1", text: "The setup failed because there is no package-lock.json. I'll run `npm install` to create one, then add the checkout page." });
     await emit(chatId, { type: "turn-completed" });
-    await waitFor(`document.querySelector('[data-slot="step"][data-status="failed"]')?.textContent.includes('exited with code 1 after 4s')`);
-    await evaluate(`[...document.querySelectorAll('[data-slot="step"] button')].find(el => el.textContent.includes('Set up worktree')).click()`);
+    await waitFor(`document.querySelector('[data-slot="step"][data-status="failed"]')?.textContent.includes('Setup failed')`);
+    assert.equal(await evaluate(`document.querySelector('[data-slot="step"][data-status="failed"]').textContent.includes('exited with code 1 after 4s')`), true);
+    await evaluate(`[...document.querySelectorAll('[data-slot="step"] button')].find(el => el.textContent.includes('Setup failed')).click()`);
     await waitFor(`document.body.textContent.includes('EUSAGE')`);
     await screenshot("setup-failed");
     console.log("PASS: a failed setup ends as a failed step with its output");
+
+    // A setup that worked, then a reply with thinking and a command: the setup stays its own row above "Thought for ...".
+    await sendInNewWorktree("Add a cart badge");
+    await waitFor(`window.calls.turns.length === 2`);
+    const second = await evaluate(`window.calls.turns[1].chatId`);
+    await emit(second, { type: "step-started", step: { id: "setup-2", kind: "setup", title: "Running setup `npm ci`", detail: "$ npm ci\n" } });
+    await emit(second, { type: "step-completed", id: "setup-2", status: "done", title: "Ran setup `npm ci`", note: "3s", detail: "$ npm ci\nadded 412 packages in 3s\n", durationMs: 3000 });
+    await emit(second, { type: "turn-started", turnId: "t2" });
+    await emit(second, { type: "step-started", step: { id: "think-1", kind: "thinking", title: "Thinking" } });
+    await emit(second, { type: "step-completed", id: "think-1", status: "done", title: "Thought", detail: "The header owns the cart count.", durationMs: 4000 });
+    await emit(second, { type: "step-started", step: { id: "cmd-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" } });
+    await emit(second, { type: "step-completed", id: "cmd-1", status: "done", title: "Ran `npm test`", detail: "$ npm test\nok\n" });
+    await emit(second, { type: "text-delta", messageId: "t2", text: "Added the cart badge to the header." });
+    await emit(second, { type: "turn-completed" });
+    await waitFor(`!!document.querySelector('[data-slot="activity"]')`);
+    await delay(900);
+    const rows = await evaluate(`(() => {
+      const setup = [...document.querySelectorAll('[data-slot="step"]')].find((el) => el.textContent.includes('Ran setup'));
+      const activity = document.querySelector('[data-slot="activity"]');
+      return { found: !!setup, inside: !!setup?.closest('[data-slot="activity"]'), before: !!(setup && activity && (setup.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING)), summary: activity?.querySelector('[role="status"]')?.textContent };
+    })()`);
+    assert.deepEqual(rows, { found: true, inside: false, before: true, summary: "Thought for 4s · ran 1 command" });
+    await screenshot("setup-done");
+    console.log("PASS: a finished setup is its own row above the activity, and the summary doesn't count it");
 
     app.exit(0);
   } catch (error) {

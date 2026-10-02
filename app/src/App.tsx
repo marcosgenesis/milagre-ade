@@ -785,7 +785,7 @@ function App() {
                 <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-xs font-medium text-ink-3 hover:text-ink">Dismiss</button>
               </div>
             )}
-            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} />
+            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>

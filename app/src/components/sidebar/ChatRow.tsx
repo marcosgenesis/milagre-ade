@@ -92,11 +92,14 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
  * accent dot, and an idle chat keeps a faint dot so labels stay
  * aligned.
  * ───────────────────────────────────────────────────────── */
-/** Marks that ask for you draw an icon, so a question and an approval read apart. */
-const MARK_ICON = { question: BubbleChatIcon, waiting: ShieldAlertIcon } satisfies Partial<Record<ChatMark, HugeIconData>>;
+/** Marks that ask for you draw an icon, so a question and an approval read apart. The shield is orange like the approval card. */
+const MARK_ICON = {
+  question: { icon: BubbleChatIcon, tone: "text-accent" },
+  waiting: { icon: ShieldAlertIcon, tone: "text-orange" },
+} satisfies Partial<Record<ChatMark, { icon: HugeIconData; tone: string }>>;
 
 function MarkIcon({ mark }: { mark: keyof typeof MARK_ICON }) {
-  return <HugeiconsIcon icon={MARK_ICON[mark]} size={13} strokeWidth={2} color="currentColor" />;
+  return <span className={`flex ${MARK_ICON[mark].tone}`}><HugeiconsIcon icon={MARK_ICON[mark].icon} size={13} strokeWidth={2} color="currentColor" /></span>;
 }
 
 function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?: boolean }) {
@@ -109,7 +112,7 @@ function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?
         data-slot="chat-mark"
         data-mark={mark}
         {...(mark === "idle" ? { "aria-hidden": true } : { role: "img", "aria-label": MARK_LABEL[mark], title: MARK_LABEL[mark] })}
-        className={mark === "running" ? "flex" : mark in MARK_ICON ? "flex text-accent" : `rounded-full ${dot}`}
+        className={mark === "running" ? "flex" : mark in MARK_ICON ? "flex" : `rounded-full ${dot}`}
       >
         {mark === "running" && <SpinnerRing size={12} />}
         {mark in MARK_ICON && <MarkIcon mark={mark as keyof typeof MARK_ICON} />}
@@ -346,7 +349,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (title: str
 function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { top: number; left: number; flip: boolean } }) {
   const { details = {} } = item;
   const mark = item.mark ?? "idle";
-  const status = mark !== "idle" ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : "text-accent-ink" }
+  const status = mark !== "idle" ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : mark === "waiting" ? "text-orange" : "text-accent-ink" }
     : details.failed ? { label: "Last turn failed", tone: "text-red" }
     : null;
   return (
@@ -405,7 +408,7 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
 
 function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
   if (mark === "running") return <SpinnerRing size={12} />;
-  if (mark in MARK_ICON) return <span className="flex text-accent"><MarkIcon mark={mark as keyof typeof MARK_ICON} /></span>;
+  if (mark in MARK_ICON) return <MarkIcon mark={mark as keyof typeof MARK_ICON} />;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;
 }
 

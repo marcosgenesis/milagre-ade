@@ -7,12 +7,15 @@ const { setTimeout: delay } = require("node:timers/promises");
 const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { ChatComposer } from "/src/components/ChatComposer";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
 function Fixture() {
   const [count, setCount] = useState(50);
+  const [sessionId, setSessionId] = useState(1);
+  window.switchChat = (id, count) => flushSync(() => { setSessionId(id); setCount(count); });
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState(MODEL_CATALOG[0]);
   const [fastMode, setFastMode] = useState(false);
@@ -25,7 +28,7 @@ function Fixture() {
   window.setDraft = setDraft;
   window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
   const messages = Array.from({ length: count }, (_, index) => ({
-    id: index + 1, session_id: 1, context: null, role: "assistant",
+    id: sessionId * 1000 + index + 1, session_id: sessionId, context: null, role: "assistant",
     body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
   }));
   return <div style={{ height: "100%", padding: 12 }}>
@@ -61,6 +64,22 @@ async function browserChecks() {
   }
   try {
     await window.loadURL(process.argv[2]);
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
+    for (const [id, count] of [[2, 200], [1, 50], [3, 50]]) {
+      // Leaving an older chat scrolled up must not disable following in the next.
+      await evaluate(`(() => {
+        const viewport = document.querySelector('[aria-label="Conversation"]');
+        viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+        viewport.scrollTo({ top: 0, behavior: 'instant' });
+        viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+      })()`);
+      const distance = await evaluate(`(() => {
+        window.switchChat(${id}, ${count});
+        const viewport = document.querySelector('[aria-label="Conversation"]');
+        return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+      })()`);
+      assert.ok(distance <= 1, `Chat ${id} must open at the bottom before paint; distance: ${distance}`);
+    }
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
     assert.equal(await evaluate(`!!(${resolveButton})`), false);
@@ -130,6 +149,7 @@ async function browserChecks() {
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
     await evaluate('window.setModel("claude-sonnet-5-5")');
     await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    console.log("PASS: long chats open at the bottom before paint, including after reading older messages");
     console.log("PASS: conflict pill placement, click action, disabled state, and removal");
     console.log("PASS: fast mode appears only for supported Opus models and the prompt expands on wrapping");
     console.log("PASS: message previews stay inside the conversation and above the prompt");

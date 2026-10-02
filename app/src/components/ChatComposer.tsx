@@ -351,7 +351,7 @@ export function ChatComposer({
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         {tab === "Worktrees" ? (
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
             {messages.map((message) => (
               <MessageSection
                 key={message.id}
@@ -377,7 +377,7 @@ export function ChatComposer({
             )}
           </div>
         ) : (
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+          <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
             <div className="flex items-center gap-2 text-[13px] text-ink"><Icon icon={Link01Icon} size={15} /><span className="font-medium">Shared context</span><span className="ml-auto text-[12px] text-ink-3">{eventsCount} events</span></div>
             <div className="rounded-control bg-inset p-3 text-[13px] leading-6 text-ink-2">
               <p>{worktreeSummary}</p>

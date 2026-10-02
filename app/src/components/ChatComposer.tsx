@@ -22,7 +22,8 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
-import { parseRecommendation, RecommendationCard } from "./agents/recommendation-card";
+import { RecommendationCard } from "./agents/recommendation-card";
+import { parseRecommendation } from "../lib/recommendation";
 import { StepRow } from "./agents/StepRow";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
@@ -67,7 +68,7 @@ function MessageSection({
   /** Steps whose approval card is open. */
   waitingStepIds?: string[];
 }) {
-  const recommendation = !isUser ? parseRecommendation(message.body) : null;
+  const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const steps = message.steps ?? [];
   return (
     <article
@@ -88,8 +89,10 @@ function MessageSection({
           <p className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
         ) : recommendation ? (
           <>
-            {steps.length > 0 && <StepGroup steps={steps} waitingStepIds={waitingStepIds} />}
-            <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
+            <div className={recommendation.intro ? "mt-2" : undefined}>
+              <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+            </div>
           </>
         ) : (
           <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />

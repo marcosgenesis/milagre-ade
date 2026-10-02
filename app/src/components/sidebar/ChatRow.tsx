@@ -16,6 +16,7 @@ import {
   LinkSquare02Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
+  ShieldAlertIcon,
   SourceCodeIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -87,14 +88,20 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
 /* ─────────────────────────────────────────────────────────
  * CHAT MARK
  * One slot left of the label. A question shows a chat bubble,
- * waiting on an approval is accent with a halo, running spins a
- * ring, unread is a plain accent dot,
- * and an idle chat keeps a faint dot so labels stay aligned.
+ * an approval a shield, running spins a ring, unread is a plain
+ * accent dot, and an idle chat keeps a faint dot so labels stay
+ * aligned.
  * ───────────────────────────────────────────────────────── */
+/** Marks that ask for you draw an icon, so a question and an approval read apart. */
+const MARK_ICON = { question: BubbleChatIcon, waiting: ShieldAlertIcon } satisfies Partial<Record<ChatMark, HugeIconData>>;
+
+function MarkIcon({ mark }: { mark: keyof typeof MARK_ICON }) {
+  return <HugeiconsIcon icon={MARK_ICON[mark]} size={13} strokeWidth={2} color="currentColor" />;
+}
+
 function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?: boolean }) {
   const dot =
-    mark === "waiting" ? "size-2 bg-accent ring-[3px] ring-accent-tint"
-    : mark === "unread" ? "size-2 bg-accent"
+    mark === "unread" ? "size-2 bg-accent"
     : "size-1.5 bg-ink-3 opacity-40";
   return (
     <span className={`sidebar-copy mr-2 flex size-3 shrink-0 items-center justify-center ${topAligned ? "mt-1" : ""}`}>
@@ -102,10 +109,10 @@ function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?
         data-slot="chat-mark"
         data-mark={mark}
         {...(mark === "idle" ? { "aria-hidden": true } : { role: "img", "aria-label": MARK_LABEL[mark], title: MARK_LABEL[mark] })}
-        className={mark === "running" ? "flex" : mark === "question" ? "flex text-accent" : `rounded-full ${dot}`}
+        className={mark === "running" ? "flex" : mark in MARK_ICON ? "flex text-accent" : `rounded-full ${dot}`}
       >
         {mark === "running" && <SpinnerRing size={12} />}
-        {mark === "question" && <HugeiconsIcon icon={BubbleChatIcon} size={13} strokeWidth={2} color="currentColor" />}
+        {mark in MARK_ICON && <MarkIcon mark={mark as keyof typeof MARK_ICON} />}
       </span>
     </span>
   );
@@ -398,7 +405,7 @@ function ChatHoverCard({ item, position }: { item: SidebarRecent; position: { to
 
 function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
   if (mark === "running") return <SpinnerRing size={12} />;
-  if (mark === "question") return <HugeiconsIcon icon={BubbleChatIcon} size={13} strokeWidth={2} color="currentColor" className="text-accent" />;
+  if (mark in MARK_ICON) return <span className="flex text-accent"><MarkIcon mark={mark as keyof typeof MARK_ICON} /></span>;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;
 }
 

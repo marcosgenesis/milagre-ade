@@ -30,7 +30,7 @@ function FileLink({ text, title, shimmer, onOpen }: { text: string; title: strin
       title={title}
       onClick={open}
       onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); open(event); } }}
-      className={`cursor-pointer rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink decoration-ink-3 underline-offset-2 hover:underline ${shimmer ? "step-shimmer" : ""}`}
+      className={`pointer-events-auto cursor-pointer rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink decoration-ink-3 underline-offset-2 hover:underline ${shimmer ? "step-shimmer" : ""}`}
     >{text}</code>
   );
 }
@@ -69,7 +69,13 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
   );
   return (
     <div data-slot="step" data-status={step.status} className="min-w-0">
-      {expandable ? (
+      {expandable && fileIndex >= 0 ? (
+        // The toggle covers the row and the file link sits above it, so no interactive element is nested in another.
+        <div className="relative">
+          <button type="button" aria-expanded={open} aria-controls={detailId} aria-label={`${step.title.replace(/`/g, "")}${state ? `, ${state}` : ""}`} onClick={() => setOpen((value) => !value)} className="absolute inset-0 rounded-[8px] transition-colors hover:bg-hover" />
+          <div className={`${rowClass} pointer-events-none relative`}>{content}</div>
+        </div>
+      ) : expandable ? (
         <button type="button" aria-expanded={open} aria-controls={detailId} onClick={() => setOpen((value) => !value)} className={`${rowClass} transition-colors hover:bg-hover hover:text-ink`}>{content}</button>
       ) : (
         <div className={rowClass}>{content}</div>

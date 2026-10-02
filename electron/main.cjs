@@ -112,7 +112,11 @@ ipcMain.handle("worktree:reveal", async (_event, worktreePath) => {
 
 // Installed editors are looked up once per run.
 let editorsFound = null;
-const editors = () => (editorsFound ??= detectEditors());
+// A failed lookup is not kept, so the next call looks again.
+const editors = () => (editorsFound ??= detectEditors().catch((error) => {
+  editorsFound = null;
+  throw error;
+}));
 ipcMain.handle("editor:list", async () => (await editors()).map(({ id, name }) => ({ id, name })));
 // Resolves to null on success, or a short message to show as a notice.
 ipcMain.handle("editor:open", async (_event, request) => {

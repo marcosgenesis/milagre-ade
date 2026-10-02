@@ -124,7 +124,7 @@ function GeneralSettings() {
       </Row>
     </Group>
     <Group title="Editor">
-      <Row label="Open files in" description={editors && editors.length === 0 ? "Install Cursor, VS Code, Zed or another editor to open files and folders" : "Used by file links in replies and Open in on a chat"}>
+      <Row label="Open files in" description={editors && editors.length === 0 ? "Install Cursor, VS Code, Zed or another editor to open files and folders" : "Used by file links in replies and tool rows, and by Open in <editor> in the chat menu"}>
         {editors && editors.length === 0 ? (
           <span className="text-ink-3">No editor found</span>
         ) : (

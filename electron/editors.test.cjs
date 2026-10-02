@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { detectEditors, openCommand, openInEditor, resolveInside } = require("./editors.cjs");
+const { requireWorktreeRoot, detectEditors, openCommand, openInEditor, resolveInside } = require("./editors.cjs");
 
 const fakeFs = (present) => ({ access: async (target) => { if (!present.includes(target)) throw new Error("ENOENT"); } });
 const fakeWhich = (found) => async (name) => found[name] ?? null;
@@ -96,7 +96,7 @@ test("openInEditor runs the editor and reports a short error string", async (t) 
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const calls = [];
   const run = async (file, args) => { calls.push({ file, args }); };
-  const deps = { editors: [cursor], run };
+  const deps = { editors: [cursor], run, checkRoot: async () => {} };
   assert.equal(await openInEditor({ root, path: "src/a.ts", line: 7, editor: "cursor" }, deps), null);
   assert.deepEqual(calls[0], { file: "/usr/local/bin/cursor", args: ["-g", `${path.join(root, "src", "a.ts")}:7`] });
   assert.equal(await openInEditor({ root }, deps), null);
@@ -111,11 +111,44 @@ test("openInEditor falls back to the first editor, and reports no editor or a fa
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const calls = [];
   const run = async (file, args) => { calls.push({ file, args }); };
-  assert.equal(await openInEditor({ root, path: "src/a.ts", editor: "nonsense" }, { editors: [appOnly], run }), null);
+  assert.equal(await openInEditor({ root, path: "src/a.ts", editor: "nonsense" }, { editors: [appOnly], run, checkRoot: async () => {} }), null);
   assert.equal(calls.length, 1);
-  assert.equal(await openInEditor({ root }, { editors: [], run }), "No editor found");
+  assert.equal(await openInEditor({ root }, { editors: [], run, checkRoot: async () => {} }), "No editor found");
   const failing = async () => { throw new Error("spawn failed"); };
-  assert.equal(await openInEditor({ root }, { editors: [cursor], run: failing }), "Couldn't open Cursor");
-  assert.equal(await openInEditor({ root, line: "7; rm" , path: "src/a.ts" }, { editors: [cursor], run }), null);
+  assert.equal(await openInEditor({ root }, { editors: [cursor], run: failing, checkRoot: async () => {} }), "Couldn't open Cursor");
+  assert.equal(await openInEditor({ root, line: "7; rm" , path: "src/a.ts" }, { editors: [cursor], run, checkRoot: async () => {} }), null);
   assert.deepEqual(calls.at(-1).args, ["-a", "/Applications/Cursor.app", path.join(root, "src", "a.ts")]);
+});
+
+test("a CLI that is not on PATH is found inside the app bundle", async () => {
+  const editors = await detectEditors({
+    fs: fakeFs(["/Applications/Cursor.app", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "/Applications/Zed.app", "/Applications/Zed.app/Contents/MacOS/cli"]),
+    which: fakeWhich({ zed: "/usr/local/bin/zed" }),
+    home: "/h",
+  });
+  assert.equal(editors[0].cli, "/Applications/Cursor.app/Contents/Resources/app/bin/cursor");
+  assert.equal(editors[1].cli, "/usr/local/bin/zed");
+});
+
+const { execFileSync } = require("node:child_process");
+
+test("editor:open only accepts the top folder of a checkout", async (t) => {
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-roots-")));
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  const repo = path.join(base, "repo");
+  await fs.mkdir(path.join(repo, "sub"), { recursive: true });
+  await fs.writeFile(path.join(repo, "sub", "a.ts"), "x");
+  execFileSync("/usr/bin/git", ["init", "-q"], { cwd: repo });
+  await fs.mkdir(path.join(base, "plain"));
+  await fs.writeFile(path.join(base, "plain", "b.ts"), "x");
+  await requireWorktreeRoot(repo);
+  const calls = [];
+  const run = async (file, args) => { calls.push({ file, args }); };
+  const deps = { editors: [cursor], run };
+  assert.equal(await openInEditor({ root: repo, path: "sub/a.ts" }, deps), null);
+  assert.equal(calls.length, 1);
+  for (const root of ["/", path.join(base, "plain"), path.join(repo, "sub"), path.join(base, "missing"), "repo", undefined, 7]) {
+    assert.equal(await openInEditor({ root, path: "etc/passwd" }, deps), "That folder isn't a project", String(root));
+  }
+  assert.equal(calls.length, 1);
 });

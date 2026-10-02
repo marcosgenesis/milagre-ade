@@ -11,7 +11,7 @@ const CLAUDE_MODES = { ask: "default", auto: "acceptEdits", full: "bypassPermiss
 
 // Claude Code's built-in terse output style. Unlike text appended to the system prompt, which the SDK
 // records with a conversation and ignores on later turns and resumes, the style applies to new chats, to
-// resumed chats and, through applyFlagSettings, to the running query.
+// resumed chats and to the running query, all through applyFlagSettings before the turn's message.
 const CONCISE_STYLE = "Concise";
 
 // Claude Code prints this when --resume names a session it no longer has.
@@ -100,7 +100,7 @@ class ClaudeSession {
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode, replies);
+      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
@@ -112,15 +112,13 @@ class ClaudeSession {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
         }
-        // Back to Normal after Concise sets the default style; a chat that never had one sets nothing.
-        const style = replies === "concise" ? CONCISE_STYLE : this.outputStyle ? "default" : null;
         // A new effort level alone turns ultracode off, so both keys always travel together.
-        if ((effort && effort !== this.effort) || ultracode !== this.ultracode || style !== (this.outputStyle ?? null)) {
-          await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode, ...(style ? { outputStyle: style } : {}) });
+        if ((effort && effort !== this.effort) || ultracode !== this.ultracode) {
+          await this.query.applyFlagSettings({ ...(effort ? { effortLevel: effort } : {}), ultracode });
           this.effort = effort;
           this.ultracode = ultracode;
-          this.outputStyle = style;
         }
+        await this.applyReplyStyle(replies);
       }
     } catch (error) {
       this.finishTurn({ type: "turn-failed", message: error.message });
@@ -139,6 +137,20 @@ class ClaudeSession {
     this.inbox.push(userMessage(prompt, images));
     this.emit({ type: "turn-started", turnId });
     return { turnId, steered: false };
+  }
+
+  // Concise is Claude Code's flag-layer outputStyle; Normal clears it (null), which falls back to the style
+  // in the user's own Claude settings, exactly what the session would have without Milagre. A CLI that
+  // rejects the style costs only the style: it is dropped for this session, never retried, and the turn runs.
+  async applyReplyStyle(replies) {
+    const wanted = replies === "concise" && !this.styleFailed ? CONCISE_STYLE : null;
+    if (wanted === this.outputStyle) return;
+    try {
+      await this.query.applyFlagSettings({ outputStyle: wanted });
+      this.outputStyle = wanted;
+    } catch {
+      this.styleFailed = true;
+    }
   }
 
   // A message for the running turn goes straight into Claude Code's input. Claude Code picks it up at
@@ -171,7 +183,7 @@ class ClaudeSession {
     this.emit({ type: "turn-started", turnId });
   }
 
-  async start(model, mode, effort, ultracode = false, replies) {
+  async start(model, mode, effort, ultracode = false) {
     const { query } = await this.loadSdk();
     if (this.closed) return;
     this.stderr = "";
@@ -181,8 +193,7 @@ class ClaudeSession {
     this.mode = mode;
     this.effort = effort;
     this.ultracode = ultracode;
-    this.outputStyle = replies === "concise" ? CONCISE_STYLE : null;
-    const settings = { ...(ultracode ? { ultracode: true } : {}), ...(this.outputStyle ? { outputStyle: this.outputStyle } : {}) };
+    this.outputStyle = null;
     this.query = query({
       prompt: this.inbox,
       options: {
@@ -190,7 +201,7 @@ class ClaudeSession {
         model,
         permissionMode: mode,
         ...(effort ? { effort } : {}),
-        ...(Object.keys(settings).length ? { settings } : {}),
+        ...(ultracode ? { settings: { ultracode: true } } : {}),
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: this.command,

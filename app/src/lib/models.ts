@@ -29,3 +29,30 @@ export function resolveModel(models: ModelOption[], wanted: string | undefined, 
     ?? models.find((model) => model.provider === provider)
     ?? models[0];
 }
+
+/** The provider an id belongs to, for an id no list offers any more (Claude ids start with "claude"). */
+export function providerForId(id: string | undefined): ModelProvider {
+  return id?.startsWith("claude") ? "claude" : "codex";
+}
+
+/** The same lists (by value), so a refetch that changed nothing doesn't re-render the app. */
+export function keepIfSame<T>(previous: T, next: T): T {
+  return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+}
+
+/**
+ * The model the composer shows once `models` changed (lists arrived or were fetched again).
+ * - `applyDefault` is true once: when the agents' lists first arrive and the user hasn't picked a model. The
+ *   Settings default then replaces the model the app started with, unless the open chat is locked to the other
+ *   provider (a chat stays on the agent it started with).
+ * - Every other time the current model stays, or gives way to its provider's recommended model when the lists
+ *   no longer offer it.
+ * Returns `current` itself when nothing changed, so the composer doesn't re-render.
+ */
+export function nextSelection(models: ModelOption[], current: ModelOption, { defaultId, applyDefault, lockedProvider }: { defaultId: string; applyDefault: boolean; lockedProvider?: ModelProvider }): ModelOption {
+  const useDefault = applyDefault && (lockedProvider === undefined || providerForId(defaultId) === lockedProvider || models.find((model) => model.id === defaultId)?.provider === lockedProvider);
+  const wanted = useDefault ? defaultId : current.id;
+  const provider = lockedProvider ?? (useDefault ? models.find((model) => model.id === wanted)?.provider ?? providerForId(wanted) : current.provider);
+  const next = resolveModel(models, wanted, provider);
+  return next.id === current.id && next.name === current.name && next.provider === current.provider ? current : next;
+}

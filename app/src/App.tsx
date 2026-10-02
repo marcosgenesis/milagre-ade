@@ -8,6 +8,7 @@ import {
   Isolation,
   MODEL_CATALOG,
   ModelOption,
+  ModelProvider,
   OpenProject,
   PermissionDecision,
   QuestionAnswers,
@@ -24,7 +25,7 @@ import {
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
-import { capabilitiesFrom, mergeModels, resolveModel } from "./lib/models";
+import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
@@ -76,20 +77,23 @@ function App() {
   // The model lists come along: the main process keeps a good list for the run but asks again for an agent
   // that had none (a CLI that was missing, or Claude Code before it was logged in).
   const refreshCliStatus = () => {
-    void window.milagre.getCliStatus().then(setCliStatus).catch(() => undefined);
-    void window.milagre.getModels().then(setReported).catch(() => undefined);
+    // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
+    // re-apply anything that depends on the lists.
+    void window.milagre.getCliStatus().then((next) => setCliStatus((previous) => keepIfSame(previous, next))).catch(() => undefined);
+    void window.milagre.getModels().then((next) => setReported((previous) => keepIfSame(previous, next))).catch(() => undefined);
   };
   useEffect(refreshCliStatus, []);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
-  // Until the user picks a model, the picker shows the default from Settings once the lists have it. A
-  // model the agents don't offer gives way to its provider's recommended model.
+  // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
+  // and the open chat isn't on the other agent. After that a model the agents don't offer only gives way to
+  // its provider's recommended model (see nextSelection).
   const pickedModel = useRef(false);
+  const appliedDefault = useRef(false);
+  const lockedProviderRef = useRef<ModelProvider | undefined>(undefined);
   useEffect(() => {
-    setSelectedModel((current) => {
-      const { defaultModelId } = getSettings();
-      const wanted = !pickedModel.current && models.some((model) => model.id === defaultModelId) ? defaultModelId : current.id;
-      return resolveModel(models, wanted, current.provider);
-    });
+    const applyDefault = reported !== null && !appliedDefault.current && !pickedModel.current;
+    if (reported !== null) appliedDefault.current = true;
+    setSelectedModel((current) => nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }));
   }, [models]);
   const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
@@ -148,6 +152,7 @@ function App() {
   const imageDraft = usePastedImages(selectedWorktree?.path ?? project?.path ?? "");
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
+  lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
   // The chat on screen; a turn that ends anywhere else leaves its chat unread.
   openSessionRef.current = view === "chat" ? selectedSessionId : null;

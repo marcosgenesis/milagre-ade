@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cliNotice, cliTabLabel, messageParts } from "./cli-status.ts";
+import { cliMessage, cliNotice, cliTabLabel, messageParts } from "./cli-status.ts";
 
 test("a CLI with a problem gets a short tab label, and one that runs gets none", () => {
   assert.equal(cliTabLabel({ state: "missing", message: "m" }), "Not installed");
@@ -12,8 +12,14 @@ test("a CLI with a problem gets a short tab label, and one that runs gets none",
   assert.equal(cliTabLabel(undefined), null);
 });
 
-test("the notice is the CLI's own message, and only for a problem", () => {
+test("the notice ends at the command, while the tooltip keeps the whole message", () => {
+  const message = "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.";
+  assert.equal(cliNotice({ state: "logged-out", message }), "Codex isn't logged in. Run `codex login` in a terminal.");
+  assert.equal(cliMessage({ state: "logged-out", message }), message);
+  assert.equal(cliNotice({ state: "outdated", message: "Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal, then send your message again." }), "Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal.");
+  assert.equal(cliNotice({ state: "broken", message: "Codex (/x/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal, then send your message again." }), "Codex (/x/codex) didn't start: env: node: No such file or directory. Check that it runs in a terminal.");
   assert.equal(cliNotice({ state: "logged-out", message: "Codex isn't logged in." }), "Codex isn't logged in.");
+  assert.equal(cliMessage({ state: "ready" }), null);
   assert.equal(cliNotice({ state: "ready" }), null);
   assert.equal(cliNotice({ state: "missing" }), null);
   assert.equal(cliNotice(null), null);

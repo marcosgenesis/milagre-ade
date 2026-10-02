@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
+import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { ThemePreference, UsageDisplay } from "../lib/settings";
 import { GlideGroup, RailButton } from "./SidebarNav";
@@ -98,7 +99,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
     <>
     <Group title="Agents">
       <Row label="Default model" description="Selected when Milagre opens">
-        <Select label="Default model" value={settings.defaultModelId} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
+        <Select label="Default model" value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
           {(["codex", "claude"] as const).map((provider) => (
             <optgroup key={provider} label={provider === "codex" ? "Codex" : "Claude"}>
               {models.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}

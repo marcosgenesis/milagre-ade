@@ -18,7 +18,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
-import { cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
+import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
@@ -361,7 +361,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             style={anchorStyle}
             header={
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliNotice(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
+                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
               </div>
             }
           >

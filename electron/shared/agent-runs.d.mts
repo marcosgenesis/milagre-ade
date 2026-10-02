@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatStep, CoordinatorState, PermissionDecision, PermissionRequest, QuestionRequest } from "../../app/src/model";
+import type { AgentEvent, AgentTask, ChatStep, CoordinatorState, PermissionDecision, PermissionRequest, QuestionRequest } from "../../app/src/model";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
 export type SentAnswer = PermissionDecision | "answered" | "dismissed";
@@ -19,6 +19,8 @@ export interface AgentRun {
   split?: boolean;
   /** The agent waits on its subagents, so the indicator says so instead of "Working". */
   waitingForSubagents?: boolean;
+  /** The agent's to-do list as it last reported it; gone with the run when the turn ends. */
+  tasks?: AgentTask[];
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -37,3 +39,4 @@ export function isTurnEnd(event: AgentEvent): boolean;
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
 export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent;
 export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent;
+export function recordAnswers(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: CoordinatorState; runs: AgentRuns; messageId: number | null };

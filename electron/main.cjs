@@ -26,6 +26,7 @@ const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
 const { createProjectSettings } = require("./project-settings.cjs");
+const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { readPullRequest } = require("./pull-request.cjs");
@@ -196,7 +197,11 @@ ipcMain.handle("worktree:remove", async (_event, worktreePath, options = {}) => 
     base,
     seen,
     force: Boolean(force),
-    closeSession: typeof chatId === "string" ? () => agents.closeChat(chatId) : undefined,
+    closeSession: typeof chatId === "string" ? async () => {
+      await worktreeSetups.cancel(chatId);
+      worktreeSetups.forget(worktreePath);
+      return agents.closeChat(chatId);
+    } : undefined,
   });
   // Read again, the project drops the worktree git no longer lists, with its chats.
   if (states.has(projectPath)) await readProject(projectPath);
@@ -216,6 +221,17 @@ ipcMain.handle("files-to-copy:save", async (_event, projectPath, patterns) => {
   const { filesToCopy } = await projectSettings().setFilesToCopy(projectPath, patterns);
   return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
 });
+// The setup command new worktrees run: the repo's .milagre/worktree.json, else the project's setting.
+async function readSetupCommand(projectPath) {
+  const { setupCommand } = await projectSettings().get(projectPath);
+  return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
+}
+ipcMain.handle("worktree-setup:read", (_event, projectPath) => readSetupCommand(projectPath));
+ipcMain.handle("worktree-setup:save", async (_event, projectPath, command) => {
+  await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
+  return readSetupCommand(projectPath);
+});
+
 // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
 // picks one, so the chat never waits on it.
 async function nameWorktree(sender, projectPath, created, prompt) {
@@ -233,9 +249,13 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
   const request = { projectPath, baseBranch, prompt };
   await environmentReady;
+  const settings = await projectSettings().get(projectPath);
   // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
-  const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: (await projectSettings().get(projectPath)).filesToCopy });
+  const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
   if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
+  // The setup command runs before the chat's first turn (see agent:start-turn).
+  const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);
+  await worktreeSetups.prepare({ worktreePath: created.path, projectPath, resolved });
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
   if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
@@ -244,7 +264,7 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
     return worktree ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base } } } : latest;
   });
   void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
-  return { project: { ...project, state }, worktreeId: listed.id };
+  return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
 });
 // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
 ipcMain.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {
@@ -308,8 +328,8 @@ async function notifyIfWaiting(chatId, event) {
 ipcMain.handle("notification:state", (_event, state) => notifier.sync(state));
 ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupported() ? notifier.notifyCompletion(notice) : false);
 
-// While any chat's turn runs the Mac stays awake (the screen can still sleep). On until the renderer
-// pushes the saved setting.
+// While any chat's turn or a new worktree's setup runs the Mac stays awake (the screen can still sleep).
+// On until the renderer pushes the saved setting.
 const keepAwake = new KeepAwake({ powerSaveBlocker });
 ipcMain.handle("app:set-keep-awake", (_event, enabled) => keepAwake.setEnabled(enabled === true));
 
@@ -346,7 +366,19 @@ async function startAgentTurn(request) {
     await chats.receive(request.chatId, failedWith(cli.problem));
     return { turnId: null, steered: false };
   }
-  return agents.startTurn({ ...request, prompt, images, command: cli.command });
+  // A new worktree's first turn waits for its setup command; one that failed tells the agent, one that was stopped stops the turn.
+  const setup = await worktreeSetups.beforeTurn(request.chatId, request.cwd);
+  if (setup.cancelled) {
+    await chats.receive(request.chatId, { type: "turn-cancelled" });
+    return { turnId: null, steered: false };
+  }
+  try {
+    return await agents.startTurn({ ...request, prompt: setup.note ? `${prompt}\n\n${setup.note}` : prompt, images, command: cli.command });
+  } catch (error) {
+    // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
+    keepAwake.turnNotStarted(request.chatId);
+    throw error;
+  }
 }
 
 const chats = new ChatHost({
@@ -356,6 +388,9 @@ const chats = new ChatHost({
   broadcast: broadcastProjectState,
   isFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
 });
+
+// A setup's steps show in the chat's turn like the agent's own.
+const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.receive(chatId, event), keepAwake });
 
 // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
 const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
@@ -405,11 +440,25 @@ ipcMain.handle("agent:cli-status", () => agentCliStatus());
 const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
 ipcMain.handle("agent:models", () => agentModels());
 
-ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
+ipcMain.handle("agent:interrupt", async (_event, chatId) => {
+  await worktreeSetups.cancel(chatId);
+  await agents.interrupt(chatId);
+});
 
 ipcMain.handle("agent:respond-permission", (_event, { chatId, requestId, decision }) => agents.respondToPermission(chatId, requestId, decision));
 
-ipcMain.handle("agent:answer-question", (_event, { chatId, requestId, answers }) => agents.answerQuestion(chatId, requestId, answers));
+// The answers show in the chat as the user's message (`summary`), and are taken back if they don't reach the agent.
+ipcMain.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
+  const messageId = answers && typeof summary === "string" && summary && typeof chatId === "string" && states.has(projectOfKey(chatId)) ? await chats.recordAnswers(chatId, summary) : null;
+  try {
+    const accepted = await agents.answerQuestion(chatId, requestId, answers);
+    if (!accepted && messageId !== null) await chats.takeBack(chatId, messageId);
+    return accepted;
+  } catch (error) {
+    if (messageId !== null) await chats.takeBack(chatId, messageId);
+    throw error;
+  }
+});
 
 ipcMain.handle("agent:set-permission-mode", (_event, { chatId, mode }) => agents.setPermissionMode(chatId, mode));
 
@@ -488,6 +537,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   notifier.closeAll();
   // No window is left to answer an approval or question, so running turns stop (and are saved) with the last one.
+  void worktreeSetups.cancelAll();
   void agents.closeAll();
   if (process.platform !== "darwin") app.quit();
 });
@@ -500,5 +550,5 @@ app.on("before-quit", (event) => {
   keepAwake.quit();
   // Agents run in their own process groups, so stop them before the app exits.
   // Their cancelled turns are saved before the app exits.
-  Promise.race([agents.closeAll().then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
+  Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
 });

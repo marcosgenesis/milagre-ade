@@ -121,3 +121,56 @@ test("observe follows a chat's events", () => {
   awake.observe("b", { type: "turn-cancelled" });
   assert.equal(blocker.held, 0);
 });
+
+test("a setup holds while it runs and hands the hold to its turn without a gap", () => {
+  const blocker = fakeBlocker();
+  const awake = new KeepAwake({ powerSaveBlocker: blocker });
+  awake.setupStarted("a");
+  assert.equal(blocker.held, 1);
+  awake.setupEnded("a", { turnFollows: true });
+  awake.observe("a", { type: "turn-started", turnId: "1" });
+  assert.equal(blocker.held, 1);
+  assert.equal(blocker.started.length, 1);
+  assert.equal(blocker.stopped.length, 0);
+  awake.observe("a", { type: "turn-completed" });
+  assert.equal(blocker.held, 0);
+});
+
+test("a cancelled setup releases, and so does a turn that ends before it starts", () => {
+  const blocker = fakeBlocker();
+  const awake = new KeepAwake({ powerSaveBlocker: blocker });
+  awake.setupStarted("a");
+  awake.setupEnded("a");
+  assert.equal(blocker.held, 0);
+  awake.setupStarted("b");
+  awake.setupEnded("b", { turnFollows: true });
+  assert.equal(blocker.held, 1);
+  awake.observe("b", { type: "turn-failed", message: "codex is missing" });
+  assert.equal(blocker.held, 0);
+  awake.setupStarted("c");
+  awake.setupEnded("c", { turnFollows: true });
+  awake.turnNotStarted("c");
+  assert.equal(blocker.held, 0);
+});
+
+test("archiving a chat mid-setup releases it", () => {
+  const blocker = fakeBlocker();
+  const awake = new KeepAwake({ powerSaveBlocker: blocker });
+  awake.setupStarted("a");
+  awake.chatClosed("a");
+  assert.equal(blocker.held, 0);
+  // The setup's own end arrives later and changes nothing.
+  awake.setupEnded("a", { turnFollows: true });
+  assert.equal(blocker.held, 0);
+});
+
+test("with the setting off a setup holds nothing", () => {
+  const blocker = fakeBlocker();
+  const awake = new KeepAwake({ powerSaveBlocker: blocker, enabled: false });
+  awake.setupStarted("a");
+  assert.equal(blocker.started.length, 0);
+  awake.setEnabled(true);
+  assert.equal(blocker.held, 1);
+  awake.quit();
+  assert.equal(blocker.held, 0);
+});

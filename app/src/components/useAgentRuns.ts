@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSendRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
 import { applyRunEvent, clearAnswered, markAnswered, projectOfKey } from "../lib/agent-runs";
+import { answerSummary } from "../lib/question-answers";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
 /**
@@ -57,8 +58,15 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
 
   const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => answer(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [answer]);
 
-  /** Sends the answers to a question, or dismisses it (null). */
-  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => answer(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [answer]);
+  /**
+   * Sends the answers to a question, or dismisses it (null). The main process shows the answers in the chat
+   * as the user's message, so whatever the agent streams next lands below them, and takes them back if they don't arrive.
+   */
+  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => {
+    const request = runsRef.current[chatId]?.questions.find((item) => item.requestId === requestId);
+    const summary = answers && request ? answerSummary(request.questions, answers) : "";
+    return answer(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers, summary));
+  }, [answer]);
 
   return { runs, send, interrupt, respond, answerQuestion };
 }

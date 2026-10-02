@@ -1,4 +1,5 @@
-import type { ChatMessage, ModelOption, ModelProvider, PermissionDecision } from "../model";
+import { subagentActive } from "./subagents.ts";
+import type { ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision } from "../model";
 import { chatInProject, sessionIdFromKey } from "../../../electron/shared/agent-runs.mjs";
 import type { AgentRun, AgentRuns, SentAnswer } from "../../../electron/shared/agent-runs.mjs";
 
@@ -14,9 +15,23 @@ export function chatsWaitingForUser(runs: AgentRuns, projectPath: string): Set<n
   return waiting;
 }
 
-/** Session ids of the project's chats with a turn running, so the sidebar can mark them. */
-export function chatsRunning(runs: AgentRuns, projectPath: string): Set<number> {
-  return new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+/** Session ids of the project's chats whose next card is a question (approvals show first), so the sidebar can mark them apart. */
+export function chatsAskingUser(runs: AgentRuns, projectPath: string): Set<number> {
+  const asking = new Set<number>();
+  for (const [key, run] of Object.entries(runs)) {
+    if (run.approvals.length === 0 && run.questions.length > 0 && chatInProject(projectPath, key)) asking.add(sessionIdFromKey(key));
+  }
+  return asking;
+}
+
+/**
+ * Session ids of the project's chats with a turn running, so the sidebar can mark them. Subagents
+ * can outlive the turn that started them, so a chat with one still active counts too.
+ */
+export function chatsRunning(runs: AgentRuns, projectPath: string, sessions: CoordinatorState["sessions"] = {}): Set<number> {
+  const running = new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+  for (const session of Object.values(sessions)) if (session.subagents?.some(subagentActive)) running.add(session.id);
+  return running;
 }
 
 /** Records what the user sent for a chat's approval or question. Kept on the run, so another chat's request with the same id is untouched. */

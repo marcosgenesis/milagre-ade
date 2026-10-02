@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
-import { chatKey, chatsRunning, chatsWaitingForUser, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply } from "./agent-runs.ts";
+import { chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply } from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 // Runs are set up with the reducer the main process saves turns with.
 import { applyAgentEvent, startRun } from "../../../electron/shared/agent-runs.mjs";
@@ -85,10 +85,25 @@ test("chatsWaitingForUser lists only this project's chats with a pending approva
   assert.equal(chatsWaitingForUser({}, PROJECT).size, 0);
 });
 
+test("chatsAskingUser lists chats with a question and no approval ahead of it", () => {
+  const request = { requestId: "r1" } as PermissionRequest;
+  const run = (approvals: PermissionRequest[], questions = [question("q1")]) => ({ text: "", model: "m", approvals, steps: [], questions, answered: {} });
+  const runs: AgentRuns = { [key(1)]: run([]), [key(2)]: run([request]), [key(3)]: run([], []), [chatKey("/work/other", 4)]: run([]) };
+  assert.deepEqual([...chatsAskingUser(runs, PROJECT)], [1]);
+});
+
 test("chatsRunning lists only this project's chats with a run", () => {
   const run = { text: "", model: "m", approvals: [], steps: [], questions: [], answered: {} };
   const runs: AgentRuns = { [key(1)]: run, [key(4)]: run, [chatKey("/work/app#other", 2)]: run, [chatKey("/work/other", 3)]: run };
   assert.deepEqual([...chatsRunning(runs, PROJECT)].sort(), [1, 4]);
+});
+
+test("chatsRunning counts a chat whose subagents outlive its turn", () => {
+  const sessions = base().sessions;
+  const agent = (id: string, status: string) => ({ id, status }) as unknown as NonNullable<CoordinatorState["sessions"][string]["subagents"]>[number];
+  sessions["1"] = { ...sessions["1"], subagents: [agent("a", "completed"), agent("b", "running")] };
+  sessions["2"] = { ...sessions["2"], subagents: [agent("c", "completed")] };
+  assert.deepEqual([...chatsRunning({}, PROJECT, sessions)], [1]);
 });
 
 const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });

@@ -255,3 +255,26 @@ test("a note for a chat with no turn running is saved at once and sent to the wi
   assert.equal(saved.get(BETA).messages.at(-1).body, "Pushed to origin");
   assert.equal(broadcasts.at(-1).state.messages.at(-1).body, "Pushed to origin");
 });
+
+test("answers to a question are saved as the user's message after the reply so far, and can be taken back", async (t) => {
+  const { host, manager, saved, published, session } = harness();
+  t.after(() => manager.closeAll());
+  const chat = await host.send(message(ALPHA, "plan it"));
+  const chatId = `${ALPHA}#${chat.sessionId}`;
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  session(ALPHA).emit({ type: "text-delta", messageId: "m1", text: "Which layout?" });
+  await waitUntil(() => host.runs[chatId]?.text === "Which layout?");
+
+  const messageId = await host.recordAnswers(chatId, "Layout: grid");
+  assert.deepEqual(chatMessages(saved.get(ALPHA), chat.sessionId), [
+    { role: "user", body: "plan it" },
+    { role: "assistant", body: "Which layout?" },
+    { role: "user", body: "Layout: grid" },
+  ]);
+  assert.equal(host.runs[chatId].text, "");
+  assert.equal(published.at(-1).event.type, "answers-sent");
+
+  await host.takeBack(chatId, messageId);
+  assert.equal(saved.get(ALPHA).messages.some((item) => item.id === messageId), false);
+});

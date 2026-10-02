@@ -22,8 +22,11 @@ const { claudeSubagents, codexSubagents } = require("./subagents.cjs");
 //                                           notice: the message is one Milagre wrote (a full sentence that names the CLI
 //                                           and the fix), shown as it is; other messages are the agent's own error text.
 //                                           login: the agent isn't logged in; its session is closed so the next message starts a fresh one
+//   { type: "tasks-updated", tasks }        the agent's to-do list, whole: tasks = [{ id, content, activeForm?, status }]
+//                                           with status "pending" | "in_progress" | "completed" (see tasks.cjs); [] clears it
 // Exactly one of the last three ends every turn.
 
+const { applyToolResult, applyToolUse, codexPlanTasks } = require("./tasks.cjs");
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
 const { bundledWritingInstructions } = require("../bundled-skills.cjs");
@@ -32,6 +35,7 @@ function milagreInstructions(tldrEnabled = true) {
   return [
     "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
     tldrEnabled ? TLDR_INSTRUCTIONS : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
+    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
   ].join("\n\n");
 }
@@ -161,6 +165,10 @@ function mapClaudeMessage(message, state) {
       state.tools ??= new Map();
       state.tools.set(block.id, block);
       events.push({ type: "step-started", step: claudeStep(block.id, block.name, block.input) });
+      // The list lives for the provider session, so it carries across turns.
+      state.tasks ??= new Map();
+      const tasks = applyToolUse(state.tasks, block.name, block.input);
+      if (tasks) events.push({ type: "tasks-updated", tasks });
     }
   }
   if (message.type === "user" && message.parent_tool_use_id == null && Array.isArray(message.message?.content)) {
@@ -170,7 +178,11 @@ function mapClaudeMessage(message, state) {
       if (!call) continue;
       state.tools.delete(block.tool_use_id);
       // tool_use_result belongs to the message, so it can only be matched to a lone result.
-      events.push({ type: "step-completed", ...claudeStepResult(call, block, results.length === 1 ? message.tool_use_result : undefined) });
+      const structured = results.length === 1 ? message.tool_use_result : undefined;
+      events.push({ type: "step-completed", ...claudeStepResult(call, block, structured) });
+      state.tasks ??= new Map();
+      const tasks = applyToolResult(state.tasks, call, block, structured);
+      if (tasks) events.push({ type: "tasks-updated", tasks });
     }
   }
   if (message.type === "result") {
@@ -220,6 +232,11 @@ function mapCodexNotification(method, params, state) {
     state.lastItemId = params.itemId;
     events.push(textDelta(state, params.delta));
     return events;
+  }
+  if (method === "turn/plan/updated") {
+    if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
+    const tasks = codexPlanTasks(params.plan);
+    return tasks ? [{ type: "tasks-updated", tasks }] : [];
   }
   if (method === "turn/completed") {
     const turn = params.turn ?? {};

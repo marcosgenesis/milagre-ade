@@ -1,4 +1,4 @@
-const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, sessionIdFromKey } = require("../shared/agent-runs.mjs");
+const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("../shared/agent-runs.mjs");
 const { patchSession } = require("../shared/project-edits.mjs");
 
 /** The part of an IPC error the user should read. */
@@ -61,6 +61,33 @@ class ChatHost {
         this.publish(chatId, event);
       },
     );
+  }
+
+  /**
+   * Saves the user's answers to a question as their message, after the reply streamed so far, and tells the
+   * windows with an "answers-sent" event. Resolves with the message's id, or null when there's nothing to save.
+   */
+  async recordAnswers(chatId, body) {
+    const projectPath = projectOfKey(chatId);
+    let messageId = null;
+    let seq;
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const result = recordAnswers(latest, this.runs, projectPath, chatId, body);
+      if (result.messageId === null) return latest;
+      this.runs = result.runs;
+      seq = ++this.seq;
+      messageId = result.messageId;
+      return result.state;
+    });
+    if (changed) this.publish(chatId, { type: "answers-sent" }, state, seq);
+    return messageId;
+  }
+
+  /** Removes a message again, such as answers that never reached the agent. */
+  async takeBack(chatId, messageId) {
+    const projectPath = projectOfKey(chatId);
+    const { state, changed } = await this.states.update(projectPath, (latest) => (latest.messages.some((message) => message.id === messageId) ? { ...latest, messages: latest.messages.filter((message) => message.id !== messageId) } : latest));
+    if (changed) this.broadcast(projectPath, state);
   }
 
   /** Adds an assistant line that isn't a reply to a chat (`context` says what it is), after its running turn if it has one. */

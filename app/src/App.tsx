@@ -22,8 +22,9 @@ import {
   sortedWorktrees,
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
-import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
+import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle } from "./lib/chat-list";
 import type { SessionPatch } from "../../electron/shared/project-edits.mjs";
@@ -188,8 +189,11 @@ function App() {
     const latest = statesRef.current[projectOfKey(chatId)];
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
-  const { pullRequests, dismissedConflicts, dismissConflictAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const { pullRequests, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
+  const pullRequestBlocker = selectedPullRequest
+    ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
+    : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const isSending = preparing || Boolean(run);
   const usage = useUsage();
@@ -257,7 +261,8 @@ function App() {
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
-  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const asking = useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
+  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
   const chats = useMemo(() => {
     if (!state) return [];
     return Object.values(state.sessions)
@@ -272,7 +277,7 @@ function App() {
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
@@ -283,7 +288,7 @@ function App() {
           },
         };
       });
-  }, [state, waiting, running, pullRequests]);
+  }, [state, asking, waiting, running, pullRequests]);
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -491,6 +496,7 @@ function App() {
     const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
+    if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(setBranches);
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
   }
@@ -563,6 +569,18 @@ function App() {
   recommendationRef.current = (option) => { void executeSend(option, permissionMode); };
   const sendRecommendation = useCallback((option: string) => recommendationRef.current(option), []);
 
+  // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findSignal, setFindSignal] = useState(0);
+  const findRef = useRef({ open: false, canOpen: false });
+  findRef.current = { open: findOpen, canOpen: view === "chat" && messages.length > 0 };
+  function openFind() {
+    if (!findRef.current.canOpen) return;
+    setFindOpen(true);
+    setFindSignal((current) => current + 1);
+  }
+  useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
+
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"], dialog[open]')) return;
@@ -574,7 +592,11 @@ function App() {
         }
         return;
       }
-      if (event.key.toLowerCase() === "k") {
+      if (event.key.toLowerCase() === "f") {
+        if (!findRef.current.canOpen) return;
+        event.preventDefault();
+        openFind();
+      } else if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandPaletteOpen(true);
       } else if (event.key === ",") {
@@ -597,6 +619,11 @@ function App() {
     function handleEscape(event: KeyboardEvent) {
       // A menu, picker or search that Escape closed has already consumed it.
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (findRef.current.open) {
+        event.preventDefault();
+        setFindOpen(false);
+        return;
+      }
       if (view === "settings") {
         event.preventDefault();
         setView("chat");
@@ -660,13 +687,14 @@ function App() {
       { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
       { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
       { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+      ...(messages.length ? [{ id: "find", label: "Find in chat", group: "Current chat", icon: "search" as const, shortcut: `${modifier}F`, keywords: "search text messages", run: openFind }] : []),
       { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
     );
     if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
   }
   commands.push(...chats.map((chat): Command => ({
     id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
-    detail: [chat.mark === "waiting" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
+    detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
     keywords: [chat.details.path, chat.details.pullRequest?.title, chat.details.pullRequest ? `#${chat.details.pullRequest.number}` : ""].filter(Boolean).join(" "),
     run: () => openChat(Number(chat.id)),
   })));
@@ -744,10 +772,14 @@ function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
-            onResolveConflicts={selectedSession && selectedPullRequest?.state === "OPEN" && selectedPullRequest.hasConflicts && !dismissedConflicts.includes(selectedPullRequest.url)
-              ? () => {
-                dismissConflictAction(selectedPullRequest);
-                void executeSend("Resolve the merge conflicts in this branch against the pull request's base branch. Preserve the intended changes from both sides and run the relevant checks.", permissionMode, [], [], true);
+            pullRequestAction={selectedSession && selectedPullRequest && pullRequestBlocker
+              ? {
+                label: BLOCKERS[pullRequestBlocker].action,
+                tone: BLOCKERS[pullRequestBlocker].tone,
+                onRun: () => {
+                  dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
+                  void executeSend(blockerPrompt(pullRequestBlocker, selectedPullRequest), permissionMode, [], [], true);
+                },
               }
               : undefined}
             isSending={isSending}
@@ -758,7 +790,9 @@ function App() {
             onArchiveFinishedSubagents={archiveFinishedChildren}
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}
+            tasks={run?.tasks}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
+            asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
             models={models}
@@ -788,6 +822,9 @@ function App() {
             baseBranch={effectiveBaseBranch}
             onBaseBranchChange={(branch) => { setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
             newChatError={newChatError}
+            findOpen={findOpen}
+            findSignal={findSignal}
+            onFindClose={() => setFindOpen(false)}
             approval={pendingApproval ? (
               <PermissionCard
                 key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}

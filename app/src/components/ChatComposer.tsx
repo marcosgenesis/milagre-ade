@@ -1,6 +1,7 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
-import type { Subagent } from "../model";
-import { memo, useEffect, useState } from "react";
+import type { AgentTask, Subagent } from "../model";
+import { TaskTrack } from "./agents/TaskTrack";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -16,6 +17,7 @@ import {
   LaptopIcon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { FindBar } from "./FindBar";
 import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
@@ -25,10 +27,11 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
+import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { Markdown } from "./markdown/Markdown";
 import { closeOpenMarkdown } from "../lib/streaming-markdown";
-import { replyActivity } from "../lib/reply-parts";
+import { replyActivity, unspokenThought } from "../lib/reply-parts";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -36,13 +39,19 @@ function Icon({ icon, size = 16 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-/** A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer. */
-function ReplyContent({ body, steps, streaming, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; waitingStepIds: string[] }) {
-  const { activity, answer } = replyActivity(body, steps);
+/**
+ * A reply: its activity (thinking, tool steps and the text between them) folded into one block, then its answer.
+ * A reply with no answer that ended or stopped to ask shows its last thinking instead, dimmed.
+ */
+function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
+  const { setup, activity, answer } = replyActivity(body, steps);
+  const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
+      {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
+      {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
     </>
   );
 }
@@ -52,12 +61,15 @@ const MessageSection = memo(function MessageSection({
   isUser,
   onRecommendationSelect,
   streaming = false,
+  asking = false,
   waitingStepIds = [],
 }: {
   message: AppChatMessage;
   isUser: boolean;
   onRecommendationSelect: (option: string) => void;
   streaming?: boolean;
+  /** The running turn is waiting on the user's answer to a question. */
+  asking?: boolean;
   /** Steps whose approval card is open. */
   waitingStepIds?: string[];
 }) {
@@ -83,7 +95,7 @@ const MessageSection = memo(function MessageSection({
             </div>
           </>
         ) : (
-          <ReplyContent body={message.body} steps={steps} streaming={streaming} waitingStepIds={waitingStepIds} />
+          <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
         )}
       </div>
     </article>
@@ -91,13 +103,18 @@ const MessageSection = memo(function MessageSection({
 });
 
 interface ChatComposerProps {
+  /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
+  findOpen?: boolean;
+  findSignal?: number;
+  onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
-  onResolveConflicts?: () => void;
+  /** One-click fix for whatever blocks the chat's PR from merging (conflicts, an outdated branch, requested changes). */
+  pullRequestAction?: { label: string; tone: "red" | "orange"; onRun: () => void };
   isSending: boolean;
   /** Sending is briefly blocked while a message is being prepared; a running turn doesn't block it. */
   sendBlocked: boolean;
@@ -108,8 +125,12 @@ interface ChatComposerProps {
   onArchiveFinishedSubagents?: () => void;
   onArchiveSubagent?: (id: string, archived: boolean) => void;
   waitingForSubagents?: boolean;
+  /** The running turn's to-do list, shown as a pill beside the subagents. */
+  tasks?: AgentTask[];
   /** Steps of the running turn whose approval card is open. */
   waitingStepIds?: string[];
+  /** The running turn is waiting on the user's answer to a question. */
+  asking?: boolean;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
   lockedProvider?: ModelProvider;
@@ -245,7 +266,7 @@ export function ChatComposer({
   draft,
   onDraftChange,
   onSend,
-  onResolveConflicts,
+  pullRequestAction,
   isSending,
   sendBlocked,
   streamingText,
@@ -254,7 +275,9 @@ export function ChatComposer({
   onArchiveFinishedSubagents,
   onArchiveSubagent,
   waitingForSubagents = false,
+  tasks,
   waitingStepIds,
+  asking = false,
   runModelName,
   lockedProvider,
   models,
@@ -282,7 +305,11 @@ export function ChatComposer({
   baseBranch,
   onBaseBranchChange,
   newChatError,
+  findOpen = false,
+  findSignal = 0,
+  onFindClose,
 }: ChatComposerProps) {
+  const root = useRef<HTMLDivElement>(null);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
   const isNewChat = messages.length === 0;
@@ -302,19 +329,23 @@ export function ChatComposer({
 
   return (
     <div
+      ref={root}
       className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
       onDrop={handleFileDrop}
     >
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
+      {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
       {!isNewChat && <MessageScroller
+        key={messages[0]?.session_id ?? "new"}
         navigation="rail"
         followOutput
         smooth
         busy={isSending}
         className="min-h-0 flex-1"
-        viewportClassName="pt-4 pb-2"
+        // The find bar floats over the top of the chat, so the first message moves below it while it is open.
+        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-2`}
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
@@ -335,6 +366,7 @@ export function ChatComposer({
               isUser={false}
               onRecommendationSelect={onRecommendationSelect}
               streaming
+              asking={asking}
               waitingStepIds={waitingStepIds}
             />
           ) : null}
@@ -345,21 +377,26 @@ export function ChatComposer({
           )}
         </div>
       </MessageScroller>}
-      <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
+      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end gap-2 px-3 empty:hidden">
+        <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+        <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
+      </div>
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}
-        {!isNewChat && onResolveConflicts && (
+        {!isNewChat && pullRequestAction && (
           <div className="mb-2 flex px-1">
             <button
               type="button"
-              onClick={onResolveConflicts}
+              onClick={pullRequestAction.onRun}
               disabled={sendBlocked || isSending || imageDraft.loading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red/20 bg-red/5 px-2.5 py-0.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red disabled:cursor-not-allowed disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+                ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+                : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
             >
               <Icon icon={GitPullRequestIcon} size={14} />
-              Resolve conflicts
+              {pullRequestAction.label}
             </button>
           </div>
         )}

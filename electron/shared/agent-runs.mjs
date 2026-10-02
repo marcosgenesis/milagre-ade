@@ -52,7 +52,7 @@ function updateStep(run, id, update) {
 
 /** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
 function endStep({ detail: _streamed, ...step }, end) {
-  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
+  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.note === undefined ? {} : { note: end.note }), ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
 }
 
 /**
@@ -130,6 +130,15 @@ export function applyRunEvent(runs, chatId, event, model = "") {
     }
     case "subagents-waiting":
       return run ? { ...runs, [chatId]: { ...run, waitingForSubagents: event.waiting } } : runs;
+    // The agent's to-do list as it last reported it; an empty list clears it.
+    case "tasks-updated": {
+      if (!run) return runs;
+      const { tasks: _cleared, ...rest } = run;
+      return { ...runs, [chatId]: event.tasks.length ? { ...rest, tasks: event.tasks } : rest };
+    }
+    // The user's answers to a question were saved as their message, after the reply so far (see recordAnswers).
+    case "answers-sent":
+      return run ? { ...runs, [chatId]: splitRun(run) ?? { ...run, split: true } } : runs;
     // Text from the parent agent means it's no longer waiting on its subagents.
     case "text-delta":
       return run ? { ...runs, [chatId]: { ...run, text: run.text + event.text, ...(run.waitingForSubagents ? { waitingForSubagents: false } : {}) } } : runs;
@@ -253,5 +262,23 @@ export function splitRunForSteer(state, runs, projectPath, chatId) {
     state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
     runs: { ...runs, [chatId]: split },
     changed: true,
+  };
+}
+
+/**
+ * Shows the user's answers to a question as their message: the reply so far is saved first (as for a
+ * steering message), so the answers sit between what the agent asked and what it does next.
+ * `messageId` is the new message's id, so it can be taken back if the answers don't reach the agent.
+ */
+export function recordAnswers(state, runs, projectPath, chatId, body) {
+  const sessionId = sessionIdFromKey(chatId);
+  const run = runs[chatId];
+  if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, messageId: null };
+  const split = splitRunForSteer(state, runs, projectPath, chatId);
+  const message = { id: split.state.next_id, session_id: sessionId, body, context: null, role: "user", model: run.model };
+  return {
+    state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
+    runs: applyRunEvent(runs, chatId, { type: "answers-sent" }),
+    messageId: message.id,
   };
 }

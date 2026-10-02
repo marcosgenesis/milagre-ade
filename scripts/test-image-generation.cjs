@@ -77,7 +77,7 @@ async function browserChecks() {
     await waitFor(`${surface}?.dataset.state === "complete"`);
     const done = await evaluate(`({ text: ${surface}.textContent, loaded: ${surface}.querySelector("img").naturalWidth > 0 })`);
     assert.ok(done.loaded, "the saved image loads through milagre-media");
-    assert.match(done.text, /Image ready/);
+    assert.doesNotMatch(done.text, /Image ready|Generating image/, "no status line under the image");
     assert.match(done.text, /\d+ × \d+/, "shows the image's real resolution");
     assert.match(done.text, /mountain landscape/, "shows the prompt it was made from");
     await screenshot("complete");

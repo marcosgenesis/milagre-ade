@@ -22,6 +22,8 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         size="fluid"
         className="max-w-80"
         status={status}
+        // The dither field already says it is working and the image says it is ready; only the prompt is shown under it.
+        showStatus={false}
         prompt={step.detail}
         resolution={size ? `${size.width} × ${size.height}` : ""}
         aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}

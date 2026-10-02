@@ -39,8 +39,8 @@ declare global {
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Lines the worktree adds and removes against its base, or null outside a repository. */
       readDiffStat: (worktreePath: string, base?: string) => Promise<DiffStat | null>;
-      /** Opens the worktree's folder in Finder. */
-      revealWorktree: (worktreePath: string) => Promise<void>;
+      /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
+      revealInFolder: (folder: string) => Promise<void>;
       /** Code editors found on this Mac, in the order the first becomes the default. */
       listEditors: () => Promise<EditorInfo[]>;
       /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Resolves to null, or a short error message. */

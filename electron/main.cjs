@@ -7,6 +7,7 @@ const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { detectEditors, openInEditor } = require("./editors.cjs");
+const { revealFolder } = require("./reveal.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
@@ -186,13 +187,8 @@ ipcMain.handle("worktree:create", async (event, { projectPath, baseBranch, promp
   return { project, worktreeId: worktree.id };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
-// Only a git checkout's top folder opens, so the renderer can't open arbitrary paths.
-ipcMain.handle("worktree:reveal", async (_event, worktreePath) => {
-  const { stdout } = await execFileAsync("git", ["-C", worktreePath, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-  if ((await fs.realpath(stdout.trim())) !== (await fs.realpath(worktreePath))) throw new Error(`${worktreePath} is not a worktree.`);
-  const error = await shell.openPath(worktreePath);
-  if (error) throw new Error(error);
-});
+// A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
+ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
 // Installed editors are looked up once per run.
 let editorsFound = null;

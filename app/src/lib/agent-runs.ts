@@ -1,3 +1,4 @@
+import { updateDetachedSubagent } from "./subagents.ts";
 import type { AgentEvent, ChatMessage, ChatStep, CoordinatorState, ModelOption, ModelProvider, PermissionDecision, PermissionRequest, QuestionRequest } from "../model";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
@@ -137,13 +138,15 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
       // A resumed provider can rediscover a child before it has replayed the earlier output.
       const agent = previous ? {
         ...event.agent,
+        archived: previous.archived,
+        detachedSessionId: previous.detachedSessionId,
         title: event.agent.title === "Subagent" ? previous.title : event.agent.title,
         prompt: event.agent.prompt ?? previous.prompt,
         startedAt: Math.min(previous.startedAt, event.agent.startedAt),
         transcript: [...new Map([...previous.transcript, ...event.agent.transcript].map(entry => [entry.id, entry])).values()].slice(-100),
       } : event.agent;
       const subagents = previous ? children.map(child => child.id === agent.id ? agent : child) : [...children, agent];
-      return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
+      return { state: updateDetachedSubagent({ ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, sessionId, agent), runs, changed: true };
     }
     case "subagents-waiting":
       return run ? { state, runs: { ...runs, [chatId]: { ...run, waitingForSubagents: event.waiting } }, changed: false } : { state, runs, changed: false };

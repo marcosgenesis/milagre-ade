@@ -18,6 +18,10 @@ function Fixture() {
     {id:"tests",title:"Run tests",status:"failed",startedAt:Date.now()-40000,updatedAt:Date.now(),endedAt:Date.now(),transcript:[{id:"b",kind:"tool",text:"Tests failed"}]}
   ]);
   const [sending, setSending] = useState(true);
+  const [detached, setDetached] = useState(null);
+  window.returnToParent = () => setDetached(null);
+  const detach = id => { setDetached(children.find(child=>child.id===id)); setChildren(items=>items.map(child=>child.id===id ? {...child,detachedSessionId:10} : child)); };
+  const archive = (id,archived) => setChildren(items=>items.map(child=>child.id===id ? {...child,archived} : child));
   window.setChildren = setChildren;
   window.finishChildren = () => {setChildren(items=>items.map(item=>({...item,status:"completed",endedAt:Date.now()})));setSending(false);};
   const [draft, setDraft] = useState("");
@@ -33,7 +37,7 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={detached ? [] : children} readOnlySubagent={detached} onDetachSubagent={detach} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -52,7 +56,11 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-subagent-ui-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  const evaluate = async (source) => {
+    try { return await window.webContents.executeJavaScript(source); }
+    catch (error) { throw new Error(`${source}: ${error.message}`); }
+  };
+  const clickLabel = label => evaluate(`[...document.querySelectorAll("button")].find(button => button.getAttribute("aria-label") === ${JSON.stringify(label)}).click()`);
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
     await delay(300);
@@ -70,39 +78,60 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("[data-slot=subagent-track]")');
-    assert.ok(await evaluate('document.body.textContent.includes("Waiting on subagents")'));
-    assert.equal(await evaluate('document.body.textContent.includes("Child-only finding")'), false);
+    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-track]").textContent.includes("active")'), false);
+    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-track]").textContent.includes("failed")'), false);
     await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
-    await waitFor('!!document.querySelector("dialog[open]")');
-    assert.ok(await evaluate('document.querySelector("dialog").textContent.includes("Running")'));
-    assert.ok(await evaluate('document.querySelector("dialog").textContent.includes("Failed")'));
+    await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
+    assert.equal(await evaluate('document.querySelectorAll("dialog[open], [aria-modal=true]").length'), 0);
+    assert.equal(await evaluate('document.querySelectorAll("[data-subagent-row]").length'), 2);
+    const rowPosition = await evaluate('(() => {const r=document.querySelector("[data-subagent-row]").getBoundingClientRect();return {x:Math.round(r.right-38),y:Math.round(r.top+r.height/2)}})()');
+    window.webContents.sendInputEvent({type:"mouseMove",...rowPosition});
     await screenshot("subagents-list");
-    await evaluate('[...document.querySelectorAll("dialog li button")].find(b=>b.textContent.includes("Review authentication")).click()');
+    await clickLabel('Archive Run tests');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length === 1');
+    await evaluate('document.querySelector("[data-subagent-archived-toggle]").click()');
+    await waitFor(`!!document.querySelector('[aria-label="Restore Run tests"]')`);
+    await clickLabel('Restore Run tests');
+    await evaluate('document.querySelector("[data-subagent-archived-toggle]").click()');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length === 2');
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
     await waitFor('!!document.querySelector("[data-slot=subagent-transcript]")');
     assert.ok(await evaluate('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Child-only finding")'));
-    assert.equal(await evaluate('document.querySelectorAll("dialog textarea").length'), 0);
     for (const [width,height] of [[800,600],[390,500]]) {
       window.setContentSize(width,height);
       await delay(200);
-      const bounds=await evaluate('(() => {const r=document.querySelector("dialog").getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}})()');
-      assert.ok(bounds.left>=0 && bounds.right<=bounds.width && bounds.top>=0 && bounds.bottom<=bounds.height, 'Subagent dialog escapes viewport');
+      const bounds=await evaluate('(() => {const r=document.querySelector("[data-slot=subagent-popover]").getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}})()');
+      assert.ok(bounds.left>=0 && bounds.right<=bounds.width && bounds.top>=0 && bounds.bottom<=bounds.height, 'Subagent popover escapes viewport');
     }
     window.setContentSize(800,600);
     await delay(200);
     await screenshot("subagent-transcript");
-    await evaluate('window.finishChildren()');
-    await waitFor('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Completed")');
-    await evaluate('[...document.querySelectorAll("dialog button")].find(b=>b.textContent==="Close").click()');
+    await clickLabel('Close subagents');
     assert.equal(await evaluate('document.activeElement === document.querySelector("[data-slot=subagent-track] > button")'),true);
-    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-track]").textContent.includes("2 completed")'));
-    assert.equal(await evaluate('document.body.textContent.includes("Waiting on subagents")'),false);
     await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
     window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
     window.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
-    await waitFor('!document.querySelector("dialog[open]")');
+    await waitFor('!document.querySelector("[data-slot=subagent-popover]")');
+    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
+    await evaluate('document.querySelector("textarea[aria-label=Prompt]").dispatchEvent(new PointerEvent("pointerdown",{bubbles:true}))');
+    await waitFor('!document.querySelector("[data-slot=subagent-popover]")');
+    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
+    await clickLabel('Unlink Review authentication');
+    await waitFor('!!document.querySelector("[data-slot=subagent-read-only]")');
+    assert.equal(await evaluate('document.querySelectorAll("textarea[aria-label=Prompt]").length'), 0);
+    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-read-only]").textContent.includes("Child-only finding")'));
+    await evaluate('window.returnToParent()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-track]")');
+    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length===1');
+    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-popover]").textContent.includes("Review authentication")'), false);
+    await evaluate('window.finishChildren()');
+    await waitFor('!document.querySelector("[data-slot=subagent-track] > button svg")');
     await evaluate('window.setChildren([])');
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
-    console.log('PASS: subagent states, transcript isolation, live completion, focus, Escape, and narrow layout');
+    console.log('PASS: anchored popover, activity indicator, archive/restore, unlink, read-only chat, focus, Escape, outside click, and narrow layout');
     app.exit(0);
   } catch (error) {
     console.error(error);

@@ -156,6 +156,9 @@ export interface AgentSession {
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
   subagents?: Subagent[];
+  /** Independent read-only view of a provider-owned child. Never resumed as a root agent. */
+  subagentSource?: { parentSessionId: number; subagentId: string; messageId: number };
+  subagentSnapshot?: Subagent;
   /** A name the user gave the chat; otherwise it's named after its first message. */
   title?: string;
   /** A turn ended while the chat wasn't open, or the user marked it unread. */
@@ -279,6 +282,8 @@ export type QuestionOutcome = "answered" | "dismissed" | "cancelled";
 
 export interface Subagent {
   id: string;
+  archived?: boolean;
+  detachedSessionId?: number;
   parentId?: string;
   title: string;
   prompt?: string;

@@ -1,62 +1,130 @@
-import { useEffect, useRef, useState } from "react";
-import type { Subagent } from "../../model";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Archive02Icon, Cancel01Icon, Unlink01Icon } from "@hugeicons/core-free-icons";
+import type { ModelProvider, Subagent } from "../../model";
+import { subagentActive } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
+import { ProviderLogo } from "../ProviderLogo";
+import { SpinnerRing } from "../primitives/SpinnerRing";
+import Tooltip from "../primitives/Tooltip";
 
-const active = (agent: Subagent) => ["initializing", "running", "waiting"].includes(agent.status);
 const labels: Record<Subagent["status"], string> = { initializing: "Starting", running: "Running", waiting: "Waiting", completed: "Completed", failed: "Failed", cancelled: "Stopped", unknown: "Status unavailable" };
 function elapsed(agent: Subagent, now: number) {
   const seconds = Math.max(0, Math.floor(((agent.endedAt ?? now) - agent.startedAt) / 1000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-/** Provider-owned children stay available after the parent finishes. This view never prompts a child. */
-export function SubagentTrack({ agents }: { agents: Subagent[] }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const [opened, setOpened] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+export function SubagentTranscript({ agent }: { agent: Subagent }) {
   const [now, setNow] = useState(Date.now());
-  const running = agents.filter(active).length;
-  const failed = agents.filter(agent => agent.status === "failed").length;
-  const completed = agents.filter(agent => agent.status === "completed").length;
-  const child = agents.find(agent => agent.id === selected);
+  const running = subagentActive(agent);
   useEffect(() => {
-    if (!opened || !running) return;
+    if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [opened, running]);
-  if (!agents.length) return null;
-  const close = () => { dialog.current?.close(); setOpened(false); trigger.current?.focus(); };
-  return <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-3" data-slot="subagent-track">
-    <button ref={trigger} type="button" aria-haspopup="dialog" onClick={() => { setSelected(null); setNow(Date.now()); setOpened(true); dialog.current?.showModal(); }} className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2 hover:bg-hover focus-visible:outline-2">
-      Subagents <span className="ml-1 tabular-nums">{agents.length}</span>
-      {running > 0 && <span className="ml-2 text-ink">{running} active</span>}
-      {completed > 0 && <span className="ml-2">{completed} completed</span>}
-      {failed > 0 && <span className="ml-2 text-red">{failed} failed</span>}
+  }, [running]);
+  return <div className="space-y-4 p-3" data-slot="subagent-transcript">
+    <div className="flex flex-wrap gap-3 text-[12px] text-ink-3"><span>{labels[agent.status]}</span><span>{elapsed(agent, now)}</span><span>Read-only transcript</span></div>
+    {agent.prompt && <div className="rounded-lg bg-hover p-3"><p className="mb-1 text-[11px] text-ink-3">Task</p><p className="whitespace-pre-wrap break-words text-[13px]">{agent.prompt}</p></div>}
+    {agent.latestActivity && <p className="break-words text-[12px] text-ink-3">{agent.latestActivity}</p>}
+    {agent.transcript.map(entry => <div key={entry.id} className="min-w-0 break-words text-[13px]">{entry.kind === "tool" ? <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-line p-3 font-mono text-[12px]">{entry.text}</pre> : <Markdown text={entry.text} />}</div>)}
+    {!agent.transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
+  </div>;
+}
+
+/** A nonmodal list anchored above the composer. Archive/unlink affect views, not provider execution. */
+export function SubagentTrack({ agents, provider = "codex", onDetach, onArchive }: {
+  agents: Subagent[];
+  provider?: ModelProvider;
+  onDetach?: (id: string) => void;
+  onArchive?: (id: string, archived: boolean) => void;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const [opened, setOpened] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [archived, setArchived] = useState(false);
+  const [bounds, setBounds] = useState({ left: 12, bottom: 60, width: 420, maxHeight: 320 });
+  const linked = agents.filter(agent => !agent.detachedSessionId);
+  const visible = linked.filter(agent => !agent.archived);
+  const archivedCount = linked.length - visible.length;
+  const rows = linked.filter(agent => Boolean(agent.archived) === archived);
+  const child = rows.find(agent => agent.id === selected);
+  const close = () => { setOpened(false); trigger.current?.focus(); };
+
+  useLayoutEffect(() => {
+    if (!opened) return;
+    const position = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(child ? 480 : 420, window.innerWidth - 24);
+      setBounds({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8, width, maxHeight: Math.max(60, rect.top - 20) });
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => { window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
+  }, [opened, Boolean(child)]);
+
+  useEffect(() => {
+    if (!opened) return;
+    const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLButtonElement>("button")?.focus());
+    const outside = (event: PointerEvent) => {
+      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpened(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpened(false);
+      trigger.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
+  }, [opened]);
+
+  if (!linked.length) return null;
+  const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
+  return <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end px-3" data-slot="subagent-track">
+    <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2 hover:bg-hover focus-visible:outline-2">
+      {visible.some(subagentActive) && <SpinnerRing size={12} />}
+      Subagents <span className="tabular-nums">{visible.length}</span>
     </button>
-    <dialog ref={dialog} aria-label="Subagents" onClose={() => setOpened(false)} onClick={event => { if (event.target === event.currentTarget) close(); }} className="m-auto w-[min(680px,calc(100vw-32px))] max-h-[80vh] rounded-xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/40">
-      <div className="flex max-h-[80vh] flex-col" onClick={event => event.stopPropagation()}>
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
-          {child && <button type="button" onClick={() => setSelected(null)} className="text-[12px] text-ink-2 hover:text-ink">Back</button>}
-          <h2 className="min-w-0 flex-1 truncate text-[14px] font-medium">{child ? child.title : "Subagents"}</h2>
-          <button type="button" onClick={close} className="rounded-control px-2 py-1 text-[12px] text-ink-2 hover:bg-hover">Close</button>
+    {opened && createPortal(<div ref={panel} id={panelId} role="dialog" aria-label="Subagents" aria-modal="false" data-slot="subagent-popover" style={bounds} className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface p-1 shadow-raised text-ink" onKeyDown={event => {
+      if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-subagent-open]")];
+      if (!buttons.length) return;
+      event.preventDefault();
+      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next = index < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next].focus();
+      buttons[next].scrollIntoView({ block: "nearest" });
+    }}>
+      {child ? <>
+        <header className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-2">
+          <button type="button" onClick={() => setSelected(null)} className="rounded px-1 text-[12px] text-ink-3 hover:text-ink">Back</button>
+          <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">{child.title}</h2>
+          <button type="button" aria-label="Close subagents" onClick={close} className={actionClass}><HugeiconsIcon icon={Cancel01Icon} size={14} /></button>
         </header>
-        <div className="min-h-0 overflow-y-auto overscroll-contain p-3">
-          {child ? <div className="space-y-4 p-1" data-slot="subagent-transcript">
-            <div className="flex gap-3 text-[12px] text-ink-3"><span>{labels[child.status]}</span><span>{elapsed(child, now)}</span><span>Read-only transcript</span></div>
-            {child.prompt && <div className="rounded-lg bg-hover p-3"><p className="mb-1 text-[11px] text-ink-3">Task</p><p className="whitespace-pre-wrap break-words text-[13px]">{child.prompt}</p></div>}
-            {child.latestActivity && <p className="break-words text-[12px] text-ink-3">{child.latestActivity}</p>}
-            {child.transcript.map(entry => <div key={entry.id} className="min-w-0 break-words text-[13px]">{entry.kind === "tool" ? <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-line p-3 font-mono text-[12px]">{entry.text}</pre> : <Markdown text={entry.text} />}</div>)}
-            {!child.transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
-          </div> : <ul className="space-y-1">
-            {agents.map(agent => <li key={agent.id}><button type="button" onClick={() => setSelected(agent.id)} className="flex w-full items-start gap-3 rounded-lg p-3 text-left hover:bg-hover focus-visible:outline-2">
-              <span aria-hidden className={`mt-1.5 size-1.5 shrink-0 rounded-full ${agent.status === "failed" ? "bg-red" : active(agent) ? "bg-ink" : "bg-ink-3"}`} />
-              <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{agent.title}</span><span className="mt-1 block truncate text-[12px] text-ink-3">{agent.latestActivity || agent.prompt || "No activity received yet"}</span></span>
-              <span className="shrink-0 text-right text-[11px] text-ink-3"><span className="block">{labels[agent.status]}</span><span className="tabular-nums">{elapsed(agent, now)}</span></span>
-            </button></li>)}
-          </ul>}
-        </div>
-      </div>
-    </dialog>
+        <div className="min-h-0 overflow-y-auto overscroll-contain"><SubagentTranscript agent={child} /></div>
+      </> : <>
+        <ul className="min-h-0 overflow-y-auto overscroll-contain">
+          {rows.map(agent => <li key={agent.id} data-subagent-row className="group flex items-center gap-1 rounded-md px-1 hover:bg-hover focus-within:bg-hover">
+            <button type="button" data-subagent-open onClick={() => setSelected(agent.id)} title={`${agent.title} (${labels[agent.status]})`} className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-1 text-left text-[13px] focus-visible:outline-2">
+              <span className="flex size-4 shrink-0 items-center justify-center text-ink-3">{subagentActive(agent) ? <SpinnerRing size={12} /> : <ProviderLogo provider={provider} size={14} />}</span>
+              <span className="truncate">{agent.title}</span>
+            </button>
+            <span className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+              {!archived && <Tooltip label="Unlink subagent"><button type="button" aria-label={`Unlink ${agent.title}`} disabled={!onDetach} onClick={() => { close(); onDetach?.(agent.id); }} className={actionClass}><HugeiconsIcon icon={Unlink01Icon} size={14} /></button></Tooltip>}
+              <Tooltip label={archived ? "Restore subagent" : "Archive subagent"}><button type="button" aria-label={`${archived ? "Restore" : "Archive"} ${agent.title}`} disabled={!onArchive} onClick={() => onArchive?.(agent.id, !archived)} className={actionClass}><HugeiconsIcon icon={Archive02Icon} size={14} /></button></Tooltip>
+            </span>
+          </li>)}
+        </ul>
+        {!rows.length && <p className="px-3 py-5 text-[12px] text-ink-3">{archived ? "No archived subagents." : "No linked subagents."}</p>}
+        {(archivedCount > 0 || archived) && <button type="button" data-subagent-archived-toggle onClick={() => setArchived(!archived)} className="mt-1 border-t border-line px-2 py-2 text-left text-[11px] text-ink-3 hover:text-ink">{archived ? "Back to subagents" : `Archived (${archivedCount})`}</button>}
+      </>}
+    </div>, document.body)}
   </div>;
 }

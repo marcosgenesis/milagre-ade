@@ -65,10 +65,17 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
 
 // A saved running flag is not proof of a live provider after an app restart.
 function markDisconnectedSubagents(state, liveSessionIds) {
-  return { ...state, sessions: Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id,
+  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id,
     liveSessionIds.has(Number(id)) || !session.subagents ? session : { ...session, subagents: session.subagents.map(agent =>
       ["running", "initializing", "waiting"].includes(agent.status) ? { ...agent, status: "unknown", endedAt: agent.updatedAt, latestActivity: "Session disconnected. Last received activity is shown below." } : agent) }
-  ])) };
+  ]));
+  for (const [id, session] of Object.entries(sessions)) {
+    if (!session.subagentSource) continue;
+    const { parentSessionId, subagentId } = session.subagentSource;
+    const agent = sessions[parentSessionId]?.subagents?.find(child => child.id === subagentId);
+    if (agent) sessions[id] = { ...session, subagentSnapshot: agent };
+  }
+  return { ...state, sessions };
 }
 
 module.exports = { emptyState, reconcileState, markDisconnectedSubagents };

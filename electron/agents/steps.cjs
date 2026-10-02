@@ -2,8 +2,9 @@ const path = require("node:path");
 const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./permissions.cjs");
 
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
-// its reply. A step starts as { id, kind, title, detail? } and ends as { id, status, title?, detail? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other"
+// its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
+// { id, status, title?, detail?, durationMs? }:
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
 //   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
 //           the title shows only its name, and the renderer opens it in an editor from here
@@ -11,6 +12,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 //   detail  a command and its output ("$ npm test\n…"), a unified diff, or the tool's result text.
 //           The detail a step ends with replaces anything streamed into it. A read that worked keeps none.
 // A title given at the end replaces the first one, for agents that only know it then.
+// A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
 
 const MAX_OUTPUT = 20_000;
 const TRUNCATED = "… truncated";
@@ -43,6 +45,21 @@ function blocksText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : "")).filter(Boolean).join("\n");
+}
+
+// --- Thinking ---
+
+const thinkingStep = (id) => ({ id: String(id), kind: "thinking", title: "Thinking" });
+
+// "Thought for 4s", "Thought for 1m 5s"; just "Thought" when the start wasn't seen.
+function thinkingEnd(id, durationMs, text) {
+  const title = durationMs === undefined ? "Thought" : `Thought for ${formatDuration(durationMs)}`;
+  return compact({ id: String(id), status: "done", title, detail: text ? capText(text) : undefined, durationMs });
+}
+
+function formatDuration(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 // --- Claude ---
@@ -174,4 +191,4 @@ function codexStepResult(item) {
   }
 }
 
-module.exports = { MAX_OUTPUT, capOutput, claudeStep, claudeStepResult, codexStep, codexStepResult };
+module.exports = { MAX_OUTPUT, capOutput, claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep };

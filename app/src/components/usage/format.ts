@@ -49,8 +49,9 @@ export function formatUpdatedAgo(updatedAt: string, now: number): string {
   return `Updated ${Math.floor(elapsed / DAY)}d ago`;
 }
 
+/** The providers the sidebar shows: those with numbers. One in error keeps showing its last-known windows. */
 export function visibleProviders(snapshot: UsageSnapshot) {
-  return snapshot.providers.filter((item) => item.status !== "unavailable");
+  return snapshot.providers.filter((item) => item.status !== "unavailable" && item.windows.length > 0);
 }
 
 export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used") {
@@ -58,6 +59,12 @@ export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used")
   if (usage.windows.length === 0) return `${name} usage unavailable`;
   const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(shownPercent(item.usedPercent, display))} ${shownSuffix(display)}`);
   return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;
+}
+
+// The saved numbers only seed an empty snapshot: a fresh read that landed first wins.
+export function seedSnapshot(current: UsageSnapshot | null, cached: UsageSnapshot): UsageSnapshot | null {
+  if (current || cached.providers.length === 0) return current;
+  return cached;
 }
 
 // A failed refresh keeps the last good windows and their timestamp, so the card

@@ -38,7 +38,9 @@ function load(): AppSettings {
     const theme = saved.theme ?? legacyTheme;
     return {
       theme: THEMES.includes(theme as ThemePreference) ? (theme as ThemePreference) : DEFAULTS.theme,
-      defaultModelId: MODEL_CATALOG.some((model) => model.id === saved.defaultModelId) ? saved.defaultModelId! : DEFAULTS.defaultModelId,
+      // Any saved id is kept: the agents report models the maintained list lacks, and App falls back
+      // to a provider's recommended model when the saved one isn't offered.
+      defaultModelId: typeof saved.defaultModelId === "string" && saved.defaultModelId ? saved.defaultModelId : DEFAULTS.defaultModelId,
       defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode) ? saved.defaultPermissionMode! : DEFAULTS.defaultPermissionMode,
       usageDisplay: USAGE_DISPLAYS.includes(saved.usageDisplay as UsageDisplay) ? saved.usageDisplay! : DEFAULTS.usageDisplay,
       showUsageInSidebar: typeof saved.showUsageInSidebar === "boolean" ? saved.showUsageInSidebar : DEFAULTS.showUsageInSidebar,

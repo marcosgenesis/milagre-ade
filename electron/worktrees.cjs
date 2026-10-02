@@ -80,4 +80,21 @@ async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEF
   return { branch, path: worktreePath, base: start };
 }
 
-module.exports = { createWorktree, listBranches, slugify };
+// Gives a chat's branch the name picked for it once the chat is already running (see worktree-name.cjs).
+// The folder keeps its first name: moving it would pull it out from under the agent. Resolves to the new
+// branch, or null when there is nothing to rename or git refuses (the branch is gone, or the name is taken).
+async function renameWorktreeBranch({ worktreePath, branch, slug }) {
+  const suffix = branch.match(/-([a-z0-9]+)$/)?.[1];
+  const name = slugify(slug);
+  if (!suffix || !name) return null;
+  const renamed = `milagre/${name}-${suffix}`;
+  if (renamed === branch) return null;
+  try {
+    await git(worktreePath, ["branch", "-m", branch, renamed]);
+    return renamed;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { createWorktree, listBranches, renameWorktreeBranch, slugify };

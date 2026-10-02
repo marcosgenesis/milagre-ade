@@ -8,12 +8,14 @@ import {
   Isolation,
   MODEL_CATALOG,
   ModelOption,
+  ModelProvider,
   OpenProject,
   PermissionDecision,
   QuestionAnswers,
   PermissionMode,
   EffortLevel,
-  ModelCapabilities,
+  AgentCliStatus,
+  AgentModels,
   capabilityFor,
   effortFor,
   createInitialState,
@@ -23,6 +25,7 @@ import {
 import { useAgentRuns } from "./components/useAgentRuns";
 import { chatInProject, chatKey, chatsRunning, chatsWaitingForUser, modelForChat, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
 import { attentionNotice } from "./lib/attention";
+import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection } from "./lib/models";
 import { chatMark, chatTitle, patchSession } from "./lib/chat-list";
 import { useWorktreeDiffs } from "./components/useWorktreeDiffs";
 import { usePastedImages } from "./components/usePastedImages";
@@ -34,6 +37,7 @@ import type { SettingsSection } from "./components/Settings";
 import { getSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 import { openInEditor } from "./lib/editors";
+import { renameWorktree } from "./lib/worktree-rename";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
 import type { UpdateState } from "./electron";
@@ -67,8 +71,34 @@ function App() {
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
   const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
-  const [capabilities, setCapabilities] = useState<ModelCapabilities | null>(null);
-  useEffect(() => { void window.milagre.getModelCapabilities().then(setCapabilities).catch(() => undefined); }, []);
+  // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
+  const [reported, setReported] = useState<AgentModels | null>(null);
+  const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
+  // Whether each agent's CLI is missing, outdated, broken or logged out, for the model picker. Loaded at
+  // startup and again each time the picker opens, so a fix shows without a restart.
+  const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
+  // The model lists come along: the main process keeps a good list for the run but asks again for an agent
+  // that had none (a CLI that was missing, or Claude Code before it was logged in).
+  const refreshCliStatus = () => {
+    // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
+    // re-apply anything that depends on the lists.
+    void window.milagre.getCliStatus().then((next) => setCliStatus((previous) => keepIfSame(previous, next))).catch(() => undefined);
+    void window.milagre.getModels().then((next) => setReported((previous) => keepIfSame(previous, next))).catch(() => undefined);
+  };
+  useEffect(refreshCliStatus, []);
+  const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
+  // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
+  // and the open chat isn't on the other agent. After that a model the agents don't offer only gives way to
+  // its provider's recommended model (see nextSelection).
+  const pickedModel = useRef(false);
+  const appliedDefault = useRef(false);
+  const lockedProviderRef = useRef<ModelProvider | undefined>(undefined);
+  useEffect(() => {
+    const applyDefault = reported !== null && !appliedDefault.current && !pickedModel.current;
+    if (reported !== null) appliedDefault.current = true;
+    setSelectedModel((current) => nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }));
+  }, [models]);
+  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "settings">("chat");
@@ -125,6 +155,7 @@ function App() {
   const imageDraft = usePastedImages(selectedWorktree?.path ?? project?.path ?? "");
   const connection = state ? Object.values(state.connections)[0] : undefined;
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
+  lockedProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
   // The chat on screen; a turn that ends anywhere else leaves its chat unread.
   openSessionRef.current = view === "chat" ? selectedSessionId : null;
@@ -167,7 +198,7 @@ function App() {
   // A chat stays on the agent it started with; the picker follows the open chat.
   useEffect(() => {
     if (!selectedSession?.provider) return;
-    const next = modelForChat(selectedModel, selectedSession.provider, messages, MODEL_CATALOG);
+    const next = modelForChat(selectedModel, selectedSession.provider, messages, models);
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
@@ -268,6 +299,20 @@ function App() {
     if (notice && "requestId" in event) void window.milagre.notifyAttention({ chatId, requestId: event.requestId, ...notice }).catch(() => {});
   }), []);
 
+  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked.
+  useEffect(() => window.milagre.onWorktreeRenamed((rename) => {
+    const latest = stateRef.current;
+    if (projectRef.current?.path !== rename.projectPath || !latest) return;
+    const next = renameWorktree(latest, rename);
+    // Not commit(): this listener outlives the render whose `project` that would save under.
+    if (next !== latest) {
+      stateRef.current = next;
+      setState(next);
+      void window.milagre.saveProject(rename.projectPath, next);
+    }
+    void window.milagre.listBranches(rename.projectPath).then(setBranches);
+  }), []);
+
   // Clicking a notification opens its chat.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const current = projectRef.current;
@@ -352,7 +397,7 @@ function App() {
     }
     const chatSession = session;
 
-    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), MODEL_CATALOG);
+    const model = modelForChat(selectedModel, chatSession.provider, latest.messages.filter((message) => message.session_id === chatSession.id), models);
     const userMessage = {
       id: nextId++,
       session_id: chatSession.id,
@@ -510,13 +555,12 @@ function App() {
       )}
 
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        {view === "settings" && <SettingsPanel section={settingsSection} />}
+        {view === "settings" && <SettingsPanel section={settingsSection} models={models} />}
         <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" ? "" : "hidden"}`}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
             key={project.path}
             messages={messages}
-            sessions={state.sessions}
             imageDraft={imageDraft}
             projectPath={selectedWorktree?.path ?? project.path}
             draft={draft}
@@ -527,10 +571,13 @@ function App() {
             streamingText={run?.text}
             streamingSteps={run?.steps}
             waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
-            runModelName={run ? MODEL_CATALOG.find((model) => model.id === run.model)?.name ?? run.model : undefined}
+            runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 ? selectedSession?.provider : undefined}
+            models={models}
+            cliStatus={cliStatus}
+            onModelPickerOpen={refreshCliStatus}
             selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            onModelChange={chooseModel}
             capability={selectedCapability}
             effort={effortFor(selectedCapability, effort)}
             onEffortChange={setEffort}

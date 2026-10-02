@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon, Settings01Icon } from "@hugeicons/core-free-icons";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
-import type { PermissionMode } from "../model";
+import { PERMISSION_MODES } from "../model";
+import type { ModelOption, PermissionMode } from "../model";
+import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import { useEditors } from "../lib/editors";
@@ -93,17 +94,17 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
-function GeneralSettings() {
+function GeneralSettings({ models }: { models: ModelOption[] }) {
   const settings = useSettings();
   const { editors, editor } = useEditors();
   return (
     <>
     <Group title="Agents">
       <Row label="Default model" description="Selected when Milagre opens">
-        <Select label="Default model" value={settings.defaultModelId} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
+        <Select label="Default model" value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id} onChange={(defaultModelId) => updateSettings({ defaultModelId })}>
           {(["codex", "claude"] as const).map((provider) => (
             <optgroup key={provider} label={provider === "codex" ? "Codex" : "Claude"}>
-              {MODEL_CATALOG.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+              {models.filter((model) => model.provider === provider).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
             </optgroup>
           ))}
         </Select>
@@ -185,13 +186,13 @@ function AboutSettings() {
   );
 }
 
-export function SettingsPanel({ section }: { section: SettingsSection }) {
+export function SettingsPanel({ section, models }: { section: SettingsSection; models: ModelOption[] }) {
   const title = SECTIONS.find((item) => item.key === section)?.label;
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
-        {section === "general" && <GeneralSettings />}
+        {section === "general" && <GeneralSettings models={models} />}
         {section === "appearance" && <AppearanceSettings />}
         {section === "about" && <AboutSettings />}
       </div>

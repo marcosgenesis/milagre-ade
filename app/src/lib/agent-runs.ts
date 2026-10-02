@@ -73,20 +73,20 @@ function updateStep(run: AgentRun, id: string, update: (step: ChatStep) => ChatS
 }
 
 /** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
-function endStep({ detail: _streamed, ...step }: ChatStep, end: { status: "done" | "failed"; title?: string; detail?: string }): ChatStep {
-  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.detail === undefined ? {} : { detail: end.detail }) };
+function endStep({ detail: _streamed, ...step }: ChatStep, end: { status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }): ChatStep {
+  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }) };
 }
 
 /**
  * Steps as saved with a reply: none left running, and offsets into the reply's trimmed text.
- * A step still running when the turn ends is saved as `closeAs`.
+ * A step still running when the turn ends is saved as `closeAs`, except thinking, which just stops.
  */
 function savedSteps(text: string, steps: ChatStep[], closeAs: "done" | "failed"): { steps?: ChatStep[] } {
   if (!steps.length) return {};
   const lead = text.length - text.trimStart().length;
   const length = text.trim().length;
   return {
-    steps: steps.map((step) => ({ ...step, status: step.status === "running" ? closeAs : step.status, offset: Math.min(Math.max((step.offset ?? text.length) - lead, 0), length) })),
+    steps: steps.map((step) => ({ ...step, status: step.status !== "running" ? step.status : step.kind === "thinking" ? "done" : closeAs, offset: Math.min(Math.max((step.offset ?? text.length) - lead, 0), length) })),
   };
 }
 
@@ -215,7 +215,11 @@ export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projec
 
 function replyBody(text: string, event: AgentEvent, hasSteps: boolean) {
   const reply = text.trim();
-  if (event.type === "turn-failed") return reply ? `${reply}\n\nAgent error: ${event.message}` : `Agent error: ${event.message}`;
+  if (event.type === "turn-failed") {
+    // Milagre's own messages are full sentences that name the CLI and the fix; the agent's raw errors get a prefix.
+    const failure = event.notice ? event.message : `Agent error: ${event.message}`;
+    return reply ? `${reply}\n\n${failure}` : failure;
+  }
   if (event.type === "turn-cancelled") return reply ? `${reply}\n\nAgent run cancelled.` : "Agent run cancelled.";
   return reply || (hasSteps ? "" : "The agent finished without a reply.");
 }

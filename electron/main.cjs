@@ -12,22 +12,33 @@ const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession } = require("./agents/codex-provider.cjs");
-const { createCapabilityCache } = require("./agents/capabilities.cjs");
-const { resolveExecutable } = require("./agents/environment.cjs");
+const { createCliCache } = require("./agents/cli.cjs");
+const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
+const { failedWith, loginMessage } = require("./agents/events.cjs");
+const { createModelCache } = require("./agents/models.cjs");
+const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
-const { createWorktree, listBranches } = require("./worktrees.cjs");
+const { createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
+const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { reconcileState } = require("./project-state.cjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createUsageReader } = require("./usage.cjs");
+const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
-const readUsage = createUsageReader();
+// Opened from Finder or the Dock, the app has launchd's bare PATH. The login shell's environment is read
+// once, in the background: windows open without waiting, and the first agent (and the usage lookup) waits for it.
+const environmentReady = loadLoginEnvironment().then(({ source }) => {
+  if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
+}, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
+const usageStore = createUsageStore({ file: path.join(app.getPath("userData"), "usage-cache.json") });
+const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
 
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };
@@ -88,10 +99,25 @@ async function readProject(projectPath) {
 
 ipcMain.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
 ipcMain.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
-ipcMain.handle("project:image", (_event, projectPath) => resolveProjectImage(projectPath));
+// The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
+ipcMain.handle("project:image", async (_event, projectPath) => {
+  await environmentReady;
+  return resolveProjectImage(projectPath);
+});
 // Packaged builds get their release version from electron-builder metadata, not the source package.json.
 ipcMain.handle("app:version", () => app.getVersion());
-ipcMain.handle("worktree:create", async (_event, request) => {
+// A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
+// picks one, so the chat never waits on it.
+async function nameWorktree(sender, projectPath, created, prompt) {
+  // The CLI check waits for the login environment and resolves the path the SDK starts directly (no shell). A
+  // missing or broken Claude has no command, and the name stays the prompt's first words.
+  const cli = await agentCli("claude");
+  const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, timeoutMs: 15_000 });
+  const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
+  if (name && !sender.isDestroyed()) sender.send("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
+}
+
+ipcMain.handle("worktree:create", async (event, request) => {
   const created = await createWorktree(request);
   const project = await readProject(request.projectPath);
   const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
@@ -99,6 +125,7 @@ ipcMain.handle("worktree:create", async (_event, request) => {
   const worktree = { ...listed, base: created.base };
   project.state.worktrees[worktree.id] = worktree;
   await saveProjectState(request.projectPath, project.state);
+  void nameWorktree(event.sender, request.projectPath, created, request.prompt ?? "").catch(() => {});
   return { project, worktreeId: worktree.id };
 });
 ipcMain.handle("worktree:diffstat", (_event, worktreePath, base) => readDiffStat(worktreePath, base));
@@ -112,8 +139,9 @@ ipcMain.handle("worktree:reveal", async (_event, worktreePath) => {
 
 // Installed editors are looked up once per run.
 let editorsFound = null;
+// Looked up after the login shell filled in PATH, so CLIs from a Finder launch are found.
 // A failed lookup is not kept, so the next call looks again.
-const editors = () => (editorsFound ??= detectEditors().catch((error) => {
+const editors = () => (editorsFound ??= environmentReady.then(() => detectEditors()).catch((error) => {
   editorsFound = null;
   throw error;
 }));
@@ -148,45 +176,53 @@ ipcMain.handle("notification:attention", (_event, notice) => (Notification.isSup
 const keepAwake = new KeepAwake({ powerSaveBlocker });
 ipcMain.handle("app:set-keep-awake", (_event, enabled) => keepAwake.setEnabled(enabled === true));
 
+function sendAgentEvent(chatId, event) {
+  notifier.observe(chatId, event);
+  keepAwake.observe(chatId, event);
+  // A turn that just failed on a login problem makes a "ready" picker status out of date.
+  if (event.type === "turn-failed" && event.login) {
+    for (const name of ["claude", "codex"]) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
+  }
+  for (const window of BrowserWindow.getAllWindows()) {
+    // A window can be mid-teardown while agents shut down on quit.
+    if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+    window.webContents.send("agent:event", { chatId, event });
+  }
+}
+
 const agents = new SessionManager({
   createSession: (provider, options) => (provider === "codex"
     ? new CodexSession({ ...options, clientVersion: app.getVersion() })
     : new ClaudeSession(options)),
   onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
-  send: (chatId, event) => {
-    notifier.observe(chatId, event);
-    keepAwake.observe(chatId, event);
-    for (const window of BrowserWindow.getAllWindows()) {
-      // A window can be mid-teardown while agents shut down on quit.
-      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-      window.webContents.send("agent:event", { chatId, event });
-    }
-  },
+  send: sendAgentEvent,
 });
 
-// CLI paths are looked up once per run; a missing CLI is looked up again next time.
-const executables = new Map();
-function executable(name) {
-  if (!executables.has(name)) {
-    executables.set(name, resolveExecutable(name).then((found) => {
-      if (!found) executables.delete(name);
-      return found;
-    }));
-  }
-  return executables.get(name);
-}
+// Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
+const agentCli = createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
 
 ipcMain.handle("usage:read", () => readUsage());
+ipcMain.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));
 
 ipcMain.handle("agent:start-turn", async (_event, request) => {
   const images = decodeImages(request.images);
   const prompt = await expandSkillPrompt(request.cwd, request.prompt);
-  const command = await executable(request.provider === "codex" ? "codex" : "claude");
-  return agents.startTurn({ ...request, prompt, images, command });
+  const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
+  // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
+  if (cli.problem) {
+    sendAgentEvent(request.chatId, failedWith(cli.problem));
+    return { turnId: null, steered: false };
+  }
+  return agents.startTurn({ ...request, prompt, images, command: cli.command });
 });
 
-const modelCapabilities = createCapabilityCache({ executable, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
-ipcMain.handle("agent:capabilities", () => modelCapabilities());
+// What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
+// after 5 minutes, a problem on every call.
+const agentCliStatus = createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
+ipcMain.handle("agent:cli-status", () => agentCliStatus());
+
+const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: app.getVersion() });
+ipcMain.handle("agent:models", () => agentModels());
 
 ipcMain.handle("agent:interrupt", (_event, chatId) => agents.interrupt(chatId));
 

@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, isTerminal, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
@@ -33,6 +33,9 @@ async function writeImages(images) {
 }
 
 const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
+
+// account/read answers in well under a second; a Codex that doesn't is not held up for the default RPC timeout.
+const ACCOUNT_TIMEOUT_MS = 8000;
 
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
@@ -65,7 +68,7 @@ class CodexSession {
   async startTurn(request) {
     if (this.turnActive) return this.steer(request);
     if (!this.command) {
-      this.emit({ type: "turn-failed", message: missingCliMessage("codex") });
+      this.emit(failedWith(missingCliMessage("codex")));
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
@@ -98,6 +101,8 @@ class CodexSession {
         input: turnInput(prompt, files),
         model,
         ...(effort ? { effort } : {}),
+        // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
+        summary: "auto",
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });
@@ -106,10 +111,10 @@ class CodexSession {
       return { turnId: this.state.turnId, steered: false };
     } catch (error) {
       if (error.resumeFailed) {
-        await this.finishTurn([{ type: "session-reset" }, { type: "turn-failed", message: RESUME_FAILED_MESSAGE }]);
+        await this.finishTurn([{ type: "session-reset" }, failedWith(RESUME_FAILED_MESSAGE)]);
         await this.close();
       } else {
-        await this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : { type: "turn-failed", message: error.message }]);
+        await this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : error.notice ? failedWith(error.message, { login: error.login === true }) : { type: "turn-failed", message: error.message }]);
         // A session that never finished starting is unusable; closing it lets the manager start over.
         if (!this.ready) await this.close();
       }
@@ -157,10 +162,11 @@ class CodexSession {
     this.rpc = rpc;
     rpc.on("notification", ({ method, params }) => this.handleNotification(method, params));
     rpc.on("request", ({ id, method, params }) => this.handleServerRequest(id, method, params));
-    rpc.on("exit", ({ detail }) => this.handleExit(detail));
+    rpc.on("exit", ({ detail, signal }) => this.handleExit(detail, signal));
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
+    await this.checkLogin(rpc);
     const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: MILAGRE_INSTRUCTIONS, config: THREAD_CONFIG };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
@@ -168,6 +174,16 @@ class CodexSession {
       this.emit({ type: "session-started", nativeId: thread.id });
     }
     this.ready = true;
+  }
+
+  // A logged-out Codex accepts a turn, retries for about 15 s and fails it with a raw 401. account/read
+  // answers at once: no account while OpenAI auth is required means `codex login` is needed. A Codex that
+  // can't answer, or one on a provider that needs no OpenAI login, isn't held up.
+  async checkLogin(rpc) {
+    const status = await rpc.request("account/read", { refreshToken: false }, { timeoutMs: ACCOUNT_TIMEOUT_MS }).catch(() => null);
+    // Only where OpenAI auth is required does a 401 mid-session mean "log in" (see mapCodexNotification).
+    this.state.requiresOpenaiAuth = status?.requiresOpenaiAuth === true;
+    if (status && !status.account && status.requiresOpenaiAuth === true) throw Object.assign(new Error(loginMessage("codex")), { notice: true, login: true });
   }
 
   // Codex ignores a feature it doesn't know, but a Codex that rejects `config` outright would leave the
@@ -213,7 +229,11 @@ class CodexSession {
       events.forEach((event) => this.emit(event));
       return;
     }
-    void this.finishTurn(this.cancelRequested ? events.map((event) => (isTerminal(event) ? { type: "turn-cancelled" } : event)) : events);
+    const loggedOut = !this.cancelRequested && events.some((event) => event.login);
+    const finished = this.finishTurn(this.cancelRequested ? events.map((event) => (isTerminal(event) ? { type: "turn-cancelled" } : event)) : events);
+    // An app-server that answered 401 holds the old credentials; the next message starts a fresh one.
+    if (loggedOut) void finished.then(() => this.close());
+    else void finished;
   }
 
   handleServerRequest(id, method, params = {}) {
@@ -268,9 +288,9 @@ class CodexSession {
     this.permissions.setMode(permissionMode);
   }
 
-  handleExit(detail) {
+  handleExit(detail, signal) {
     this.closed = true;
-    void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : { type: "turn-failed", message: `Codex stopped: ${detail}` }]);
+    void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : failedWith(crashMessage("codex", detail, { signal }))]);
   }
 
   async finishTurn(events) {
@@ -285,6 +305,7 @@ class CodexSession {
     this.fileChanges.clear();
     // A command still running when the turn stopped never completes; the renderer closes its step.
     this.state.steps.clear();
+    this.state.thinkingStarts?.clear();
     const imageSets = this.imageSets;
     this.imageSets = [];
     await Promise.all(imageSets.map((files) => files.cleanup().catch(() => {})));

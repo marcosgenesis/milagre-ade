@@ -20,6 +20,12 @@ function saveProjectState(projectPath, state) {
   return save;
 }
 
+// Resolves once every save queued so far for the project has finished (or failed), so a read that follows
+// sees the last one: switching back to a project must not load the file from before its last turn ended.
+function savesSettled(projectPath) {
+  return (queues.get(path.resolve(projectPath)) ?? Promise.resolve()).then(() => {}, () => {});
+}
+
 async function writeState(projectPath, state) {
   const contents = JSON.stringify(state, null, 2);
   const directory = path.dirname(stateFile(projectPath));
@@ -34,4 +40,4 @@ async function writeState(projectPath, state) {
   }
 }
 
-module.exports = { saveProjectState, stateFile };
+module.exports = { saveProjectState, savesSettled, stateFile };

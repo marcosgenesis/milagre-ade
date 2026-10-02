@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { saveProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, savesSettled, stateFile } = require("./project-store.cjs");
 
 async function tempProject(t) {
   const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-store-"));
@@ -40,4 +40,26 @@ test("a failed save rejects without blocking the next one", async (t) => {
 
   assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), { next_id: 3 });
   assert.deepEqual(await fs.readdir(path.join(projectPath, ".milagre")), ["coordination.json"]);
+});
+
+test("savesSettled waits for the saves queued so far, so a read right after sees the last one", async (t) => {
+  const projectPath = await tempProject(t);
+  const saving = saveProjectState(projectPath, { next_id: 9 });
+
+  await savesSettled(projectPath);
+
+  assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), { next_id: 9 });
+  await saving;
+});
+
+test("savesSettled resolves with nothing queued and after a failed save", async (t) => {
+  const projectPath = await tempProject(t);
+  await savesSettled(projectPath);
+  const circular = {};
+  circular.self = circular;
+  const failing = saveProjectState(projectPath, circular);
+
+  await savesSettled(projectPath);
+
+  await assert.rejects(failing);
 });

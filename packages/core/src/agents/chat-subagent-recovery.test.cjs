@@ -64,6 +64,7 @@ test("recovery reads only eligible unknown children and saves terminal outcomes 
   assert.deepEqual(children[0].transcript, [oldEntry, recovered[0].agent.transcript[0]]);
   assert.deepEqual(children[0].communications, [oldMessage]);
   for (const untouched of excluded.filter(agent => agent.id !== "native-parent")) assert.equal(children.find(agent => agent.id === untouched.id), untouched);
+  await states.flush(PROJECT);
   assert.equal(saved.length, 1);
   assert.deepEqual(broadcasts, [{ path: PROJECT, state: next }]);
   assert.equal(next.messages, state.messages);

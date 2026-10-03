@@ -1,4 +1,5 @@
 // @ts-check
+const { createQuitHandler } = require("./quit.cjs");
 const { createEditorOpener } = require("./editor-open.cjs");
 const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
@@ -227,22 +228,27 @@ function prepareQuit() {
   quitPrepared ??= (async () => {
     notifier.closeAll();
     await runtime.close();
-  })();
+  })().catch(error => { quitPrepared = null; quitting = false; throw error; });
   return quitPrepared;
 }
 
 let quitReady = false;
+const attemptQuit = createQuitHandler({
+  prepare: prepareQuit,
+  quit: () => { quitReady = true; app.quit(); },
+  failed: error => {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) { window.show(); window.webContents.send("app:quit-failed", message); }
+    }
+  },
+});
+ipcMain.handle("app:retry-quit", () => { app.quit(); });
 app.on("before-quit", (event) => {
   quitting = true;
   if (quitReady) return;
   event.preventDefault();
-  void prepareQuit().then(() => {
-    quitReady = true;
-    app.quit();
-  }, error => {
-    quitPrepared = null; quitting = false;
-    dialog.showErrorBox("Chats could not be saved", error.message);
-  });
+  void attemptQuit();
 });
 
 }

@@ -11,8 +11,8 @@ export function Attachments({ images = [], files = [], removeImage, removeFile, 
   const [open, setOpen] = useState<number | null>(null);
   const thumbs = useRef(new Map<string, HTMLButtonElement>());
   const items = [
-    ...images.map(image => ({ id: image.id, name: image.name, src: image.dataUrl, kind: 'image' as const, file: image.path ?? image.dataUrl, remove: image.path && removeFile ? () => removeFile(image.path!) : removeImage ? () => removeImage(image.id) : undefined })),
-    ...files.filter(path => !images.some(image => image.path === path)).map(path => ({ id: path, name: path.split('/').at(-1) || path, src: mediaUrl(path), kind: mediaKind(path), file: mediaKind(path) === 'image' ? path : undefined, remove: removeFile ? () => removeFile(path) : undefined })),
+    ...images.map(image => ({ id: image.id, name: image.name, src: image.dataUrl ?? mediaUrl(image.path ?? ""), kind: 'image' as const, file: image.path ?? image.dataUrl, remove: image.path && removeFile ? () => removeFile(image.path!) : removeImage ? () => removeImage(image.id) : undefined })),
+    ...files.filter(path => !images.some(image => (image.sourcePath ?? image.path) === path)).map(path => ({ id: path, name: path.split('/').at(-1) || path, src: mediaUrl(path), kind: mediaKind(path), file: mediaKind(path) === 'image' ? path : undefined, remove: removeFile ? () => removeFile(path) : undefined })),
   ];
   const media = items.filter((item): item is typeof item & LightboxItem => !!item.kind);
   const close = useCallback(() => setOpen(null), []);

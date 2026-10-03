@@ -1,3 +1,5 @@
+import { reconcileState } from "@milagre/shared/reconcile";
+import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
@@ -150,6 +152,8 @@ function App() {
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [newChatError, setNewChatError] = useState<string | null>(null);
   // A short message about something that happened off to the side (a worktree that wouldn't go).
+  const [quitError, setQuitError] = useState<string | null>(null);
+  useEffect(() => window.milagre.onQuitFailed?.(setQuitError), []);
   const [notice, setNotice] = useState<string | null>(null);
   const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
 
@@ -328,7 +332,7 @@ function App() {
   }, [selectedSession?.id, selectedSession?.provider]);
 
   function receiveState(projectPath: string, next: CoordinatorState) {
-    statesRef.current = { ...statesRef.current, [projectPath]: next };
+    statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
   }
 
@@ -484,6 +488,11 @@ function App() {
 
   // A turn that ends in the open project while Milagre is in the background gets a completion alert.
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
+    if (event.type === "subagent-update") {
+      const path = projectOfKey(chatId);
+      const cached = statesRef.current[path];
+      if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
+    }
     const current = projectRef.current;
     const latest = openState();
     if (!current || !latest || !chatInProject(current.path, chatId)) return;
@@ -1038,6 +1047,14 @@ function App() {
       <Notice />
     </DotBackground>
     {splashOverlay(true)}
+    {quitError && <dialog ref={element => { if (element && !element.open) element.showModal(); }} onCancel={event => event.preventDefault()} className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex" role="alertdialog" aria-modal="true" aria-labelledby="save-failure-title">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
+        <h2 id="save-failure-title" className="text-lg font-semibold">Chats could not be saved</h2>
+        <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
+        <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
+        <button autoFocus className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface" onClick={() => void window.milagre.retryQuit().catch(error => setQuitError(ipcErrorMessage(error)))}>Retry saving and quit</button>
+      </div>
+    </dialog>}
     </>
   );
 }

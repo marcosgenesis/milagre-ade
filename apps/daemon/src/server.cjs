@@ -106,7 +106,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
           view.chatId = typeof request.args[0] === 'string' ? request.args[0] : null;
           await runtime.focused(view);
         }
-        else if (request.method === 'daemon:stop') result = { stopping: true };
+        else if (request.method === 'daemon:stop') { await runtime.close(); result = { stopping: true }; }
         else if (request.method === 'project:open') result = await runtime.openProject(...request.args);
         else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args);
@@ -121,16 +121,16 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
   let socketPath;
   async function close() {
     stopping ??= (async () => {
-      // Stop accepting connections first. Existing sockets stay until their
-      // accepted runtime commands and agent shutdown have drained.
-      const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
+      // Keep the listening socket available after a failed save so a client
+      // can receive the error and retry stop after disk recovery.
       await runtime.close();
+      const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
       for (const socket of clients.keys()) socket.end();
       // Do not let a client that never closes its side keep shutdown alive.
       const timeout = setTimeout(() => { for (const socket of clients.keys()) socket.destroy(); }, 1000);
       await stopped;
       clearTimeout(timeout);
-    })();
+    })().catch(error => { stopping = undefined; throw error; });
     return stopping;
   }
   try {

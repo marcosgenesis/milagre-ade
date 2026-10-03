@@ -1,3 +1,4 @@
+const { storeImages } = require("../project-content.cjs");
 const { ipcErrorMessage } = require("@milagre/shared/result");
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { patchSession } = require("@milagre/shared/project-edits");
@@ -101,8 +102,8 @@ class ChatHost {
       const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
       const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
       return isTurnEnd(event) ? this.withNotes(next, chatId) : next;
-    }).then(
-      ({ state, changed }) => this.publish(chatId, event, changed ? state : undefined, seq),
+    }, { persist: event.type !== "subagent-update" }).then(
+      ({ state, changed }) => this.publish(chatId, event.type === "subagent-update" && changed ? { ...event, agent: state.sessions[sessionId].subagents.find(agent => agent.id === event.agent.id) } : event, changed && event.type !== "subagent-update" ? state : undefined, seq),
       (error) => {
         console.warn(`Milagre couldn't record an agent event for ${chatId}:`, error.message);
         this.publish(chatId, event);
@@ -116,17 +117,29 @@ class ChatHost {
    */
   async recordAnswers(chatId, body) {
     const projectPath = projectOfKey(chatId);
+    let pendingId = null;
+    await this.states.update(projectPath, latest => {
+      const sessionId = sessionIdFromKey(chatId);
+      const run = this.runs[chatId];
+      if (!latest.sessions[sessionId] || !run || !body) return latest;
+      pendingId = latest.next_id;
+      return { ...latest, next_id: pendingId + 1, messages: [...latest.messages, { id: pendingId, session_id: sessionId, body, role: 'user', context: null, model: run.model }] };
+    });
+    if (pendingId === null) return null;
+    try { await this.states.flush(projectPath); }
+    catch (error) { await this.takeBack(chatId, pendingId); throw error; }
     let messageId = null;
     let seq;
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const result = recordAnswers(latest, this.runs, projectPath, chatId, body);
-      if (result.messageId === null) return latest;
+    const { state } = await this.states.update(projectPath, latest => {
+      const withoutPending = { ...latest, messages: latest.messages.filter(message => message.id !== pendingId) };
+      const result = recordAnswers(withoutPending, this.runs, projectPath, chatId, body);
       this.runs = result.runs;
-      seq = ++this.seq;
       messageId = result.messageId;
+      seq = ++this.seq;
       return result.state;
     });
-    if (changed) this.publish(chatId, { type: "answers-sent" }, state, seq);
+    // No disk await between the current mutation and publication.
+    this.publish(chatId, { type: 'answers-sent' }, state, seq);
     return messageId;
   }
 
@@ -162,10 +175,13 @@ class ChatHost {
    */
   async send(request) {
     const { projectPath, body, images = [], files = [], provider, model } = request;
+    const storedImages = await storeImages(projectPath, images);
     let target = null;
-    let seq;
     let brief;
-    const { state } = await this.states.update(projectPath, (latest) => {
+    let pendingId;
+    let originalSession;
+    let stagedSession;
+    await this.states.update(projectPath, (latest) => {
       let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
       if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
       // A chat runs in its own worktree; a new one goes to the worktree asked for.
@@ -180,19 +196,43 @@ class ChatHost {
       brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
       const withSession = { ...latest, next_id: nextId, sessions: { ...latest.sessions, [session.id]: session } };
-      // A running turn's reply so far is saved first, so it stays above the new message.
-      const sent = applyAgentEvent(withSession, this.runs, projectPath, chatId, { type: "message-sent", model });
-      this.runs = sent.runs;
-      seq = ++this.seq;
-      const next = sent.state;
-      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
+      // Persist the input before splitting or starting its run. Tokens keep flowing
+      // while this save is pending; rejected input never changes a live run.
+      const next = withSession;
+      originalSession = session;
+      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
+      pendingId = message.id;
+      stagedSession = { ...withoutDraft(session), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {
         ...next,
         next_id: next.next_id + 1,
-        sessions: { ...next.sessions, [session.id]: { ...withoutDraft(next.sessions[session.id]), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) } },
+        sessions: { ...next.sessions, [session.id]: stagedSession },
         messages: [...next.messages, message],
       };
+    });
+    try { await this.states.flush(projectPath); }
+    catch (error) {
+      const { state } = await this.states.update(projectPath, latest => {
+        const session = { ...latest.sessions[target.sessionId] };
+        for (const field of ['provider', 'titlePending', 'handoverDraft', 'resumeTurn']) {
+          if (session[field] !== stagedSession[field]) continue;
+          if (Object.hasOwn(originalSession, field)) session[field] = originalSession[field];
+          else delete session[field];
+        }
+        return { ...latest, sessions: { ...latest.sessions, [target.sessionId]: session }, messages: latest.messages.filter(message => message.id !== pendingId) };
+      });
+      this.broadcast(projectPath, state);
+      throw error;
+    }
+    let seq;
+    const { state } = await this.states.update(projectPath, latest => {
+      const message = latest.messages.find(item => item.id === pendingId);
+      const withoutPending = { ...latest, messages: latest.messages.filter(item => item.id !== pendingId) };
+      const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: 'message-sent', model });
+      this.runs = sent.runs;
+      seq = ++this.seq;
+      return { ...sent.state, messages: [...sent.state.messages, message] };
     });
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});

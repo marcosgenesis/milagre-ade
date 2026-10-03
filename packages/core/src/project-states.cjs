@@ -1,44 +1,27 @@
-// The latest state of every project Milagre has read this run, and the only way to change one. Chats
-// in several projects can finish at once, and the renderer edits state too, so every change to a
-// project runs one at a time against its latest state, and is saved before the next one starts.
-// A change that leaves the state as it was saves nothing. A save that fails keeps the change in
-// memory, so the next one retries it.
-
+// The single writer of each Project's in-memory state. Disk I/O has its own bounded,
+// coalescing write-behind path, so a slow save cannot stall another Chat's events.
 class ProjectStates {
-  /** `read(projectPath)` loads a project's state the first time it's needed; `save(projectPath, state)` writes it. */
-  constructor({ read, save }) {
-    Object.assign(this, { read, save });
+  constructor({ read, save, debounceMs = 250 }) {
+    Object.assign(this, { read, save, debounceMs });
     this.states = new Map();
     this.queues = new Map();
+    this.dirty = new Map();
+    this.writes = new Map();
+    this.timers = new Map();
+    this.due = new Map();
+    this.transient = new Set();
   }
-
-  /** Whether the project has been read this run. */
-  has(projectPath) {
-    return this.states.has(projectPath);
-  }
-
-  /** The paths of the projects read this run. */
-  projects() {
-    return [...this.states.keys()];
-  }
-
-  /** Active Worktree folders already reconciled by readProject; never starts a Git process. */
+  has(projectPath) { return this.states.has(projectPath); }
+  projects() { return [...this.states.keys()]; }
+  /** Reconciled Worktree folders; never starts a Git process. */
   worktreePaths() {
     return [...this.states.values()].flatMap(state => Object.values(state.worktrees ?? {}).map(worktree => worktree.path));
   }
+  async get(projectPath) { return (await this.update(projectPath, state => state)).state; }
 
-  /** The project's latest state, read first if it hasn't been. */
-  async get(projectPath) {
-    return (await this.update(projectPath, (state) => state)).state;
-  }
-
-  /**
-   * Runs `change(state)` once every earlier change to the project has finished. It returns the next
-   * state, or the same object to change nothing, and may be async. Resolves with the state after the
-   * change and whether it changed.
-   */
-  update(projectPath, change) {
-    if (this.closed) return Promise.reject(new Error("Project state is closed"));
+  /** Serializes mutations, including async changes, but never waits for a save. */
+  update(projectPath, change, { persist = true } = {}) {
+    if (this.closed) return Promise.reject(new Error('Project state is closed'));
     const run = (this.queues.get(projectPath) ?? Promise.resolve()).catch(() => {}).then(async () => {
       let state = this.states.get(projectPath);
       if (state === undefined) {
@@ -48,30 +31,70 @@ class ProjectStates {
       const next = await change(state);
       if (next === state) return { state, changed: false };
       this.states.set(projectPath, next);
-      try {
-        await this.save(projectPath, next);
-      } catch (error) {
-        console.warn(`Milagre couldn't save ${projectPath}:`, error.message);
-      }
+      if (persist) {
+        this.transient.delete(projectPath);
+        this.dirty.set(projectPath, next);
+        this.due.set(projectPath, Date.now() + this.debounceMs);
+        this.schedule(projectPath);
+      } else this.transient.add(projectPath);
       return { state: next, changed: true };
     });
     this.queues.set(projectPath, run);
-    const forget = () => {
-      if (this.queues.get(projectPath) === run) this.queues.delete(projectPath);
-    };
+    const forget = () => { if (this.queues.get(projectPath) === run) this.queues.delete(projectPath); };
     run.then(forget, forget);
     return run;
   }
 
-  close() {
+  schedule(projectPath) {
+    clearTimeout(this.timers.get(projectPath));
+    const timer = setTimeout(() => {
+      this.timers.delete(projectPath);
+      void this.write(projectPath).catch(error => console.warn(`Milagre couldn't save ${projectPath}:`, error.message));
+    }, Math.max(0, (this.due.get(projectPath) ?? 0) - Date.now()));
+    timer.unref?.();
+    this.timers.set(projectPath, timer);
+  }
+
+  /** At most one save per Project in flight; newer edits remain dirty. */
+  write(projectPath) {
+    if (this.writes.has(projectPath)) return this.writes.get(projectPath);
+    if (!this.dirty.has(projectPath)) return Promise.resolve();
+    const state = this.dirty.get(projectPath);
+    this.dirty.delete(projectPath);
+    let failed = false;
+    const writing = Promise.resolve().then(() => this.save(projectPath, state)).catch(error => {
+      failed = true;
+      if (!this.dirty.has(projectPath)) this.dirty.set(projectPath, state);
+      throw error;
+    }).finally(() => {
+      this.writes.delete(projectPath);
+      // A timer may have fired during the save. Do not lose that newer edit.
+      if (!failed && this.dirty.has(projectPath) && !this.timers.has(projectPath)) this.schedule(projectPath);
+    });
+    this.writes.set(projectPath, writing);
+    return writing;
+  }
+
+  async close() {
     this.closed = true;
+    await Promise.all([...this.queues.values()].map(work => work.catch(() => {})));
+    for (const projectPath of this.transient) this.dirty.set(projectPath, this.states.get(projectPath));
+    this.transient.clear();
     return this.flush();
   }
 
-  /** Waits for every change already asked for. */
-  async flush() {
-    await Promise.all([...this.queues.values()].map((run) => run.catch(() => {})));
+  /** Durability boundary for quit and accepted user messages. Failed writes stay dirty and reject. */
+  async flush(projectPath) {
+    const entries = map => projectPath === undefined ? [...map.entries()] : map.has(projectPath) ? [[projectPath, map.get(projectPath)]] : [];
+    await Promise.all(entries(this.queues).map(([, work]) => work.catch(() => {})));
+    await Promise.all(entries(this.writes).map(([, work]) => work.catch(() => {})));
+    while (entries(this.dirty).length) {
+      const pending = entries(this.dirty).map(([key]) => {
+        clearTimeout(this.timers.get(key)); this.timers.delete(key);
+        return this.write(key);
+      });
+      await Promise.all(pending);
+    }
   }
 }
-
 module.exports = { ProjectStates };

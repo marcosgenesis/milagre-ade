@@ -239,6 +239,7 @@ test("a note added while the chat's turn runs lands after the reply", async (t) 
   await waitUntil(() => host.runs[chatId]?.text === "Committing.");
 
   await host.addNote(chatId, { body: "Committed abc123", context: { kind: "git-action" } });
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).messages.length, 1, "the note waits for the turn");
   session(ALPHA).emit({ type: "turn-completed" });
   await waitUntil(() => saved.get(ALPHA)?.messages.length === 3);
@@ -250,11 +251,12 @@ test("a note added while the chat's turn runs lands after the reply", async (t) 
   ]);
 });
 
-test("a note for a chat with no turn running is saved at once and sent to the windows", async () => {
+test("a note for an idle chat is published immediately and saved by flush", async () => {
   const { host, saved, broadcasts } = harness({ failStart: "no agent" });
   const chat = await host.send(message(BETA, "hi"));
   await waitUntil(() => saved.get(BETA)?.messages.length === 2);
   await host.addNote(`${BETA}#${chat.sessionId}`, { body: "Pushed to origin", context: { kind: "git-action" } });
+  await host.states.flush();
 
   assert.equal(saved.get(BETA).messages.at(-1).body, "Pushed to origin");
   assert.equal(broadcasts.at(-1).state.messages.at(-1).body, "Pushed to origin");
@@ -271,6 +273,7 @@ test("answers to a question are saved as the user's message after the reply so f
   await waitUntil(() => host.runs[chatId]?.text === "Which layout?");
 
   const messageId = await host.recordAnswers(chatId, "Layout: grid");
+  await host.states.flush();
   assert.deepEqual(chatMessages(saved.get(ALPHA), chat.sessionId), [
     { role: "user", body: "plan it" },
     { role: "assistant", body: "Which layout?" },
@@ -280,6 +283,7 @@ test("answers to a question are saved as the user's message after the reply so f
   assert.equal(published.at(-1).event.type, "answers-sent");
 
   await host.takeBack(chatId, messageId);
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).messages.some((item) => item.id === messageId), false);
 });
 
@@ -303,12 +307,14 @@ test("handover opens a linked chat on the other provider in the same worktree an
   const source = await chatWithReply(host, session, saved);
 
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", replies: "concise" });
+  await host.states.flush();
   assert.notEqual(target, source);
   assert.equal(saved.get(ALPHA).sessions[source].handedOverTo, target);
   const linked = saved.get(ALPHA).sessions[target];
   assert.deepEqual({ worktree_id: linked.worktree_id, provider: linked.provider, handedOverFrom: linked.handedOverFrom }, { worktree_id: 1, provider: "codex", handedOverFrom: source });
 
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  await host.states.flush();
   const state = saved.get(ALPHA);
   assert.equal(state.sessions[target].handoverPending, undefined);
   assert.equal(state.sessions[target].handoverDraft, "BRIEF");
@@ -321,7 +327,9 @@ test("handover opens a linked chat on the other provider in the same worktree an
 async function handedOver(host, session, saved) {
   const source = await chatWithReply(host, session, saved);
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6", permissionMode: "ask" });
+  await host.states.flush();
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  await host.states.flush();
   return { source, target };
 }
 
@@ -365,15 +373,18 @@ test("the brief can be edited while it is a draft, and not after the first messa
 
   const before = broadcasts.length;
   assert.equal(await host.setHandoverDraft(ALPHA, target, "BRIEF, edited"), true);
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).sessions[target].handoverDraft, "BRIEF, edited");
   assert.equal(broadcasts.length, before + 1);
   // A chat that never held a draft is left alone.
   assert.equal(await host.setHandoverDraft(ALPHA, source, "nope"), false);
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).sessions[source].handoverDraft, undefined);
 
   await host.send({ projectPath: ALPHA, sessionId: target, body: "", prompt: "", provider: "codex", model: "gpt-6", images: [], files: [] });
   assert.equal(saved.get(ALPHA).messages.find((item) => item.session_id === target).handoverBrief, "BRIEF, edited");
   assert.equal(await host.setHandoverDraft(ALPHA, target, "too late"), false);
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).sessions[target].handoverDraft, undefined);
 });
 
@@ -382,6 +393,7 @@ test("a second handover while the first holds its draft returns the same chat", 
   t.after(() => manager.closeAll());
   const { source, target } = await handedOver(host, session, saved);
   const again = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.states.flush();
   assert.equal(again.sessionId, target);
   assert.equal(Object.values(saved.get(ALPHA).sessions).filter((item) => item.handedOverFrom === source).length, 1);
   assert.equal(saved.get(ALPHA).sessions[target].handoverDraft, "BRIEF");
@@ -391,6 +403,7 @@ test("a new-chat send does not reuse a handover chat that holds a draft", async 
   const { host, manager, states, saved } = harness();
   t.after(() => manager.closeAll());
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverDraft: "BRIEF" } } }));
+  await host.states.flush();
   const { sessionId } = await host.send(message(ALPHA, "hello"));
   assert.notEqual(sessionId, 7);
   assert.equal(saved.get(ALPHA).sessions[7].handoverDraft, "BRIEF");
@@ -415,12 +428,15 @@ test("a second handover while the first is pending returns the same chat", async
   t.after(() => manager.closeAll());
   const source = await chatWithReply(host, session, saved);
   const first = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.states.flush();
   const second = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.states.flush();
   assert.equal(second.sessionId, first.sessionId);
   assert.equal(Object.values(saved.get(ALPHA).sessions).filter((item) => item.handedOverFrom === source).length, 1);
   await waitUntil(() => release);
   release("BRIEF");
   await host.pendingHandovers.get(`${ALPHA}#${first.sessionId}`);
+  await host.states.flush();
 });
 
 test("a handover that fails leaves a note with the transcript path and keeps the links", async (t) => {
@@ -428,7 +444,9 @@ test("a handover that fails leaves a note with the transcript path and keeps the
   t.after(() => manager.closeAll());
   const source = await chatWithReply(host, session, saved);
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.states.flush();
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  await host.states.flush();
   const state = saved.get(ALPHA);
   assert.equal(state.sessions[target].handoverPending, undefined);
   assert.equal(state.sessions[source].handedOverTo, target);
@@ -439,7 +457,9 @@ test("a handover left pending by a quit is closed with a note on the next open",
   const { host, manager, states, saved } = harness();
   t.after(() => manager.closeAll());
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverPending: true } } }));
+  await host.states.flush();
   await host.recoverHandovers(ALPHA, saved.get(ALPHA));
+  await host.states.flush();
   const state = saved.get(ALPHA);
   assert.equal(state.sessions[7].handoverPending, undefined);
   assert.deepEqual(chatMessages(state, 7), [{ role: "assistant", body: "Milagre closed before this handover finished. Hand over again from the original chat." }]);
@@ -449,7 +469,9 @@ test("a handover that finished with a draft is not interrupted on the next open"
   const { host, manager, states, saved } = harness();
   t.after(() => manager.closeAll());
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3, handoverDraft: "BRIEF" } } }));
+  await host.states.flush();
   await host.recoverHandovers(ALPHA, saved.get(ALPHA));
+  await host.states.flush();
   const state = saved.get(ALPHA);
   assert.equal(state.sessions[7].handoverDraft, "BRIEF");
   assert.deepEqual(chatMessages(state, 7), []);
@@ -459,8 +481,10 @@ test("recovery from a stale state adds no note to a handover that has since fini
   const { host, manager, states, saved } = harness();
   t.after(() => manager.closeAll());
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", handedOverFrom: 3 } } }));
+  await host.states.flush();
   const stale = { ...saved.get(ALPHA), sessions: { 7: { ...saved.get(ALPHA).sessions[7], handoverPending: true } } };
   await host.recoverHandovers(ALPHA, stale);
+  await host.states.flush();
   assert.deepEqual(chatMessages(saved.get(ALPHA), 7), []);
 });
 
@@ -470,11 +494,13 @@ test("a new chat sent while a handover is pending doesn't land in the handover c
   t.after(() => manager.closeAll());
   const source = await chatWithReply(host, session, saved);
   const { sessionId: target } = await host.handover({ projectPath: ALPHA, sessionId: source, provider: "codex", model: "gpt-6" });
+  await host.states.flush();
   await waitUntil(() => release);
   const fresh = await host.send(message(ALPHA, "new work"));
   assert.notEqual(fresh.sessionId, target);
   release("BRIEF");
   await host.pendingHandovers.get(`${ALPHA}#${target}`);
+  await host.states.flush();
   const state = saved.get(ALPHA);
   assert.deepEqual(chatMessages(state, target), []);
   assert.equal(state.sessions[target].handoverDraft, "BRIEF");
@@ -495,6 +521,7 @@ test("a quit saves each running chat to resume, and its cancelled turn says so",
   await waitUntil(() => saved.get(BETA)?.messages.length === 2 && saved.get(ALPHA)?.sessions[running.sessionId].native_session_id);
 
   await host.suspendRunning();
+  await host.states.flush();
   session(ALPHA).emit({ type: "turn-cancelled" });
   await waitUntil(() => saved.get(ALPHA).messages.length === 2);
 
@@ -509,9 +536,12 @@ test("a chat a quit stopped continues once on its saved session when its project
   const { host, manager, states, saved, session } = harness();
   t.after(() => manager.closeAll());
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-1", resumeTurn: { provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", stoppedAt: NOW - 60_000 } } } }));
+  await host.states.flush();
   const stale = saved.get(ALPHA);
   await host.resumeInterrupted(ALPHA, stale);
+  await host.states.flush();
   await host.resumeInterrupted(ALPHA, stale);
+  await host.states.flush();
   await waitUntil(() => session(ALPHA)?.turns.length === 1);
 
   const state = saved.get(ALPHA);
@@ -531,6 +561,7 @@ test("a chat whose agent hadn't started when Milagre quit is sent its prompt aga
   await waitUntil(() => session(ALPHA));
   session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
   await host.suspendRunning();
+  await host.states.flush();
   assert.equal(saved.get(ALPHA).sessions[chat.sessionId].resumeTurn.prompt, "fix the api");
 });
 
@@ -539,13 +570,17 @@ test("a chat stopped more than a day ago waits for Continue, and a message sent 
   t.after(() => manager.closeAll());
   const old = { provider: "codex", model: "gpt-6", permissionMode: "auto", stoppedAt: NOW - 2 * DAY };
   await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-1", resumeTurn: old }, 8: { id: 8, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-2", resumeTurn: old } } }));
+  await host.states.flush();
   await host.resumeInterrupted(ALPHA, saved.get(ALPHA));
+  await host.states.flush();
   assert.deepEqual(chatMessages(saved.get(ALPHA), 7), []);
   assert.equal(saved.get(ALPHA).sessions[7].resumeTurn.stoppedAt, NOW - 2 * DAY);
 
   // Continue resumes it once; a second click has nothing left to continue.
   assert.equal(await host.resumeChat(ALPHA, 7), true);
+  await host.states.flush();
   assert.equal(await host.resumeChat(ALPHA, 7), false);
+  await host.states.flush();
   await waitUntil(() => session(ALPHA)?.turns.length === 1);
   assert.match(session(ALPHA).turns[0].prompt, /closed while you were working/);
   assert.equal(saved.get(ALPHA).sessions[7].resumeTurn, undefined);
@@ -554,4 +589,69 @@ test("a chat stopped more than a day ago waits for Continue, and a message sent 
   await host.send(message(ALPHA, "never mind, do this instead", { sessionId: 8, provider: "codex", model: "gpt-6" }));
   assert.equal(saved.get(ALPHA).sessions[8].resumeTurn, undefined);
   assert.deepEqual(chatMessages(saved.get(ALPHA), 8), [{ role: "user", body: "never mind, do this instead" }]);
+});
+
+test('streaming child updates publish only the child, never save, and late readers see the transcript', async t => {
+  const { host, manager, states, saved, published } = harness(); t.after(() => manager.closeAll());
+  const sent = await host.send(message(ALPHA, 'review')); await states.flush();
+  const before = saved.get(ALPHA);
+  const chatId = `${ALPHA}#${sent.sessionId}`;
+  const child = { id: 'child', title: 'Review', status: 'running', startedAt: 1, updatedAt: 2, transcript: [{ id: 'one', kind: 'message', text: 'Working on it' }] };
+  await host.receive(chatId, { type: 'subagent-update', agent: child }); await states.flush();
+  await host.states.flush();
+  assert.equal(saved.get(ALPHA), before, 'child streaming must not schedule a save');
+  assert.equal(published.at(-1).state, undefined);
+  assert.equal(published.at(-1).event.agent.transcript[0].text, 'Working on it');
+  assert.equal((await states.get(ALPHA)).sessions[sent.sessionId].subagents[0].transcript[0].text, 'Working on it');
+  await host.receive(chatId, { type: 'turn-completed' }); await states.flush();
+  await host.states.flush();
+  assert.equal(saved.get(ALPHA).sessions[sent.sessionId].subagents[0].transcript[0].text, 'Working on it');
+});
+
+test('sending an image stores its bytes before the provider starts and keeps original provider input',async t=>{
+ const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');
+ const {saveProjectState,readProjectState}=require('../project-store.cjs');
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'milagre-chat-image-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const image={id:'png',name:'photo.png',dataUrl:'data:image/png;base64,'+(await fs.readFile(path.join(__dirname,'../../../../scripts/fixtures/photo.png'))).toString('base64')};
+ let started;const began=new Promise(resolve=>started=resolve);
+ const states=new ProjectStates({read:async()=>projectState(root),save:saveProjectState});t.after(()=>states.close());
+ const host=new ChatHost({states,startTurn:async request=>{started(request);return {turnId:'one'};},publish:()=>{},broadcast:()=>{}});
+ await host.send(message(root,'Describe it',{images:[image]}));const request=await began;
+ const saved=await readProjectState(root);const stored=saved.messages[0].images[0];
+ assert.equal(stored.dataUrl,undefined);assert.equal(path.dirname(stored.path),path.join(root,'.milagre','images'));
+ assert.ok((await fs.stat(stored.path)).size>0);assert.deepEqual(request.images,[image]);
+});
+
+function durableHarness() {
+ let fail=false,blocked=null;const saved=[];const published=[];const started=[];
+ const states=new ProjectStates({read:async p=>projectState(p),save:async(_p,state)=>{if(blocked)await blocked;if(fail)throw new Error('disk full');saved.push(state);}});
+ const host=new ChatHost({states,startTurn:async r=>{started.push(r);},publish:(chatId,event,state,seq)=>published.push({chatId,event,state,seq}),broadcast:(path,state)=>published.push({path,state})});
+ return {host,states,saved,published,started,fail:value=>fail=value,block:value=>blocked=value};
+}
+
+test('a slow send does not publish old state after a concurrent turn finishes',async()=>{
+ const h=durableHarness();const first=await h.host.send(message(ALPHA,'First'));const chatId=ALPHA+'#'+first.sessionId;
+ await h.host.receive(chatId,{type:'turn-started',turnId:'t'});await h.host.receive(chatId,{type:'text-delta',text:'First reply'});
+ let release;h.block(new Promise(resolve=>release=resolve));const send=h.host.send(message(ALPHA,'Follow-up',{sessionId:first.sessionId}));
+ for(let i=0;i<20;i++)await Promise.resolve();
+ await h.host.receive(chatId,{type:'text-delta',text:' complete.'});await h.host.receive(chatId,{type:'turn-completed'});
+ h.block(null);release();await send;
+ const seq=h.published.filter(x=>x.seq!==undefined).map(x=>x.seq);assert.deepEqual(seq,[...seq].sort((a,b)=>a-b));
+ const latest=h.published.filter(x=>x.state).at(-1).state;assert.ok(latest.messages.some(m=>m.body==='First reply complete.'));
+ assert.equal(h.started.length,2);await h.states.close();
+});
+
+test('a rejected send removes its undelivered message and never leaves a phantom run',async()=>{
+ const h=durableHarness();h.fail(true);await assert.rejects(h.host.send(message(ALPHA,'Retry me')),/disk full/);
+ assert.deepEqual(h.host.runs,{});assert.deepEqual((await h.states.get(ALPHA)).messages,[]);assert.equal(h.started.length,0);
+ h.fail(false);await h.host.send(message(ALPHA,'Retry me'));assert.equal((await h.states.get(ALPHA)).messages.length,1);assert.equal(h.started.length,1);await h.states.close();
+});
+
+test('a rejected answer preserves the question, current reply and concurrent tokens',async()=>{
+ const h=durableHarness();const {sessionId}=await h.host.send(message(ALPHA,'Ask me'));const chatId=ALPHA+'#'+sessionId;
+ await h.host.receive(chatId,{type:'text-delta',text:'Question'});await h.host.receive(chatId,{type:'question-request',requestId:'q',questions:[]});
+ let release;h.block(new Promise(resolve=>release=resolve));h.fail(true);const answer=h.host.recordAnswers(chatId,'My answer');
+ for(let i=0;i<20;i++)await Promise.resolve();await h.host.receive(chatId,{type:'text-delta',text:' details'});
+ h.block(null);release();await assert.rejects(answer,/disk full/);assert.equal(h.host.runs[chatId].text,'Question details');assert.equal(h.host.runs[chatId].questions[0].requestId,'q');
+ assert.equal((await h.states.get(ALPHA)).messages.length,1);h.fail(false);await h.states.close();
 });

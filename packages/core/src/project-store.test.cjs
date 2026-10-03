@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { saveProjectState, savesSettled, stateFile } = require("./project-store.cjs");
+const { saveProjectState, stateFile } = require("./project-store.cjs");
 
 async function tempProject(t) {
   const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-store-"));
@@ -17,14 +17,17 @@ test("concurrent saves leave valid JSON equal to the last save", async (t) => {
   const long = { next_id: 5001, messages: Array.from({ length: 5000 }, (_, id) => ({ id, session_id: 2, body: "x".repeat(200) })) };
   const short = { next_id: 2, messages: [{ id: 1, session_id: 2, body: "hi" }] };
 
-  await Promise.all([saveProjectState(projectPath, long), saveProjectState(projectPath, short)]);
+  const { ProjectStates } = require("./project-states.cjs");
+  const states = new ProjectStates({ read: async () => ({}), save: saveProjectState });
+  await Promise.all([states.update(projectPath, () => long), states.update(projectPath, () => short)]);
+  await states.close();
 
   assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), short);
 });
 
 test("saves leave no temporary files behind", async (t) => {
   const projectPath = await tempProject(t);
-  await Promise.all(Array.from({ length: 5 }, (_, index) => saveProjectState(projectPath, { next_id: index })));
+  for (let index = 0; index < 5; index++) await saveProjectState(projectPath, { next_id: index });
 
   assert.deepEqual(await fs.readdir(path.join(projectPath, ".milagre")), ["coordination.json"]);
   assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), { next_id: 4 });
@@ -40,26 +43,4 @@ test("a failed save rejects without blocking the next one", async (t) => {
 
   assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), { next_id: 3 });
   assert.deepEqual(await fs.readdir(path.join(projectPath, ".milagre")), ["coordination.json"]);
-});
-
-test("savesSettled waits for the saves queued so far, so a read right after sees the last one", async (t) => {
-  const projectPath = await tempProject(t);
-  const saving = saveProjectState(projectPath, { next_id: 9 });
-
-  await savesSettled(projectPath);
-
-  assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), { next_id: 9 });
-  await saving;
-});
-
-test("savesSettled resolves with nothing queued and after a failed save", async (t) => {
-  const projectPath = await tempProject(t);
-  await savesSettled(projectPath);
-  const circular = {};
-  circular.self = circular;
-  const failing = saveProjectState(projectPath, circular);
-
-  await savesSettled(projectPath);
-
-  await assert.rejects(failing);
 });

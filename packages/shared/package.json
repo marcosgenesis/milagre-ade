@@ -40,6 +40,10 @@
     },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
+    "./reconcile": {
+      "types": "./src/reconcile.d.mts",
+      "default": "./src/reconcile.mjs"
+    },
     "./reply-parts": "./src/reply-parts.ts",
     "./streaming-markdown": "./src/streaming-markdown.ts",
     "./pr-blockers": "./src/pr-blockers.ts"

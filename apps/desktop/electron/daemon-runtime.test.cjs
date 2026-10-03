@@ -136,3 +136,30 @@ test('desktop reconnect restores two large Projects without an oversized aggrega
   for (const opened of restored.payload.projects) assert.equal(opened.state.messages[0].body.length, 9 * 1024 * 1024);
   assert.equal((await desktop.invoke('project:current')).path, other);
 });
+
+for (const stopHost of [false, true]) {
+  test(`desktop ${stopHost ? 'update stop' : 'quit flush'} rejects a failed save and can retry without losing accepted notes`, async t => {
+    const { dataDir, project, desktop } = await fixture(t);
+    const opened = await desktop.openProject(project);
+    const session = Object.values(opened.state.sessions)[0];
+    const rename = fs.rename;
+    let fail = true;
+    t.mock.method(fs, 'rename', async (...args) => {
+      if (fail && String(args[1]).endsWith('/coordination.json')) throw new Error('disk full');
+      return rename(...args);
+    });
+    await desktop.invoke('chat:git-note', [`${project}#${session.id}`, 'Keep this accepted note']);
+    try {
+      await assert.rejects(desktop.close({ stopHost }), /disk full/);
+      assert.ok(await fs.stat(path.join(dataDir, 'runtime.lock')));
+    } finally { fail = false; }
+    await desktop.close({ stopHost });
+    const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
+    assert.ok(saved.messages.some(message => message.body === 'Keep this accepted note'));
+    if (stopHost) await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' });
+    else {
+      const observer = await connect({ dataDir }); t.after(() => observer.close());
+      assert.ok((await observer.call('daemon:status')).capabilities.includes('desktop-v1'));
+    }
+  });
+}

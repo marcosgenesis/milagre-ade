@@ -21,7 +21,7 @@ function harness({ failSaves = 0 } = {}) {
 
 const bump = (state) => ({ ...state, count: state.count + 1 });
 
-test("reads a project once and saves each change", async () => {
+test("reads a project once and coalesces changes", async () => {
   const { states, reads, saves } = harness();
   assert.equal(states.has("/a"), false);
   await states.update("/a", bump);
@@ -30,7 +30,8 @@ test("reads a project once and saves each change", async () => {
   assert.deepEqual(reads, ["/a"]);
   assert.equal(states.has("/a"), true);
   assert.deepEqual(states.projects(), ["/a"]);
-  assert.deepEqual(saves.map((save) => save.state.count), [1, 2]);
+  await states.flush();
+  assert.deepEqual(saves.map((save) => save.state.count), [2]);
   assert.deepEqual(await states.get("/a"), { project: "/a", count: 2 });
 });
 
@@ -52,7 +53,8 @@ test("projects change independently", async () => {
 
   assert.deepEqual(await states.get("/a"), { project: "/a", count: 2 });
   assert.deepEqual(await states.get("/b"), { project: "/b", count: 1 });
-  assert.equal(saves.length, 3);
+  await states.flush();
+  assert.equal(saves.length, 2);
 });
 
 test("a change that leaves the state as it was saves nothing", async () => {
@@ -74,7 +76,9 @@ test("a change that throws leaves the state as it was and doesn't block the next
 test("a failed save keeps the change, and the next save writes it", async () => {
   const { states, saves } = harness({ failSaves: 1 });
   const first = await states.update("/a", bump);
+  await assert.rejects(states.flush(), /disk full/);
   await states.update("/a", bump);
+  await states.flush();
 
   assert.equal(first.changed, true);
   assert.deepEqual(saves.map((save) => save.state.count), [1, 2]);
@@ -101,4 +105,54 @@ test('known Worktree folders come from loaded state and update without another r
   await states.update('/one', s => ({ ...s, worktrees: { 2: { path: '/one/new' } } }));
   assert.deepEqual(states.worktreePaths(), ['/one/new', '/two/main']);
   assert.equal(reads, 2);
+});
+
+test('a slow save in Chat B does not block a token batch in Chat A', async (t) => {
+  let release; let started;
+  const began = new Promise(resolve => { started = resolve; });
+  const disk = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const states = new ProjectStates({ read: async () => ({ count: 0 }), save: async () => { started(); await disk; }, debounceMs: 1 });
+  const first = states.update('/p', bump);
+  await began;
+  let received = false;
+  const token = states.update('/p', state => { received = true; return state; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(received, true, 'disk writes must not hold the Project mutation queue');
+  release(); await Promise.all([first, token]); await states.close();
+});
+test('write-behind coalesces a burst and flush durably saves the latest state', async () => {
+  const { states, saves } = harness();
+  await states.update('/p', bump); await states.update('/p', bump);
+  assert.equal(saves.length, 0);
+  assert.equal((await states.get('/p')).count, 2);
+  await states.flush();
+  assert.deepEqual(saves.map(x => x.state.count), [2]);
+});
+test('transient agent updates stay in memory without scheduling a write', async () => {
+  const { states, saves } = harness();
+  await states.update('/p', bump, { persist: false });
+  await states.flush();
+  assert.equal(saves.length, 0); assert.equal((await states.get('/p')).count, 1);
+});
+
+test('quit persists the latest transient state without making transient flushes save', async () => {
+ const { states, saves } = harness(); await states.update('/p',bump,{persist:false}); await states.flush(); assert.equal(saves.length,0);
+ await states.close(); assert.equal(saves[0].state.count,1);
+});
+
+test('streaming changes produce one save after the 250 ms trailing debounce',async t=>{
+ t.mock.timers.enable({apis:['setTimeout','Date'],now:0});const {states,saves}=harness();
+ for(let i=0;i<10;i++){await states.update('/p',bump);t.mock.timers.tick(25);}
+ assert.equal(saves.length,0);t.mock.timers.tick(225);for(let i=0;i<10;i++)await Promise.resolve();
+ assert.deepEqual(saves.map(s=>s.state.count),[10]);await states.close();
+});
+
+test('an edit made during a slow save is flushed after it with no overlapping writes',async()=>{
+ let release;const disk=new Promise(resolve=>release=resolve);const saved=[];let active=0,max=0;
+ const states=new ProjectStates({read:async()=>({count:0}),save:async(_p,state)=>{max=Math.max(max,++active);saved.push(state.count);if(state.count===1)await disk;active--;}});
+ await states.update('/p',bump);const flushing=states.flush();
+ for(let i=0;i<10;i++)await Promise.resolve();assert.deepEqual(saved,[1]);
+ await states.update('/p',bump);release();await flushing;await states.close();
+ assert.deepEqual(saved,[1,2]);assert.equal(max,1);
 });

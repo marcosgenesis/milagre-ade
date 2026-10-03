@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
+const { migrateImages } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -36,7 +37,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
-const { saveProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -116,7 +117,7 @@ function createRuntime(options) {
   async function readStoredState(projectPath) {
     await ownProject(projectPath);
     try {
-      return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
+      return await readProjectState(projectPath);
     } catch (error) {
       if (error.code === "ENOENT") return null;
       throw error;
@@ -142,6 +143,14 @@ function createRuntime(options) {
     return result.state;
   }
 
+  // Explicit user edits keep their existing error contract. The flush waits outside
+  // the mutation queue, so other Chats continue receiving streaming events.
+  async function editProject(projectPath, change) {
+    const result = await states.update(projectPath, change);
+    if (result.changed) broadcastProjectState(projectPath, result.state);
+    await states.flush(projectPath);
+  }
+
   const diffs = new DiffRefresher({ states, readDiffStat, update: updateProject });
 
   // Reading a project matches its worktrees with the ones git lists now. A project read before keeps the
@@ -154,9 +163,9 @@ function createRuntime(options) {
       const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
       return Boolean(entry && !entry.session.closed);
     };
-    let state = await updateProject(projectPath, (current) => {
+    let state = await updateProject(projectPath, async (current) => {
       const next = reconcileState(current, projectName(projectPath), discovered);
-      return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
+      return migrateImages(projectPath, markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live))));
     });
     // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
@@ -334,6 +343,7 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
+    isRunning: () => [...agents.sessions.values()].some(entry => entry.session.turnActive),
     roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
     publish: (next) => {
       emit("agent:ports", next);
@@ -430,10 +440,10 @@ function createRuntime(options) {
     if (!states.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
     return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
   });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? updateProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
+  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
-  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? updateProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
-  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (states.has(projectPath) ? updateProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
+  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
+  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
   // What the "Commit and open PR" dialog did, as a line in its chat.
   commands.handle("chat:git-note", (_event, chatId, body) => {
     if (typeof chatId !== "string" || typeof body !== "string" || !states.has(projectOfKey(chatId))) return undefined;
@@ -498,6 +508,7 @@ function createRuntime(options) {
     if (notice) options.notifyWaiting({ chatId, requestId: event.requestId, ...notice });
   }
 
+  let shownProjectPath = null;
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
   let registryStore = null;
@@ -508,6 +519,7 @@ function createRuntime(options) {
     const project = await readProject(identity.path);
     await projectRegistry().add(identity);
     await rememberProject(recentProjects(), identity.path);
+    shownProjectPath = identity.path;
     return project;
   }
 
@@ -537,25 +549,34 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      // Accepted commands may still be creating a Chat or changing settings.
       await Promise.allSettled([...active]);
       keepAwake.quit();
       ports.close();
       diffs.close();
-      await chats.suspendRunning();
-      await states.flush();
-      await Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]);
-      await Promise.allSettled([...starting]);
-      await agents.closeAll();
-      await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+      if (!states.closed) {
+        await chats.suspendRunning();
+        // A failed early save must not leave provider processes running. The
+        // final flush retries after their cancellation events have been recorded.
+        await states.flush().catch(() => {});
+        await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
+        await Promise.allSettled([...starting]);
+        await agents.closeAll();
+        await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+      }
       await states.close();
       await usageStore.idle();
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();
-    })();
+    })().catch(error => {
+      // Retain ownership and unsaved memory until the host reports the error and
+      // retries. A rejected Promise must not permanently disable that retry.
+      closed = undefined;
+      throw error;
+    });
     return closed;
   }
+
   return {
     methods: Object.freeze([...handlers.keys()]),
     invoke(method, args = []) {
@@ -571,7 +592,7 @@ function createRuntime(options) {
     // Synchronous capture: the socket serializes this before another event can
     // mutate state, so its event watermark and run sequence describe one instant.
     snapshot: () => ({ projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
-    focused: (view) => accept(() => { diffs.focused(view?.projectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
+    focused: (view) => accept(() => { diffs.focused(view ? view.projectPath : shownProjectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
     flush: async () => { await Promise.allSettled([...active]); await states.flush(); await usageStore.idle(); },
     close,
   };

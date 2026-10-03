@@ -611,38 +611,40 @@ test("TLDR can be disabled when starting or resuming Codex", async (t) => {
   }
 });
 
-test('reads child history without resuming it and keeps child completion separate from parent', async () => {
- const events=[];
- const session=new CodexSession({emit:e=>events.push(e)});
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
- session.rpc={request:async(method,params)=>{
-  assert.equal(method,'thread/read');
-  assert.deepEqual(params,{threadId:'child',includeTurns:true});
-  return {thread:{id:'child',turns:[{id:'child-turn',status:'completed',items:[{type:'agentMessage',id:'answer',text:'Review finished'}]}]}};
- }};
- await session.refreshSubagents();
- assert.equal(events.some(e=>e.type==='turn-completed'),false);
+function childPoller(request) {
+ const events=[];const session=new CodexSession({emit:e=>events.push(e)});
+ session.state.threadId='parent';session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
+ session.rpc={request};return {session,events};
+}
+
+test('reads paginated child history without resuming and keeps completion separate from parent',async()=>{
+ const {session,events}=childPoller(async(method,params)=>{
+  if(method==='thread/read'){assert.deepEqual(params,{threadId:'child'});return {thread:{id:'child',status:{type:'idle'}}};}
+  assert.equal(method,'thread/turns/list');assert.equal(params.itemsView,'full');assert.equal(params.sortDirection,'desc');
+  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null,backwardsCursor:'anchor-t'};
+ });
+ await session.refreshSubagents();assert.equal(events.some(e=>e.type==='turn-completed'),false);
  const child=events.filter(e=>e.type==='subagent-update').at(-1).agent;
- assert.equal(child.status,'completed');
- assert.equal(child.transcript[0].text,'Review finished');
+ assert.equal(child.status,'completed');assert.equal(child.transcript[0].text,'Paged result');
 });
 
-test('child history falls back to paginated threads when full reads are rejected', async () => {
- const events=[];
- const session=new CodexSession({emit:e=>events.push(e)});
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
- session.rpc={request:async(method,params)=>{
-  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('paginated history'),{rpcError:true});
-  if(method==='thread/read') return {thread:{id:'child',status:{type:'idle'}}};
-  assert.equal(method,'thread/turns/list');
-  assert.equal(params.itemsView,'full');
-  assert.equal(params.sortDirection,'desc');
-  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null};
- }};
- await session.refreshSubagents();
- assert.equal(events.filter(e=>e.type==='subagent-update').at(-1)?.agent.transcript[0].text,'Paged result');
+test('child polling starts at the last turn, follows pages and updates active items with the same id',async()=>{
+ let round=0;const calls=[];
+ const turn=(id,text,status='completed')=>({id,status,items:[{id:'message-'+id,type:'agentMessage',text}]});
+ const {session,events}=childPoller(async(method,params)=>{
+  assert.ok(!params.includeTurns);if(method==='thread/read')return {thread:{id:'child',status:{type:'active'}}};
+  assert.equal(method,'thread/turns/list');calls.push(params);
+  if(params.sortDirection==='desc')return {data:[turn(round===2?'t3':'t1',round===0?'Partial':'Complete',round===0?'inProgress':'completed')],backwardsCursor:round===2?'anchor-3':'anchor-1',nextCursor:null};
+  assert.equal(params.sortDirection,'asc');assert.equal(params.cursor,round===3?'anchor-3':params.cursor);
+  if(params.cursor==='page-2')return {data:[turn('t3','Third')],nextCursor:null};
+  assert.equal(params.cursor,round===3?'anchor-3':'anchor-1');
+  return {data:round===1?[turn('t1','Complete')]:round===2?[turn('t1','Complete'),turn('t2','Second')]:[turn('t3','Third')],nextCursor:round===2?'page-2':null};
+ });
+ await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Partial');
+ round=1;await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Complete');
+ round=2;await session.refreshSubagents();assert.deepEqual(events.at(-1).agent.transcript.map(x=>x.text),['Complete','Second','Third']);
+ const count=events.length;round=3;await session.refreshSubagents();assert.equal(events.length,count,'unchanged completed ids emit nothing');
+ assert.ok(calls.some(p=>p.cursor==='page-2'));
 });
 
 test("a generated image Codex didn't save is written out from its base64", () => {
@@ -659,6 +661,18 @@ test("a generated image Codex didn't save is written out from its base64", () =>
   }
 });
 
+// Canvas lifecycle fixtures expose the same paginated contract as live child polling.
+function childSnapshotRpc(snapshot, onRead = () => {}) {
+ return {close:async()=>{},request:async(method,params)=>{
+  assert.equal(params.threadId,'child');
+  assert.ok(!params.includeTurns);
+  const thread=structuredClone(snapshot());
+  if(method==='thread/read'){onRead();return {thread:{...thread,turns:[]}};}
+  assert.equal(method,'thread/turns/list');
+  return {data:[...thread.turns].reverse(),nextCursor:null};
+ }};
+}
+
 test('a completed child catches up to a follow-up turn after native interaction without replaying history', async t => {
  const events=[];
  const session=new CodexSession({emit:event=>events.push(event)});
@@ -668,12 +682,7 @@ test('a completed child catches up to a follow-up turn after native interaction 
  const firstTurn={id:'first',status:'completed',items:[{type:'agentMessage',id:'old-answer',text:'First review finished'}]};
  let snapshot={id:'child',status:{type:'idle'},turns:[firstTurn]};
  let reads=0;
- session.rpc={close:async()=>{},request:async(method,params)=>{
-  assert.equal(method,'thread/read');
-  assert.equal(params.threadId,'child');
-  reads++;
-  return {thread:structuredClone(snapshot)};
- }};
+ session.rpc=childSnapshotRpc(()=>snapshot,()=>reads++);
  await session.refreshSubagents();
  const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
  session.handleNotification('item/completed',interaction);
@@ -711,7 +720,7 @@ test('a new interaction briefly polls a finished child without claiming a messag
  session.state.threadId='parent';
  session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
  let reads=0;
- session.rpc={close:async()=>{},request:async()=>{reads++;return {thread:{id:'child',status:{type:'idle'},turns:[{id:'done',status:'completed',items:[]}]}};}};
+ session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:'idle'},turns:[{id:'done',status:'completed',items:[]}]}),()=>reads++);
  await session.refreshSubagents();
  const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'message',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
  session.handleNotification('item/completed',interaction);
@@ -735,7 +744,7 @@ test('a resumed child latest in-progress turn corrects an earlier completion rec
  t.after(()=>session.close());
  session.state.threadId='parent';
  session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- session.rpc={close:async()=>{},request:async()=>({thread:{id:'child',status:{type:'notLoaded'},turns:[{id:'old',status:'completed',items:[]},{id:'new',status:'inProgress',items:[]}]}})};
+ session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:'notLoaded'},turns:[{id:'old',status:'completed',items:[]},{id:'new',status:'inProgress',items:[]}]}));
  await session.refreshSubagents();
  assert.equal(session.state.subagents.get('child').status,'running');
  assert.equal(session.state.subagents.get('child').endedAt,undefined);
@@ -762,10 +771,7 @@ test('the scheduled child poll continues through stale completion until a follow
  session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
  let reads=0;
  let followup=false;
- session.rpc={close:async()=>{},request:async()=>{
-  reads++;
-  return {thread:{id:'child',status:{type:followup?'active':'idle',...(followup?{activeFlags:[]}:{})},turns:[{id:followup?'followup':'first',status:followup?'inProgress':'completed',items:[]}]}};
- }};
+ session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:followup?'active':'idle',...(followup?{activeFlags:[]}:{})},turns:[{id:followup?'followup':'first',status:followup?'inProgress':'completed',items:[]}]}),()=>reads++);
  await session.refreshSubagents();
  session.handleNotification('item/completed',{threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}});
  t.mock.timers.tick(1500);
@@ -852,7 +858,7 @@ test('child recovery closes an unreadable provider and leaves unknown outcomes u
  assert.equal(created,false);
 });
 
-test('polling remembers paginated child history instead of retrying a rejected full read', async () => {
+test('polling always uses paginated child history without requesting a full read', async () => {
  const calls=[];
  const session=new CodexSession({emit:()=>{}});
  session.rpc={request:async(method,params)=>{
@@ -864,8 +870,8 @@ test('polling remembers paginated child history instead of retrying a rejected f
  const first=await session.readSubagentThread('child');
  const second=await session.readSubagentThread('child');
  assert.deepEqual(first,second);
- assert.equal(calls.filter(call=>call.params.includeTurns).length,1);
- assert.equal(calls.length,5);
+ assert.equal(calls.filter(call=>call.params.includeTurns).length,0);
+ assert.equal(calls.length,4);
 });
 
 test('concurrent child refreshes share one read and one output update', async t => {
@@ -875,7 +881,7 @@ test('concurrent child refreshes share one read and one output update', async t 
  session.state.threadId='parent';
  session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:2,transcript:[]}]]);
  const waiting=[];
- session.rpc={close:async()=>{},request:()=>new Promise(resolve=>waiting.push(resolve))};
+ session.rpc={close:async()=>{},request:(method)=>method==='thread/read'?new Promise(resolve=>waiting.push(resolve)):Promise.resolve({data:[{id:'review',status:'inProgress',items:[{id:'answer',type:'agentMessage',text:'Reviewing auth'}]}],nextCursor:null})};
  const first=session.refreshSubagents();
  const second=session.refreshSubagents();
  const reads=waiting.length;

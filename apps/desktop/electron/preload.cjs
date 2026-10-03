@@ -60,6 +60,12 @@ const bridge = {
   setProjectPosition: (id, position) => ipcRenderer.invoke("project:position", id, position),
   switchProject: (projectPath) => ipcRenderer.invoke("project:switch", projectPath),
   forgetProject: (projectPath) => ipcRenderer.invoke("project:forget", projectPath),
+  retryQuit: () => ipcRenderer.invoke("app:retry-quit"),
+  onQuitFailed: (callback) => {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on("app:quit-failed", listener);
+    return () => ipcRenderer.removeListener("app:quit-failed", listener);
+  },
   onProjectState: (callback) => {
     const listener = (_event, update) => callback(update);
     ipcRenderer.on("project:state", listener);

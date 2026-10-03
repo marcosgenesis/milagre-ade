@@ -155,6 +155,17 @@ test('opening a linked checkout cannot bypass the repository runtime owner', asy
   await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
 });
 
+test('Chat edits still report a disk failure while streaming writes are deferred',async t=>{
+ const {project,make}=await fixture(t);const runtime=make();const opened=await runtime.openProject(project);
+ const session=Object.values(opened.state.sessions)[0];const rename=fs.rename;let fail=true;
+ t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
+ for(const [method,args] of [['chat:patch',[project,session.id,{title:'Keep my title'}]],['chat:archive-subagent',[project,session.id,'none',true]],['chat:archive-finished-subagents',[project,session.id]]]) {
+  await assert.rejects(runtime.invoke(method,args),/disk full/);
+ }
+ fail=false;await runtime.close();
+ assert.equal(JSON.parse(await fs.readFile(path.join(project,'.milagre/coordination.json'),'utf8')).sessions[session.id].title,'Keep my title');
+});
+
 test('a failed Worktree discovery preserves existing Chats and disk state',async t=>{
  const {project,make}=await fixture(t);const runtime=make();const opened=await runtime.openProject(project);const session=Object.values(opened.state.sessions)[0];
  await runtime.invoke('chat:patch',[project,session.id,{title:'Never erase this'}]);
@@ -165,6 +176,14 @@ test('a failed Worktree discovery preserves existing Chats and disk state',async
  await runtime.close();assert.equal(JSON.parse(await fs.readFile(file,'utf8')).sessions[session.id].title,JSON.parse(before).sessions[session.id].title);
 });
 
+test('quit stops agents after a disk failure and can retry before releasing ownership',async t=>{
+ const {project,make}=await fixture(t);let closed=0,created=false;const runtime=make({titleModels:{},agentCli:async()=>({command:'/fake'}),createSession(_provider,options){created=true;return {turnActive:true,closed:false,startTurn:async()=>{options.emit({type:'turn-started',turnId:'t'});return {turnId:'t'};},close:async()=>{closed++;options.emit({type:'turn-cancelled'});}};}});
+ const opened=await runtime.openProject(project);const session=Object.values(opened.state.sessions)[0];await runtime.invoke('chat:send',[{projectPath:project,sessionId:session.id,body:'Keep me',provider:'codex',model:'test'}]);
+ for(let i=0;i<100 && !created;i++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(created,true);
+ const rename=fs.rename;let fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
+ await assert.rejects(runtime.close(),/disk full/);assert.ok(closed>0,'providers must stop even when persistence fails');assert.throws(()=>make(),/already owned/);
+ fail=false;await runtime.close();const next=make();const restored=await next.openProject(project);assert.ok(restored.state.messages.some(m=>m.body==='Keep me'));
+});
 
 test('linked Worktrees resolve to one registered Project without losing saved Chats', async t => {
   const { project, make } = await fixture(t);

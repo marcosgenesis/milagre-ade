@@ -54,17 +54,41 @@ test("refreshing a project reads every worktree that has a chat", async () => {
   assert.deepEqual(reads.map((read) => read.worktreePath), ["/a"]);
 });
 
-test("focusing a window re-reads every project read this run, at most once per throttle period", async () => {
+test("focus refreshes only the visible Project, throttled per Project", async () => {
   let clock = 0;
   const { diffs, states, reads } = harness({ now: () => clock });
   await Promise.all([states.get("/a"), states.get("/b")]);
-  diffs.focused();
+  diffs.focused("/a");
   clock = 4000;
-  diffs.focused();
+  diffs.focused("/a");
+  await waitUntil(() => reads.length === 1);
+  diffs.focused("/b");
   await waitUntil(() => reads.length === 2);
   clock = 6000;
-  diffs.focused();
-  await waitUntil(() => reads.length === 4);
+  diffs.focused("/a");
+  await waitUntil(() => reads.length === 3);
 
-  assert.deepEqual(reads.map((read) => read.worktreePath).sort(), ["/a", "/a", "/b", "/b"]);
+  assert.deepEqual(reads.map((read) => read.worktreePath).sort(), ["/a", "/a", "/b"]);
+});
+
+
+test("thinking completions do not read Git", async () => {
+ const {diffs,states,reads}=harness(); await states.get('/a');
+ diffs.observe('/a#7',{type:'step-started',step:{id:'thought',kind:'thinking'}});
+ diffs.observe('/a#7',{type:'step-completed',id:'thought'});
+ await new Promise(resolve=>setTimeout(resolve,30));
+ assert.deepEqual(reads,[]); diffs.close();
+});
+
+test("concurrent refreshes share four Git slots and close cancels queued reads", async () => {
+ const states=new ProjectStates({read:async p=>projectState(p),save:async()=>{}});
+ const releases=[];const reads=[];let active=0,max=0,updates=0;
+ const diffs=new DiffRefresher({states,readDiffStat:async p=>{
+   reads.push(p); max=Math.max(max,++active); await new Promise(resolve=>releases.push(resolve)); --active;return {added:1,removed:0};
+ },update:async()=>{updates++;}});
+ const pending=Array.from({length:10},(_,i)=>diffs.refresh('/'+i));
+ await waitUntil(()=>reads.length>=4);
+ assert.equal(reads.length,4); assert.equal(max,4);
+ diffs.close();releases.forEach(resolve=>resolve());await Promise.all(pending);
+ assert.equal(reads.length,4);assert.equal(updates,0);
 });

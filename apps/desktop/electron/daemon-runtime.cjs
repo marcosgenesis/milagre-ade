@@ -109,8 +109,8 @@ async function connectDesktopRuntime(options) {
       if (stopHost) {
         if (!client || recovering) throw new Error('Reconnect to the host before installing an update.');
         const connection = client;
-        // A stop acknowledgement precedes saving. Socket closure follows the
-        // host's full shutdown, so only then may the installer replace its files.
+        // A stop acknowledgement follows saving. Socket closure also confirms
+        // host shutdown before the installer can replace its files.
         let deadline;
         let onClose;
         const stopped = new Promise((resolve, reject) => {

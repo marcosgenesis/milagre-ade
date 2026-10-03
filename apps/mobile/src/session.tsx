@@ -1,3 +1,4 @@
+import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
@@ -61,7 +62,7 @@ function useSessionState() {
       const state = await client.snapshot(project.path);
       if (current === generation.current) {
         selection.current = { client, path: project.path };
-        setSnapshot(state); setError('');
+        setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
       }
     } catch (error) {
       if (current === generation.current) selection.current = previous;
@@ -74,7 +75,7 @@ function useSessionState() {
     if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
     try {
       const state = await client.snapshot(projectPath);
-      if (current === selection.current) { setSnapshot(state); setError(''); }
+      if (current === selection.current) { setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError(''); }
     } catch (error) {
       if (current === selection.current) throw error;
     }

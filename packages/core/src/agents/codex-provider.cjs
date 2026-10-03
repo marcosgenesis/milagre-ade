@@ -1,3 +1,4 @@
+const { isDeepStrictEqual } = require('node:util');
 const { active: activeSubagent, settleSubagents } = require("./subagents.cjs");
 const fs = require("node:fs/promises");
 const { mkdirSync, writeFileSync } = require("node:fs");
@@ -54,21 +55,6 @@ const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_element
 const ACCOUNT_TIMEOUT_MS = 8000;
 
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
-
-async function readChildHistory(rpc, threadId, paginated) {
-  if (!paginated.has(threadId)) {
-    try {
-      return (await rpc.request("thread/read", { threadId, includeTurns: true }, { timeoutMs: 5000 })).thread;
-    } catch (error) {
-      if (!error.rpcError) throw error;
-    }
-  }
-  // Once a thread has answered through pagination, do not retry its rejected full read.
-  const { thread } = await rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
-  const page = await rpc.request("thread/turns/list", { threadId, limit: 20, sortDirection: "desc", itemsView: "full" }, { timeoutMs: 5000 });
-  paginated.add(threadId);
-  return { ...thread, turns: [...page.data].reverse() };
-}
 
 async function readLatestChildTurn(rpc, threadId) {
   const { thread } = await rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
@@ -307,51 +293,73 @@ class CodexSession {
     this.subagentTimer.unref?.();
   }
 
-  async readSubagentThread(threadId) {
-    this.paginatedChildren ??= new Set();
-    return readChildHistory(this.rpc, threadId, this.paginatedChildren);
+  async readSubagentThread(threadId, previous) {
+    const { thread } = await this.rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
+    // The opposite-direction cursor includes its anchor turn, so an active item can
+    // grow without getting lost. A one-turn descending page gives the next anchor.
+    const newest = await this.rpc.request("thread/turns/list", {
+      threadId, limit: previous?.cursor ? 1 : 20, sortDirection: "desc", itemsView: "full",
+    }, { timeoutMs: 5000 });
+    if (!previous?.cursor) return { ...thread, turns: [...newest.data].reverse(), cursor: newest.backwardsCursor };
+    const turns = [];
+    let cursor = previous.cursor;
+    const seen = new Set();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const page = await this.rpc.request("thread/turns/list", {
+        threadId, cursor, limit: 20, sortDirection: "asc", itemsView: "full",
+      }, { timeoutMs: 5000 });
+      turns.push(...page.data);
+      cursor = page.nextCursor;
+    }
+    return { ...thread, turns, cursor: newest.backwardsCursor ?? previous.cursor };
   }
 
   refreshSubagents() {
-    // Notifications can schedule another poll while a slow provider read is still pending.
-    this.subagentRefresh ??= this.refreshSubagentHistory().finally(() => { this.subagentRefresh = null; });
-    return this.subagentRefresh;
+    // A timer and a final refresh may overlap. One cursor owner prevents stale results.
+    if (this.refreshingChildren) return this.refreshingChildren;
+    this.refreshingChildren = this.pollSubagents().finally(() => { this.refreshingChildren = null; });
+    return this.refreshingChildren;
   }
 
-  async refreshSubagentHistory() {
+  async pollSubagents() {
     this.childHistory ??= new Map();
     for (const agent of [...(this.state.subagents?.values() ?? [])]) {
       if (this.closed) return;
-      const history = this.childHistory.get(agent.id);
-      if (!this.shouldPollSubagent(agent) && history?.finished) continue;
+      const previous = this.childHistory.get(agent.id);
+      if (!this.shouldPollSubagent(agent) && previous?.finished) continue;
       try {
-        const thread = await this.readSubagentThread(agent.id);
+        const thread = await this.readSubagentThread(agent.id, previous);
         if (this.closed) return;
         const turns = thread?.turns ?? [];
-        const fingerprint = JSON.stringify({ turns, status: thread?.status });
-        if (history?.fingerprint === fingerprint && history.status === agent.status) continue;
-        const items = new Map(history?.items);
+        const items = new Map();
         for (const turn of turns) {
+          const completed = ["completed", "failed", "interrupted"].includes(turn.status);
           for (const item of turn.items ?? []) {
             const itemKey = `${turn.id}:${item.id}`;
-            const encoded = JSON.stringify(item);
-            if (items.get(itemKey) === encoded) continue;
-            items.set(itemKey, encoded);
+            const old = previous?.items.get(itemKey);
+            // Completed item ids are stable. Only the active turn's items need a
+            // content comparison; never serialize the thread history for a fingerprint.
+            items.set(itemKey, completed ? null : item);
+            if (old === null || (old !== undefined && isDeepStrictEqual(old, item))) continue;
             for (const event of mapCodexNotification("item/completed", { threadId: agent.id, item }, this.state)) this.emit(event);
           }
         }
         const last = turns.at(-1);
-        if (["active", "systemError"].includes(thread?.status?.type)) {
-          for (const event of mapCodexNotification("thread/status/changed", { threadId: agent.id, status: thread.status }, this.state)) this.emit(event);
-        } else if (last?.status === "inProgress") {
-          for (const event of mapCodexNotification("turn/started", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
-        } else if (last && ["completed", "failed", "interrupted"].includes(last.status)) {
-          for (const event of mapCodexNotification("turn/completed", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
+        const outcome = { status: thread?.status, turnId: last?.id, turnStatus: last?.status };
+        if (!isDeepStrictEqual(previous?.outcome, outcome) || previous?.agentStatus !== this.state.subagents.get(agent.id)?.status) {
+          if (["active", "systemError"].includes(thread?.status?.type)) {
+            for (const event of mapCodexNotification("thread/status/changed", { threadId: agent.id, status: thread.status }, this.state)) this.emit(event);
+          } else if (last?.status === "inProgress") {
+            for (const event of mapCodexNotification("turn/started", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
+          } else if (last && ["completed", "failed", "interrupted"].includes(last.status)) {
+            for (const event of mapCodexNotification("turn/completed", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
+          }
         }
         const current = this.state.subagents.get(agent.id);
-        this.childHistory.set(agent.id, { fingerprint, items, status: current.status, finished: !activeSubagent(current) });
+        this.childHistory.set(agent.id, { cursor: thread.cursor, items, outcome, agentStatus: current.status, finished: !activeSubagent(current) });
       } catch {
-        // A live child may not have flushed its history yet. Keep the last known status.
+        // A live child may not have flushed its history yet. Retry from the last cursor.
       }
     }
   }

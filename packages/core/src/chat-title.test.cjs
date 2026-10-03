@@ -63,6 +63,7 @@ test('main process names first messages once, persists and broadcasts across pro
   h.replies[0]('Preserve chat scroll position');
   h.replies[1]('Fix authentication');
   await Promise.all([...h.titles.pending.values()]);
+  await h.states.flush();
   const session = h.saved.get('/alpha').sessions[first.sessionId];
   assert.equal(chatTitle(session, []), 'Preserve chat scroll position');
   assert.equal(session.titlePending, undefined);
@@ -77,6 +78,7 @@ test('late generated title preserves a manual rename and concurrent state', asyn
   await h.states.update('/alpha', state => ({ ...state, sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], title: 'My title', unread: true } } }));
   h.replies[0]('Automatic title');
   await h.titles.name('/alpha', sessionId);
+  await h.states.flush();
   const session = h.saved.get('/alpha').sessions[sessionId];
   assert.equal(session.title, 'My title');
   assert.equal(session.generatedTitle, undefined);
@@ -90,6 +92,7 @@ test('failed naming keeps the prompt and persisted pending names resume after re
   await tick();
   h.replies[0](null);
   await h.titles.name('/alpha', sessionId);
+  await h.states.flush();
   const saved = h.saved.get('/alpha');
   assert.equal(chatTitle(saved.sessions[sessionId], saved.messages), 'when I switch chats the scroll jumps');
   assert.equal(saved.sessions[sessionId].titlePending, undefined);
@@ -98,5 +101,6 @@ test('failed naming keeps the prompt and persisted pending names resume after re
   const titles = new ChatTitles({ states, update: (path, change) => states.update(path, change), generate: async () => 'Recovered title' });
   titles.resume('/restarted', await states.get('/restarted'));
   await titles.name('/restarted', sessionId);
+  await states.flush();
   assert.equal(h.saved.get('/restarted').sessions[sessionId].generatedTitle, 'Recovered title');
 });

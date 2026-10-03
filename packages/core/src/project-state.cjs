@@ -1,3 +1,4 @@
+const { isDeepStrictEqual } = require("node:util");
 // Coordination state persisted in <project>/.milagre/coordination.json, reconciled with the
 // worktrees git reports each time a project is read.
 
@@ -56,7 +57,7 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     tasks,
     ...(state.artifacts ? { artifacts } : {}),
   };
-  return rawState && JSON.stringify(next) === JSON.stringify(rawState) ? rawState : next;
+  return rawState && isDeepStrictEqual(next, rawState) ? rawState : next;
 }
 
 // A saved running flag is not proof of a live provider after an app restart. A state with nothing to mark is returned as is.

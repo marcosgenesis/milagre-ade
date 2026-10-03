@@ -1,33 +1,12 @@
-const fs = require("node:fs/promises");
-const path = require("node:path");
-
-// Writes <project>/.milagre/coordination.json. Several chats can finish at once, so saves for
-// one project run one at a time, and each writes a temporary file in the same directory and
-// renames it over the old one: the file is always either the previous save or the new one.
-
-const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
-const queues = new Map();
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { migrateImages, compactSubagents, hydrateSubagents } = require('./project-content.cjs');
+// ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
+const stateFile = projectPath => path.join(projectPath, '.milagre', 'coordination.json');
 let counter = 0;
-
-function saveProjectState(projectPath, state) {
-  const key = path.resolve(projectPath);
-  const save = (queues.get(key) ?? Promise.resolve()).catch(() => {}).then(() => writeState(key, state));
-  queues.set(key, save);
-  const forget = () => {
-    if (queues.get(key) === save) queues.delete(key);
-  };
-  save.then(forget, forget);
-  return save;
-}
-
-// Resolves once every save queued so far for the project has finished (or failed), so a read that follows
-// sees the last one: switching back to a project must not load the file from before its last turn ended.
-function savesSettled(projectPath) {
-  return (queues.get(path.resolve(projectPath)) ?? Promise.resolve()).then(() => {}, () => {});
-}
-
-async function writeState(projectPath, state) {
-  const contents = JSON.stringify(state, null, 2);
+async function saveProjectState(projectPath, state) {
+  const persisted = await compactSubagents(projectPath, await migrateImages(projectPath, state));
+  const contents = JSON.stringify(persisted);
   const directory = path.dirname(stateFile(projectPath));
   await fs.mkdir(directory, { recursive: true });
   const temporary = path.join(directory, `coordination.json.${process.pid}.${++counter}.tmp`);
@@ -39,5 +18,7 @@ async function writeState(projectPath, state) {
     throw error;
   }
 }
-
-module.exports = { saveProjectState, savesSettled, stateFile };
+async function readProjectState(projectPath) {
+  return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
+}
+module.exports = { saveProjectState, readProjectState, stateFile };

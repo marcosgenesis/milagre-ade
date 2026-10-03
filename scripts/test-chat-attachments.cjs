@@ -12,7 +12,7 @@ import '/src/styles.css';
 const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'main', path: '/fixture', project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' }, 5: { id: 5, worktree_id: 1, agent_name: 'Other', provider: 'codex', status: 'Idle' } };
-state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }];
+state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null, images: [{id:'old',name:'legacy.png',dataUrl:'data:image/png;base64,'+window.imageBytes},{id:'new',name:'stored.png',path:'/fixture/.milagre/images/photo.png'}] }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }];
 state.next_id = 7;
 window.calls = []; window.searches = []; window.notices = []; window.synced = []; window.listeners = [];
 window.stateListeners = [];
@@ -28,6 +28,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
  getAgentPorts: async () => ({}),
+ onQuitFailed: fn => {window.quitFailed=fn;return ()=>{};},
+ retryQuit: async () => {window.retriedQuit=true;},
  showImageMenu: async (file, name) => { (window.imageMenus ??= []).push([file, name]); },
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
@@ -98,6 +100,11 @@ async function browserChecks() {
   await waitFor(String.raw`!!document.querySelector("textarea")`);
   await key('2', { metaKey: true });
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Attachment test")`);
+  await waitFor(String.raw`document.querySelector('article [aria-label="Preview legacy.png"] img')?.naturalWidth > 0 && document.querySelector('article [aria-label="Preview stored.png"] img')?.naturalWidth > 0`);
+  assert.ok(await evaluate(`document.querySelector('article [aria-label="Preview legacy.png"] img').src.startsWith('data:image/png')`));
+  assert.ok(await evaluate(`document.querySelector('article [aria-label="Preview stored.png"] img').src.startsWith('milagre-media:')`));
+  await screenshot('legacy-and-stored-images');
+
   await evaluate(`document.querySelector('input[type=file]').addEventListener('click', e => { window.pickerOpened=true; e.preventDefault(); });`);
   await click('[aria-label="Add attachments and sources"]');
   await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Add files')).click()`);
@@ -166,6 +173,7 @@ async function browserChecks() {
   assert.equal(await evaluate('window.saved.messages.at(-1).body'), '');
   await waitFor(String.raw`!!document.querySelector("article [aria-label=\"Preview photo.png\"]")`);
   await click('article [aria-label="Preview photo.png"]');
+  await waitFor(`document.querySelector('dialog[open] img')?.naturalWidth > 0`);
   await key('Escape');
   await waitFor(String.raw`!document.querySelector("dialog")`);
   assert.equal(await evaluate('window.interrupted'), undefined, 'Preview Escape never stops active agent');
@@ -227,6 +235,14 @@ async function browserChecks() {
   await waitFor(String.raw`!!document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Stop agent"]')`);
   await delay(250);
   require('node:fs').writeFileSync('/tmp/milagre-attachments.png', (await window.webContents.capturePage()).toPNG());
+  await evaluate(`window.emitAgent({type:'subagent-update',agent:{id:'delta-child',title:'Streaming review',status:'running',startedAt:Date.now()-2000,updatedAt:Date.now(),transcript:[{id:'finding',kind:'message',text:'Both image formats render correctly.'}]}})`);
+  await waitFor(`!!document.querySelector('[data-slot=subagent-track] > button')`);
+  await click('[data-slot=subagent-track] > button');
+  await waitFor(`!!document.querySelector('[data-subagent-open]')`);
+  await click('[data-subagent-open]');
+  await waitFor(`document.querySelector('[data-slot=subagent-transcript]')?.textContent.includes('Both image formats render correctly.')`);
+  await screenshot('subagent-delta');
+  await click('[aria-label="Close subagents"]');
   await key(',', { metaKey:true });
   await waitFor(String.raw`!!document.querySelector('[role=switch][aria-label="Notify when finished"]')`);
   await screenshot('notification-settings');
@@ -237,6 +253,11 @@ async function browserChecks() {
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("milagre-settings")).showDockBadge'), false, 'Notification preferences persist');
   await evaluate('window.openNotification("/other#10")');
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Notification destination")`);
+  await evaluate(`window.quitFailed('disk full')`);
+  await waitFor(`document.querySelector('[role=alertdialog]')?.textContent.includes('Chats could not be saved')`);
+  await screenshot('save-failure-retry');
+  await evaluate(`document.querySelector('[role=alertdialog] button').click()`);
+  assert.equal(await evaluate('window.retriedQuit'),true);
   console.log('PASS: native picker trigger, file-only send, saved attachments, image/video lightbox (counter, arrows, click to zoom, click outside to close, right-click copy/save, focus return), Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
   app.exit(0);
  } catch(error) { console.error(error); console.error(errors); console.error(await evaluate(`(() => { const v = document.querySelector('dialog video'); return v ? { src:v.src, error:v.error?.message, code:v.error?.code, ready:v.readyState, network:v.networkState } : null; })()`)); app.exit(1); }

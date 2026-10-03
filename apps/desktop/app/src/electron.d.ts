@@ -104,6 +104,8 @@ declare global {
       /** Takes a project off the recent list (its folder is untouched) and resolves to the list. */
       forgetProject: (projectPath: string) => Promise<RecentProject[]>;
       /** A project's state changed in the main process, its only writer. Changes made by agent events come with the event instead. */
+      retryQuit: () => Promise<void>;
+      onQuitFailed: (callback: (message: string) => void) => () => void;
       onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;

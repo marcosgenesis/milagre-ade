@@ -24,9 +24,15 @@ export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downlo
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
+export type RuntimeConnection = { connected: boolean; message?: string };
+export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+
 declare global {
   interface Window {
     milagre: {
+      getRuntimeConnection: () => Promise<RuntimeConnection>;
+      onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
+      onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;

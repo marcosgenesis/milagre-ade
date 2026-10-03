@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "exports": { "./*": "./src/*.cjs", "./package.json": "./package.json" },
   "scripts": {
     "start": "node src/cli.cjs",
     "test": "node --test src/*.test.cjs"

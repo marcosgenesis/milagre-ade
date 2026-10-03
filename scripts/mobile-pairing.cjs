@@ -16,7 +16,7 @@ function pairingLink({ address, token, name }) {
   try { url = new URL(address); } catch { throw new Error('The pairing address must be a URL.'); }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('The pairing address must use http or https.');
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) throw new Error('The pairing token must be 64 hex characters.');
-  return `milagre-local://pair?address=${encodeURIComponent(address)}&token=${token}&name=${encodeURIComponent(name ?? '')}`;
+  return `milagre://pair?address=${encodeURIComponent(address)}&token=${token}&name=${encodeURIComponent(name ?? '')}`;
 }
 
 // Prints the scan-to-pair block. The QR and the link both carry the token.

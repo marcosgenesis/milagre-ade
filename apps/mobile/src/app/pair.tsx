@@ -6,7 +6,7 @@ import { useSession } from '../session';
 import { ErrorNotice, PillButton, styles } from '../ui';
 import { SpinnerRing } from '../icons';
 
-/** Opened by the milagre-local://pair link in the host's QR code when it is scanned with the Camera app. */
+/** Opened by the milagre://pair link in the host's QR code when it is scanned with the Camera app. */
 export default function PairLink() {
   const params = useLocalSearchParams<{ address?: string; token?: string; name?: string }>();
   const session = useSession();
@@ -15,7 +15,7 @@ export default function PairLink() {
     let cancelled = false;
     void (async () => {
       try {
-        const pairing = parsePairing(`milagre-local://pair?address=${encodeURIComponent(params.address || '')}&token=${params.token || ''}&name=${encodeURIComponent(params.name || '')}`);
+        const pairing = parsePairing(`milagre://pair?address=${encodeURIComponent(params.address || '')}&token=${params.token || ''}&name=${encodeURIComponent(params.name || '')}`);
         if (await session.connect(pairing.address, pairing.token, true, pairing.name) && !cancelled) { router.dismissAll(); router.push('/projects'); }
       } catch (e) { if (!cancelled) setError((e as Error).message); }
     })();

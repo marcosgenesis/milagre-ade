@@ -5,7 +5,7 @@ export type Pairing = { address: string; token: string; name: string };
 /** Reads the link the host prints and encodes in its QR code (scripts/mobile-pairing.cjs). */
 export function parsePairing(input: string): Pairing {
   // React Native's URL does not parse custom schemes or query strings, so the link is read by hand.
-  const match = /^milagre-local:\/\/\/?pair\/?\?(.*)$/i.exec(input.trim());
+  const match = /^milagre(?:-local)?:\/\/\/?pair\/?\?(.*)$/i.exec(input.trim());
   if (!match) throw new Error('That is not a Milagre pairing link. Scan the code your Mac shows, or copy its pairing link.');
   const params: Record<string, string> = {};
   for (const part of match[1].split('&')) {

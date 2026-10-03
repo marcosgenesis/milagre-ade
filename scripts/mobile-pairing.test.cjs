@@ -6,7 +6,7 @@ const token = 'ab'.repeat(32);
 
 test('pairing link encodes the address and computer name and keeps the token as is', () => {
   const link = pairingLink({ address: 'https://host.example', token, name: "Victor's MacBook Pro & Co" });
-  assert.equal(link, `milagre-local://pair?address=https%3A%2F%2Fhost.example&token=${token}&name=Victor's%20MacBook%20Pro%20%26%20Co`);
+  assert.equal(link, `milagre://pair?address=https%3A%2F%2Fhost.example&token=${token}&name=Victor's%20MacBook%20Pro%20%26%20Co`);
   const parsed = new URL(link);
   assert.equal(parsed.searchParams.get('address'), 'https://host.example');
   assert.equal(parsed.searchParams.get('token'), token);

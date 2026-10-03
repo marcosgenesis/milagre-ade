@@ -49,9 +49,10 @@ test('remote plaintext addresses and bad tokens are rejected', async () => {
 });
 
 test('pairing links from the host QR parse into a computer', () => {
-  const link = `milagre-local://pair?address=${encodeURIComponent('https://mac.example.com')}&token=${token}&name=${encodeURIComponent("Victor's MacBook Pro")}`;
+  const link = `milagre://pair?address=${encodeURIComponent('https://mac.example.com')}&token=${token}&name=${encodeURIComponent("Victor's MacBook Pro")}`;
   assert.deepEqual(parsePairing(link), { address: 'https://mac.example.com', token, name: "Victor's MacBook Pro" });
-  assert.equal(parsePairing(`milagre-local://pair?address=${encodeURIComponent('http://127.0.0.1:8787')}&token=${token}`).name, '127.0.0.1');
+  assert.equal(parsePairing(`milagre://pair?address=${encodeURIComponent('http://127.0.0.1:8787')}&token=${token}`).name, '127.0.0.1');
+  assert.equal(parsePairing(`milagre-local://pair?address=${encodeURIComponent('http://127.0.0.1:8787')}&token=${token}`).address, 'http://127.0.0.1:8787');
   assert.throws(() => parsePairing('https://example.com/pair?token=x'), /not a Milagre pairing link/);
-  assert.throws(() => parsePairing(`milagre-local://pair?address=x&token=short`), /valid token/);
+  assert.throws(() => parsePairing(`milagre://pair?address=x&token=short`), /valid token/);
 });

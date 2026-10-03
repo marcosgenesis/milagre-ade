@@ -10,6 +10,7 @@ import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
 import { ChatReply } from '../chat-reply';
+import { BottomFade } from '../bottom-fade';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
 import { chatRecency } from '../indicators';
@@ -23,6 +24,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState('');
   const scroll = useRef<ScrollView>(null);
   const following = useRef(true);
@@ -126,7 +128,7 @@ export default function ChatScreen() {
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
     <Stack.Screen options={{ title, headerTitle: () => header }} />
     {more}
-    <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12, gap: 16 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
@@ -136,7 +138,9 @@ export default function ChatScreen() {
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </PageScroll>
-    <View style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 12), gap: 8 }}>
+    {/* The composer floats over the transcript, which blurs and fades under it like desktop's. */}
+    <BottomFade height={dockHeight + 48} />
+    <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 12), gap: 8 }}>
       {(blockers.length > 0 || agents.length > 0) && !question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />

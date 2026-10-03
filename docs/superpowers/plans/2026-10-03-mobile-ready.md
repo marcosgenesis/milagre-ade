@@ -41,11 +41,11 @@ Files: mobile routes, shared native controls, composer/model helpers/tests; brid
 
 Files: real-provider opt-in smoke script, run docs, verification record and fixes.
 
-- [ ] Verify installed Codex and Claude through the real mobile HTTP/socket/core path in an isolated Project. Test reconnect/restart and preserve stored Chat/provider IDs.
-- [ ] Validate HTTPS using an available configured tunnel with only temporary test data, authentication checks and request inspection disabled. Stop the test tunnel afterward. If unavailable, record the exact setup requirement without weakening authentication.
-- [ ] Build/install a standalone iOS simulator app with the available Xcode toolchain and verify saved connection, new Chat/reply, model settings, Worktrees/changes, approval/question/Stop and app restart. Keep Expo Go as a fallback if a concrete toolchain constraint blocks the build.
-- [ ] Run root compatibility checks and packaging checks affected by dependency/config changes. One independent review, one RED-to-GREEN fix pass, update #137 and screenshot links, sync the draft stack and check CI.
-- [ ] Leave a persistent real-host test Project and working simulator app, with exact start/stop instructions and limits. Stop only this session's simulator automation services.
+- [x] Verify installed Codex and Claude through the real mobile HTTP/socket/core path in an isolated Project. Test reconnect/restart and preserve stored Chat/provider IDs.
+- [x] Validate HTTPS using an available configured tunnel with only temporary test data, authentication checks and request inspection disabled. Stop the test tunnel afterward. If unavailable, record the exact setup requirement without weakening authentication.
+- [x] Build/install a standalone iOS simulator app with the available Xcode toolchain and verify saved connection, new Chat/reply, model settings, Worktrees/changes, approval/question/Stop and app restart. Keep Expo Go as a fallback if a concrete toolchain constraint blocks the build.
+- [x] Run root compatibility checks and packaging checks affected by dependency/config changes. One independent review, one RED-to-GREEN fix pass, update #137 and screenshot links, sync the draft stack and check CI.
+- [x] Leave a persistent real-host test Project and working simulator app, with exact start/stop instructions and limits. Stop only this session's simulator automation services.
 
 ## Rulings
 

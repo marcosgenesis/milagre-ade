@@ -127,4 +127,16 @@ async function switchTarget(store, requested, { checkRoot = requireWorktreeRoot 
   return entry.path;
 }
 
-module.exports = { MAX_RECENT, createRecentProjects, rememberProject, switchTarget };
+/**
+ * The project to open at launch: the folder Milagre was started in when it's inside a git repo (a terminal launch),
+ * else the most recent project that still is one. A Dock, Finder or update relaunch starts in "/", which is neither.
+ */
+async function launchProject(store, cwd, { topLevel = gitTopLevel } = {}) {
+  if (cwd !== "/" && await topLevel(cwd).then(() => true, () => false)) return cwd;
+  for (const entry of await store.list()) {
+    if (await topLevel(entry.path).then(() => true, () => false)) return entry.path;
+  }
+  return cwd;
+}
+
+module.exports = { MAX_RECENT, createRecentProjects, launchProject, rememberProject, switchTarget };

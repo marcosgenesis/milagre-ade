@@ -47,7 +47,7 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
-  const { guardNavigation } = require("../electron/links.cjs");
+  const { guardNavigation } = require("../apps/desktop/electron/links.cjs");
   // A fresh profile, so a zoom level saved for 127.0.0.1 in the shared Electron profile can't change the layout.
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-sidebar-pr-")));
   await app.whenReady();

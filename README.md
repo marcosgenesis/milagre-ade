@@ -47,7 +47,9 @@ npm run test:agent
 npm run release:dry
 ```
 
-`npm run dev` starts Vite and opens the Electron shell. The renderer is served locally at port 5180 during development.
+The repo uses npm workspaces with one root lockfile. Run the existing commands from the repository root; `npm ci` installs every workspace. `npm run test:monorepo` checks package resolution and desktop packaging metadata. After building, `npm run test:desktop` opens the real app against temporary saved Chats and settings. On macOS, add `-- --packaged release/mac-arm64/Milagre.app` to check a local installer build too (use `release/mac/Milagre.app` for Intel).
+
+`npm run dev` starts Vite and opens the Electron shell. The renderer is served locally at port 5180 during development. Its production build is in `apps/desktop/dist/`; installers remain in the root `release/` directory. The desktop package keeps its existing app identity and data paths, so saved Chats and settings need no migration.
 
 ## Releases
 
@@ -117,10 +119,10 @@ The approval boundary is enforced in the Electron main process. The renderer can
 ## Repository layout
 
 ```text
-app/       React renderer, components and styles
-electron/  Electron main process, preload bridge and agent runner
-scripts/   Development launch helpers
-docs/      Product and domain documentation
+apps/desktop/     Desktop package (milagre): React renderer and Electron runtime
+packages/shared/  Shared model, Chat operations and state reducers (@milagre/shared)
+scripts/          Root development, integration-test and release helpers
+docs/             Product and domain documentation
 ```
 
 ## Contributing

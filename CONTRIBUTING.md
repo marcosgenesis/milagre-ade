@@ -16,13 +16,18 @@ npm run dev
 npm run typecheck
 npm run build
 npm run test:agent
+npm run test:ui
+npm run test:monorepo
 ```
 
 Use `npm run dev` for visual work. Keep the renderer and Electron process boundaries explicit:
 
-- `app/` owns UI state and presentation.
-- `electron/` owns process execution, filesystem access and privileged operations.
-- `scripts/` contains development helpers.
+- `apps/desktop/app/` owns UI state and presentation.
+- `apps/desktop/electron/` owns process execution, filesystem access and privileged operations.
+- `packages/shared/` owns the model and pure Chat/state operations used by both sides. Import through `@milagre/shared` package exports.
+- `scripts/` contains root development, integration-test and release helpers.
+
+Install dependencies from the repository root with `npm ci`. Add package dependencies to their workspace. Root commands still work; `npm run build --workspace milagre` and `npm run test --workspace @milagre/shared` target individual packages. Electron packaging and semantic-release run at root, with installers in `release/`.
 
 When changing the UI, include a short description of the interaction and, when practical, a screenshot or recording in the pull request.
 

@@ -48,7 +48,7 @@ if (process.versions.electron) require("electron").protocol.registerSchemesAsPri
 
 async function browserChecks() {
   const { app, BrowserWindow, protocol, net } = require("electron");
-  const { createMediaHandler } = require("../electron/media.cjs");
+  const { createMediaHandler } = require("../apps/desktop/electron/media.cjs");
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-image-generation-")));
   await app.whenReady();
   protocol.handle("milagre-media", createMediaHandler((url, options) => net.fetch(url, options)));

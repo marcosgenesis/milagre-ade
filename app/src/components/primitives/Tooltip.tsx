@@ -9,6 +9,7 @@ export default function Tooltip({
   shortcut,
   align = "start",
   side = "top",
+  wrap = false,
   className = "",
   children,
 }: {
@@ -17,6 +18,8 @@ export default function Tooltip({
   align?: "start" | "end";
   /** Which side of the trigger the tooltip opens on; "bottom" for triggers at the window's top edge. */
   side?: "top" | "bottom";
+  /** Lets a long label break onto more lines instead of running past the window. */
+  wrap?: boolean;
   /** Extra classes for the trigger wrapper, e.g. to position it. */
   className?: string;
   children: ReactNode;
@@ -63,7 +66,7 @@ export default function Tooltip({
       {rect && createPortal(
         <span
           role="tooltip"
-          className="pointer-events-none fixed z-[60] flex items-center gap-2 whitespace-nowrap rounded-[8px] bg-ink px-2 py-1 text-[12px] font-medium text-surface shadow-overlay"
+          className={`pointer-events-none fixed z-[60] flex items-center gap-2 ${wrap ? "max-w-[280px] whitespace-normal leading-snug" : "whitespace-nowrap"} rounded-[8px] bg-ink px-2 py-1 text-[12px] font-medium text-surface shadow-overlay`}
           style={{
             ...(side === "top" ? { top: rect.top - 6 } : { top: rect.bottom + 6 }),
             ...(align === "start" ? { left: rect.left } : { right: window.innerWidth - rect.right }),

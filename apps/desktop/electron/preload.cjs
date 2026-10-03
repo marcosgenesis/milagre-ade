@@ -4,6 +4,17 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** @type {Window["milagre"]} */
 const bridge = {
+  getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
+  onRuntimeConnection: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("runtime:connection", listener);
+    return () => ipcRenderer.removeListener("runtime:connection", listener);
+  },
+  onRuntimeSnapshot: (callback) => {
+    const listener = (_event, snapshot) => callback(snapshot);
+    ipcRenderer.on("runtime:snapshot", listener);
+    return () => ipcRenderer.removeListener("runtime:snapshot", listener);
+  },
   getPathForFile: (file) => webUtils.getPathForFile(file),
   searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),

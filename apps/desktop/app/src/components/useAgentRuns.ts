@@ -27,15 +27,22 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
   // A window that loads mid-turn takes the turns from the main process, and skips the events they hold.
   useEffect(() => {
     let taken = 0;
+    let recovered = false;
     const unsubscribe = window.milagre.onAgentEvent(({ chatId, event, state, seq }) => {
       if (seq === undefined || seq > taken) setAll(applyRunEvent(runsRef.current, chatId, event, event.type === "turn-started" ? modelForRef.current(chatId) : ""));
       if (state) onStateRef.current(projectOfKey(chatId), state);
     });
+    const recover = window.milagre.onRuntimeSnapshot?.(snapshot => {
+      recovered = true;
+      taken = snapshot.runs.seq;
+      setAll(snapshot.runs.runs);
+    });
     void window.milagre.getRuns().then((snapshot) => {
+      if (recovered) return;
       taken = snapshot.seq;
       setAll(snapshot.runs);
     }).catch(() => {});
-    return unsubscribe;
+    return () => { recovered = true; unsubscribe(); recover?.(); };
   }, [setAll]);
 
   /** Saves the message and starts or steers its chat's turn; resolves with the chat's session id. */

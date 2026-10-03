@@ -62,7 +62,7 @@ import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
 import { PermissionCard } from "./components/agents/PermissionCard";
 import { QuestionCard } from "./components/agents/QuestionCard";
-import type { UpdateState } from "./electron";
+import type { RuntimeConnection, UpdateState } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
@@ -186,6 +186,7 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
   const [startupError, setStartupError] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
@@ -212,6 +213,16 @@ function App() {
   }
 
   useEffect(() => { void loadInitialProject(); }, []);
+
+  useEffect(() => {
+    let updated = false;
+    const off = window.milagre.onRuntimeConnection?.(state => { updated = true; setHostConnection(state); });
+    void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
+    const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
+      for (const next of snapshot.projects) receiveState(next.path, next.state);
+    });
+    return () => { updated = true; off?.(); snapshotOff?.(); };
+  }, []);
 
   useEffect(() => {
     let unsubscribe = () => {};
@@ -831,6 +842,10 @@ function App() {
   return (
     <>
     <DotBackground key="app">
+      {!hostConnection.connected && <div role="status" data-host-disconnected className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]">
+        <p className="font-medium">Reconnecting to your computer</p>
+        <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+      </div>}
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (

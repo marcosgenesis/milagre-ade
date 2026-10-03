@@ -38,7 +38,7 @@
         "expo-camera",
         {
           "cameraPermission": "Milagre uses the camera to scan the pairing code your Mac shows.",
-          "microphonePermission": false,
+          "microphonePermission": "Milagre never records audio. iOS asks because the code scanner shares the camera.",
           "recordAudioAndroid": false
         }
       ],
@@ -52,7 +52,7 @@
       ]
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.victorlucas.milagre",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false

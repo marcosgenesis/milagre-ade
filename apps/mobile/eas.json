@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 16.0.0",
+    "version": ">= 24.0.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -9,6 +9,10 @@
       "autoIncrement": true,
       "ios": {
         "image": "latest"
+      },
+      "node": "24.13.0",
+      "env": {
+        "ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
       }
     }
   },

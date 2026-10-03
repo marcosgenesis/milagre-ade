@@ -151,7 +151,7 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
 
-  const handleUpdateCli = async (provider: ModelProvider) => {
+  const updateCli = async (provider: ModelProvider) => {
     setUpdatingCli(provider);
     try {
       const result = await window.milagre.updateCli(provider);
@@ -170,6 +170,11 @@ function App() {
       setUpdatingCli(null);
     }
   };
+  // Every finished message card gets this (an outdated CLI's reply shows an Update button), so it keeps one identity
+  // across renders: a new function per keystroke or streamed batch would re-render the whole transcript (see sendRecommendation).
+  const updateCliRef = useRef(updateCli);
+  updateCliRef.current = updateCli;
+  const handleUpdateCli = useCallback((provider: ModelProvider) => updateCliRef.current(provider), []);
 
   useEffect(() => {
     if (!notice) return;

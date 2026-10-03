@@ -24,7 +24,12 @@ function hookHost() {
       return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
-    useCallback(fn) { return fn; }, useEffect() {}, createContext() { return {}; }, useContext() {},
+    useCallback(fn, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { fn, deps };
+      return slots[index].fn;
+    }, useEffect() {}, createContext() { return {}; }, useContext() {},
   };
 }
 function load(file, modules, extra = '') {
@@ -192,4 +197,76 @@ test('switching the requested diff hides old content and ignores its late respon
   await settle();
   assert.equal(render().data.patch, '+second');
   cleanup?.();
+});
+
+function worktreeFormHost() {
+  const creating = deferred();
+  const react = hookHost();
+  let active = true, cleanup, effect, focusEffect;
+  react.useEffect = fn => { effect = fn; };
+  const nav = [];
+  const session = {
+    client: { call: method => method === 'worktree:create' ? creating.promise : Promise.resolve(['main']) },
+    snapshot: { project: { path: '/A' } }, drafts: {},
+    isSelected: () => active,
+    open: async () => { session.snapshot.project.path = '/A'; },
+    refresh: async () => {},
+    setDrafts(fn) { this.drafts = fn(this.drafts); },
+  };
+  const { default: Form } = load('app/new-worktree.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
+    'expo-router': { Redirect: 'Redirect', router: { replace: route => nav.push(route) }, useFocusEffect: fn => { if (fn !== focusEffect) { cleanup?.(); cleanup = fn(); focusEffect = fn; } } },
+    '../session': { useSession: () => session },
+    '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll', 'Select'].map(name => [name, name])), styles: {} },
+  });
+  const render = () => { react.begin(); return Form(); };
+  const field = () => find(render(), n => n.type === 'Field').props;
+  const initialize = async () => { render(); effect?.(); await settle(); find(render(), n => n.type === 'Select').props.onChange('main'); field().onChangeText('original task'); };
+  return { session, creating, nav, render, field, initialize,
+    create() { find(render(), n => n.type === 'Button').props.onPress(); },
+    leaveRoute() { cleanup?.(); },
+    changeProject() { active = false; session.snapshot = { project: { path: '/B' } }; },
+  };
+}
+
+test('late Worktree creation cannot select its old Project or navigate after context changes', async () => {
+  for (const transition of ['changeProject', 'leaveRoute']) {
+    const form = worktreeFormHost(); await form.initialize(); form.create(); form[transition]();
+    form.creating.resolve({ worktreeId: 42 }); await settle();
+    assert.equal(form.nav.length, 0, transition);
+    if (transition === 'changeProject') assert.equal(form.session.snapshot.project.path, '/B');
+  }
+});
+
+test('new Worktree Chat receives the latest prompt typed while creation is pending', async () => {
+  const form = worktreeFormHost(); await form.initialize(); form.create();
+  form.field().onChangeText('newer task details');
+  form.creating.resolve({ worktreeId: 42 }); await settle();
+  assert.equal(form.session.drafts['/A#new:42'], 'newer task details');
+  assert.equal(form.nav.length, 1);
+});
+
+test('late Chat rename cannot pop another screen after its form loses focus', async () => {
+  const saving = deferred(), react = hookHost();
+  let cleanup, backs = 0;
+  const session = { client: { call: () => saving.promise }, snapshot: { project: { path: '/A', state: { sessions: { 1: { id: 1, title: 'Chat' } } } }, runs: { runs: {} } }, isSelected: () => true, refresh: async () => {} };
+  const { default: Form } = load('app/chat-details.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
+    'expo-router': { Redirect: 'Redirect', router: { back: () => backs++ }, useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => { cleanup = fn(); } },
+    '../session': { useSession: () => session }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
+  });
+  react.begin(); const tree = Form();
+  find(tree, n => n.type === 'Button' && n.props.title === 'Save name').props.onPress();
+  cleanup?.(); saving.resolve({}); await settle();
+  assert.equal(backs, 0);
+});
+
+
+test('selection guards expire when Project or connection changes', async () => {
+  const render = sessionHost({ call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async p => snapshot(p) });
+  await render().connect('address', 'token'); await render().open('A');
+  const first = render(); assert.equal(first.isSelected(), true);
+  await first.open('B'); assert.equal(first.isSelected(), false);
+  const second = render(); assert.equal(second.isSelected(), true);
+  await second.connect('another-address', 'token'); assert.equal(second.isSelected(), false);
 });

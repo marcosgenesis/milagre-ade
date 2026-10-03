@@ -92,8 +92,10 @@ function useSessionState() {
     const subscription = AppState.addEventListener('change', state => { clearTimeout(timer); if (state === 'active') void poll(); });
     return () => { cancelled = true; clearTimeout(timer); subscription.remove(); };
   }, [client, projectPath, refresh]);
+  const selected = selection.current;
+  const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { client, recent, snapshot, error, setError, drafts, setDrafts, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, disconnect };
+  return { client, recent, snapshot, error, setError, drafts, setDrafts, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

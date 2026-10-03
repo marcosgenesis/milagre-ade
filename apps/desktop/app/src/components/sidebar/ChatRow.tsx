@@ -1,6 +1,6 @@
 import { ChatTitle } from "./ChatTitle";
 import { SpinnerRing } from "../primitives/SpinnerRing";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -144,7 +144,8 @@ function recentInitials(label: string) {
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
 }
 
-export function ChatRow({
+// memo: the sidebar rebuilds on streamed batches, and a row only needs to render when its own item changes.
+export const ChatRow = memo(function ChatRow({
   item,
   active,
   collapsed,
@@ -155,7 +156,7 @@ export function ChatRow({
   item: SidebarRecent;
   active: boolean;
   collapsed: boolean;
-  onPick: () => void;
+  onPick: (item: SidebarRecent) => void;
   actions: ChatRowActions;
   shortcutHint?: string;
 }) {
@@ -235,7 +236,7 @@ export function ChatRow({
         <button
           data-row
           type="button"
-          onClick={onPick}
+          onClick={() => onPick(item)}
           aria-current={active ? "page" : undefined}
           className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
@@ -312,7 +313,7 @@ export function ChatRow({
     {card && !menu && createPortal(<ChatHoverCard item={item} position={card} onPointerEnter={clearHover} onPointerLeave={hideCardSoon} onOpenLink={hideCard} />, document.body)}
     </>
   );
-}
+});
 
 /** Merged is purple, a blocked PR takes its first blocker's tone, running CI is orange like GitHub's own dot, other open PRs are green. */
 function prTone(pr: PullRequest) {

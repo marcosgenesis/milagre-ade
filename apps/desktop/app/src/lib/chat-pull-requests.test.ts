@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatPullRequests, pullRequestRefs, rowPullRequests } from "./chat-pull-requests.ts";
+import { chatPullRequests, pullRequestRefs, pullRequestRefsCache, rowPullRequests } from "./chat-pull-requests.ts";
 import type { ChatStep } from "../model.ts";
 
 const url = (n: number) => `https://github.com/example/repo/pull/${n}`;
@@ -66,4 +66,15 @@ test("the chat's PRs keep creation order and include the branch PR once", () => 
 test("the row shows PRs that need attention first, then the rest in order", () => {
   const prs = [pr(84, { state: "MERGED" }), pr(88), pr(90, { hasConflicts: true }), pr(91, { readyToMerge: true }), pr(92, { isBehind: true }), pr(93, { changesRequested: true })];
   assert.deepEqual(rowPullRequests(prs).map((item) => item.number), [90, 92, 93, 88, 91, 84]);
+});
+
+test("the refs cache rescans a chat only when one of its messages is a different object", () => {
+  const read = pullRequestRefsCache();
+  const first = reply(shell(`$ gh pr create --fill\n${url(88)}`));
+  const refs = read("a#1", [first]);
+  assert.deepEqual(refs, [url(88)]);
+  assert.equal(read("a#1", [first]), refs);
+  assert.notEqual(read("a#1", [first, reply()]), refs);
+  assert.deepEqual(read("a#1", [reply(shell(`$ gh pr create --fill\n${url(89)}`))]), [url(89)]);
+  assert.deepEqual(read("a#2", [first]), [url(88)]);
 });

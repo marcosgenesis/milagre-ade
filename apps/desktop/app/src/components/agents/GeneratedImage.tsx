@@ -7,7 +7,7 @@ import { mediaUrl } from "../../lib/media";
 import { ImageGeneration } from "./ImageGeneration";
 import type { ImageGenerationStatus } from "./ImageGeneration";
 import { StepRow } from "./StepRow";
-import { MediaLightbox } from "../motion/MediaLightbox";
+import { MediaLightbox } from "../motion/LazyMediaLightbox";
 import Tooltip from "../primitives/Tooltip";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];

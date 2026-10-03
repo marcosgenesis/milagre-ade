@@ -32,9 +32,9 @@
 
 **Interfaces:** `ensureDaemon({dataDir,version,cwd,worktreeRoot,executable,entry,env})` returns a connected socket client. Status includes `capabilities: ['desktop-v1']` and `methods`. `daemon:focus` takes `{focused,projectPath,chatId}` for that socket. `daemon:flush` invokes runtime flush without closing. Runtime `focused(view?)` and `flush()` preserve the embedded defaults. `isChatFocused(chatId)` supports multiple focused clients.
 
-- [ ] Write failing socket tests for per-client view/read state, notifications, flush, two concurrent attach/start calls, compatibility and preserved live turns after disconnect. Run `node --test apps/daemon/src/*.test.cjs`; expect new assertions to fail.
-- [ ] Implement the advertised contract, per-client view state, detached bootstrap and macOS activity blocker. Keep startup ownership fail-closed.
-- [ ] Run daemon and core suites; expect all pass. Commit the tested change.
+- [x] Write failing socket tests for per-client view/read state, notifications, flush, two concurrent attach/start calls, compatibility and preserved live turns after disconnect. Run `node --test apps/daemon/src/*.test.cjs`; expect new assertions to fail.
+- [x] Implement the advertised contract, per-client view state, detached bootstrap and macOS activity blocker. Keep startup ownership fail-closed.
+- [x] Run daemon and core suites; expect all pass. Commit the tested change.
 
 ## Task 2: Desktop daemon adapter and recovery (#131)
 

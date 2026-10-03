@@ -394,6 +394,7 @@ function createRuntime(options) {
     publish: publishAgentEvent,
     broadcast: broadcastProjectState,
     isFocused: () => isFocused(),
+    isChatFocused: options.isChatFocused,
     handoverTools: {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
       brief: ({ cwd, ...input }) => generateBrief({
@@ -450,8 +451,7 @@ function createRuntime(options) {
     return chats.addNote(chatId, { body, context: { kind: "git-action" } });
   });
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
-  async function readOpenChat() {
-    const chatId = chats.openChat;
+  async function readOpenChat(chatId = chats.openChat) {
     if (chatId && states.has(projectOfKey(chatId))) await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
   }
   commands.handle("chat:set-open", (_event, chatId) => {
@@ -528,6 +528,10 @@ function createRuntime(options) {
     }
   }
   commands.handle("project:recent", () => recentProjects().list());
+  commands.handle("project:snapshot", async (_event, projectPath) => {
+    if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
+    return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
+  });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
   commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 
@@ -566,7 +570,8 @@ function createRuntime(options) {
     openProject: projectPath => accept(() => openProject(projectPath)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
-    focused: () => accept(() => { diffs.focused(); return readOpenChat(); }),
+    focused: (view) => accept(() => { diffs.focused(view?.projectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
+    flush: async () => { await Promise.allSettled([...active]); await states.flush(); await usageStore.idle(); },
     close,
   };
 }

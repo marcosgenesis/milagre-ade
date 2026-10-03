@@ -7,20 +7,31 @@ const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, wire } = require('./protocol.cjs'
 
 async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
   const clients = new Map();
+  const views = new Map();
   let stopping;
   let listening = false;
   const runtime = createRuntime({ ...runtimeOptions, dataDir, version,
+    isChatFocused: chatId => [...views.values()].some(view => view.focused && view.chatId === chatId),
+    notifyWaiting(notice) {
+      broadcast('notification:waiting', notice);
+      runtimeOptions.notifyWaiting?.(notice);
+    },
     emit(channel, payload) {
-      for (const [socket, connection] of clients) {
-        try { connection.send({ v: VERSION, event: { channel, payload } }); }
-        catch { socket.destroy(); } // Reconnect and read snapshots; never truncate state.
-      }
+      broadcast(channel, payload);
       runtimeOptions.emit?.(channel, payload);
     },
   });
+  function broadcast(channel, payload) {
+    for (const [socket, connection] of clients) {
+      try { connection.send({ v: VERSION, event: { channel, payload } }); }
+      catch { socket.destroy(); }
+    }
+  }
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();
+    const view = { focused: false, projectPath: null, chatId: null };
+    views.set(socket, view);
     const connection = wire(socket, {
       maxFrameBytes,
       onInvalid(error) {
@@ -33,7 +44,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     });
     clients.set(socket, connection);
     socket.on('error', () => {});
-    socket.on('close', () => clients.delete(socket));
+    socket.on('close', () => { clients.delete(socket); views.delete(socket); });
     async function dispatch(request) {
       const validId = Number.isSafeInteger(request?.id) || (typeof request?.id === 'string' && request.id.length <= 128);
       const id = validId ? request.id : null;
@@ -47,10 +58,23 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       inflight.add(id);
       try {
         let result;
-        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath };
+        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1'], methods: runtime.methods };
+        else if (request.method === 'daemon:flush') result = await runtime.flush();
+        else if (request.method === 'daemon:focus') {
+          const next = request.args[0];
+          if (!next || typeof next.focused !== 'boolean') throw new Error('Expected a focused boolean');
+          view.focused = next.focused;
+          if (view.focused) await runtime.focused(view);
+        }
+        else if (request.method === 'chat:set-open') {
+          view.chatId = typeof request.args[0] === 'string' ? request.args[0] : null;
+          await runtime.focused(view);
+        }
         else if (request.method === 'daemon:stop') result = { stopping: true };
         else if (request.method === 'project:open') result = await runtime.openProject(...request.args);
+        else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args);
+        if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
         connection.send({ v: VERSION, id, result: result ?? null });
         if (request.method === 'daemon:stop') void close().catch(onError);
       } catch (error) {

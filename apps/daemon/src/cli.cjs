@@ -4,10 +4,13 @@ const { parseArgs } = require('node:util');
 const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
 const { version } = require('../package.json');
+const { KeepAwake } = require('@milagre/core/keep-awake');
+const { createPowerBlocker } = require('./power.cjs');
 
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     'data-dir': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    'app-version': { type: 'string' }, cwd: { type: 'string' }, 'worktree-root': { type: 'string' },
   } });
   if (values.help) {
     console.log('milagre daemon <serve|status|stop|request METHOD [JSON_ARGS]> --data-dir /absolute/path\n\nLocal macOS/Linux daemon. Use a separate profile and close these Projects in older desktop releases.');
@@ -19,7 +22,10 @@ async function main() {
   const dataDir = values['data-dir'];
   if (command === 'serve') {
     if (positionals.length !== 1) throw new Error('Unexpected serve arguments');
-    const daemon = await startDaemon({ dataDir, version });
+    const daemon = await startDaemon({ dataDir, version: values['app-version'] || version, runtimeOptions: {
+      cwd: values.cwd || process.cwd(), worktreeRoot: values['worktree-root'],
+      keepAwake: new KeepAwake({ powerSaveBlocker: createPowerBlocker() }),
+    } });
     console.log(JSON.stringify({ status: 'ready', pid: process.pid, dataDir, socketPath: daemon.socketPath }));
     const stop = () => { void daemon.close().catch(error => { console.error(error.message); process.exitCode = 1; }); };
     process.once('SIGINT', stop);

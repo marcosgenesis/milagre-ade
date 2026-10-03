@@ -108,3 +108,46 @@ test('socket is private and rejects incompatible, malformed and oversized reques
     socket.destroy();
   }
 });
+
+test('desktop capability advertises methods, flush preserves a running turn, and waiting notices reach clients', async t => {
+  const { project, sessions, client } = await fixture(t);
+  const desktop = await client();
+  const mobile = await client();
+  const status = await desktop.call('daemon:status');
+  assert.ok(status.capabilities?.includes('desktop-v1'));
+  assert.ok(status.methods.includes('chat:send'));
+  const notices = [];
+  desktop.on('event', event => { if (event.channel === 'notification:waiting') notices.push(event.payload); });
+  const opened = await desktop.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  await mobile.call('chat:send', [{ projectPath: project, sessionId: session.id, body: 'Shared Chat', provider: 'codex', model: 'test', permissionMode: 'ask' }]);
+  await waitFor(() => notices.length);
+  assert.equal(notices[0].requestId, 'permission-1');
+  await desktop.call('daemon:flush');
+  desktop.close();
+  assert.equal(sessions[0].closed, false);
+  assert.ok(JSON.stringify(await mobile.call('chat:runs')).includes('permission-1'));
+  const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
+  assert.ok(saved.messages.some(message => message.body === 'Shared Chat'));
+});
+
+test('each desktop connection keeps its own Project and focus cannot read another client Chat', async t => {
+  const { project, client } = await fixture(t);
+  const other = path.join(path.dirname(project), 'other');
+  await fs.mkdir(other);
+  execFileSync('git', ['init', '-b', 'main', other], { stdio: 'ignore' });
+  const first = await client();
+  const second = await client();
+  const a = await first.call('project:open', [project]);
+  const b = await second.call('project:open', [other]);
+  const aId = Object.values(a.state.sessions)[0].id;
+  const bId = Object.values(b.state.sessions)[0].id;
+  await first.call('chat:set-open', [`${project}#${aId}`]);
+  await second.call('chat:set-open', [`${other}#${bId}`]);
+  await second.call('chat:patch', [other, bId, { unread: true }]);
+  await first.call('daemon:focus', [{ focused: true }]);
+  assert.equal((await second.call('project:snapshot', [other])).state.sessions[bId].unread, true);
+  assert.equal((await first.call('project:current')).path, project);
+  assert.equal((await second.call('project:current')).path, other);
+  await assert.rejects(first.call('daemon:focus', [{ focused: 'yes' }]), /focused/);
+});

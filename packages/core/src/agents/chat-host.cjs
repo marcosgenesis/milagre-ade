@@ -33,8 +33,8 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, handoverTools, now = Date.now }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, handoverTools, now });
+  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, isChatFocused, nameChat = async () => {}, handoverTools, now = Date.now }) {
+    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, isChatFocused, nameChat, handoverTools, now });
     this.pendingHandovers = new Map();
     this.runs = {};
     this.seq = 0;
@@ -67,7 +67,8 @@ class ChatHost {
       this.runs = result.runs;
       seq = ++this.seq;
       if (!result.changed) return state;
-      const unread = isTurnEnd(event) && (chatId !== this.openChat || !this.isFocused()) && !result.state.sessions[sessionId]?.archived;
+      const visible = this.isChatFocused ? this.isChatFocused(chatId) : chatId === this.openChat && this.isFocused();
+      const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
       const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
       return isTurnEnd(event) ? this.withNotes(next, chatId) : next;
     }).then(

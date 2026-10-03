@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { openModal } from "../../lib/modal";
 import { shortcutModifier, useShortcutHints } from "../../lib/shortcut-hints";
 
 const SHOW_DELAY = 400;
@@ -32,7 +33,7 @@ export default function Tooltip({
   const hint = shortcut?.replace("⌘", shortcutModifier);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
-    const modal = document.querySelector('dialog[open], [aria-modal="true"]');
+    const modal = openModal();
     const bounds = trigger?.getBoundingClientRect();
     setHintRect(showHints && shortcut && bounds?.width && bounds.height && (!modal || modal.contains(trigger)) ? bounds : null);
   }, [showHints, shortcut]);

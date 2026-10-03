@@ -52,7 +52,27 @@
 
 **Files:** affected Electron fixtures, packaging smoke, CI, README/CONTRIBUTING, this plan's verification record.
 
-- [ ] Run clean install, build/typecheck, complete test suites and all existing Electron fixtures. Expected: no lost test coverage or behavior.
-- [ ] Build the local Mac app, verify signature and archives, inspect core/skills/dependencies, and run the source/packaged saved-state smoke. Expected: retained identity and data compatibility.
-- [ ] Run the CLI in a real temporary process through serve/status/request/stop. Expected: socket, locks and child process clean up after stop.
-- [ ] Get one independent whole-branch review, resolve important findings with reproducing tests, commit, push and open a separate stacked draft PR. Check CI and record remaining release-only validation.
+- [x] Run clean install, build/typecheck, complete test suites and all existing Electron fixtures. Expected: no lost test coverage or behavior.
+- [x] Build the local Mac app, verify signature and archives, inspect core/skills/dependencies, and run the source/packaged saved-state smoke. Expected: retained identity and data compatibility.
+- [x] Run the CLI in a real temporary process through serve/status/request/stop. Expected: socket, locks and child process clean up after stop.
+- [x] Get one independent whole-branch review, resolve important findings with reproducing tests, commit, push and open a separate stacked draft PR. Check CI and record remaining release-only validation.
+
+## Verification record
+
+Validated on macOS arm64 with Node 24.13.0 and npm 11.6.2. Clean install, typecheck, build, shared/core/desktop/daemon unit suites, UI/release/monorepo suites and all 21 Electron fixtures passed. Built the local DMG and ZIP; checked the signature, archive integrity, packaged core/SDK/YAML and unpacked skills. Source and packaged desktop smoke preserved the saved Chat/provider ID and transcript and exercised ownership error recovery.
+
+Independent whole-branch review found one important issue: direct worktree create/remove calls could mutate a Project before ownership. Reproducing tests failed before the fix and passed afterward. The fix acquires the shared Git-directory lock and Project lock before mutation, including linked checkouts. All root suites, packaging and source/packaged smoke passed again after the fix.
+
+Release-only limits: production signing/notarization, Intel execution and real updater installation remain untested. Provider integration used deterministic sessions rather than user credentials. The daemon remains opt-in and local; desktop transport, mobile, pairing and internet access belong to later phases. Desktop shutdown now waits for writes to drain, which can delay quit. Corrupt state fails closed and needs manual recovery. Crash ownership is never silently stolen.
+
+## Authorized follow-up
+
+Today's priority is a minimal mobile app running in a local simulator (issue #130). After that, execute code-quality audit Tasks 1 and 2, then Task 3 in new worktrees with separate PRs. The user clarified that these follow the phases running, without waiting for merges. Read the handoff on PR #126 and this repo's code-quality audit plan. Task 5 needs a design conversation and is not authorized here.
+
+After the audit, create a new Milagre Chat in a new Worktree using Claude Fable 5.1. Its first line must be:
+
+```text
+Code quality audit handback. Plan: `docs/superpowers/plans/2026-10-02-code-quality-audit.md`.
+```
+
+ Include PR-to-task mapping, skipped tasks with reasons and disputed findings, as the audit plan's Handback section specifies.

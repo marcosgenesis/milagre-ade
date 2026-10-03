@@ -544,6 +544,22 @@ a:focus-visible .animated-underline::after {
   mask-image: linear-gradient(to bottom, black 35%, transparent);
 }
 
+/* The bottom of the chat, under the chips and down to the composer. The text fades into the page
+ * over the whole height and blurs only near the composer, so it softens all the way down instead of
+ * cutting off. Two layers: a mask on the blur itself would leave a crisp copy showing through it. */
+.chat-bottom-blur > * {
+  position: absolute;
+  inset: 0;
+}
+.chat-bottom-blur > :nth-child(1) {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  mask-image: linear-gradient(to top, black 20%, transparent 60%);
+}
+.chat-bottom-blur > :nth-child(2) {
+  background: linear-gradient(to top, var(--page) 5%, color-mix(in oklab, var(--page) 70%, transparent) 40%, transparent);
+}
+
 /* The diff's sticky file headers sit at its top edge, so only the bottom fades. */
 .diff-scroll.scroll-fade[data-fade-top] {
   --fade-top: 0px;

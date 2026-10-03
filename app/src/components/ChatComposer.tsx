@@ -422,7 +422,8 @@ export function ChatComposer({
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
-      {!isNewChat && <MessageScroller
+      {!isNewChat && <div className="relative flex min-h-0 flex-1 flex-col">
+      <MessageScroller
         key={messages[0]?.session_id ?? "new"}
         navigation="rail"
         followOutput
@@ -430,7 +431,8 @@ export function ChatComposer({
         busy={isSending}
         className="min-h-0 flex-1"
         // The find bar floats over the top of the chat, so the first message moves below it while it is open.
-        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-2`}
+        // The chip row floats over the bottom blur, so the last message can scroll clear of it.
+        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-10`}
         contentClassName="min-h-full"
         autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
@@ -477,28 +479,34 @@ export function ChatComposer({
             </div>
           )}
         </div>
-      </MessageScroller>}
-      <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden">
-        {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right. */}
+      </MessageScroller>
+      {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
+      <div aria-hidden className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"><div /><div /></div>
+      </div>}
+      <div className={`mx-auto flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden ${isNewChat ? "mb-2" : "pointer-events-none relative z-20 -mt-[38px] mb-3.5 [&>*]:pointer-events-auto"}`}>
+        {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right.
+            Its tint is translucent, so a surface backing keeps the messages under the row from showing through. */}
         {!isNewChat && pullRequestAction && (
+          <span className="mr-auto rounded-full bg-surface">
           <button
             type="button"
             onClick={pullRequestAction.onRun}
             disabled={sendBlocked || isSending || imageDraft.loading}
-            className={`mr-auto inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
+            className={`inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
               ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
               : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
           >
             <Icon icon={GitPullRequestIcon} size={14} />
             {pullRequestAction.label}
           </button>
+          </span>
         )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>
 
-      <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "mt-auto"}`}>
+      <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
         {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
         {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}

@@ -44,7 +44,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("./shared/attention.mjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
-const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -604,7 +604,16 @@ async function openProject(projectPath) {
   return project;
 }
 
-ipcMain.handle("project:current", () => openProject(process.cwd()));
+ipcMain.handle("project:current", async () => openProject(await launchProject(recentProjects(), process.cwd())));
+
+// Chats a quit stopped continue on launch in every recent project, not only the one on screen.
+async function resumeRecentProjects() {
+  for (const { path: projectPath } of await recentProjects().list()) {
+    const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+    if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
+    await readProject(projectPath).catch((error) => console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message));
+  }
+}
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({
     title: "Open project",
@@ -625,6 +634,7 @@ app.whenReady().then(async () => {
     if (!appIcon.isEmpty()) app.dock.setIcon(appIcon);
   }
   createWindow();
+  void resumeRecentProjects();
   app.on("browser-window-focus", () => {
     diffs.focused();
     void readOpenChat().catch(() => {});

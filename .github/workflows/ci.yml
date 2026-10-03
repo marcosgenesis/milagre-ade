@@ -23,6 +23,12 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Typecheck mobile
+        run: npm run typecheck:mobile
+      - name: Lint mobile
+        run: npm run lint --workspace @milagre/mobile
+      - name: Test mobile transport
+        run: npm run test:mobile
       - name: Build renderer
         run: npm run build
       - name: Test agent runner

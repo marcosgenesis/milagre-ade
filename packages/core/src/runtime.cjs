@@ -531,6 +531,10 @@ function createRuntime(options) {
   commands.handle("project:registry", () => projectRegistry().list());
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("project:recent", () => recentProjects().list());
+  commands.handle("project:snapshot", async (_event, projectPath) => {
+    if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
+    return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
+  });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
   commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 

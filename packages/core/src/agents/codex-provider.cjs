@@ -55,6 +55,35 @@ const ACCOUNT_TIMEOUT_MS = 8000;
 
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
+async function readChildHistory(rpc, threadId, paginated) {
+  if (!paginated.has(threadId)) {
+    try {
+      return (await rpc.request("thread/read", { threadId, includeTurns: true }, { timeoutMs: 5000 })).thread;
+    } catch (error) {
+      if (!error.rpcError) throw error;
+    }
+  }
+  // Once a thread has answered through pagination, do not retry its rejected full read.
+  const { thread } = await rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
+  const page = await rpc.request("thread/turns/list", { threadId, limit: 20, sortDirection: "desc", itemsView: "full" }, { timeoutMs: 5000 });
+  paginated.add(threadId);
+  return { ...thread, turns: [...page.data].reverse() };
+}
+
+async function readLatestChildTurn(rpc, threadId) {
+  const { thread } = await rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
+  if (thread?.status?.type === "active") return thread;
+  try {
+    // Outcome recovery needs no transcript or earlier turns.
+    const page = await rpc.request("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "notLoaded" }, { timeoutMs: 5000 });
+    return { ...thread, turns: page.data.slice(0, 1) };
+  } catch (error) {
+    if (!error.rpcError) throw error;
+    // Older providers do not have the paginated endpoint.
+    return (await rpc.request("thread/read", { threadId, includeTurns: true }, { timeoutMs: 5000 })).thread;
+  }
+}
+
 class CodexSession {
   constructor({ cwd, resumeId, command, emit, tldrEnabled = true, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
     Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, clientVersion, interruptGraceMs, createRpc });
@@ -246,7 +275,7 @@ class CodexSession {
       this.questions.forget(String(params.requestId));
     }
     // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
-    if (method === "turn/started" && !this.turnActive) return;
+    if (method === "turn/started" && !this.turnActive && !this.state.subagents?.has(params.threadId)) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
     if (method === "item/completed" && params.item?.type === "imageGeneration") params = { ...params, item: saveGeneratedImage(params.item) };
     const events = mapCodexNotification(method, params, this.state);
@@ -264,40 +293,44 @@ class CodexSession {
 
   // Native children need not be subscribed on the parent's connection. Read their history
   // without resuming them, then route it through the same child-only event mapper.
+  shouldPollSubagent(agent) {
+    return activeSubagent(agent) || (this.state.subagentRecheckUntil?.get(agent.id) ?? 0) > Date.now();
+  }
+
   scheduleSubagents() {
     if (this.closed || this.subagentTimer) return;
     this.subagentTimer = setTimeout(async () => {
       this.subagentTimer = null;
       await this.refreshSubagents();
-      if ([...(this.state.subagents?.values() ?? [])].some(activeSubagent)) this.scheduleSubagents();
+      if ([...(this.state.subagents?.values() ?? [])].some(agent => this.shouldPollSubagent(agent))) this.scheduleSubagents();
     }, 1500);
     this.subagentTimer.unref?.();
   }
 
   async readSubagentThread(threadId) {
-    try {
-      return (await this.rpc.request("thread/read", { threadId, includeTurns: true }, { timeoutMs: 5000 })).thread;
-    } catch (error) {
-      if (!error.rpcError) throw error;
-      // Newer threads require paginated history. The panel retains recent activity only.
-      const { thread } = await this.rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
-      const page = await this.rpc.request("thread/turns/list", { threadId, limit: 20, sortDirection: "desc", itemsView: "full" }, { timeoutMs: 5000 });
-      return { ...thread, turns: [...page.data].reverse() };
-    }
+    this.paginatedChildren ??= new Set();
+    return readChildHistory(this.rpc, threadId, this.paginatedChildren);
   }
 
-  async refreshSubagents() {
+  refreshSubagents() {
+    // Notifications can schedule another poll while a slow provider read is still pending.
+    this.subagentRefresh ??= this.refreshSubagentHistory().finally(() => { this.subagentRefresh = null; });
+    return this.subagentRefresh;
+  }
+
+  async refreshSubagentHistory() {
     this.childHistory ??= new Map();
     for (const agent of [...(this.state.subagents?.values() ?? [])]) {
       if (this.closed) return;
-      if (!activeSubagent(agent) && this.childHistory.get(agent.id)?.finished) continue;
+      const history = this.childHistory.get(agent.id);
+      if (!this.shouldPollSubagent(agent) && history?.finished) continue;
       try {
         const thread = await this.readSubagentThread(agent.id);
         if (this.closed) return;
         const turns = thread?.turns ?? [];
         const fingerprint = JSON.stringify({ turns, status: thread?.status });
-        if (this.childHistory.get(agent.id)?.fingerprint === fingerprint) continue;
-        const items = new Map(this.childHistory.get(agent.id)?.items);
+        if (history?.fingerprint === fingerprint && history.status === agent.status) continue;
+        const items = new Map(history?.items);
         for (const turn of turns) {
           for (const item of turn.items ?? []) {
             const itemKey = `${turn.id}:${item.id}`;
@@ -308,10 +341,15 @@ class CodexSession {
           }
         }
         const last = turns.at(-1);
-        if (last && thread?.status?.type !== "active" && ["completed", "failed", "interrupted"].includes(last.status)) {
+        if (["active", "systemError"].includes(thread?.status?.type)) {
+          for (const event of mapCodexNotification("thread/status/changed", { threadId: agent.id, status: thread.status }, this.state)) this.emit(event);
+        } else if (last?.status === "inProgress") {
+          for (const event of mapCodexNotification("turn/started", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
+        } else if (last && ["completed", "failed", "interrupted"].includes(last.status)) {
           for (const event of mapCodexNotification("turn/completed", { threadId: agent.id, turn: last }, this.state)) this.emit(event);
         }
-        this.childHistory.set(agent.id, { fingerprint, items, finished: !activeSubagent(this.state.subagents.get(agent.id)) });
+        const current = this.state.subagents.get(agent.id);
+        this.childHistory.set(agent.id, { fingerprint, items, status: current.status, finished: !activeSubagent(current) });
       } catch {
         // A live child may not have flushed its history yet. Keep the last known status.
       }
@@ -430,4 +468,39 @@ class CodexSession {
   }
 }
 
-module.exports = { CodexSession, codexPolicy, saveGeneratedImage };
+// Reopening an idle chat need not start or resume an agent. Only its saved unknown children
+// are checked, and history items are never replayed as new output or fresh communications.
+async function recoverCodexSubagents({ cwd, command, agents, clientVersion = "0.0.0", createRpc = options => new CodexRpc(options) }) {
+  const unknown = (agents ?? []).filter(agent => agent.status === "unknown" && !agent.archived);
+  if (!command || !unknown.length) return [];
+  let rpc;
+  try {
+    rpc = createRpc({ command, cwd });
+    rpc.start();
+    await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: 5000 });
+    rpc.notify("initialized");
+    const reads = await Promise.allSettled(unknown.map(agent => readLatestChildTurn(rpc, agent.id)));
+    return reads.flatMap((read, index) => {
+      if (read.status !== "fulfilled" || read.value?.status?.type === "active") return [];
+      const last = read.value?.turns?.at(-1);
+      const status = { completed: "completed", failed: "failed", interrupted: "cancelled" }[last?.status];
+      if (!status) return [];
+      const agent = unknown[index];
+      const time = Math.max(Date.now(), agent.updatedAt);
+      return [{ type: "subagent-update", agent: {
+        ...agent,
+        status,
+        updatedAt: time,
+        endedAt: agent.endedAt ?? time,
+        ...(agent.latestActivity?.startsWith("Session disconnected.") ? { latestActivity: { completed: "Finished", failed: "Failed", cancelled: "Cancelled" }[status] } : {}),
+      } }];
+    });
+  } catch {
+    // A missing provider or unreadable history supplies no new evidence about these children.
+    return [];
+  } finally {
+    await rpc?.close().catch(() => {});
+  }
+}
+
+module.exports = { CodexSession, codexPolicy, saveGeneratedImage, recoverCodexSubagents };

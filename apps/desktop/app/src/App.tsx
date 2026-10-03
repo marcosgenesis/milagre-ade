@@ -227,6 +227,7 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
+  const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
   const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
@@ -879,7 +880,7 @@ function App() {
         </div>
       )}
 
-      <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+      <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
         <DiffBar open={diffShowing} onBack={changes.closeDiff} send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
         <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
           {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
@@ -891,7 +892,7 @@ function App() {
           </div>
         )}
         {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
-        <div className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out both" }}>
+        <div data-chat-pane className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
           <ChatComposer
             key={project.path}
@@ -916,7 +917,7 @@ function App() {
             sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
             streamingText={run?.text}
             streamingSteps={run?.steps}
-            subagents={selectedSession?.subagents}
+            subagents={subagents}
             onArchiveFinishedSubagents={archiveFinishedChildren}
             onArchiveSubagent={archiveChild}
             waitingForSubagents={run?.waitingForSubagents}

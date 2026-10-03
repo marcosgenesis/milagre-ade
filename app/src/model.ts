@@ -21,6 +21,8 @@ export interface ModelCapability {
   defaultEffort?: EffortLevel;
   /** Claude only: standing multi-agent orchestration on top of any effort level. */
   ultracode: boolean;
+  /** Faster output at higher usage rates: Claude's fast mode (some Opus models), Codex's "priority" tier. */
+  fastMode: boolean;
 }
 
 export type ModelCapabilities = Record<ModelProvider, Record<string, ModelCapability>>;
@@ -39,14 +41,19 @@ export function effortCopy(level: EffortLevel) {
   return EFFORT_COPY[level] ?? { name: level, description: "" };
 }
 
+/** The Claude models Claude Code 2.1.288 offers fast mode on; a guess until Claude reports its own list. */
+const CLAUDE_FAST_MODELS = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+
 /** What the agent reported for this model, or a cautious guess while it hasn't answered. */
 export function capabilityFor(model: ModelOption, capabilities: ModelCapabilities | null): ModelCapability {
   const reported = capabilities?.[model.provider][model.id];
   if (reported) return reported;
-  if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false };
-  if (model.id.includes("haiku")) return { efforts: [], ultracode: false };
+  // Every GPT model codex-cli 0.160.0 lists has the "priority" tier.
+  if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false, fastMode: true };
+  const fastMode = CLAUDE_FAST_MODELS.includes(model.id);
+  if (model.id.includes("haiku")) return { efforts: [], ultracode: false, fastMode };
   const modern = /claude-(opus|sonnet|fable)-5/.test(model.id);
-  return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern };
+  return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern, fastMode };
 }
 
 /** Keeps the chosen effort when the model takes it, else its default, else the nearest middle level. */
@@ -66,18 +73,14 @@ export interface ModelOption {
   recommended?: boolean;
 }
 
-/** Claude's faster inference is offered only on these Opus models. */
-export function supportsFastMode(model: Pick<ModelOption, "provider" | "id">): boolean {
-  return model.provider === "claude" && ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(model.id);
-}
-
 /**
- * The maintained list: what codex-cli 0.158.0 and Claude Code 2.1.287 report, recommended model first.
+ * The maintained list: what codex-cli 0.160.0 and Claude Code 2.1.288 report, recommended model first.
  * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
  * CLI is missing, too old or couldn't be asked.
  */
 export const MODEL_CATALOG: ModelOption[] = [
-  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work", recommended: true },
+  { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", provider: "codex", description: "Latest generation workhorse model", recommended: true },
+  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work" },
   { id: "gpt-6-sol", name: "GPT-6-Sol", provider: "codex", description: "Previous generation workhorse model" },
   { id: "gpt-6-luna", name: "GPT-6-Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
   { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", provider: "codex", description: "Older generation workhorse model" },

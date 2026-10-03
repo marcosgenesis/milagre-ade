@@ -50,7 +50,7 @@ Recovery now bounds queued events, skips deleted Projects, and never replays fai
 
 - [x] Write failing adapter tests for real socket events, disconnect/reconnect, no mutation replay, per-client Project selection and quit retaining the daemon. Run focused tests; expect missing adapter failures.
 - [x] Replace desktop embedded runtime with the facade; add connection notice and snapshot subscriptions. Advertise the existing profile in host documentation. Update ADR-0003 for the authorized transport switch.
-- [ ] Run types/build, agent/UI/release/monorepo tests and real desktop saved-state smoke. Test packaged spawn/attach. Expect all pass and saved Chat/provider ID unchanged. Commit and update #131, then merge it into #137.
+- [x] Run types/build, agent/UI/release/monorepo tests and real desktop saved-state smoke. Test packaged spawn/attach. Saved Chat/provider IDs are unchanged. Delivery follows the later main-merge request above.
 
 ## Task 3: Persistent shared host and macOS service (#137)
 
@@ -72,3 +72,15 @@ Recovery now bounds queued events, skips deleted Projects, and never replays fai
 - [ ] Run complete types/build/agent/UI/release/mobile/monorepo suites, all Electron fixtures, packaged desktop and native mobile against the same temporary Project. Capture real shared Chat and connection-state screenshots. Expect preserved data, one runtime owner and no duplicate command delivery.
 - [ ] One fresh whole-increment review, one regression-test fix pass for accepted Important/Critical findings; record deferred minors. Update all affected draft descriptions/screenshots and verify CI/mergeability on exact heads.
 - [ ] Refresh Claude handback files with new PR scope and remaining endpoint or live-app migration constraints. Keep the user's host trial available.
+
+## Verified desktop landing
+
+Validation on 2026-10-03, with temporary profiles and Projects only:
+
+- `npm run typecheck` and `npm run build` passed. Build retains the existing CSS `::highlight` optimizer warnings.
+- `npm run test:agent` passed: 45 shared, 668 core, 231 desktop, and 10 daemon tests. The five desktop adapter tests include shared state/quit, reconnect/no replay, deleted Project recovery, bounded recovery events, and save/stop before update.
+- `npm run test:ui` passed 217 tests; `npm run test:release` passed 15; `npm run test:monorepo` passed 3.
+- `npm run test:desktop` passed against source. An unsigned local macOS arm64 package built with electron-builder, then `npm run test:desktop -- --packaged /tmp/milagre-shared-desktop-package/mac-arm64/Milagre.app` passed. The packaged daemon launched from the app's own executable and `app.asar`, preserving saved Chats, provider IDs, Project settings and UI preferences. Both runs checked shared updates, host restart with draft retention, and Project ownership recovery.
+- Screenshots were captured outside the repository in `/tmp/milagre-shared-desktop-shots` and `/tmp/milagre-shared-desktop-packaged-shots`; publication belongs to the screenshots branch. No screenshot is committed here.
+
+Release signing/notarization and an actual downloaded update installation were not exercised. Update shutdown was tested against a real socket daemon. The live development desktop and its host were not restarted. The managed login service, stable remote endpoint, native mobile validation of this desktop facade, and migration of the live profile remain follow-up work.

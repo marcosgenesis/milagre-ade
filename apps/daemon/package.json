@@ -16,7 +16,8 @@
     "test": "node --test src/*.test.cjs"
   },
   "dependencies": {
-    "@milagre/core": "0.1.0"
+    "@milagre/core": "0.1.0",
+    "qrcode": "^1.5.4"
   },
   "engines": {
     "node": ">=24"

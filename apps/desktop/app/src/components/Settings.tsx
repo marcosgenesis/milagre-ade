@@ -3,8 +3,8 @@ import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, UpdateState, WorktreeSetupSettings } from "../electron";
+import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -15,6 +15,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
+import { phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
@@ -26,11 +27,12 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "appearance" | "about" | "project";
+export type SettingsSection = "general" | "appearance" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
+  { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
 
@@ -236,6 +238,101 @@ function AppearanceSettings() {
             </Row>
           </>
         )}
+      </Group>
+    )}
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────
+ * PHONE
+ * The host runs the bridge the Milagre phone app talks to.
+ * Turning it on shows a QR code that carries the access token;
+ * resetting makes a new token, so paired phones scan again.
+ * ───────────────────────────────────────────────────────── */
+function usePhoneStatus() {
+  const [status, setStatus] = useState<PhoneStatus | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    let pushed = false;
+    // An update that arrives while the first read is in flight is newer than that read.
+    const off = window.milagre.onPhoneStatus((next) => { pushed = true; setStatus(next); });
+    window.milagre.getPhoneStatus().then((next) => { if (live && !pushed) setStatus(next); }, (error) => {
+      if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
+    });
+    return () => { live = false; off(); };
+  }, []);
+  return { status, setStatus, loadError };
+}
+
+const SECONDARY_BUTTON = "rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50";
+
+function PhoneSettings() {
+  const { status, setStatus, loadError } = usePhoneStatus();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (copyTimer.current !== null) window.clearTimeout(copyTimer.current); }, []);
+
+  const run = (action: () => Promise<PhoneStatus>) => {
+    setBusy(true);
+    setError(null);
+    action().then(setStatus, (failure) => setError(ipcErrorMessage(failure))).finally(() => setBusy(false));
+  };
+  const copyLink = () => {
+    if (!status?.pairingLink) return;
+    void navigator.clipboard.writeText(status.pairingLink).then(() => {
+      setCopied(true);
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+    }, () => {});
+  };
+
+  const on = status?.state === "on" && status.qrSvg && status.pairingLink;
+  return (
+    <>
+    <Group title="Phone access">
+      <Row label="Allow your phone to connect" description={loadError ?? phoneStatusLine(status)}>
+        <Switch label="Allow your phone to connect" checked={status?.enabled === true} onChange={(enabled) => { if (!busy && status) run(() => window.milagre.setPhoneEnabled(enabled)); }} />
+      </Row>
+      {status?.state === "on" && status.remote === "none" && (
+        <p data-phone-local-only className="px-4 py-3 text-[12px] text-ink-3">Only a phone simulator on this Mac can connect. Set up a Cloudflare tunnel with npm run mobile:cloudflare to reach this Mac from any network.</p>
+      )}
+      {status?.state === "error" && status.error && <p data-phone-error className="break-words px-4 py-3 text-[12px] text-red">{status.error}</p>}
+      {error && <p data-phone-action-error className="break-words px-4 py-3 text-[12px] text-red">Couldn't change phone access: {error}</p>}
+    </Group>
+    {on && (
+      <Group title="Pair your phone">
+        <div className="flex items-start gap-5 px-4 py-4">
+          <img data-phone-qr src={phoneQrSrc(status.qrSvg!)} alt="QR code to pair your phone" width={176} height={176} className="size-44 shrink-0 rounded-[10px] bg-white" />
+          <div className="grid min-w-0 gap-3">
+            <div className="grid gap-0.5">
+              <span className="text-[13.5px] font-medium text-ink">Scan with the Milagre app</span>
+              <span className="text-[12px] text-ink-3">Open the app on your phone and point its camera at this code.</span>
+            </div>
+            <div>
+              <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>{copied ? "Copied" : "Copy pairing link"}</button>
+            </div>
+            <p data-phone-warning className="text-[12px] text-ink-2">This code gives access to your agents. Don't share it or post a screenshot of it.</p>
+          </div>
+        </div>
+      </Group>
+    )}
+    {status?.enabled && (
+      <Group title="Access">
+        <Row label="Reset access" description={confirmReset ? "Phones that already paired stop working and must scan again. This can't be undone." : "Make a new code. Phones that already paired scan again."}>
+          {confirmReset ? (
+            <span className="flex items-center gap-2">
+              <button type="button" onClick={() => setConfirmReset(false)} className={SECONDARY_BUTTON}>Cancel</button>
+              <button type="button" disabled={busy} data-phone-reset-confirm onClick={() => { setConfirmReset(false); run(() => window.milagre.resetPhoneAccess()); }} className="rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50">Reset and disconnect</button>
+            </span>
+          ) : (
+            <button type="button" disabled={busy || status.state === "starting"} onClick={() => setConfirmReset(true)} className={SECONDARY_BUTTON}>Reset access</button>
+          )}
+        </Row>
       </Group>
     )}
     </>
@@ -492,6 +589,7 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "appearance" && <AppearanceSettings />}
+        {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>

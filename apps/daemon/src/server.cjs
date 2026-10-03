@@ -4,8 +4,12 @@ const { once } = require('node:events');
 const { createRuntime } = require('@milagre/core');
 const { socketPath: pathFor, prepareSocketDirectory } = require('./paths.cjs');
 const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, wire } = require('./protocol.cjs');
+const { createPhone } = require('./phone.cjs');
 
-async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
+// Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
+const PHONE_METHODS = Object.freeze(['phone:status', 'phone:set-enabled', 'phone:reset']);
+
+async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
@@ -29,6 +33,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       catch { socket.destroy(); }
     }
   }
+  // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
+  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), ...phoneOptions });
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();
@@ -68,7 +74,10 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       inflight.add(id);
       try {
         let result;
-        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: runtime.methods };
+        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: [...runtime.methods, ...PHONE_METHODS] };
+        else if (request.method === 'phone:status') result = phone.status();
+        else if (request.method === 'phone:set-enabled') result = await phone.setEnabled(request.args[0]);
+        else if (request.method === 'phone:reset') result = await phone.reset();
         else if (request.method === 'daemon:snapshot') {
           const snapshot = { ...runtime.snapshot(), eventSeq };
           if (request.args[0]?.paged === true) {
@@ -123,6 +132,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     stopping ??= (async () => {
       // Keep the listening socket available after a failed save so a client
       // can receive the error and retry stop after disk recovery.
+      await phone.close();
       await runtime.close();
       const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
       for (const socket of clients.keys()) socket.end();
@@ -141,6 +151,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     listening = true;
     await fs.chmod(socketPath, 0o600);
     server.on('error', onError);
+    await phone.start();
     await runtime.resumeRecentProjects();
   } catch (error) {
     await close();

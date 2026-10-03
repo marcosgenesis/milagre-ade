@@ -346,10 +346,19 @@ export interface CoordinatorState {
   tasks: Record<string, { id: number; worktree_id: number; title: string; status: string }>;
 }
 
+/** Chats a linked worktree's old project file held, brought into the repository's project. */
+export interface RestoredChats {
+  /** The worktree's name, as the sidebar shows it. */
+  worktree: string;
+  count: number;
+}
+
 export interface OpenProject {
   path: string;
   name: string;
   state: CoordinatorState;
+  /** Only on the first open after chats came back from linked worktrees' old files. */
+  restoredChats?: RestoredChats[];
 }
 
 export function sortedWorktrees(state: CoordinatorState) {

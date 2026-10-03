@@ -30,7 +30,8 @@ const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
-const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
+const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
+const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -136,9 +137,33 @@ function createRuntime(options) {
 
   const projectName = (projectPath) => path.basename(projectPath) || "Untitled project";
 
+  // Chats brought back from linked worktrees' old files, per project, until a window opening it shows the notice.
+  const restoredChats = new Map();
+
+  // Before #117 a linked worktree opened as a project kept its chats in its own file. They join the main checkout's
+  // state on the first read, before anything uses it. This runs inside ProjectStates' read for the project, after
+  // ownProject took the repository's owner lock, so neither another window nor another runtime merges at the same time.
+  async function withWorktreeChats(projectPath, stored, discovered) {
+    if (discovered.length < 2 || await fs.realpath(discovered[0].path).catch(() => null) !== projectPath) return stored;
+    const { state, restored } = await migrateWorktreeChats({
+      projectPath,
+      state: stored ?? emptyState(projectName(projectPath)),
+      linkedWorktrees: discovered.slice(1),
+      listed: new Set(discovered.map((worktree) => worktree.path)),
+      save: saveProjectState,
+    });
+    if (!restored.length) return stored;
+    restoredChats.set(projectPath, [...(restoredChats.get(projectPath) ?? []), ...restored]);
+    return state;
+  }
+
   // Every project's state goes through here: this runtime is its only writer (see ADR-0001 and ADR-0003).
   const states = new ProjectStates({
-    read: async (projectPath) => reconcileState(await readStoredState(projectPath), projectName(projectPath), await discoverWorktrees(projectPath)),
+    read: async (projectPath) => {
+      const stored = await readStoredState(projectPath);
+      const discovered = await discoverWorktrees(projectPath);
+      return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered);
+    },
     save: saveProjectState,
   });
 
@@ -183,7 +208,10 @@ function createRuntime(options) {
     chatTitles.resume(projectPath, state);
     void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
     void diffs.refresh(projectPath).catch(() => {});
-    return { path: projectPath, name: projectName(projectPath), state };
+    // The first window to open the project after chats came back says so, once.
+    const restored = restoredChats.get(projectPath);
+    restoredChats.delete(projectPath);
+    return { path: projectPath, name: projectName(projectPath), state, ...(restored ? { restoredChats: restored } : {}) };
   }
 
   commands.handle("project:files", async (_event, root, query) => {

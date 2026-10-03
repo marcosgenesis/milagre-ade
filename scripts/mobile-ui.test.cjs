@@ -114,10 +114,11 @@ function chatHost() {
   const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: {}, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
+  const router = { setParams: values => Object.assign(params, values), push() {} };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router: { setParams: values => Object.assign(params, values), push() {} }, useLocalSearchParams: () => params },
-    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../dot-background': { useDotBackground: () => ({}) },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params },
+    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
     '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
@@ -125,7 +126,7 @@ function chatHost() {
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
   const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
-  return { session, sending, params, field, send, render };
+  return { session, sending, params, field, send, render, router };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -166,32 +167,29 @@ test('a failed first send keeps the current draft and releases the composer', as
 test('opening agent settings keeps them in view instead of following the transcript bottom', () => {
   const screen = chatHost();
   const tree = screen.render();
-  const page = find(tree, node => node.type === 'PageScroll');
+  const page = find(tree, node => node.type === 'KeyboardChatScrollView');
   let scrolls = 0;
   page.props.ref.current = { scrollToEnd() { scrolls++; } };
-  page.props.onContentSizeChange();
+  page.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page.props.onContentSizeChange(0, 400);
+  assert.equal(scrolls, 0, 'a transcript shorter than the screen never scrolls');
+  page.props.onContentSizeChange(0, 900);
   assert.equal(scrolls, 1);
   find(tree, node => node.type === 'AgentControls').props.onToggle();
-  page.props.onContentSizeChange();
+  page.props.onContentSizeChange(0, 1000);
   assert.equal(scrolls, 1);
 });
 
-test('opening live tool activity keeps the reader in place', () => {
+test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
   const screen = chatHost();
-  screen.session.snapshot.runs.runs['/p#new:1'] = { text: '', steps: [], approvals: [], questions: [] };
-  // Use a saved Chat so its run has the actual Chat identifier.
   screen.params.id = '42';
   screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
   screen.session.snapshot.runs.runs['/p#42'] = { text: '', steps: [], approvals: [], questions: [] };
   const tree = screen.render();
-  const page = find(tree, node => node.type === 'PageScroll');
-  let scrolls = 0;
-  page.props.ref.current = { scrollToEnd() { scrolls++; } };
-  page.props.onContentSizeChange();
-  assert.equal(scrolls, 1);
-  find(tree, node => node.type === 'ChatReply').props.onInteract();
-  page.props.onContentSizeChange();
-  assert.equal(scrolls, 1);
+  const pushed = [];
+  screen.router.push = route => pushed.push(route);
+  find(tree, node => node.type === 'ChatReply').props.onActivity();
+  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/activity', params: { id: '42', message: 'run' } }]));
 });
 
 test('switching the requested diff hides old content and ignores its late response', async () => {

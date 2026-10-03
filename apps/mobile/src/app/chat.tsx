@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { Alert, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Text, View } from 'react-native';
+import type Reanimated from 'react-native-reanimated';
+import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
@@ -9,7 +10,9 @@ import { useSession } from '../session';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
+import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { ChatReply } from '../chat-reply';
+import { ThinkingIndicator } from '../running-logo';
 import { BottomFade, EdgeFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
@@ -27,9 +30,11 @@ export default function ChatScreen() {
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState('');
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
+  // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
+  const viewport = useRef(0);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
   const pr = usePullRequest(worktreeOf);
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
@@ -127,24 +132,29 @@ export default function ChatScreen() {
     </Stack.Toolbar.Menu>
   </Stack.Toolbar>;
   const question = run?.questions[0];
-  return <KeyboardAvoidingView style={[styles.screen, dots]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
+  // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
+  const dockPadding = Math.max(insets.bottom, 12);
+  const lift = dockPadding - 8;
+  return <View style={[styles.screen, dots]}>
     <Stack.Screen options={{ title, headerTitle: () => header }} />
     {more}
-    <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>Your agent runs in {worktree?.name || 'this Worktree'} on your computer.</Text></View>}
-      {messages.map(message => <ChatReply key={message.id} message={message} media={media} onInteract={() => { following.current = false; }} />)}
-      {run && <ChatReply run={run} media={media} onInteract={() => { following.current = false; }} />}
+      {messages.map(message => <ChatReply key={message.id} message={message} media={media} onActivity={() => router.push({ pathname: '/activity', params: { id: String(chat!.id), message: String(message.id) } })} />)}
+      {run && <ChatReply run={run} media={media} onActivity={() => router.push({ pathname: '/activity', params: { id: String(chat!.id), message: 'run' } })} />}
+      {run && <ThinkingIndicator label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
-    </PageScroll>
-    {/* The composer floats over the transcript, which blurs and fades under it like desktop's. */}
-    <BottomFade height={dockHeight + 48} />
+    </KeyboardChatScrollView>
     {/* iOS's soft edge only covers the status bar here, so text under the title fades out the same way. */}
     <EdgeFade edge="top" height={insets.top + 72} />
-    <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 12), gap: 8 }}>
+    <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    {/* The transcript blurs and fades under the composer like desktop's. */}
+    <BottomFade height={dockHeight + 48} />
+    <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}>
       {(blockers.length > 0 || agents.length > 0) && !question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />
@@ -167,5 +177,6 @@ export default function ChatScreen() {
         </View>
       </View>}
     </View>
-  </KeyboardAvoidingView>;
+    </KeyboardStickyView>
+  </View>;
 }

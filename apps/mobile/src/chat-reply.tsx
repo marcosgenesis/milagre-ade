@@ -1,13 +1,15 @@
 import { memo, useState } from 'react';
-import { Image, Pressable, Text, View, type ImageSourcePropType } from 'react-native';
+import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType, type TextStyle } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
-import { AiBrainIcon, Alert02Icon, ArrowDown01Icon, ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Maximize01Icon, Search01Icon, ShieldAlertIcon, Wrench01Icon } from '@hugeicons/core-free-icons';
+import { AiBrainIcon, Alert02Icon, ArrowDown01Icon, ArrowRight01Icon, ArrowUp01Icon, CheckmarkCircle02Icon, CircleIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Maximize01Icon, Search01Icon, Wrench01Icon } from '@hugeicons/core-free-icons';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import type { ChatMessage, ChatStep, StepKind } from '@milagre/shared/model';
-import { activitySummary, replyActivity, unspokenThought } from '@milagre/shared/reply-parts';
-import { activityState } from './chat-presentation';
+import { activitySummary, replyActivity, titleSpans, unspokenThought } from '@milagre/shared/reply-parts';
 import { Markdown } from './markdown';
-import { Icon, SpinnerRing, type IconData } from './icons';
+import { Icon, type IconData } from './icons';
+import { ShimmerText } from './running-logo';
+import { fonts, hex } from './theme';
 import { showImages, type ViewerImage } from './viewer-store';
 import { PageScroll, colors, styles } from './ui';
 
@@ -45,26 +47,49 @@ function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource })
     <View style={{ position: 'absolute', right: 8, top: 8, width: 30, height: 30, borderRadius: 10, backgroundColor: '#ffffffcc', alignItems: 'center', justifyContent: 'center' }}><Icon icon={Maximize01Icon} tone="ink" size={15} /></View>
   </Pressable>;
 }
-function ToolRow({ step, live, waiting, onInteract }: { step: ChatStep; live: boolean; waiting: boolean; onInteract?: () => void }) {
+/** A step title with its code spans as chips, like desktop's; a running step's title shimmers. */
+function StepTitle({ title, shimmer, style }: { title: string; shimmer: boolean; style: TextStyle }) {
+  const spans = titleSpans(title).map((span, index) => span.code ? <Text key={index} style={{ fontFamily: fonts.mono, fontSize: (style.fontSize || 14) * 0.92, backgroundColor: shimmer ? undefined : colors.field, color: colors.ink }}>{span.text}</Text> : span.text);
+  return shimmer ? <ShimmerText style={style}>{spans}</ShimmerText> : <Text numberOfLines={1} style={style}>{spans}</Text>;
+}
+/** One tool step. In the Chat a tap opens the activity sheet; in the sheet it expands to show the tool's output. */
+export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live: boolean; waiting: boolean; onPress?: () => void }) {
   const [open, setOpen] = useState(false);
-  const running = live && step.status === 'running' && !waiting;
-  const state = step.status === 'failed' ? 'Failed' : live && step.status === 'running' ? waiting ? 'Waiting' : 'Running' : '';
-  return <View style={{ gap: 8 }}><Pressable accessibilityRole={step.detail ? 'button' : 'text'} accessibilityState={step.detail ? { expanded: open } : undefined} accessibilityLabel={`${step.title.replace(/`/g, '')}${state ? `, ${state}` : ''}`} disabled={!step.detail} onPress={() => { onInteract?.(); setOpen(!open); }} style={({ pressed }) => ({ minHeight: 36, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.5 : 1 })}>
-    {running ? <SpinnerRing size={15} /> : <Icon icon={icons[step.kind]} tone={step.status === 'failed' ? 'red' : 'ink2'} size={16} />}
-    <View style={{ flex: 1, gap: 2 }}><Text style={{ color: step.status === 'failed' ? colors.red : colors.ink, fontSize: 13, fontFamily: styles.code.fontFamily }}>{step.title.replace(/`/g, '')}</Text>{(step.note || state) && <Text style={styles.label}>{[state, step.note].filter(Boolean).join(' · ')}</Text>}</View>
-    {step.detail && <Icon icon={open ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={12} />}
+  const running = live && step.status === 'running';
+  const failed = step.status === 'failed';
+  const expandable = !onPress && !!step.detail;
+  return <View style={{ gap: 8 }}><Pressable accessibilityRole={onPress || expandable ? 'button' : 'text'} accessibilityState={expandable ? { expanded: open } : undefined} accessibilityLabel={`${step.title.replace(/`/g, '')}${failed ? ', Failed' : running ? waiting ? ', Waiting for approval' : ', Running' : ''}`} disabled={!onPress && !expandable} onPress={() => onPress ? onPress() : setOpen(!open)} style={({ pressed }) => ({ minHeight: 36, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.5 : 1 })}>
+    <Icon icon={failed ? Alert02Icon : icons[step.kind]} tone={failed ? 'red' : running ? 'ink2' : 'ink3'} size={16} />
+    <View style={{ flex: 1, gap: 2 }}>
+      <StepTitle title={step.title} shimmer={running && !waiting} style={{ color: failed ? colors.red : colors.ink2, fontSize: 14 }} />
+      {(step.note || (running && waiting)) && <Text style={styles.label}>{[running && waiting ? 'Waiting for approval' : '', step.note].filter(Boolean).join(' · ')}</Text>}
+    </View>
+    {(onPress || expandable) && <Icon icon={onPress ? ArrowRight01Icon : open ? ArrowUp01Icon : ArrowDown01Icon} tone="ink3" size={12} />}
   </Pressable>{open && step.detail && <PageScroll nestedScrollEnabled style={{ maxHeight: 320, backgroundColor: colors.field, borderRadius: 12 }} contentContainerStyle={{ padding: 12, paddingBottom: 12 }}>
     {step.kind === 'thinking' ? <Markdown text={step.detail} streaming={running} /> : <Text selectable style={styles.code}>{step.detail}</Text>}
   </PageScroll>}</View>;
 }
-export const ChatReply = memo(function ChatReply({ message, run, onInteract, media }: { message?: ChatMessage; run?: AgentRun; onInteract?: () => void; media: MediaSource }) {
-  const [expanded, setExpanded] = useState(false);
+const SPARKLE = 'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z';
+/** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */
+function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; live: boolean; waiting: boolean; onPress: () => void }) {
+  const palette = hex(useColorScheme());
+  const current = live ? [...steps].reverse().find(step => step.status === 'running') : undefined;
+  const summary = activitySummary(steps);
+  const label = current ? current.title : summary.text || 'Activity';
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${label.replace(/`/g, '')}${waiting ? ', waiting for approval' : ''}${!current && summary.failed ? `, ${summary.failed} failed` : ''}. Show activity`} onPress={onPress} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, opacity: pressed ? 0.5 : 1 })}>
+    <Svg width={16} height={16} viewBox="0 0 24 24"><Path d={SPARKLE} fill={current ? palette.ink2 : palette.ink3} /></Svg>
+    <View style={{ flexShrink: 1 }}>{current ? <StepTitle title={current.title} shimmer={!waiting} style={{ color: colors.ink2, fontSize: 14 }} /> : <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 14 }}>{label}</Text>}</View>
+    {waiting && <Text style={{ color: colors.ink3, fontSize: 12.5 }}>Waiting for approval</Text>}
+    {!current && summary.failed > 0 && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon icon={Alert02Icon} tone="red" size={13} /><Text style={{ color: colors.red, fontSize: 12.5 }}>{summary.failed} failed</Text></View>}
+    <View style={{ flex: 1 }} />
+    <Icon icon={ArrowRight01Icon} tone="ink3" size={12} />
+  </Pressable>;
+}
+export const ChatReply = memo(function ChatReply({ message, run, onActivity, media }: { message?: ChatMessage; run?: AgentRun; onActivity: () => void; media: MediaSource }) {
   const text = run?.text ?? message?.body ?? '';
   const steps = run?.steps ?? message?.steps ?? [];
   const reply = replyActivity(text, steps);
-  const state = activityState(steps, run);
   const waiting = !!(run?.approvals.length || run?.questions.length);
-  const summary = activitySummary(steps);
   const answer = reply.answer || (!run ? unspokenThought(reply.activity, reply.answer) : '');
   if (message?.role === 'user') return <View style={{ alignSelf: 'flex-end', alignItems: 'flex-end', gap: 6, maxWidth: '88%' }}>
     <Photos message={message} media={media} />
@@ -72,12 +97,10 @@ export const ChatReply = memo(function ChatReply({ message, run, onInteract, med
     {!!text && <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: 'continuous', paddingVertical: 10, paddingHorizontal: 14 }}><Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 22 }}>{text}</Text></View>}
   </View>;
   return <View style={{ gap: 14, paddingVertical: 8 }}>
-    {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onInteract={onInteract} />)}
-    {(reply.activity.length > 0 || run) && <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={`${run ? state.label : summary.text || 'Activity'}. ${expanded ? 'Hide' : 'Show'} activity`} onPress={() => { onInteract?.(); setExpanded(!expanded); }} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, opacity: pressed ? 0.5 : 1 })}>
-      {state.working ? <SpinnerRing size={15} /> : <Icon icon={waiting ? ShieldAlertIcon : summary.failed ? Alert02Icon : CheckmarkCircle02Icon} tone={waiting ? 'orange' : summary.failed ? 'red' : 'ink3'} size={16} />}
-      <Text style={{ color: colors.ink2, fontSize: 14, flex: 1 }}>{run ? state.label : summary.text || 'Activity'}{!run && summary.failed ? ` · ${state.label}` : ''}</Text><Icon icon={expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={12} />
-    </Pressable>{expanded && <View style={{ paddingLeft: 16, marginLeft: 8, borderLeftWidth: 1, borderColor: colors.line, gap: 4 }}>{reply.activity.map((entry, i) => entry.type === 'step' ? <ToolRow key={entry.step.id} step={entry.step} live={!!run} waiting={waiting} onInteract={onInteract} /> : <Markdown key={`text-${i}`} text={entry.text} />)}</View>}</View>}
-    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onInteract={onInteract} /><GeneratedImage step={step} media={media} /></View>)}
+    {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={onActivity} />)}
+    {reply.activity.length === 1 && reply.activity[0].type === 'step' ? <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={onActivity} />
+      : reply.activity.length > 0 && <ActivityRow steps={reply.activity.flatMap(entry => entry.type === 'step' ? [entry.step] : [])} live={!!run} waiting={waiting} onPress={onActivity} />}
+    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onPress={onActivity} /><GeneratedImage step={step} media={media} /></View>)}
     {!!answer && <Markdown text={answer} streaming={!!run} />}
     {run?.tasks?.length ? <View style={[styles.card, { gap: 8 }]}>{run.tasks.map(task => <View key={task.id} style={[styles.row, { flexWrap: 'nowrap' }]}><Icon icon={task.status === 'completed' ? CheckmarkCircle02Icon : CircleIcon} tone={task.status === 'completed' ? 'green' : 'ink3'} size={16} /><Text style={[styles.muted, { flex: 1 }]}>{task.status === 'in_progress' ? task.activeForm || task.content : task.content}</Text></View>)}</View> : null}
     {!run && message?.outcome === 'cancelled' && <Text style={styles.muted}>Turn stopped</Text>}

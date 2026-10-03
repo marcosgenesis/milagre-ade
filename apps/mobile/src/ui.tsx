@@ -1,5 +1,6 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type TextInputProps } from 'react-native';
+import React, { useState } from 'react';
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type TextInputProps } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export const colors = { bg: '#111015', panel: '#1c1b22', line: '#34313d', text: '#f4f0e9', muted: '#aaa5b5', accent: '#d9b6ff', error: '#ffb6b6', green: '#b3ddbc' };
 export const styles = StyleSheet.create({
@@ -34,4 +35,10 @@ export function Field({ label, ...props }: TextInputProps & { label: string }) {
 }
 export function ErrorNotice({ message, retry }: { message: string; retry?: () => void }) {
   return <View accessibilityRole="alert" style={styles.error}><Text selectable style={{ color: colors.error, fontSize: 14, lineHeight: 21 }}>{message}</Text>{retry && <Button title="Reconnect" secondary onPress={retry} />}</View>;
+}
+export function Select({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; title: string; description?: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return <View style={{ gap: 8 }}><Button title={`${label}: ${options.find(option => option.value === value)?.title || value || 'Choose'}`} secondary disabled={disabled} onPress={() => { Keyboard.dismiss(); setOpen(true); }} />
+    <Modal visible={open} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOpen(false)}><SafeAreaView style={styles.screen}><PageScroll accessibilityViewIsModal><Text style={styles.title}>{label}</Text><Button title="Done" secondary onPress={() => setOpen(false)} />{options.map(option => <View style={{ gap: 6 }} key={option.value}><Choice title={option.title} selected={option.value === value} onPress={() => { onChange(option.value); setOpen(false); }} />{option.description ? <Text style={styles.muted}>{option.description}</Text> : null}</View>)}</PageScroll></SafeAreaView></Modal>
+  </View>;
 }

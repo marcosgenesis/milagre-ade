@@ -10,6 +10,8 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   const { createClient } = await import('../apps/mobile/src/client.ts');
   let client = createClient(demo.url, demo.token);
   const project = await client.call('project:open', [demo.project]);
+  const changes = await client.call('git:diff-files', [{ cwd: demo.project, mode: 'uncommitted' }]);
+  assert.ok(changes.files.some(file => file.path === 'README.md'));
   const chat = Object.values(project.state.sessions)[0];
   const chatId = `${demo.project}#${chat.id}`;
   const send = body => client.call('chat:send', [{ projectPath: demo.project, sessionId: chat.id, body, provider: 'codex', model: 'demo', permissionMode: 'ask' }]);

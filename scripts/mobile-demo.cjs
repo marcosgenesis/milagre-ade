@@ -71,7 +71,12 @@ async function startDemo({ port = 8787 } = {}) {
   try {
     await fs.mkdir(project);
     execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
-    daemon = await startDaemon({ dataDir, version: '0.1.0-demo', runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {}, createSession: demoSession, agentCli: Object.assign(async () => ({ command: '/demo/codex' }), { invalidate() {} }) } });
+    await fs.writeFile(path.join(project, 'README.md'), '# Mobile playground\n\nA temporary Project for trying Milagre.\n');
+    await fs.writeFile(path.join(project, '.gitignore'), '.milagre/\n');
+    execFileSync('git', ['-C', project, 'add', 'README.md', '.gitignore'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', project, '-c', 'user.name=Milagre Demo', '-c', 'user.email=demo@example.invalid', 'commit', '-m', 'Create mobile playground'], { stdio: 'ignore' });
+    await fs.appendFile(path.join(project, 'README.md'), '\nThis change is ready to review from mobile.\n');
+    daemon = await startDaemon({ dataDir, version: '0.1.0-demo', runtimeOptions: { cwd: project, worktreeRoot: path.join(root, 'worktrees'), environmentReady: Promise.resolve(), titleModels: {}, createSession: demoSession, agentCli: Object.assign(async () => ({ command: '/demo/codex' }), { invalidate() {} }) } });
     client = await connect({ dataDir });
     const opened = await client.call('project:open', [project]);
     const chat = Object.values(opened.state.sessions)[0];

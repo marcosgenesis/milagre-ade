@@ -16,7 +16,7 @@ async function fixture(t) {
   const project = path.join(root, 'project');
   await fs.mkdir(project);
   execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
-  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {} } });
+  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, worktreeRoot: path.join(root, 'worktrees'), agentCli: Object.assign(async () => ({ command: null, problem: 'Test has no provider' }), { invalidate() {} }) } });
   const token = randomBytes(32).toString('hex');
   const bridge = await startMobileBridge({ dataDir, port: 0, token });
   t.after(async () => { await bridge.close(); await daemon.close(); await fs.rm(root, { recursive: true, force: true }); });
@@ -64,4 +64,28 @@ test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported r
   assert.equal((await request('/rpc', { method: 'POST', body: JSON.stringify({ v: 1, method: 'daemon:status', args: [] }) })).status, 415);
   assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 2, method: 'daemon:status', args: [] }) })).status, 400);
   assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(1024 * 1024 + 1) })).status, 413);
+});
+
+test('mobile can manage Chat metadata and create Worktrees, and read changes only in open Projects', async t => {
+  const { project, rpc, request } = await fixture(t);
+  execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const opened = (await (await rpc('project:open', [project])).json()).result;
+  const chat = Object.values(opened.state.sessions)[0];
+  assert.equal((await rpc('chat:patch', [project, chat.id, { title: 'Mobile name', archived: true }])).status, 200);
+  let state = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.equal(state.project.state.sessions[chat.id].title, 'Mobile name');
+  assert.equal(state.project.state.sessions[chat.id].archived, true);
+  assert.equal((await rpc('project:branches', [project])).status, 200);
+  const created = await rpc('worktree:create', [{ projectPath: project, baseBranch: 'main', prompt: 'Mobile feature' }]);
+  assert.equal(created.status, 200);
+  const result = (await created.json()).result;
+  assert.ok(result.project.state.worktrees[result.worktreeId]);
+  await fs.writeFile(path.join(project, 'mobile.txt'), 'A change from the computer\n');
+  const files = (await (await rpc('git:diff-files', [{ cwd: project, mode: 'uncommitted' }])).json()).result;
+  assert.ok(files.files.some(file => file.path === 'mobile.txt'));
+  const diff = (await (await rpc('git:diff-file', [{ cwd: project, mode: 'uncommitted', path: 'mobile.txt', untracked: true }])).json()).result;
+  assert.match(diff.patch, /\+A change from the computer/);
+  assert.equal((await rpc('git:diff-files', [{ cwd: os.homedir(), mode: 'uncommitted' }])).status, 409);
+  assert.equal((await rpc('git:diff-file', [{ cwd: project, mode: 'uncommitted', path: '../outside' }])).status, 409);
+  for (const method of ['git:commit', 'git:push', 'git:open-pr', 'worktree:remove', 'daemon:stop']) assert.equal((await rpc(method)).status, 403);
 });

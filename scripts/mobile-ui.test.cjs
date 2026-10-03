@@ -99,6 +99,8 @@ function chatHost() {
     client: { call: () => sending.promise },
     snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [] } }, runs: { runs: {} } },
     drafts: { '/p#new:1': 'first message' },
+    preferences: {}, models: null, cliStatus: null,
+    setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; },
   };
@@ -110,7 +112,7 @@ function chatHost() {
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values) }, useLocalSearchParams: () => params },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../questions': {}, '../ui': ui,
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../questions': {}, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
@@ -151,4 +153,30 @@ test('a failed first send keeps the current draft and releases the composer', as
   const button = find(screen.render(), node => node.type === 'Button' && node.props.title === 'Send message');
   assert.equal(button.props.disabled, false);
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
+});
+
+test('switching the requested diff hides old content and ignores its late response', async () => {
+  const react = hookHost();
+  let currentDeps, cleanup, pendingEffect;
+  react.useEffect = (effect, deps) => {
+    if (!currentDeps || deps.some((value, index) => value !== currentDeps[index])) {
+      currentDeps = deps;
+      pendingEffect = () => { cleanup?.(); cleanup = effect(); };
+    }
+  };
+  const first = deferred(), second = deferred();
+  const client = { call: (_method, args) => args[0].path === 'first' ? first.promise : second.promise };
+  const { useRpc } = load('use-rpc.ts', { react });
+  let file = 'first';
+  const render = () => { react.begin(); const value = useRpc(client, 'git:diff-file', [{ path: file }]); const effect = pendingEffect; pendingEffect = null; effect?.(); return value; };
+  assert.equal(render().loading, true);
+  file = 'second';
+  assert.equal(render().data, null);
+  second.resolve({ patch: '+second' });
+  await settle();
+  assert.equal(render().data.patch, '+second');
+  first.resolve({ patch: '+first' });
+  await settle();
+  assert.equal(render().data.patch, '+second');
+  cleanup?.();
 });

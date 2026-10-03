@@ -23,19 +23,19 @@
 
 Files: mobile client/tests, connection storage module/tests, session/connect UI, Expo config/dependency; daemon bridge tests and real-host launcher.
 
-- [ ] Write failing tests for HTTPS validation, redirect/auth behavior, private connection-file reuse and secure-store save/load/forget ordering.
-- [ ] Add Expo SecureStore, a remembered connection with explicit Forget, and HTTPS endpoint support. Keep tokens out of ordinary storage. Preserve manual reconnect and drafts.
-- [ ] Add `mobile:host` using a separate persistent profile, private stable token file, optional absolute Project and clean shutdown. Existing daemon and bridge CLIs remain compatible. Keep loopback binding and explicit Host checks; document TLS proxy Host rewrite.
-- [ ] Run mobile/daemon tests, typecheck, lint and real local startup/stop. Commit.
+- [x] Write failing tests for HTTPS validation, redirect/auth behavior, private connection-file reuse and secure-store save/load/forget ordering.
+- [x] Add Expo SecureStore, a remembered connection with explicit Forget, and HTTPS endpoint support. Keep tokens out of ordinary storage. Preserve manual reconnect and drafts.
+- [x] Add `mobile:host` using a separate persistent profile, private stable token file, optional absolute Project and clean shutdown. Existing daemon and bridge CLIs remain compatible. Keep loopback binding and explicit Host checks; document TLS proxy Host rewrite.
+- [x] Run mobile/daemon tests, typecheck, lint and real local startup/stop. Commit.
 
 ## Task 2: Existing Milagre controls on mobile
 
 Files: mobile routes, shared native controls, composer/model helpers/tests; bridge allowlist tests.
 
-- [ ] Add reported provider readiness/models/capabilities, effort and fast-mode controls and permission selection. Test payloads and unsupported option normalization.
-- [ ] Group Chats by Worktree; support archived Chats, rename/archive, new Worktree and Chat in selected Worktree. Use existing core commands; test allowed/rejected RPC and asynchronous form behavior.
-- [ ] Add changes list and readable per-file diff using existing read-only Git commands. Handle binary/large files and stale async results. Retain drafts across route changes and errors.
-- [ ] Run mobile/daemon and root suites, then real simulator flows. Commit.
+- [x] Add reported provider readiness/models/capabilities, effort and fast-mode controls and permission selection. Test payloads and unsupported option normalization.
+- [x] Group Chats by Worktree; support archived Chats, rename/archive, new Worktree and Chat in selected Worktree. Use existing core commands; test allowed/rejected RPC and asynchronous form behavior.
+- [x] Add changes list and readable per-file diff using existing read-only Git commands. Handle binary/large files and stale async results. Retain drafts across route changes and errors.
+- [x] Run mobile/daemon and root suites, then real simulator flows. Commit.
 
 ## Task 3: Real-provider, remote and standalone simulator validation
 

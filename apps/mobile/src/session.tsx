@@ -2,6 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from 'react-native';
 import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
 import { savedConnection } from './connection-native';
+import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
+import type { TurnPreferences } from './turn-options';
 
 function useSessionState() {
   const [client, setClient] = useState<Client | null>(null);
@@ -9,8 +11,20 @@ function useSessionState() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
+  const [models, setModels] = useState<AgentModels | null>(null);
+  const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
+  const [providerError, setProviderError] = useState('');
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!client || process.env.EXPO_PUBLIC_DEMO === '1') return;
+    void Promise.all([client.call<AgentModels>('agent:models'), client.call<AgentCliStatus>('agent:cli-status')]).then(([models, status]) => {
+      if (!cancelled) { setModels(models); setCliStatus(status); }
+    }).catch(() => { if (!cancelled) setProviderError('Could not check the installed agents. Reconnect to check again.'); });
+    return () => { cancelled = true; };
+  }, [client]);
   const connect = async (address: string, token: string, remember = true) => {
     const next = createClient(address, token);
     const current = ++generation.current;
@@ -27,6 +41,7 @@ function useSessionState() {
         } catch { throw new Error('Could not save this connection on your device. Turn off Remember this computer to connect without saving it.'); }
       }
       if (current !== generation.current) return false;
+      setModels(null); setCliStatus(null); setProviderError('');
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
       return true;
     } catch (error) {
@@ -78,7 +93,7 @@ function useSessionState() {
     return () => { cancelled = true; clearTimeout(timer); subscription.remove(); };
   }, [client, projectPath, refresh]);
   const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { client, recent, snapshot, error, setError, drafts, setDrafts, connect, open, refresh, disconnect };
+  return { client, recent, snapshot, error, setError, drafts, setDrafts, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

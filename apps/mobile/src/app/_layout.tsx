@@ -9,5 +9,9 @@ export default function Layout() {
     <Stack.Screen name="projects" options={{ title: 'Your computer' }} />
     <Stack.Screen name="project" options={{ title: 'Chats' }} />
     <Stack.Screen name="chat" options={{ title: 'Chat' }} />
+    <Stack.Screen name="chat-details" options={{ title: 'Manage Chat' }} />
+    <Stack.Screen name="new-worktree" options={{ title: 'New Worktree' }} />
+    <Stack.Screen name="changes" options={{ title: 'Changes' }} />
+    <Stack.Screen name="diff" options={{ title: 'Diff' }} />
   </Stack></SessionProvider>;
 }

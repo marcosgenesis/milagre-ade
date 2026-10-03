@@ -5,11 +5,12 @@ const { connect } = require('./client.cjs');
 
 const METHODS = new Set(['daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
-  'agent:answer-question', 'agent:models', 'agent:cli-status']);
+  'agent:answer-question', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
-// A development-only native-client bridge. All state stays in the Unix-socket
+// A native-client bridge behind loopback or an explicitly configured TLS proxy. All state stays in the Unix-socket
 // daemon; closing this listener must never stop that runtime or its turns.
 async function startMobileBridge({ dataDir, port = 8787, token }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('Bridge token must be 32 random bytes encoded as hex');

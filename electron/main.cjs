@@ -46,6 +46,8 @@ const { attentionContext, attentionNotice } = require("./shared/attention.mjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
+const { createProjectRegistry } = require("./project-registry.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -101,19 +103,7 @@ ipcMain.handle("update:install", async () => {
 
 async function discoverWorktrees(projectPath) {
   try {
-    const { stdout } = await execFileAsync("git", ["-C", projectPath, "worktree", "list", "--porcelain"], { encoding: "utf8" });
-    return stdout
-      .trim()
-      .split(/\n(?=worktree )/)
-      .filter(Boolean)
-      .map((block) => {
-        const worktreePath = block.match(/^worktree (.+)$/m)?.[1];
-        const branchRef = block.match(/^branch (.+)$/m)?.[1];
-        if (!worktreePath) return null;
-        const branch = branchRef?.replace(/^refs\/heads\//, "");
-        return { path: worktreePath, name: branch || path.basename(worktreePath) };
-      })
-      .filter(Boolean);
+    return await activeWorktrees(projectPath);
   } catch {
     return [];
   }
@@ -615,10 +605,14 @@ function createWindow() {
 
 let recentStore = null;
 const recentProjects = () => (recentStore ??= createRecentProjects(path.join(app.getPath("userData"), "recent-projects.json")));
+let registryStore = null;
+const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(app.getPath("userData"), "project-registry.json")));
 // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
 async function openProject(projectPath) {
-  const project = await readProject(projectPath);
-  await rememberProject(recentProjects(), projectPath);
+  const identity = await resolveProject(projectPath);
+  const project = await readProject(identity.path);
+  await projectRegistry().add(identity);
+  await rememberProject(recentProjects(), identity.path);
   return project;
 }
 
@@ -641,6 +635,8 @@ ipcMain.handle("project:open", async () => {
   return openProject(result.filePaths[0]);
 });
 ipcMain.handle("project:recent", () => recentProjects().list());
+ipcMain.handle("project:registry", () => projectRegistry().list());
+ipcMain.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
 ipcMain.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
 ipcMain.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 

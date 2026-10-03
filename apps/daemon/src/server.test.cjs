@@ -9,6 +9,33 @@ const { execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
+const { MAX_FRAME_BYTES } = require('./protocol.cjs');
+
+const gitConfig = ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null'];
+
+// One chat whose saved replies take more than 16 MB: many replies with long tool output, as a heavy user's would.
+function largeChat({ worktreeId, sessionId, firstId, replies = 900 }) {
+  const messages = [];
+  for (let index = 0; index < replies; index++) {
+    messages.push({ id: firstId + index, session_id: sessionId, body: `Reply ${index}`, context: null, role: 'assistant',
+      steps: [{ id: `step-${index}`, kind: 'shell', title: 'Ran `npm test`', status: 'done', detail: `${index} `.padEnd(20_000, 'output line\n') }] });
+  }
+  return { session: { id: sessionId, worktree_id: worktreeId, agent_name: 'main', status: 'Created', provider: 'claude', native_session_id: `large-${sessionId}`, title: 'Long chat' }, messages };
+}
+async function writeState(folder, state) {
+  await fs.mkdir(path.join(folder, '.milagre'), { recursive: true });
+  await fs.writeFile(path.join(folder, '.milagre/coordination.json'), JSON.stringify(state));
+}
+// The raw replies to one request on a plain socket, skipping events.
+async function rawRequest(socket, request) {
+  let text = '';
+  const reply = new Promise((resolve) => socket.on('data', (chunk) => {
+    text += chunk;
+    for (const line of text.split('\n').slice(0, -1)) { const message = JSON.parse(line); if (message.id === request.id) resolve(message); }
+  }));
+  socket.write(JSON.stringify(request) + '\n');
+  return reply;
+}
 
 async function waitFor(read) {
   for (let i = 0; i < 200; i++) { const value = await read(); if (value) return value; await delay(10); }
@@ -176,7 +203,8 @@ test('paged snapshots preserve one immutable watermark across Projects above the
     assert.equal(snapshot.state.messages[0].body, body);
     assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < maxFrameBytes);
   }
-  await assert.rejects(client.call('daemon:snapshot'), { code: 'FRAME_TOO_LARGE' });
+  // The client reads an unpaged snapshot over the limit in pages too.
+  assert.equal((await client.call('daemon:snapshot')).projects.length, 2);
   const manifest = await client.call('daemon:snapshot', [{ paged: true }]);
   assert.ok(manifest.pageCount > 1);
   await assert.rejects(client.call('daemon:snapshot-page', [manifest.snapshotId, 1]), /out of order/);
@@ -193,4 +221,84 @@ test('paged snapshots preserve one immutable watermark across Projects above the
   assert.equal(captured.eventSeq, manifest.eventSeq);
   assert.notEqual(captured.projects.find(item => item.path === project).state.sessions[session.id].title, 'Changed after capture');
   await assert.rejects(client.call('daemon:snapshot-page', [manifest.snapshotId, 0]), /expired|snapshot/i);
+});
+
+test('a Project state over 16 MB opens through the client, and a change to it keeps every connection', async t => {
+  const { project, client } = await fixture(t, { maxFrameBytes: MAX_FRAME_BYTES });
+  const { session, messages } = largeChat({ worktreeId: 1, sessionId: 2, firstId: 10 });
+  await writeState(project, { next_id: 5000, projects: { 1: { id: 1, name: 'project' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } }, sessions: { 2: session }, messages, tasks: {} });
+  const desktop = await client();
+  const observer = await client();
+  const events = [];
+  observer.on('event', event => events.push(event));
+  const opened = await desktop.call('project:open', [project]);
+  assert.ok(Buffer.byteLength(JSON.stringify(opened)) > MAX_FRAME_BYTES);
+  assert.equal(opened.state.messages.length, 900);
+  assert.equal(opened.state.messages[899].steps[0].detail.length, 20_000);
+  assert.equal((await desktop.call('project:current')).state.messages.length, 900);
+  await desktop.call('chat:patch', [project, 2, { title: 'Renamed' }]);
+  const changed = await waitFor(() => events.find(event => event.channel === 'project:state'));
+  assert.equal(changed.payload.path, project);
+  assert.equal(changed.payload.stateTooLarge, true, 'the state is left out of the event and read in pages');
+  assert.equal('state' in changed.payload, false);
+  assert.equal((await observer.call('project:snapshot', [project])).state.sessions[2].title, 'Renamed');
+  assert.equal((await desktop.call('daemon:status')).version, '9.8.7');
+});
+
+test('a response over the frame limit fails with a clear error for a client that cannot read pages', async t => {
+  const { daemon, project, client } = await fixture(t);
+  const first = await client();
+  const opened = await first.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  // Two notes, each small enough to send, make a state over this fixture's 8 KB frame limit.
+  for (const body of ['x'.repeat(5000), 'z'.repeat(5000)]) await first.call('chat:git-note', [`${project}#${session.id}`, body]);
+  assert.equal((await first.call('project:snapshot', [project])).state.messages[1].body.length, 5000);
+  const socket = net.createConnection(daemon.socketPath);
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  const refused = await rawRequest(socket, { v: 1, id: 1, method: 'project:snapshot', args: [project] });
+  assert.equal(refused.error.code, 'FRAME_TOO_LARGE');
+  assert.match(refused.error.message, /over the local daemon's .* frame limit/);
+  const status = await rawRequest(socket, { v: 1, id: 2, method: 'daemon:status', args: [] });
+  assert.ok(status.result.capabilities.includes('result-pages-v1'), 'the connection stays open');
+});
+
+test('pages of a response are read in order, by the connection that asked, before they expire', async t => {
+  const { dataDir, project, client } = await fixture(t);
+  const first = await client();
+  const opened = await first.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  for (const body of ['y'.repeat(5000), 'w'.repeat(5000)]) await first.call('chat:git-note', [`${project}#${session.id}`, body]);
+  const socket = net.createConnection(require('./paths.cjs').socketPath(dataDir));
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  const manifest = await rawRequest(socket, { v: 1, id: 1, method: 'project:snapshot', args: [project], pages: true });
+  assert.ok(manifest.pages.pageCount > 1);
+  assert.equal('result' in manifest, false);
+  await assert.rejects(first.call('daemon:result-page', [manifest.pages.pageId, 0]), /expired|out of order/);
+  const outOfOrder = await rawRequest(socket, { v: 1, id: 2, method: 'daemon:result-page', args: [manifest.pages.pageId, 1] });
+  assert.match(outOfOrder.error.message, /out of order/);
+  const parts = [];
+  for (let index = 0; index < manifest.pages.pageCount; index++) parts.push((await rawRequest(socket, { v: 1, id: 10 + index, method: 'daemon:result-page', args: [manifest.pages.pageId, index] })).result);
+  assert.deepEqual(JSON.parse(parts.join('')).state.messages.map(item => item.body), ['y'.repeat(5000), 'w'.repeat(5000)]);
+  const again = await rawRequest(socket, { v: 1, id: 99, method: 'daemon:result-page', args: [manifest.pages.pageId, 0] });
+  assert.match(again.error.message, /expired/);
+});
+
+test('chats brought back from a large old worktree file load through the daemon', async t => {
+  const { project, client } = await fixture(t, { maxFrameBytes: MAX_FRAME_BYTES });
+  execFileSync('git', ['-C', project, ...gitConfig, 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const linked = path.join(path.dirname(project), 'linked');
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'linked', linked], { stdio: 'ignore' });
+  const { session, messages } = largeChat({ worktreeId: 2, sessionId: 3, firstId: 10 });
+  await writeState(linked, { next_id: 5000, projects: { 1: { id: 1, name: 'linked' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' }, 2: { id: 2, project_id: 1, path: linked, name: 'linked' } }, sessions: { 3: session }, messages, tasks: {}, approvals: [] });
+  assert.ok((await fs.stat(path.join(linked, '.milagre/coordination.json'))).size > MAX_FRAME_BYTES);
+  const desktop = await client();
+  const opened = await desktop.call('project:open', [project]);
+  assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 1 }]);
+  const chat = Object.values(opened.state.sessions).find(item => item.title === 'Long chat');
+  assert.equal(opened.state.worktrees[chat.worktree_id].path, linked);
+  assert.equal(opened.state.messages.filter(item => item.session_id === chat.id).length, 900);
+  assert.equal((await desktop.call('project:current')).restoredChats, undefined);
+  await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
 });

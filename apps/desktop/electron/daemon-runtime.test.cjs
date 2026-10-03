@@ -93,7 +93,7 @@ test('recovery disconnects an overflowing event stream before publishing a snaps
           // Recovery must reject the stream even when the snapshot never arrives.
           return;
         }
-        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: [] } : null;
+        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: [] } : null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
@@ -163,3 +163,72 @@ for (const stopHost of [false, true]) {
     }
   });
 }
+
+test('a Project state over 16 MB opens in the desktop, and its changes reach the window whole', async t => {
+  const { dataDir, project, desktop, events } = await fixture(t);
+  const messages = [];
+  for (let index = 0; index < 900; index++) {
+    messages.push({ id: 10 + index, session_id: 2, body: `Reply ${index}`, context: null, role: 'assistant',
+      steps: [{ id: `step-${index}`, kind: 'shell', title: 'Ran `npm test`', status: 'done', detail: `${index} `.padEnd(20_000, 'output line\n') }] });
+  }
+  await fs.mkdir(path.join(project, '.milagre'));
+  await fs.writeFile(path.join(project, '.milagre/coordination.json'), JSON.stringify({ next_id: 5000, projects: { 1: { id: 1, name: 'project' } },
+    worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'main', status: 'Created', title: 'Long chat' } }, messages, tasks: {} }));
+  const opened = await desktop.openProject(project);
+  assert.ok(Buffer.byteLength(JSON.stringify(opened)) > 16 * 1024 * 1024);
+  assert.equal(opened.state.messages.length, 900);
+  const mobile = await connect({ dataDir }); t.after(() => mobile.close());
+  await mobile.call('chat:patch', [project, 2, { title: 'From phone' }]);
+  const changed = await waitFor(() => events.find(e => e.channel === 'project:state' && e.payload.state?.sessions[2].title === 'From phone'), 1000);
+  assert.equal(changed.payload.state.messages.length, 900);
+  assert.equal('stateTooLarge' in changed.payload, false);
+  assert.equal(events.some(e => e.channel === 'runtime:connection'), false, 'the connection never dropped');
+});
+
+test('an event whose state was left out reaches the window with it, in order, and a failed read degrades', async t => {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  const { socketPath, prepareSocketDirectory } = require('../../daemon/src/paths.cjs');
+  const { wire } = require('../../daemon/src/protocol.cjs');
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-large-events-')));
+  const socket = socketPath(dataDir); prepareSocketDirectory(socket);
+  const sockets = new Set();
+  let snapshots = 0;
+  let protocol;
+  const server = net.createServer(connection => {
+    sockets.add(connection);
+    connection.on('error', () => {});
+    protocol = wire(connection, {
+      onInvalid() { connection.destroy(); },
+      onMessage(request) {
+        if (request.method === 'project:snapshot') {
+          snapshots++;
+          // The first read is slow, so later events wait behind it; the third fails.
+          if (snapshots === 3) { protocol.send({ v: 1, id: request.id, error: { code: 'COMMAND_FAILED', message: 'gone' } }); return; }
+          setTimeout(() => protocol.send({ v: 1, id: request.id, result: { path: '/p', state: { read: snapshots } } }), snapshots === 1 ? 50 : 0);
+          return;
+        }
+        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: [] } : null;
+        protocol.send({ v: 1, id: request.id, result });
+      },
+    });
+  });
+  server.listen(socket); await once(server, 'listening');
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(async () => { await desktop.close().catch(() => {}); for (const client of sockets) client.destroy(); await new Promise(resolve => server.close(resolve)); await fs.rm(dataDir, { recursive: true, force: true }); });
+  const push = (seq, channel, payload) => protocol.send({ v: 1, event: { seq, channel, payload } });
+  push(1, 'agent:event', { chatId: '/p#2', event: { type: 'turn-completed' }, seq: 7, stateTooLarge: true });
+  push(2, 'agent:event', { chatId: '/p#2', event: { type: 'turn-started' }, seq: 8 });
+  push(3, 'project:state', { path: '/p', stateTooLarge: true });
+  push(4, 'agent:event', { chatId: '/p#2', event: { type: 'turn-failed' }, seq: 9, stateTooLarge: true });
+  push(5, 'project:state', { path: '/p', stateTooLarge: true });
+  await waitFor(() => events.length >= 5 || null);
+  assert.deepEqual(events.map(({ channel, payload }) => [channel, payload.event?.type ?? null, payload.state ?? null, 'stateTooLarge' in payload]), [
+    ['agent:event', 'turn-completed', { read: 1 }, false],
+    ['agent:event', 'turn-started', null, false],
+    ['project:state', null, { read: 2 }, false],
+    ['agent:event', 'turn-failed', null, false],
+    ['project:state', null, { read: 4 }, false],
+  ]);
+});

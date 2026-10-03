@@ -1,4 +1,5 @@
 const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
+const { projectOfKey } = require('@milagre/shared/agent-runs');
 
 async function connectDesktopRuntime(options) {
   const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
@@ -17,10 +18,44 @@ async function connectDesktopRuntime(options) {
   const projects = new Set();
 
   function forward({ channel, payload }) { emit(channel, payload); }
+
+  // The host leaves a project state too large for one frame out of an event (`stateTooLarge`). It is read in pages
+  // and put back before the window sees the event, so a turn's end and its saved reply still arrive together. Events
+  // behind it wait, in order. A reconnect drops what is waiting: its snapshot holds every state.
+  let held = null;
+  let heldFor = null;
+  function deliver(connection, event) {
+    if (held && heldFor === connection) { held.push(event); return; }
+    if (!event.payload?.stateTooLarge) { forward(event); return; }
+    held = [event];
+    heldFor = connection;
+    void releaseHeld(connection);
+  }
+  async function releaseHeld(connection) {
+    while (heldFor === connection && held.length) {
+      const event = held.shift();
+      const ready = event.payload?.stateTooLarge ? await withState(connection, event) : event;
+      if (heldFor !== connection || client !== connection || closed) return;
+      if (ready) forward(ready);
+    }
+    if (heldFor === connection) { held = null; heldFor = null; }
+  }
+  async function withState(connection, { channel, payload, seq }) {
+    const { stateTooLarge: _left, ...rest } = payload;
+    const projectPath = channel === 'project:state' ? payload.path : projectOfKey(payload.chatId);
+    try {
+      const project = /** @type {{ state: unknown }} */ (await connection.call('project:snapshot', [projectPath]));
+      return { channel, payload: { ...rest, state: project.state }, seq };
+    } catch {
+      // The window keeps the state it has; the event still moves the turn on screen.
+      return channel === 'project:state' ? null : { channel, payload: rest, seq };
+    }
+  }
+
   function attach(connection) {
     connection.on('event', event => {
       if (client !== connection || closed) return;
-      if (!recovering) { forward(event); return; }
+      if (!recovering) { deliver(connection, event); return; }
       if (!capturingSnapshot) return; // The later snapshot covers restoration events.
       bufferedBytes += Buffer.byteLength(JSON.stringify(event));
       // Recovery re-reads state instead of retaining an unbounded event stream.
@@ -73,7 +108,7 @@ async function connectDesktopRuntime(options) {
       }
       const snapshot = JSON.parse(pages.join(''));
       emit('runtime:snapshot', snapshot);
-      for (const event of buffered) if (event.seq > snapshot.eventSeq) forward(event);
+      for (const event of buffered) if (event.seq > snapshot.eventSeq) deliver(connection, event);
       buffered = []; recovering = false;
       emit('runtime:connection', { connected: true });
     } catch (error) {

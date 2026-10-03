@@ -8,7 +8,8 @@ async function compatibleClient(dataDir, timeoutMs = 30000) {
   const client = await connect({ dataDir, timeoutMs });
   try {
     const status = await client.call('daemon:status');
-    if (!status.capabilities?.includes('desktop-v1') || !status.capabilities?.includes('snapshot-pages-v1') || !Array.isArray(status.methods)) {
+    const required = ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'];
+    if (!required.every(capability => status.capabilities?.includes(capability)) || !Array.isArray(status.methods)) {
       throw Object.assign(new Error('The running Milagre host is older than this desktop. Stop the host cleanly, then reopen Milagre.'), { code: 'INCOMPATIBLE_DAEMON' });
     }
     return client;

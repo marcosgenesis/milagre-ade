@@ -33,9 +33,17 @@ async function connect({ dataDir, timeoutMs = 30000 }) {
       pending.delete(message.id);
       clearTimeout(request.timeout);
       if (message.error) request.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
+      else if (message.pages) request.resolve(readPages(message.pages));
       else request.resolve(message.result);
     },
   });
+  // A response too large for one frame (a big Project's state) arrives as pages, read one at a time in order.
+  async function readPages({ pageId, pageCount }) {
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error('The daemon sent an invalid paged response');
+    const parts = [];
+    for (let index = 0; index < pageCount; index++) parts.push(await client.call('daemon:result-page', [pageId, index]));
+    return JSON.parse(parts.join(''));
+  }
   socket.on('error', fail);
   socket.on('close', () => { fail(new Error('Daemon connection closed')); client.emit('close'); });
   client.call = (method, args = []) => new Promise((resolve, reject) => {
@@ -48,7 +56,7 @@ async function connect({ dataDir, timeoutMs = 30000 }) {
     }, deadlineFor(method, timeoutMs));
     pending.set(id, { resolve, reject, timeout });
     try {
-      if (!connection.send({ v: VERSION, id, method, args })) throw new Error('Daemon connection closed');
+      if (!connection.send({ v: VERSION, id, method, args, pages: true })) throw new Error('Daemon connection closed');
     } catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
   });
   client.close = () => socket.destroy();

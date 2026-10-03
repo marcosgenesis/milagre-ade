@@ -1,0 +1,61 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { randomBytes } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const http = require('node:http');
+const { startDaemon } = require('./server.cjs');
+const { startMobileBridge } = require('./mobile-bridge.cjs');
+const { connect } = require('./client.cjs');
+
+async function fixture(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-'));
+  const dataDir = path.join(root, 'profile');
+  const project = path.join(root, 'project');
+  await fs.mkdir(project);
+  execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
+  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {} } });
+  const token = randomBytes(32).toString('hex');
+  const bridge = await startMobileBridge({ dataDir, port: 0, token });
+  t.after(async () => { await bridge.close(); await daemon.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const request = (route, options = {}) => fetch(bridge.url + route, { ...options, headers: { authorization: `Bearer ${token}`, ...options.headers } });
+  const rpc = (method, args = []) => request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method, args }) });
+  return { dataDir, project, bridge, request, rpc, token };
+}
+
+test('mobile bridge forwards commands to the existing owner and reads cached snapshots', async t => {
+  const { dataDir, project, bridge, request, rpc } = await fixture(t);
+  assert.match(bridge.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.equal((await rpc('daemon:status')).status, 200);
+  assert.equal((await request('/snapshot?projectPath=' + encodeURIComponent(project))).status, 409);
+  const opened = (await (await rpc('project:open', [project])).json()).result;
+  const session = Object.values(opened.state.sessions)[0];
+  const client = await connect({ dataDir });
+  t.after(() => client.close());
+  await client.call('chat:patch', [project, session.id, { title: 'Updated from socket' }]);
+  const snapshot = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.equal(snapshot.project.state.sessions[session.id].title, 'Updated from socket');
+  assert.deepEqual(snapshot.runs.runs, {});
+  await bridge.close();
+  assert.equal((await client.call('daemon:status')).version, 'test');
+});
+
+test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported requests', async t => {
+  const { bridge, request, rpc, token } = await fixture(t);
+  assert.equal((await fetch(bridge.url + '/snapshot')).status, 401);
+  assert.equal((await request('/snapshot', { headers: { authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await request('/snapshot', { headers: { origin: 'https://evil.example' } })).status, 403);
+  const hostileHost = await new Promise((resolve, reject) => {
+    const req = http.get(bridge.url + '/snapshot', { headers: { host: 'evil.example', authorization: `Bearer ${token}` } }, res => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+  });
+  assert.equal(hostileHost, 403);
+  assert.equal((await rpc('worktree:remove', ['/tmp/nope'])).status, 403);
+  assert.equal((await rpc('daemon:stop')).status, 403);
+  assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status, 400);
+  assert.equal((await request('/rpc', { method: 'POST', body: JSON.stringify({ v: 1, method: 'daemon:status', args: [] }) })).status, 415);
+  assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 2, method: 'daemon:status', args: [] }) })).status, 400);
+  assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(1024 * 1024 + 1) })).status, 413);
+});

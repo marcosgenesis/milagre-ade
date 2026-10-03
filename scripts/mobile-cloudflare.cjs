@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { parseArgs } = require('node:util');
+const { readCloudflare } = require('../apps/daemon/src/mobile-cloudflare.cjs');
 
 const API = 'https://api.cloudflare.com/client/v4/';
 
@@ -64,17 +65,6 @@ async function setUpCloudflare({ token, domain, name = 'mac', port = 8797, dataD
     await fs.rename(temporary, file);
   } finally { await fs.rm(temporary, { force: true }); }
   return { ...config, file };
-}
-
-async function readCloudflare(dataDir) {
-  const file = path.join(dataDir, 'cloudflare.json');
-  let config;
-  try { config = JSON.parse(await fs.readFile(file, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') throw new Error('No Cloudflare tunnel is set up for this profile. Run `npm run mobile:cloudflare -- --domain your.domain` first.'); throw error; }
-  const info = await fs.stat(file);
-  if ((info.mode & 0o777) !== 0o600) throw new Error(`${file} must have permissions 0600; it holds the tunnel and Access secrets.`);
-  if (!config.hostname || !config.connectorToken || !config.access?.id || !config.access?.secret || !Number.isInteger(config.port)) throw new Error(`${file} is incomplete. Run mobile:cloudflare again.`);
-  return config;
 }
 
 async function main() {

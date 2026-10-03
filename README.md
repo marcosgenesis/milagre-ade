@@ -136,3 +136,7 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request. 
 ## License
 
 Milagre is released under the [MIT License](LICENSE).
+
+## Local mobile preview
+
+Run `npm run mobile:demo` to try the Expo client with an isolated local daemon and demo agent. See [simulator setup and real-provider instructions](docs/mobile-local.md). The existing desktop commands keep their behavior.

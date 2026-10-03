@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./model": "./src/model.ts",
+    "./git-diff": "./src/git-diff.ts",
     "./agent-runs": {
       "types": "./src/agent-runs.d.mts",
       "default": "./src/agent-runs.mjs"
@@ -20,12 +21,19 @@
     "./attention": {
       "types": "./src/attention.d.mts",
       "default": "./src/attention.mjs"
-    }
+    },
+    "./reply-parts": "./src/reply-parts.ts",
+    "./streaming-markdown": "./src/streaming-markdown.ts",
+    "./pr-blockers": "./src/pr-blockers.ts"
   },
   "files": [
     "src/*.mjs",
     "src/*.d.mts",
-    "src/model.ts"
+    "src/model.ts",
+    "src/git-diff.ts",
+    "src/reply-parts.ts",
+    "src/streaming-markdown.ts",
+    "src/pr-blockers.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts",

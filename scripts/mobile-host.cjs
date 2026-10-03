@@ -9,6 +9,7 @@ const { startDaemon } = require('../apps/daemon/src/server.cjs');
 const { startMobileBridge } = require('../apps/daemon/src/mobile-bridge.cjs');
 const { connect } = require('../apps/daemon/src/client.cjs');
 const { version } = require('../package.json');
+const { printPairing } = require('./mobile-pairing.cjs');
 
 async function readToken(file) {
   let handle;
@@ -44,7 +45,7 @@ async function startMobileHost({ dataDir, project, port = 8787, publicUrl, runti
       await fs.writeFile(temporary, JSON.stringify({ url: publicUrl || bridge.url, token }, null, 2), { flag: 'wx', mode: 0o600 });
       await fs.rename(temporary, connectionFile);
     } finally { await fs.rm(temporary, { force: true }); }
-    return { url: publicUrl || bridge.url, localUrl: bridge.url, connectionFile, close };
+    return { url: publicUrl || bridge.url, localUrl: bridge.url, token, connectionFile, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -52,10 +53,10 @@ async function main() {
   const { values } = parseArgs({ options: {
     'data-dir': { type: 'string', default: path.join(os.homedir(), '.milagre-mobile') },
     project: { type: 'string' }, port: { type: 'string', default: '8787' },
-    'public-url': { type: 'string' }, 'stay-awake': { type: 'boolean' }, help: { type: 'boolean' },
+    'public-url': { type: 'string' }, 'stay-awake': { type: 'boolean' }, 'no-qr': { type: 'boolean' }, help: { type: 'boolean' },
   } });
   if (values.help) {
-    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example] [--stay-awake]\nSeparate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
+    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example] [--stay-awake] [--no-qr]\nPrints a QR code and link for the app to pair; --no-qr prints only the link. Separate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
     return;
   }
   const host = await startMobileHost({ dataDir: values['data-dir'], project: values.project, port: Number(values.port), publicUrl: values['public-url'] });
@@ -68,6 +69,7 @@ async function main() {
   process.once('SIGINT', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   process.once('SIGTERM', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   console.log(`Milagre host: ${host.url}\nConnection details: ${host.connectionFile}\nUses installed Codex and Claude. Close a Project in other Milagre hosts before opening it here. Ctrl+C stops this host.`);
+  printPairing({ address: host.url, token: host.token, qr: !values['no-qr'] });
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
 module.exports = { startMobileHost };

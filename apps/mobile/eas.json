@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 24.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "testflight": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      },
+      "node": "24.13.0",
+      "env": {
+        "ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
+      }
+    }
+  },
+  "submit": {
+    "testflight": {
+      "ios": {
+        "appleTeamId": "9J2K2AFDLJ",
+        "ascAppId": "6818804252"
+      }
+    }
+  }
+}

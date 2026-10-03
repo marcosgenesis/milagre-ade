@@ -1,17 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatIndicator, agentCounts } from './indicators.ts';
+import { agentCounts } from './indicators.ts';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import type { AgentSession, Subagent } from '@milagre/shared/model';
 import { pullRequestBlockers } from '@milagre/shared/pr-blockers';
-test('questions and approvals take precedence over running and unread indicators', () => {
-  const run = { questions: [{}], approvals: [{}] } as AgentRun;
-  assert.equal(chatIndicator({ unread: true } as AgentSession, run).label, 'Asking you');
-  run.questions = [];
-  assert.equal(chatIndicator(undefined, run).label, 'Waiting for approval');
-  run.approvals = [];
-  assert.equal(chatIndicator(undefined, run).label, 'Running');
-});
 test('agent counts exclude archived agents and preserve waiting and failure', () => {
   const agents = ['running', 'initializing', 'waiting', 'failed', 'completed'].map(status => ({ status })) as Subagent[];
   agents.push({ status: 'failed', archived: true } as Subagent);
@@ -20,4 +12,20 @@ test('agent counts exclude archived agents and preserve waiting and failure', ()
 test('mobile uses the desktop PR blocker precedence without calling unknown conflict state clean', () => {
   assert.deepEqual(pullRequestBlockers({ state: 'OPEN', url: 'https://github.com/a/b/pull/1', hasConflicts: true, checks: 'failed', isBehind: true }), ['conflicts', 'checks-failed', 'behind']);
   assert.deepEqual(pullRequestBlockers({ state: 'MERGED', url: 'x', hasConflicts: true }), []);
+});
+test('chat marks follow the desktop sidebar precedence', async () => {
+  const { chatMark } = await import('./indicators.ts');
+  const run = { questions: [{}], approvals: [{}] } as AgentRun;
+  assert.equal(chatMark({ unread: true } as AgentSession, run), 'question');
+  assert.equal(chatMark(undefined, { ...run, questions: [] }), 'waiting');
+  assert.equal(chatMark({ unread: true } as AgentSession, { questions: [], approvals: [] } as unknown as AgentRun), 'running');
+  assert.equal(chatMark({ unread: true } as AgentSession, undefined, [{ outcome: 'failed' }] as never), 'unread');
+  assert.equal(chatMark({} as AgentSession, undefined, [{ outcome: 'failed' }] as never), 'failed');
+  assert.equal(chatMark({} as AgentSession), 'idle');
+});
+test('chats order by their newest message, empty chats last', async () => {
+  const { chatRecency } = await import('./indicators.ts');
+  const messages = [{ id: 3, session_id: 1 }, { id: 9, session_id: 2 }] as never;
+  assert.ok(chatRecency(2, messages) > chatRecency(1, messages));
+  assert.ok(chatRecency(1, messages) > chatRecency(7, messages));
 });

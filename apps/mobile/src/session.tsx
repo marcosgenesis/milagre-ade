@@ -2,10 +2,13 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
-import { savedConnection } from './connection-native';
+import { savedHosts } from './hosts-native';
+import type { SavedHost } from './hosts-store';
 import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
 import type { Attachment } from './attachments';
 import type { TurnPreferences } from './turn-options';
+
+const hostOf = (url: string) => String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 
 function useSessionState() {
   const [client, setClient] = useState<Client | null>(null);
@@ -18,8 +21,15 @@ function useSessionState() {
   const [models, setModels] = useState<AgentModels | null>(null);
   const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
   const [providerError, setProviderError] = useState('');
+  const [hosts, setHosts] = useState<SavedHost[]>([]);
+  const [hostName, setHostName] = useState('');
+  const [booted, setBooted] = useState(false);
+  const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
+  // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
+  const autoOpen = useRef(true);
+  const claimAutoOpen = () => { const first = autoOpen.current; autoOpen.current = false; return first; };
   useEffect(() => {
     let cancelled = false;
     if (!client || process.env.EXPO_PUBLIC_DEMO === '1') return;
@@ -28,7 +38,14 @@ function useSessionState() {
     }).catch(() => { if (!cancelled) setProviderError('Could not check the installed agents. Reconnect to check again.'); });
     return () => { cancelled = true; };
   }, [client]);
-  const connect = async (address: string, token: string, remember = true) => {
+  const loadHosts = useCallback(async () => {
+    const list = await savedHosts.list();
+    setHosts(list);
+    return list;
+  }, []);
+  // Saved computers are read once at launch; the startup splash waits for them.
+  useEffect(() => { void savedHosts.list().then(setHosts).catch(() => {}).finally(() => setBooted(true)); }, []);
+  const connect = async (address: string, token: string, remember = true, name = '') => {
     const next = createClient(address, token);
     const current = ++generation.current;
     const previous = selection.current;
@@ -38,14 +55,17 @@ function useSessionState() {
       const projects = await next.call<RecentProject[]>('project:recent');
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== '1') {
-        try {
-          if (remember) await savedConnection.save({ address: next.url, token: token.trim() });
-          else await savedConnection.forget();
-        } catch { throw new Error('Could not save this connection on your device. Turn off Remember this computer to connect without saving it.'); }
+        if (remember) {
+          try { await savedHosts.save({ name: name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url), address: next.url, token: token.trim() }); }
+          catch { throw new Error('Could not save this computer on your device. Try pairing again.'); }
+          void loadHosts().catch(() => {});
+        }
       }
       if (current !== generation.current) return false;
       setModels(null); setCliStatus(null); setProviderError('');
+      autoOpen.current = false;
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
+      setHostName(name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url));
       return true;
     } catch (error) {
       if (current === generation.current) selection.current = previous;
@@ -80,6 +100,11 @@ function useSessionState() {
       if (current === selection.current) throw error;
     }
   }, [client, projectPath]);
+  const live = useRef(false);
+  const running = !!snapshot && Object.keys(snapshot.runs.runs).length > 0;
+  useEffect(() => { live.current = running; }, [running]);
+  /** Poll quickly for a while after the user acts, so a new turn shows up before its first event arrives. */
+  const expectActivity = () => { busyUntil.current = Date.now() + 15000; };
   useEffect(() => {
     if (!client || !projectPath) return;
     let cancelled = false;
@@ -89,7 +114,8 @@ function useSessionState() {
       if (cancelled || inFlight || AppState.currentState !== 'active') return;
       inFlight = true;
       try { await refresh(); } catch (e) { if (!cancelled) setError((e as Error).message); }
-      finally { inFlight = false; if (!cancelled) timer = setTimeout(poll, 1000); }
+      // Live turns refresh every second; an idle Project only needs a slower check for changes made elsewhere.
+      finally { inFlight = false; if (!cancelled) timer = setTimeout(poll, live.current || Date.now() < busyUntil.current ? 1000 : 4000); }
     }
     void poll();
     const subscription = AppState.addEventListener('change', state => { clearTimeout(timer); if (state === 'active') void poll(); });
@@ -97,8 +123,8 @@ function useSessionState() {
   }, [client, projectPath, refresh]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
-  const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
+  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

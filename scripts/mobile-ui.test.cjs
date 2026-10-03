@@ -29,6 +29,12 @@ function hookHost() {
       const previous = slots[index];
       if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { fn, deps };
       return slots[index].fn;
+    },
+    useMemo(fn, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { value: fn(), deps };
+      return slots[index].value;
     }, useEffect() {}, createContext() { return {}; }, useContext() {},
   };
 }
@@ -49,7 +55,7 @@ function sessionHost(client) {
   const react = hookHost();
   const { useSessionState } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
-    './connection-native': { savedConnection: { save: async () => {}, forget: async () => {} } },
+    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] } },
   }, '\nexport { useSessionState };');
   return () => { react.begin(); return useSessionState(); };
 }
@@ -108,22 +114,25 @@ function chatHost() {
     preferences: {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
-    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; },
+    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {},
   };
   const react = hookHost();
-  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'Icon', 'Choice', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {}, colors: {} };
-  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} } };
+  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
+  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: {}, Linking: {}, StyleSheet: { absoluteFill: {} } };
+  const icons = new Proxy({}, { get: (_, name) => String(name) });
+  const router = { setParams: values => Object.assign(params, values), push() {} };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values) }, useLocalSearchParams: () => params },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params },
+    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../questions': {}, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
   const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
-  return { session, sending, params, field, send, render };
+  return { session, sending, params, field, send, render, router };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -161,35 +170,32 @@ test('a failed first send keeps the current draft and releases the composer', as
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
 });
 
-test('opening agent settings keeps them in view instead of following the transcript bottom', () => {
+test('the transcript follows new content, also after the agent settings sheet opens', () => {
   const screen = chatHost();
   const tree = screen.render();
-  const page = find(tree, node => node.type === 'PageScroll');
+  const page = find(tree, node => node.type === 'KeyboardChatScrollView');
   let scrolls = 0;
   page.props.ref.current = { scrollToEnd() { scrolls++; } };
-  page.props.onContentSizeChange();
+  page.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page.props.onContentSizeChange(0, 400);
+  assert.equal(scrolls, 0, 'a transcript shorter than the screen never scrolls');
+  page.props.onContentSizeChange(0, 900);
   assert.equal(scrolls, 1);
   find(tree, node => node.type === 'AgentControls').props.onToggle();
-  page.props.onContentSizeChange();
-  assert.equal(scrolls, 1);
+  page.props.onContentSizeChange(0, 1000);
+  assert.equal(scrolls, 2);
 });
 
-test('opening live tool activity keeps the reader in place', () => {
+test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
   const screen = chatHost();
-  screen.session.snapshot.runs.runs['/p#new:1'] = { text: '', steps: [], approvals: [], questions: [] };
-  // Use a saved Chat so its run has the actual Chat identifier.
   screen.params.id = '42';
   screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
   screen.session.snapshot.runs.runs['/p#42'] = { text: '', steps: [], approvals: [], questions: [] };
   const tree = screen.render();
-  const page = find(tree, node => node.type === 'PageScroll');
-  let scrolls = 0;
-  page.props.ref.current = { scrollToEnd() { scrolls++; } };
-  page.props.onContentSizeChange();
-  assert.equal(scrolls, 1);
-  find(tree, node => node.type === 'ChatReply').props.onInteract();
-  page.props.onContentSizeChange();
-  assert.equal(scrolls, 1);
+  const pushed = [];
+  screen.router.push = route => pushed.push(route);
+  find(tree, node => node.type === 'ChatReply').props.onActivity('run');
+  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/activity', params: { id: '42', message: 'run' } }]));
 });
 
 test('switching the requested diff hides old content and ignores its late response', async () => {

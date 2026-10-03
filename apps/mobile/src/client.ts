@@ -40,6 +40,8 @@ export function createClient(address: string, token: string, fetcher: typeof fet
     url,
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
     call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }),
+    /** An image file on the computer, served by the bridge only from the Project's Worktrees and Milagre's image folders. */
+    media: (projectPath: string, path: string) => ({ uri: `${url}/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`, headers: { Authorization: `Bearer ${token.trim()}` } }),
     snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
   };
 }

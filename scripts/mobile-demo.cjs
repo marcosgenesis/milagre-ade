@@ -7,6 +7,7 @@ const { startDaemon } = require('../apps/daemon/src/server.cjs');
 const { startMobileBridge } = require('../apps/daemon/src/mobile-bridge.cjs');
 const { connect } = require('../apps/daemon/src/client.cjs');
 const { startMetro } = require('./start-mobile.cjs');
+const { printPairing } = require('./mobile-pairing.cjs');
 
 // Explicit demo provider, never selected by the real daemon CLI.
 function demoSession(_provider, { emit }) {
@@ -105,6 +106,7 @@ async function startDemo({ port = 8787 } = {}) {
 async function main() {
   const demo = await startDemo({ port: Number(process.env.MILAGRE_MOBILE_PORT || 8787) });
   console.log(`Demo Project: ${demo.project}\nConnection details: ${path.join(demo.root, 'connection.json')}\nBridge: ${demo.url}\nPress Shift+i to choose the Milagre Local simulator. Ctrl+C stops the demo and Metro.`);
+  printPairing({ address: demo.url, token: demo.token });
   const metro = startMetro({ ...process.env, EXPO_PUBLIC_DAEMON_URL: demo.url, EXPO_PUBLIC_DAEMON_TOKEN: demo.token, EXPO_PUBLIC_DEMO: '1' });
   let stopping;
   const stop = () => stopping ??= (async () => { metro.kill('SIGTERM'); await demo.close(); })();

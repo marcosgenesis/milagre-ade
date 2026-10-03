@@ -29,7 +29,7 @@ The persistent host starts the real providers installed and logged in on your Ma
 npm run mobile:host -- --project /absolute/path/to/a/Project --stay-awake
 ```
 
-Omit `--project` to choose a Project in the app. The separate profile defaults to `~/.milagre-mobile`; use `--data-dir /absolute/profile` to choose another. The command prints the private connection-file path, never its token. Enter its address and token in the app and leave **Remember this computer** selected to save them in platform secure storage. **Forget this computer** removes the saved connection. Tokens remain stable across host restarts; to rotate one, stop the host, remove its `mobile-connection.json`, restart and connect again.
+Omit `--project` to choose a Project in the app. The separate profile defaults to `~/.milagre-mobile`; use `--data-dir /absolute/profile` to choose another. The command prints the private connection-file path, then a QR code and the same pairing link. In the app, choose the scan option and point the camera at the QR code; the app fills in the address, token and computer name. Pass `--no-qr` to print only the link. The QR code and link contain the token, so do not share or screenshot them. To pair by hand instead, enter the address and the token from the connection file. Leave **Remember this computer** selected to save the connection in platform secure storage. **Forget this computer** removes the saved connection. Tokens remain stable across host restarts; to rotate one, stop the host, remove its `mobile-connection.json`, restart and connect again.
 
 Ctrl+C stops the host cleanly. On macOS, `--stay-awake` keeps the computer awake while the host runs; it does not keep a closed laptop lid awake. The separate daemon/bridge commands below remain available.
 
@@ -116,11 +116,15 @@ This generates the ignored native project and produces `/tmp/milagre-mobile-rele
 ## Boundaries
 
 - The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. RPC bodies are capped at 1 MiB and concurrent requests at 16. File uploads use a separate authenticated 7 MiB envelope for at most 5 MiB of decoded content.
-- Foreground snapshots poll once per second. PR status refreshes every 30 seconds on the focused, foreground screen with at most two requests in flight. Chat renders Markdown, expandable tool output, live activity, agent counts and PR blockers. The composer opens native model/effort/permission controls and Photo Library/Files pickers. Up to four attachments fit per message; photos are resized to 1024 pixels and capped at 160 KiB each, files at 5 MiB each. Persisted images with only a host path show their filename and an Open on your computer hint until authorized image retrieval is added. Large-history virtualization is still pending.
+- Foreground snapshots poll once per second. PR status refreshes every 30 seconds on the focused, foreground screen with at most two requests in flight. Chat renders Markdown, expandable tool output, live activity, agent counts and PR blockers. The composer opens native model/effort/permission controls and Photo Library/Files pickers. Up to four attachments fit per message; photos are resized to 1024 pixels and capped at 160 KiB each, files at 5 MiB each. Persisted and agent-generated images are fetched through the bridge (see Images below). Large-history virtualization is still pending.
 - Uploaded files stay in the host profile for Chat history. Failed sends preserve drafts; retrying may upload a file again. Abandoned-upload cleanup and upload reuse are pending.
-- Local simulator and direct HTTPS host access are supported. An encrypted relay, QR device pairing, push notifications and production background services come later.
+- Local simulator and direct HTTPS host access are supported. An encrypted relay, push notifications and production background services come later.
 - iOS works in Expo Go and a standalone simulator Release build. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
 - Demo connection defaults are injected into a local development bundle. Never publish that bundle or use this mechanism for a real remote token. The real workflow enters the token in the app.
+
+## Images
+
+`GET /media?projectPath=<abs>&path=<abs>` streams an image file to the paired app through the same authenticated bridge (token, Host and Origin rules). It serves only png, jpeg, gif, webp and heic files (checked by extension and file header) up to 15 MiB, and only from inside the Project's Worktrees, the Project's `.milagre/images` folder, the host profile's `mobile-attachments` folder and the folders where agents save generated images. Paths are resolved through symlinks first. Anything else returns 403, a non-image returns 415 and a relative path returns 400.
 
 ## Development checks
 

@@ -4,6 +4,7 @@ const { createHash, randomUUID } = require('node:crypto');
 const { decodeImages } = require('./image-input.cjs');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
+const SIDECAR = /^[a-f0-9]{64}\.json$/;
 
 async function contentDirectory(projectPath, folder) {
   const root = await fs.realpath(projectPath);
@@ -17,8 +18,8 @@ async function contentDirectory(projectPath, folder) {
 }
 
 /** Immutable, content-addressed files keep both the old and new state valid during a save. */
-async function writeContent(projectPath, folder, bytes, extension) {
-  const directory = await contentDirectory(projectPath, folder);
+async function writeContent(projectPath, folder, bytes, extension, resolved) {
+  const directory = resolved ?? await contentDirectory(projectPath, folder);
   const name = `${digest(bytes)}.${extension}`;
   const file = path.join(directory, name);
   const temporary = path.join(directory, `.${name}.${randomUUID()}.tmp`);
@@ -62,56 +63,121 @@ async function migrateImages(projectPath, state) {
   return changed ? { ...state, messages } : state;
 }
 
-/** Keep complete transcripts in sidecars; coordination.json holds the latest short entry. */
-async function compactSubagents(projectPath, state) {
+/**
+ * Keep complete transcripts in sidecars; coordination.json holds the latest short entry.
+ * `tracker` (optional) lets a caller skip unchanged agents: `known` maps session/agent to the digest of
+ * the sidecar already written for it, `next` collects the digests this call settled on, and `wrote` is set
+ * when a sidecar was written. The caller commits `next` only once the state itself is saved.
+ */
+async function compactSubagents(projectPath, state, tracker = {}) {
   if (!state.sessions) return state;
+  const { known, next } = tracker;
+  let directory; // Resolved once per call, not per agent.
+  let existing;
   const sessions = {};
   for (const [id, session] of Object.entries(state.sessions)) {
     if (!session.subagents?.length) { sessions[id] = session; continue; }
     const subagents = [];
     for (const agent of session.subagents) {
       if (!agent.transcript?.length) { subagents.push(agent); continue; }
-      const file = await writeContent(projectPath, 'subagents', JSON.stringify(agent.transcript), 'json');
+      const bytes = JSON.stringify(agent.transcript);
+      const hash = digest(bytes);
+      const key = `${id}/${agent.id}`;
+      // A remembered digest is trusted only while its file is still there (one readdir per save, not a stat per agent).
+      if (known?.get(key) === hash) existing ??= new Set(await fs.readdir(path.join(projectPath, '.milagre', 'subagents')).catch(() => []));
+      if (known?.get(key) !== hash || !existing.has(`${hash}.json`)) {
+        directory ??= await contentDirectory(projectPath, 'subagents');
+        await writeContent(projectPath, 'subagents', bytes, 'json', directory);
+        tracker.wrote = true;
+      }
+      next?.set(key, hash);
+      const name = `${hash}.json`;
       const last = agent.transcript.at(-1);
-      const refs = [...new Set([...(agent.transcriptFiles ?? []), agent.transcriptFile].filter(ref => ref && ref !== path.basename(file)))];
-      subagents.push({ ...agent, transcriptFile: path.basename(file), ...(refs.length ? { transcriptFiles: refs } : {}), transcript: [{ ...last, text: last.text.slice(-1000), compact: true }] });
+      const refs = [...new Set([...(agent.transcriptFiles ?? []), agent.transcriptFile].filter(ref => ref && ref !== name))];
+      subagents.push({ ...agent, transcriptFile: name, ...(refs.length ? { transcriptFiles: refs } : {}), transcript: [{ ...last, text: last.text.slice(-1000), compact: true }] });
     }
     sessions[id] = { ...session, subagents };
   }
   return { ...state, sessions };
 }
 
+/** Every sidecar a saved state points at, current and superseded. */
+function referencedSidecars(state) {
+  const refs = new Set();
+  for (const session of Object.values(state.sessions ?? {}))
+    for (const agent of session.subagents ?? [])
+      for (const ref of [agent.transcriptFile, ...(agent.transcriptFiles ?? [])]) if (typeof ref === 'string') refs.add(ref);
+  return refs;
+}
+
+/**
+ * Removes transcript sidecars the saved state no longer references. Call only after that state is
+ * durably written. Touches only content-addressed *.json files directly inside the Project's own
+ * .milagre/subagents; one younger than `minAgeMs` may belong to a save still in flight, so it stays.
+ */
+async function sweepSubagentContent(projectPath, referenced, { minAgeMs = 0, now = Date.now } = {}) {
+  try {
+    const root = await fs.realpath(projectPath);
+    const metadata = path.join(root, '.milagre');
+    const directory = path.join(metadata, 'subagents');
+    let real;
+    try { real = await fs.realpath(directory); } catch { return 0; }
+    if (real !== directory || !inside(root, await fs.realpath(metadata))) return 0;
+    let removed = 0;
+    for (const name of await fs.readdir(directory)) {
+      if (!SIDECAR.test(name) || referenced.has(name)) continue;
+      const file = path.join(directory, name);
+      const stat = await fs.lstat(file).catch(() => null);
+      if (!stat?.isFile() || now() - stat.mtimeMs < minAgeMs) continue;
+      await fs.rm(file, { force: true });
+      removed++;
+    }
+    return removed;
+  } catch { return 0; } // Best effort: a leftover sidecar costs disk, never data.
+}
+
+const HYDRATE_CONCURRENCY = 8;
+
 async function hydrateSubagents(projectPath, state) {
-  const validName = name => typeof name === 'string' && /^[a-f0-9]{64}\.json$/.test(name);
+  const validName = name => typeof name === 'string' && SIDECAR.test(name);
+  let resolved; // One directory resolution per Project, shared by every reference.
+  const directoryOf = () => resolved ??= contentDirectory(projectPath, 'subagents');
+  const tasks = [];
   for (const session of Object.values(state.sessions ?? {})) {
     for (const agent of session.subagents ?? []) {
       const refs = [...new Set([...(agent.transcriptFiles ?? []), agent.transcriptFile].filter(validName))];
-      if (!refs.length) continue;
-      const entries = new Map();
-      const missing = [];
-      const merge = rows => {
-        for (const row of rows) if (!row.compact || !entries.has(row.id)) entries.set(row.id, row);
-      };
-      for (const ref of refs) {
-        try {
-          const directory = await contentDirectory(projectPath, 'subagents');
-          const file = await fs.realpath(path.join(directory, ref));
-          if (!inside(directory, file)) throw new Error('Invalid transcript path');
-          const bytes = await fs.readFile(file);
-          if (digest(bytes) + '.json' !== ref) throw new Error('Invalid transcript hash');
-          const transcript = JSON.parse(bytes);
-          if (!Array.isArray(transcript) || !transcript.every(row => typeof row.id === 'string' && typeof row.text === 'string' && ['message','tool'].includes(row.kind))) throw new Error('Invalid transcript');
-          merge(transcript);
-        } catch { missing.push(ref); }
-      }
-      // Compact summaries never replace a recovered complete entry with the same id.
-      merge(agent.transcript ?? []);
-      agent.transcript = [...entries.values()];
-      delete agent.transcriptFile;
-      if (missing.length) agent.transcriptFiles = missing;
-      else delete agent.transcriptFiles;
+      if (refs.length) tasks.push({ agent, refs });
     }
   }
+  const hydrate = async ({ agent, refs }) => {
+    const entries = new Map();
+    const missing = [];
+    const merge = rows => {
+      for (const row of rows) if (!row.compact || !entries.has(row.id)) entries.set(row.id, row);
+    };
+    for (const ref of refs) {
+      try {
+        const directory = await directoryOf();
+        const file = await fs.realpath(path.join(directory, ref));
+        if (!inside(directory, file)) throw new Error('Invalid transcript path');
+        const bytes = await fs.readFile(file);
+        if (digest(bytes) + '.json' !== ref) throw new Error('Invalid transcript hash');
+        const transcript = JSON.parse(bytes);
+        if (!Array.isArray(transcript) || !transcript.every(row => typeof row.id === 'string' && typeof row.text === 'string' && ['message','tool'].includes(row.kind))) throw new Error('Invalid transcript');
+        merge(transcript);
+      } catch { missing.push(ref); }
+    }
+    // Compact summaries never replace a recovered complete entry with the same id.
+    merge(agent.transcript ?? []);
+    agent.transcript = [...entries.values()];
+    delete agent.transcriptFile;
+    if (missing.length) agent.transcriptFiles = missing;
+    else delete agent.transcriptFiles;
+  };
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(HYDRATE_CONCURRENCY, tasks.length) }, async () => {
+    while (cursor < tasks.length) await hydrate(tasks[cursor++]);
+  }));
   return state;
 }
-module.exports = { storeImages, migrateImages, compactSubagents, hydrateSubagents };
+module.exports = { storeImages, migrateImages, compactSubagents, hydrateSubagents, referencedSidecars, sweepSubagentContent };

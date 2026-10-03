@@ -108,3 +108,73 @@ test('mobile uploads are private, bounded and scoped to an open Project', async 
   const next = (await (await upload(payload)).json()).result;
   assert.notEqual(next.path, file.path);
 });
+
+test('mobile media serves images only from the Project Worktrees and Milagre image folders', async t => {
+  const { project, dataDir, bridge, request, rpc, token } = await fixture(t);
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('pretend image data')]);
+  const media = (file, projectPath = project) => request(`/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(file)}`);
+  const inside = path.join(project, 'shot.png');
+  await fs.writeFile(inside, png);
+  assert.equal((await media(inside)).status, 409); // The Project is not open yet.
+  execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const created = (await (await rpc('worktree:create', [{ projectPath: project, baseBranch: 'main', prompt: 'Media' }])).json()).result;
+  const worktree = created.project.state.worktrees[created.worktreeId].path;
+
+  const generated = path.join(worktree, 'generated.png');
+  await fs.writeFile(generated, png);
+  const ok = await media(generated);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('content-type'), 'image/png');
+  assert.equal(ok.headers.get('cache-control'), 'private, max-age=3600');
+  assert.deepEqual(Buffer.from(await ok.arrayBuffer()), png);
+
+  // Persisted attachments and mobile uploads.
+  await fs.mkdir(path.join(project, '.milagre', 'images'), { recursive: true });
+  const persisted = path.join(project, '.milagre', 'images', 'abc.png');
+  await fs.writeFile(persisted, png);
+  assert.equal((await media(persisted)).status, 200);
+  await fs.mkdir(path.join(dataDir, 'mobile-attachments', 'one'), { recursive: true });
+  const uploaded = path.join(dataDir, 'mobile-attachments', 'one', 'photo.png');
+  await fs.writeFile(uploaded, png);
+  assert.equal((await media(uploaded)).status, 200);
+
+  // Outside every allowed folder, including through a symlink inside a Worktree.
+  const outside = path.join(path.dirname(project), 'secret.png');
+  await fs.writeFile(outside, png);
+  assert.equal((await media(outside)).status, 403);
+  await fs.symlink(outside, path.join(worktree, 'link.png'));
+  assert.equal((await media(path.join(worktree, 'link.png'))).status, 403);
+  await fs.symlink(path.dirname(project), path.join(worktree, 'up'));
+  assert.equal((await media(path.join(worktree, 'up', 'secret.png'))).status, 403);
+  assert.equal((await media(path.join(path.dirname(project), 'missing.png'))).status, 403);
+  assert.equal((await media(path.join(worktree, 'missing.png'))).status, 404);
+
+  // Only supported images: 415 for another extension or for bytes that are not an image, 400 for a relative path.
+  await fs.writeFile(path.join(worktree, 'notes.txt'), 'hello');
+  assert.equal((await media(path.join(worktree, 'notes.txt'))).status, 415);
+  await fs.writeFile(path.join(worktree, 'fake.png'), 'not really a png');
+  assert.equal((await media(path.join(worktree, 'fake.png'))).status, 415);
+  await fs.symlink(path.join(worktree, 'notes.txt'), path.join(worktree, 'alias.png'));
+  assert.equal((await media(path.join(worktree, 'alias.png'))).status, 415);
+  assert.equal((await media('shot.png')).status, 400);
+  assert.equal((await request(`/media?projectPath=${encodeURIComponent(project)}`)).status, 400);
+  assert.equal((await media(worktree + '/dir.png')).status, 404);
+  await fs.mkdir(path.join(worktree, 'folder.png'));
+  assert.equal((await media(path.join(worktree, 'folder.png'))).status, 403);
+
+  // 15 MiB cap.
+  const big = path.join(worktree, 'big.png');
+  await fs.writeFile(big, Buffer.concat([png, Buffer.alloc(15 * 1024 * 1024)]));
+  assert.equal((await media(big)).status, 413);
+
+  // Same token and host rules as every other route.
+  const url = `/media?projectPath=${encodeURIComponent(project)}&path=${encodeURIComponent(generated)}`;
+  assert.equal((await fetch(bridge.url + url)).status, 401);
+  assert.equal((await request(url, { headers: { authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await request(url, { headers: { origin: 'https://evil.example' } })).status, 403);
+  const hostileHost = await new Promise((resolve, reject) => {
+    const req = http.get(bridge.url + url, { headers: { host: 'evil.example', authorization: `Bearer ${token}` } }, res => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+  });
+  assert.equal(hostileHost, 403);
+});

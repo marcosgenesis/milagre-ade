@@ -13,6 +13,10 @@ import { PreviewRail, type PreviewRailItem } from "../motion/PreviewRail";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
+// The last messages can still be streaming, so only older ones keep a cached preview.
+const LIVE_TAIL = 3;
+// Streamed growth refreshes the live previews this often instead of on every chunk.
+const RAIL_REFRESH_MS = 250;
 
 function truncateMessageText(text: string, limit: number) {
   if (text.length <= limit) return text;
@@ -111,6 +115,10 @@ export function MessageScroller({
   const programmaticScrollRef = useRef(false);
   const scrollTimerRef = useRef<number | undefined>(undefined);
   const railFrameRef = useRef<number | undefined>(undefined);
+  const railRefreshTimerRef = useRef<number | undefined>(undefined);
+  const activeFrameRef = useRef<number | undefined>(undefined);
+  const previewCacheRef = useRef(new WeakMap<HTMLElement, { label: string; description: string | undefined }>());
+  const railMessageCountRef = useRef(0);
   const railIdRef = useRef(new WeakMap<HTMLElement, string>());
   const railIdCounterRef = useRef(0);
   const railTargetsRef = useRef(new Map<string, HTMLElement>());
@@ -165,18 +173,23 @@ export function MessageScroller({
       return;
     }
 
+    // Messages sit in document order, so their centres only grow: binary-search the first one past the viewport centre.
     const viewportCenter = viewport.getBoundingClientRect().top + viewport.clientHeight / 2;
-    let nearestId = targets[0][0];
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    for (const [id, element] of targets) {
-      const rect = element.getBoundingClientRect();
-      const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestId = id;
-      }
+    const centerOf = (index: number) => {
+      const rect = targets[index][1].getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    };
+    let low = 0;
+    let high = targets.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (centerOf(mid) < viewportCenter) low = mid + 1;
+      else high = mid;
     }
+    const previous = low > 0 ? low - 1 : low;
+    const nearest =
+      Math.abs(centerOf(previous) - viewportCenter) <= Math.abs(centerOf(low) - viewportCenter) ? previous : low;
+    const nearestId = targets[nearest][0];
 
     setActiveRailId((current) => (current === nearestId ? current : nearestId));
   }, [followThreshold, navigation]);
@@ -188,6 +201,14 @@ export function MessageScroller({
     if (!content || !viewport) return;
 
     const messages = Array.from(content.querySelectorAll<HTMLElement>('[data-slot="message"]'));
+    // The first assistant message after each one, found in a single backwards pass.
+    const responses: Array<HTMLElement | undefined> = new Array(messages.length);
+    let nextAssistant: HTMLElement | undefined;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      responses[index] = nextAssistant;
+      if (messages[index].dataset.from === "assistant") nextAssistant = messages[index];
+    }
+    const cache = previewCacheRef.current;
     const targets = new Map<string, HTMLElement>();
     const nextItems = messages.map((message, index) => {
       let id = railIdRef.current.get(message);
@@ -198,11 +219,11 @@ export function MessageScroller({
       }
       targets.set(id, message);
       const sender = message.dataset.from ?? "conversation";
-      const assistantResponse =
-        sender === "user"
-          ? messages.slice(index + 1).find((candidate) => candidate.dataset.from === "assistant")
-          : undefined;
-      const preview = getMessagePreview(message, assistantResponse);
+      let preview = cache.get(message);
+      if (!preview) {
+        preview = getMessagePreview(message, sender === "user" ? responses[index] : undefined);
+        if (index < messages.length - LIVE_TAIL) cache.set(message, preview);
+      }
 
       return {
         id,
@@ -211,6 +232,7 @@ export function MessageScroller({
         ariaLabel: `Go to ${sender} message ${index + 1} of ${messages.length}`,
       };
     });
+    railMessageCountRef.current = messages.length;
 
     railTargetsRef.current = targets;
     setRailItems((current) => {
@@ -228,6 +250,15 @@ export function MessageScroller({
     setRailOverflowing(viewport.scrollHeight > viewport.clientHeight + 1 && messages.length > 1);
   }, [navigation]);
 
+  // Scroll events and layout changes ask for the active item at most once a frame.
+  const scheduleActiveRailItem = useCallback(() => {
+    if (navigation !== "rail" || activeFrameRef.current) return;
+    activeFrameRef.current = requestAnimationFrame(() => {
+      activeFrameRef.current = undefined;
+      updateActiveRailItem();
+    });
+  }, [navigation, updateActiveRailItem]);
+
   const scheduleRailSync = useCallback(() => {
     if (navigation !== "rail") return;
     if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
@@ -236,6 +267,15 @@ export function MessageScroller({
       updateActiveRailItem();
     });
   }, [navigation, syncRailItems, updateActiveRailItem]);
+
+  // Streamed growth: the last previews change but the list doesn't, so refresh them on a timer, not per chunk.
+  const scheduleRailRefresh = useCallback(() => {
+    if (navigation !== "rail" || railRefreshTimerRef.current) return;
+    railRefreshTimerRef.current = window.setTimeout(() => {
+      railRefreshTimerRef.current = undefined;
+      syncRailItems();
+    }, RAIL_REFRESH_MS);
+  }, [navigation, syncRailItems]);
 
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
     const viewport = viewportRef.current;
@@ -251,11 +291,13 @@ export function MessageScroller({
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
-    if (!viewport || programmaticScrollRef.current) return;
+    if (!viewport) return;
+    // The active item follows every scroll, including the ones that chase streamed output.
+    scheduleActiveRailItem();
+    if (programmaticScrollRef.current) return;
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setFollowing(distance <= followThreshold);
-    updateActiveRailItem();
-  }, [followThreshold, setFollowing, updateActiveRailItem]);
+  }, [followThreshold, scheduleActiveRailItem, setFollowing]);
 
   const leaveLiveEdge = useCallback(() => {
     programmaticScrollRef.current = false;
@@ -273,17 +315,19 @@ export function MessageScroller({
     scrollToEnd(reduce || !smooth ? "auto" : "smooth");
   }, [autoScrollKey, followOutput, reduce, scrollToEnd, smooth]);
 
+  // While output streams the content grows every batch; a smooth scroll restarted that often lags behind it.
+  const followBehavior: ScrollBehavior = reduce || !smooth || busy ? "auto" : "smooth";
+
   useEffect(() => {
     const content = contentRef.current;
     if (!content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      scheduleRailSync();
       if (!followOutput || !followingRef.current) return;
-      scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+      scrollToEnd(followBehavior);
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [followOutput, reduce, scheduleRailSync, scrollToEnd, smooth]);
+  }, [followBehavior, followOutput, scrollToEnd]);
 
   useEffect(() => {
     if (navigation !== "rail") {
@@ -298,9 +342,32 @@ export function MessageScroller({
     if (!content || !viewport) return;
 
     scheduleRailSync();
-    const mutationObserver = new MutationObserver(scheduleRailSync);
-    mutationObserver.observe(content, { childList: true, characterData: true, subtree: true });
-    const resizeObserver = new ResizeObserver(scheduleRailSync);
+    // Only messages being added or removed rebuild the list; text streaming inside one never reaches this observer.
+    // A list that doesn't exist yet (or is replaced) is found again through the content's own children.
+    const listOf = () =>
+      content.querySelector<HTMLElement>('[data-slot="message"]')?.parentElement ??
+      (content.firstElementChild as HTMLElement | null) ??
+      content;
+    let list = listOf();
+    const mutationObserver = new MutationObserver(() => {
+      const current = listOf();
+      if (current !== list) {
+        mutationObserver.disconnect();
+        list = current;
+        mutationObserver.observe(content, { childList: true });
+        if (list !== content) mutationObserver.observe(list, { childList: true });
+      }
+      scheduleRailSync();
+    });
+    mutationObserver.observe(content, { childList: true });
+    if (list !== content) mutationObserver.observe(list, { childList: true });
+    const resizeObserver = new ResizeObserver((entries) => {
+      // A resized viewport can change what fits, so it rebuilds the list; content growth only checks overflow and the active item.
+      if (entries.some((entry) => entry.target === viewport)) scheduleRailSync();
+      setRailOverflowing(viewport.scrollHeight > viewport.clientHeight + 1 && railMessageCountRef.current > 1);
+      scheduleRailRefresh();
+      scheduleActiveRailItem();
+    });
     resizeObserver.observe(content);
     resizeObserver.observe(viewport);
 
@@ -308,12 +375,14 @@ export function MessageScroller({
       mutationObserver.disconnect();
       resizeObserver.disconnect();
     };
-  }, [navigation, scheduleRailSync]);
+  }, [navigation, scheduleActiveRailItem, scheduleRailRefresh, scheduleRailSync]);
 
   useEffect(
     () => () => {
       if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
       if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
+      if (activeFrameRef.current) cancelAnimationFrame(activeFrameRef.current);
+      if (railRefreshTimerRef.current) window.clearTimeout(railRefreshTimerRef.current);
     },
     [],
   );

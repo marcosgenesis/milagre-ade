@@ -586,6 +586,26 @@ a:focus-visible .animated-underline::after {
 .chat-bottom-blur > :nth-child(2) {
   background: linear-gradient(to top, var(--page) 5%, color-mix(in oklab, var(--page) 70%, transparent) 40%, transparent);
 }
+/* While a turn streams the transcript repaints every batch, and a backdrop blur re-blurs it each time. The
+ * fades stay as plain gradients, a touch denser where the blur used to soften the text. */
+.chat-top-blur[data-busy] {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 88%, transparent), transparent);
+}
+.chat-bottom-blur[data-busy] > :nth-child(1) {
+  display: none;
+}
+.chat-bottom-blur[data-busy] > :nth-child(2) {
+  background: linear-gradient(to top, var(--page) 15%, color-mix(in oklab, var(--page) 80%, transparent) 50%, transparent);
+}
+
+/* Messages far off screen skip layout and paint; the size of the last render stands in, so scrolling stays steady.
+ * The streaming reply is exempt: it grows at the live edge and must always measure itself. */
+[data-slot="message"]:not([data-streaming]) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
 
 /* The diff's sticky file headers sit at its top edge, so only the bottom fades. */
 .diff-scroll.scroll-fade[data-fade-top] {

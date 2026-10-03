@@ -23,7 +23,8 @@ npm run test:monorepo
 Use `npm run dev` for visual work. Keep the renderer and Electron process boundaries explicit:
 
 - `apps/desktop/app/` owns UI state and presentation.
-- `apps/desktop/electron/` owns process execution, filesystem access and privileged operations.
+- `apps/desktop/electron/` owns native windows, dialogs, media, notifications and updates.
+- `packages/core/` owns provider processes, Chat state, filesystem and git operations; `apps/daemon/` exposes that runtime over a private local socket.
 - `packages/shared/` owns the model and pure Chat/state operations used by both sides. Import through `@milagre/shared` package exports.
 - `scripts/` contains root development, integration-test and release helpers.
 

@@ -1,0 +1,12 @@
+{
+  "name": "@milagre/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/cli.cjs",
+    "test": "node --test src/*.test.cjs"
+  },
+  "dependencies": { "@milagre/core": "0.1.0" },
+  "engines": { "node": ">=24" }
+}

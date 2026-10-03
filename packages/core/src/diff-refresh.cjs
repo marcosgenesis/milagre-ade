@@ -21,6 +21,7 @@ class DiffRefresher {
 
   /** Re-reads a chat's worktree shortly after one of its agent's tool steps or turns ends. */
   observe(chatId, event) {
+    if (this.closed) return;
     if (event.type !== "step-completed" && !isTurnEnd(event)) return;
     clearTimeout(this.timers.get(chatId));
     const timer = setTimeout(() => {
@@ -32,7 +33,14 @@ class DiffRefresher {
   }
 
   /** Re-reads every project read this run, at most once per throttle period. */
+  close() {
+    this.closed = true;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+  }
+
   focused() {
+    if (this.closed) return;
     if (this.now() - this.lastFocus < this.throttleMs) return;
     this.lastFocus = this.now();
     for (const projectPath of this.states.projects()) void this.refresh(projectPath).catch(() => {});
@@ -53,6 +61,7 @@ class DiffRefresher {
       const worktree = state.worktrees[id];
       return [id, worktree ? await this.readDiffStat(worktree.path, worktree.base).catch(() => null) : null];
     }));
+    if (this.closed) return;
     // Applied to the latest state: turns may have finished while git ran.
     await this.update(projectPath, (latest) => withDiffStats(latest, Object.fromEntries(stats)));
   }

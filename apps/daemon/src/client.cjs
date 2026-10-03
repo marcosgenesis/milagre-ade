@@ -1,0 +1,49 @@
+const net = require('node:net');
+const { once, EventEmitter } = require('node:events');
+const { socketPath } = require('./paths.cjs');
+const { VERSION, MAX_PENDING, wire } = require('./protocol.cjs');
+
+async function connect({ dataDir, timeoutMs = 30000 }) {
+  const socket = net.createConnection(socketPath(dataDir));
+  const connecting = once(socket, 'connect');
+  const deadline = setTimeout(() => socket.destroy(new Error('Daemon connection timed out')), timeoutMs);
+  try { await connecting; } finally { clearTimeout(deadline); }
+  const client = new EventEmitter();
+  const pending = new Map();
+  let nextId = 0;
+  function fail(error) {
+    for (const { reject, timeout } of pending.values()) { clearTimeout(timeout); reject(error); }
+    pending.clear();
+  }
+  const connection = wire(socket, {
+    onInvalid(error) { fail(error); socket.destroy(); },
+    onMessage(message) {
+      if (message?.v !== VERSION) { fail(new Error('Incompatible daemon protocol')); socket.destroy(); return; }
+      if (message.event) { client.emit('event', message.event); return; }
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      clearTimeout(request.timeout);
+      if (message.error) request.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
+      else request.resolve(message.result);
+    },
+  });
+  socket.on('error', fail);
+  socket.on('close', () => { fail(new Error('Daemon connection closed')); client.emit('close'); });
+  client.call = (method, args = []) => new Promise((resolve, reject) => {
+    if (socket.destroyed) { reject(new Error('Daemon connection closed')); return; }
+    if (pending.size >= MAX_PENDING) { reject(new Error('Too many pending daemon requests')); return; }
+    const id = ++nextId;
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Timed out: ${method}. It may still be running; do not retry a mutation without checking state.`));
+    }, timeoutMs);
+    pending.set(id, { resolve, reject, timeout });
+    try {
+      if (!connection.send({ v: VERSION, id, method, args })) throw new Error('Daemon connection closed');
+    } catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
+  });
+  client.close = () => socket.destroy();
+  return client;
+}
+module.exports = { connect };

@@ -33,6 +33,7 @@ class ProjectStates {
    * change and whether it changed.
    */
   update(projectPath, change) {
+    if (this.closed) return Promise.reject(new Error("Project state is closed"));
     const run = (this.queues.get(projectPath) ?? Promise.resolve()).catch(() => {}).then(async () => {
       let state = this.states.get(projectPath);
       if (state === undefined) {
@@ -55,6 +56,11 @@ class ProjectStates {
     };
     run.then(forget, forget);
     return run;
+  }
+
+  close() {
+    this.closed = true;
+    return this.flush();
   }
 
   /** Waits for every change already asked for. */

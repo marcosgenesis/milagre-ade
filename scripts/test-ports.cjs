@@ -56,7 +56,7 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 // A fake agent with an MCP-like child in its own group and a command shell that starts a server in the background.
 async function realProcessCheck() {
   const { spawn } = require("node:child_process");
-  const { PortWatcher } = require("../apps/desktop/electron/agents/ports.cjs");
+  const { PortWatcher } = require("../packages/core/src/agents/ports.cjs");
   const agentSource = `
     const { spawn } = require("node:child_process");
     const net = require("node:net");

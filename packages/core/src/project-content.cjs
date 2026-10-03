@@ -1,6 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { decodeImages } = require('./image-input.cjs');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
@@ -21,12 +21,16 @@ async function writeContent(projectPath, folder, bytes, extension) {
   const directory = await contentDirectory(projectPath, folder);
   const name = `${digest(bytes)}.${extension}`;
   const file = path.join(directory, name);
-  try { await fs.writeFile(file, bytes, { flag: 'wx', mode: 0o600 }); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    const real = await fs.realpath(file);
-    if (!inside(directory, real) || digest(await fs.readFile(real)) !== digest(bytes)) throw new Error('Stored Project content does not match its reference');
-  }
+  const temporary = path.join(directory, `.${name}.${randomUUID()}.tmp`);
+  try {
+    await fs.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
+    try { await fs.link(temporary, file); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const real = await fs.realpath(file);
+      if (!inside(directory, real) || digest(await fs.readFile(real)) !== digest(bytes)) throw new Error('Stored Project content does not match its reference');
+    }
+  } finally { await fs.rm(temporary, { force: true }); }
   return file;
 }
 
@@ -66,10 +70,11 @@ async function compactSubagents(projectPath, state) {
     if (!session.subagents?.length) { sessions[id] = session; continue; }
     const subagents = [];
     for (const agent of session.subagents) {
-      if (agent.transcriptFile || !agent.transcript?.length) { subagents.push(agent); continue; }
+      if (!agent.transcript?.length) { subagents.push(agent); continue; }
       const file = await writeContent(projectPath, 'subagents', JSON.stringify(agent.transcript), 'json');
       const last = agent.transcript.at(-1);
-      subagents.push({ ...agent, transcriptFile: path.basename(file), transcript: [{ ...last, text: last.text.slice(-1000) }] });
+      const refs = [...new Set([...(agent.transcriptFiles ?? []), agent.transcriptFile].filter(ref => ref && ref !== path.basename(file)))];
+      subagents.push({ ...agent, transcriptFile: path.basename(file), ...(refs.length ? { transcriptFiles: refs } : {}), transcript: [{ ...last, text: last.text.slice(-1000), compact: true }] });
     }
     sessions[id] = { ...session, subagents };
   }
@@ -77,21 +82,34 @@ async function compactSubagents(projectPath, state) {
 }
 
 async function hydrateSubagents(projectPath, state) {
+  const validName = name => typeof name === 'string' && /^[a-f0-9]{64}\.json$/.test(name);
   for (const session of Object.values(state.sessions ?? {})) {
     for (const agent of session.subagents ?? []) {
-      if (!/^[a-f0-9]{64}\.json$/.test(agent.transcriptFile ?? '')) continue;
-      try {
-        const directory = await contentDirectory(projectPath, 'subagents');
-        const file = await fs.realpath(path.join(directory, agent.transcriptFile));
-        if (!inside(directory, file)) continue;
-        const bytes = await fs.readFile(file);
-        if (digest(bytes) + '.json' !== agent.transcriptFile) continue;
-        const transcript = JSON.parse(bytes);
-        if (Array.isArray(transcript) && transcript.every(row => typeof row.id === 'string' && typeof row.text === 'string' && ['message','tool'].includes(row.kind))) {
-          agent.transcript = transcript;
-          delete agent.transcriptFile;
-        }
-      } catch { /* A missing/corrupt sidecar leaves the saved summary visible. */ }
+      const refs = [...new Set([...(agent.transcriptFiles ?? []), agent.transcriptFile].filter(validName))];
+      if (!refs.length) continue;
+      const entries = new Map();
+      const missing = [];
+      const merge = rows => {
+        for (const row of rows) if (!row.compact || !entries.has(row.id)) entries.set(row.id, row);
+      };
+      for (const ref of refs) {
+        try {
+          const directory = await contentDirectory(projectPath, 'subagents');
+          const file = await fs.realpath(path.join(directory, ref));
+          if (!inside(directory, file)) throw new Error('Invalid transcript path');
+          const bytes = await fs.readFile(file);
+          if (digest(bytes) + '.json' !== ref) throw new Error('Invalid transcript hash');
+          const transcript = JSON.parse(bytes);
+          if (!Array.isArray(transcript) || !transcript.every(row => typeof row.id === 'string' && typeof row.text === 'string' && ['message','tool'].includes(row.kind))) throw new Error('Invalid transcript');
+          merge(transcript);
+        } catch { missing.push(ref); }
+      }
+      // Compact summaries never replace a recovered complete entry with the same id.
+      merge(agent.transcript ?? []);
+      agent.transcript = [...entries.values()];
+      delete agent.transcriptFile;
+      if (missing.length) agent.transcriptFiles = missing;
+      else delete agent.transcriptFiles;
     }
   }
   return state;

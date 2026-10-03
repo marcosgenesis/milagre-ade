@@ -621,3 +621,37 @@ test('sending an image stores its bytes before the provider starts and keeps ori
  assert.equal(stored.dataUrl,undefined);assert.equal(path.dirname(stored.path),path.join(root,'.milagre','images'));
  assert.ok((await fs.stat(stored.path)).size>0);assert.deepEqual(request.images,[image]);
 });
+
+function durableHarness() {
+ let fail=false,blocked=null;const saved=[];const published=[];const started=[];
+ const states=new ProjectStates({read:async p=>projectState(p),save:async(_p,state)=>{if(blocked)await blocked;if(fail)throw new Error('disk full');saved.push(state);}});
+ const host=new ChatHost({states,startTurn:async r=>{started.push(r);},publish:(chatId,event,state,seq)=>published.push({chatId,event,state,seq}),broadcast:(path,state)=>published.push({path,state})});
+ return {host,states,saved,published,started,fail:value=>fail=value,block:value=>blocked=value};
+}
+
+test('a slow send does not publish old state after a concurrent turn finishes',async()=>{
+ const h=durableHarness();const first=await h.host.send(message(ALPHA,'First'));const chatId=ALPHA+'#'+first.sessionId;
+ await h.host.receive(chatId,{type:'turn-started',turnId:'t'});await h.host.receive(chatId,{type:'text-delta',text:'First reply'});
+ let release;h.block(new Promise(resolve=>release=resolve));const send=h.host.send(message(ALPHA,'Follow-up',{sessionId:first.sessionId}));
+ for(let i=0;i<20;i++)await Promise.resolve();
+ await h.host.receive(chatId,{type:'text-delta',text:' complete.'});await h.host.receive(chatId,{type:'turn-completed'});
+ h.block(null);release();await send;
+ const seq=h.published.filter(x=>x.seq!==undefined).map(x=>x.seq);assert.deepEqual(seq,[...seq].sort((a,b)=>a-b));
+ const latest=h.published.filter(x=>x.state).at(-1).state;assert.ok(latest.messages.some(m=>m.body==='First reply complete.'));
+ assert.equal(h.started.length,2);await h.states.close();
+});
+
+test('a rejected send removes its undelivered message and never leaves a phantom run',async()=>{
+ const h=durableHarness();h.fail(true);await assert.rejects(h.host.send(message(ALPHA,'Retry me')),/disk full/);
+ assert.deepEqual(h.host.runs,{});assert.deepEqual((await h.states.get(ALPHA)).messages,[]);assert.equal(h.started.length,0);
+ h.fail(false);await h.host.send(message(ALPHA,'Retry me'));assert.equal((await h.states.get(ALPHA)).messages.length,1);assert.equal(h.started.length,1);await h.states.close();
+});
+
+test('a rejected answer preserves the question, current reply and concurrent tokens',async()=>{
+ const h=durableHarness();const {sessionId}=await h.host.send(message(ALPHA,'Ask me'));const chatId=ALPHA+'#'+sessionId;
+ await h.host.receive(chatId,{type:'text-delta',text:'Question'});await h.host.receive(chatId,{type:'question-request',requestId:'q',questions:[]});
+ let release;h.block(new Promise(resolve=>release=resolve));h.fail(true);const answer=h.host.recordAnswers(chatId,'My answer');
+ for(let i=0;i<20;i++)await Promise.resolve();await h.host.receive(chatId,{type:'text-delta',text:' details'});
+ h.block(null);release();await assert.rejects(answer,/disk full/);assert.equal(h.host.runs[chatId].text,'Question details');assert.equal(h.host.runs[chatId].questions[0].requestId,'q');
+ assert.equal((await h.states.get(ALPHA)).messages.length,1);h.fail(false);await h.states.close();
+});

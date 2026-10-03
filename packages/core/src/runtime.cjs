@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
+const { migrateImages } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -107,11 +108,8 @@ function createRuntime(options) {
   const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
 
   async function discoverWorktrees(projectPath) {
-    try {
-      return await git.worktreeList(projectPath);
-    } catch {
-      return [];
-    }
+    // A failed read is not evidence that every Worktree was removed.
+    return git.worktreeList(projectPath);
   }
 
   async function readStoredState(projectPath) {
@@ -147,8 +145,8 @@ function createRuntime(options) {
   // the mutation queue, so other Chats continue receiving streaming events.
   async function editProject(projectPath, change) {
     const result = await states.update(projectPath, change);
-    await states.flush(projectPath);
     if (result.changed) broadcastProjectState(projectPath, result.state);
+    await states.flush(projectPath);
   }
 
   const diffs = new DiffRefresher({ states, readDiffStat, update: updateProject });
@@ -163,9 +161,9 @@ function createRuntime(options) {
       const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
       return Boolean(entry && !entry.session.closed);
     };
-    let state = await updateProject(projectPath, (current) => {
+    let state = await updateProject(projectPath, async (current) => {
       const next = reconcileState(current, projectName(projectPath), discovered);
-      return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
+      return migrateImages(projectPath, markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live))));
     });
     // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
@@ -536,25 +534,34 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      // Accepted commands may still be creating a Chat or changing settings.
       await Promise.allSettled([...active]);
       keepAwake.quit();
       ports.close();
       diffs.close();
-      await chats.suspendRunning();
-      await states.flush();
-      await Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]);
-      await Promise.allSettled([...starting]);
-      await agents.closeAll();
-      await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+      if (!states.closed) {
+        await chats.suspendRunning();
+        // A failed early save must not leave provider processes running. The
+        // final flush retries after their cancellation events have been recorded.
+        await states.flush().catch(() => {});
+        await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
+        await Promise.allSettled([...starting]);
+        await agents.closeAll();
+        await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+      }
       await states.close();
       await usageStore.idle();
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();
-    })();
+    })().catch(error => {
+      // Retain ownership and unsaved memory until the host reports the error and
+      // retries. A rejected Promise must not permanently disable that retry.
+      closed = undefined;
+      throw error;
+    });
     return closed;
   }
+
   return {
     methods: Object.freeze([...handlers.keys()]),
     invoke(method, args = []) {

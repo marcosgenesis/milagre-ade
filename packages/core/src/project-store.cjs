@@ -19,9 +19,6 @@ async function saveProjectState(projectPath, state) {
   }
 }
 async function readProjectState(projectPath) {
-  const state = await hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
-  const migrated = await migrateImages(projectPath, state);
-  if (migrated !== state) await saveProjectState(projectPath, migrated);
-  return migrated;
+  return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
 }
 module.exports = { saveProjectState, readProjectState, stateFile };

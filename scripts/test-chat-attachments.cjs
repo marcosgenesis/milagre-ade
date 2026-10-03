@@ -27,6 +27,8 @@ window.emitAgent = event => {
 window.milagre = new Proxy({
  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
  getAgentPorts: async () => ({}),
+ onQuitFailed: fn => {window.quitFailed=fn;return ()=>{};},
+ retryQuit: async () => {window.retriedQuit=true;},
  showImageMenu: async (file, name) => { (window.imageMenus ??= []).push([file, name]); },
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
@@ -241,6 +243,11 @@ async function browserChecks() {
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("milagre-settings")).showDockBadge'), false, 'Notification preferences persist');
   await evaluate('window.openNotification("/other#10")');
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Notification destination")`);
+  await evaluate(`window.quitFailed('disk full')`);
+  await waitFor(`document.querySelector('[role=alertdialog]')?.textContent.includes('Chats could not be saved')`);
+  await screenshot('save-failure-retry');
+  await evaluate(`document.querySelector('[role=alertdialog] button').click()`);
+  assert.equal(await evaluate('window.retriedQuit'),true);
   console.log('PASS: native picker trigger, file-only send, saved attachments, image/video lightbox (counter, arrows, click to zoom, click outside to close, right-click copy/save, focus return), Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
   app.exit(0);
  } catch(error) { console.error(error); console.error(errors); console.error(await evaluate(`(() => { const v = document.querySelector('dialog video'); return v ? { src:v.src, error:v.error?.message, code:v.error?.code, ready:v.readyState, network:v.networkState } : null; })()`)); app.exit(1); }

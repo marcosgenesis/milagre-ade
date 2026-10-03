@@ -186,6 +186,7 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       if (previous && previous.updatedAt > event.agent.updatedAt) return { state, runs, changed: false };
       // A resumed provider can rediscover a child before it has replayed the earlier output.
       const agent = previous ? {
+        ...previous,
         ...event.agent,
         archived: previous.archived,
         title: event.agent.title === "Subagent" ? previous.title : event.agent.title,

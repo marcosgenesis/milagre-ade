@@ -108,3 +108,11 @@ test('socket is private and rejects incompatible, malformed and oversized reques
     socket.destroy();
   }
 });
+
+test('a failed daemon stop reports the save error and permits a retry after recovery',async t=>{
+ const {project,sessions,client}=await fixture(t);const first=await client();const opened=await first.call('project:open',[project]);const session=Object.values(opened.state.sessions)[0];
+ await first.call('chat:send',[{projectPath:project,sessionId:session.id,body:'Keep me',provider:'codex',model:'test'}]);await waitFor(()=>sessions.length===1);
+ const rename=fs.rename;let fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
+ try {await assert.rejects(first.call('daemon:stop'),/disk full/);assert.equal(sessions[0].closed,true);} finally {fail=false;}
+ assert.equal((await first.call('daemon:stop')).stopping,true);
+});

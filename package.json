@@ -42,7 +42,11 @@
     "test:desktop": "node scripts/test-desktop.cjs",
     "test:core": "npm run test --workspace @milagre/core",
     "daemon": "node apps/daemon/src/cli.cjs",
-    "test:daemon": "npm run test --workspace @milagre/daemon"
+    "test:daemon": "npm run test --workspace @milagre/daemon",
+    "mobile": "npm run start --workspace @milagre/mobile",
+    "mobile:demo": "node scripts/mobile-demo.cjs",
+    "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
+    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",

@@ -52,6 +52,12 @@ test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported r
     req.on('error', reject);
   });
   assert.equal(hostileHost, 403);
+  const androidHost = await new Promise((resolve, reject) => {
+    const req = http.request(bridge.url + '/rpc', { method: 'POST', headers: { host: `10.0.2.2:${new URL(bridge.url).port}`, authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, res => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+    req.end(JSON.stringify({ v: 1, method: 'daemon:status', args: [] }));
+  });
+  assert.equal(androidHost, 200);
   assert.equal((await rpc('worktree:remove', ['/tmp/nope'])).status, 403);
   assert.equal((await rpc('daemon:stop')).status, 403);
   assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status, 400);

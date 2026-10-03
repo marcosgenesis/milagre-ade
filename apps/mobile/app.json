@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Milagre Local",
+    "slug": "milagre-local",
+    "scheme": "milagre-local",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/milagre.png",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.milagre.mobile"
+    },
+    "android": {
+      "package": "com.milagre.mobile"
+    }
+  }
+}

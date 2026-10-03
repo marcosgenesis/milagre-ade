@@ -27,7 +27,9 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
     void (async () => {
       const received = Buffer.from(req.headers.authorization ?? '');
       if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw failure(401, 'Connection token is missing or incorrect');
-      if (req.headers.origin || req.headers.host !== new URL(url).host) throw failure(403, 'Only a native localhost client is supported');
+      const address = new URL(url);
+      // Android's emulator maps 10.0.2.2 to this host's loopback interface.
+      if (req.headers.origin || ![address.host, `10.0.2.2:${address.port}`].includes(req.headers.host)) throw failure(403, 'Only a native localhost client is supported');
       if (closed) throw failure(503, 'Bridge is closing');
       if (active >= 16) throw failure(429, 'Too many pending requests');
       active++;

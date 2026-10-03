@@ -44,3 +44,7 @@ When changing the UI, include a short description of the interaction and, when p
 ## Commit messages
 
 Pull Request titles are used to calculate automated releases. Use a short title such as `feat: add approval state for file edits` or `fix: prevent duplicate agent responses`.
+
+## Local mobile preview
+
+Run `npm run mobile:demo` to try the Expo client with an isolated local daemon and demo agent. See [simulator setup and real-provider instructions](docs/mobile-local.md). The existing desktop commands keep their behavior.

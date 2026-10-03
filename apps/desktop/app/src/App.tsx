@@ -1050,7 +1050,7 @@ function App() {
     {quitError && <dialog ref={element => { if (element && !element.open) element.showModal(); }} onCancel={event => event.preventDefault()} className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex" role="alertdialog" aria-modal="true" aria-labelledby="save-failure-title">
       <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
         <h2 id="save-failure-title" className="text-lg font-semibold">Chats could not be saved</h2>
-        <p className="mt-3 text-sm">Your agents have stopped. Keep Milagre open while you fix the storage problem, then retry saving.</p>
+        <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
         <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
         <button autoFocus className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface" onClick={() => void window.milagre.retryQuit().catch(error => setQuitError(ipcErrorMessage(error)))}>Retry saving and quit</button>
       </div>

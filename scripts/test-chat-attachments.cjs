@@ -64,7 +64,7 @@ async function browserChecks() {
  const { app, BrowserWindow, protocol, net, session } = require('electron');
  protocol.registerSchemesAsPrivileged([{ scheme: 'milagre-media', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
  await app.whenReady();
- const handleMedia = require('../electron/media.cjs').createMediaHandler((url, options) => net.fetch(url, options));
+ const handleMedia = require('../apps/desktop/electron/media.cjs').createMediaHandler((url, options) => net.fetch(url, options));
  session.fromPartition('issues-test').protocol.handle('milagre-media', request => {
    const url = new URL(request.url);
    url.searchParams.set('path', path.join(__dirname, 'fixtures', path.basename(url.searchParams.get('path'))));

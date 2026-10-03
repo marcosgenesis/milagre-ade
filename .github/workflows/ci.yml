@@ -27,5 +27,9 @@ jobs:
         run: npm run build
       - name: Test agent runner
         run: npm run test:agent
+      - name: Test UI logic
+        run: npm run test:ui
+      - name: Test workspace and packaging contracts
+        run: npm run test:monorepo
       - name: Test release safeguards
         run: npm run test:release

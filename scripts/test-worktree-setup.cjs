@@ -12,7 +12,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "/src/styles.css";
 // The main process's reducer, so agent events are saved into the state as ChatHost saves them.
-import { applyAgentEvent } from "/@fs${require("node:path").resolve(__dirname, "../electron/shared/agent-runs.mjs")}";
+import { applyAgentEvent } from "@milagre/shared/agent-runs";
 // A project's state as the main process reads it.
 const state = { next_id: 1, projects: { 1: { id: 1, name: "shop" } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } };

@@ -4,6 +4,7 @@ const path = require("node:path");
 const { spawn, execFileSync } = require("node:child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
+const desktopRoot = path.join(projectRoot, "apps", "desktop");
 const electronBinary = require("electron");
 const sourceApp = path.resolve(electronBinary, "../../..");
 const runtimeRoot = path.join(projectRoot, ".milagre", "runtime");
@@ -12,7 +13,7 @@ const appContents = path.join(appBundle, "Contents");
 const appMacOS = path.join(appContents, "MacOS");
 const appResources = path.join(appContents, "Resources");
 const infoPlist = path.join(appContents, "Info.plist");
-const iconSource = path.join(projectRoot, "app", "public", "logo-milagre-image.png");
+const iconSource = path.join(desktopRoot, "app", "public", "logo-milagre-image.png");
 const iconset = path.join(runtimeRoot, "Milagre.iconset");
 const iconFile = path.join(appResources, "Milagre.icns");
 const appExecutable = path.join(appMacOS, "Electron");
@@ -60,7 +61,7 @@ async function main() {
   if (process.platform === "darwin") await prepareMacBundle();
 
   const executable = process.platform === "darwin" ? appExecutable : electronBinary;
-  const child = spawn(executable, [projectRoot], {
+  const child = spawn(executable, [desktopRoot], {
     cwd: projectRoot,
     env: process.env,
     stdio: "inherit",

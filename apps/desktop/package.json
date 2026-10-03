@@ -1,0 +1,44 @@
+{
+  "name": "milagre",
+  "productName": "Milagre",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5180\" \"wait-on http://127.0.0.1:5180 && MILAGRE_DEV_SERVER_URL=http://127.0.0.1:5180 node ../../scripts/launch-electron.cjs\"",
+    "start": "node ../../scripts/launch-electron.cjs",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test:agent": "node --test electron/*.test.cjs electron/agents/*.test.cjs app/src/lib/*.test.ts",
+    "test:ui": "node --test \"app/src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@milagre/shared": "0.1.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.286",
+    "@hugeicons/core-free-icons": "^4.3.5",
+    "@hugeicons/react": "^1.1.10",
+    "electron-updater": "^6.8.9",
+    "motion": "^13.4.6",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.5.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.2.1",
+    "electron": "^44.5.1",
+    "postcss": "^8.5.28",
+    "shadow-plugin": "^2.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7",
+    "wait-on": "^8.0.4"
+  }
+}

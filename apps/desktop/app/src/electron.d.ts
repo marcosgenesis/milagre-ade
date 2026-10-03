@@ -1,4 +1,4 @@
-export {};
+import type { Result } from "@milagre/shared/result";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
@@ -90,8 +90,8 @@ declare global {
       };
       /** Code editors found on this Mac, in the order the first becomes the default. */
       listEditors: () => Promise<EditorInfo[]>;
-      /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Resolves to null, or a short error message. */
-      openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<string | null>;
+      /** Opens a file (or, with no path, the folder) in an editor. `path` is relative to `root`. Returns a Result with a failure code and message. */
+      openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<Result<null>>;
       getCurrentProject: () => Promise<OpenProject>;
       openProject: () => Promise<OpenProject | null>;
       /** Projects opened lately, most recent first; folders that are gone are left out. */

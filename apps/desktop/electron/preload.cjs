@@ -1,6 +1,9 @@
+// @ts-check
+/** @typedef {import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
-contextBridge.exposeInMainWorld("milagre", {
+/** @type {Window["milagre"]} */
+const bridge = {
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   onRuntimeConnection: (callback) => {
     const listener = (_event, state) => callback(state);
@@ -111,4 +114,5 @@ contextBridge.exposeInMainWorld("milagre", {
     ipcRenderer.on("notification:open-chat", listener);
     return () => ipcRenderer.removeListener("notification:open-chat", listener);
   },
-});
+};
+contextBridge.exposeInMainWorld("milagre", bridge);

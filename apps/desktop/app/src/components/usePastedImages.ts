@@ -1,10 +1,10 @@
+import { MAX_IMAGE_BYTES, MAX_IMAGES, IMAGE_TYPES, IMAGE_ERRORS } from "@milagre/shared/limits";
 import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { ImageAttachment } from "../model";
 
-const TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-export const MAX_IMAGES = 4;
+const TYPES = new Set(IMAGE_TYPES);
+export { MAX_IMAGE_BYTES, MAX_IMAGES } from "@milagre/shared/limits";
 
 export function isAttachableImage(file: File): boolean {
   return TYPES.has(file.type) && file.size <= MAX_IMAGE_BYTES;
@@ -45,9 +45,9 @@ export function usePastedImages(scope: string) {
     if (!files.length) return;
     setError("");
     if (reading.current) { setError("Wait for the current image to finish loading, then try again."); return; }
-    if (files.some((file) => !TYPES.has(file.type))) { setError("Use PNG, JPEG, WebP, or GIF images."); return; }
-    if (files.some((file) => file.size > MAX_IMAGE_BYTES)) { setError("Each image must be 5 MB or smaller."); return; }
-    if (images.length + files.length > MAX_IMAGES) { setError("Attach up to 4 images per message."); return; }
+    if (files.some((file) => !TYPES.has(file.type))) { setError(IMAGE_ERRORS.type); return; }
+    if (files.some((file) => file.size > MAX_IMAGE_BYTES)) { setError(IMAGE_ERRORS.size); return; }
+    if (images.length + files.length > MAX_IMAGES) { setError(IMAGE_ERRORS.count); return; }
     const current = generation.current;
     reading.current = true;
     setLoading(true);

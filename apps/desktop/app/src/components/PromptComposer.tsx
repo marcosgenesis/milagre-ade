@@ -1,3 +1,4 @@
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -362,7 +363,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
                 />
               ) : (
                 <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                      {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
+                      {PROVIDERS.map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${providerName(lockedProvider)}. Start a new chat to use ${providerName(item)}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{providerName(item)}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
                 </div>
               )
             }
@@ -386,7 +387,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
                           <span>Updating…</span>
                         </>
                       ) : (
-                        <span>Update {provider === "codex" ? "Codex" : "Claude"}</span>
+                        <span>Update {providerName(provider)}</span>
                       )}
                     </button>
                   </div>

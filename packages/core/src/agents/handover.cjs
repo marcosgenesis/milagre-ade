@@ -1,3 +1,4 @@
+const { providerName } = require("@milagre/shared/providers");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -17,7 +18,6 @@ const SYSTEM = [
   "with these sections: Goal, Decisions (with the reason for each), Files touched, Current state, Next steps.",
 ].join(" ");
 
-const providerName = (provider) => (provider === "codex" ? "Codex" : "Claude");
 
 function stepLine(step) {
   const notes = [step.status === "failed" ? "failed" : null, step.note, step.file].filter(Boolean);

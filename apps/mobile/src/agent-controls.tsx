@@ -1,6 +1,9 @@
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
+import { effortFor } from "@milagre/shared/model-options";
+import { PERMISSION_MODES, effortCopy } from "@milagre/shared/model-copy";
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { PERMISSION_MODES, effortCopy, effortFor, type AgentCliStatus, type AgentModels, type ModelProvider, type PermissionMode } from '@milagre/shared/model';
+import { type AgentCliStatus, type AgentModels, type ModelProvider, type PermissionMode } from '@milagre/shared/model';
 import { modelsFor, type MobileModel, type TurnPreferences } from './turn-options';
 import { Icon, Sheet, Toggle, Select, colors, styles } from './ui';
 
@@ -14,7 +17,7 @@ export function AgentControls({ model, preferences, reported, status, lockedProv
     <Sheet title="Agent settings" visible={expanded} close={() => setExpanded(false)}>
       {cli && cli.state !== 'ready' && <Text style={styles.muted}>{cli.message || `Agent ${cli.state}`}</Text>}
       {disabled && <Text style={styles.muted}>Settings can be changed when this turn finishes.</Text>}
-      {!lockedProvider && <Select label="Agent" value={model.provider} disabled={disabled} options={[{ value: 'codex', title: 'Codex' }, { value: 'claude', title: 'Claude' }]} onChange={value => onChange({ provider: value as ModelProvider, model: '', fastMode: false })} />}
+      {!lockedProvider && <Select label="Agent" value={model.provider} disabled={disabled} options={PROVIDERS.map(value => ({ value, title: providerName(value) }))} onChange={value => onChange({ provider: value as ModelProvider, model: '', fastMode: false })} />}
       <Select label="Model" value={model.id} disabled={disabled} options={models.map(item => ({ value: item.id, title: item.name, description: item.description }))} onChange={value => onChange({ model: value })} />
       {model.efforts.length > 0 && <Select label="Effort" value={effortFor(model, preferences.effort) || ''} disabled={disabled} options={model.efforts.map(value => ({ value, title: effortCopy(value).name, description: effortCopy(value).description }))} onChange={effort => onChange({ effort })} />}
       {model.fastMode && !disabled && <View style={{ gap: 6 }}><Toggle title="Fast mode" selected={preferences.fastMode} onPress={() => onChange({ fastMode: !preferences.fastMode })} /><Text style={styles.muted}>Faster output uses higher provider rates.</Text></View>}

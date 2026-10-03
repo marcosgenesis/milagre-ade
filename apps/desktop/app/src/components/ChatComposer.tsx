@@ -1,3 +1,4 @@
+import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, Subagent } from "../model";
@@ -143,10 +144,10 @@ const MessageSection = memo(function MessageSection({
               {updatingCli === outdatedProvider ? (
                 <>
                   <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
-                  <span>Updating {outdatedProvider === "codex" ? "Codex" : "Claude"}…</span>
+                  <span>Updating {providerName(outdatedProvider)}…</span>
                 </>
               ) : (
-                <span>Update {outdatedProvider === "codex" ? "Codex" : "Claude"} now</span>
+                <span>Update {providerName(outdatedProvider)} now</span>
               )}
             </button>
           </div>

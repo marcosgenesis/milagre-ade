@@ -1,4 +1,6 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, protocol, net } = require("electron");
+// @ts-check
+const { createEditorOpener } = require("./editor-open.cjs");
+const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -54,15 +56,15 @@ ipcMain.handle("update:install", async () => {
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
 // An image in a chat, generated or attached: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
-const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.writeImage(image) });
-const saveImageFile = (event, file, name) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) }, name);
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.write([new ClipboardItem({ "image/png": new Blob([new Uint8Array(image.toPNG())], { type: "image/png" }) })]) });
+const saveImageFile = (event, file, name) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => BrowserWindow.fromWebContents(event.sender) ? dialog.showSaveDialog(/** @type {Electron.BrowserWindow} */ (BrowserWindow.fromWebContents(event.sender)), options) : dialog.showSaveDialog(options) }, name);
 ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
 ipcMain.handle("image:save", (event, file, name) => saveImageFile(event, file, name));
 ipcMain.handle("image:menu", (event, file, name) => {
   Menu.buildFromTemplate([
     { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
     { label: "Save Image…", click: () => void saveImageFile(event, file, name).catch(() => {}) },
-  ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
+  ]).popup({ window: BrowserWindow.fromWebContents(event.sender) ?? undefined });
 });
 
 // Installed editors are looked up once per run.
@@ -74,11 +76,8 @@ const editors = () => (editorsFound ??= environmentReady.then(() => detectEditor
   throw error;
 }));
 ipcMain.handle("editor:list", async () => (await editors()).map(({ id, name }) => ({ id, name })));
-// Resolves to null on success, or a short message to show as a notice.
-ipcMain.handle("editor:open", async (_event, request) => {
-  if (!request || typeof request.root !== "string") return "File not found";
-  return openInEditor({ root: request.root, path: request.path, line: request.line, editor: request.editor }, { editors: await editors() });
-});
+const openEditor = createEditorOpener({ editors, open: openInEditor });
+ipcMain.handle("editor:open", (_event, request) => openEditor(request));
 
 // Brings the window back from a notification click and opens the chat it was about.
 function openChatFromNotification(chatId) {
@@ -133,7 +132,7 @@ runtime = await connectDesktopRuntime({
   },
 });
 } catch (error) {
-  void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error.message); app.quit(); });
+  void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error instanceof Error ? error.message : String(error)); app.quit(); });
   return;
 }
 const environmentReady = loadLoginEnvironment();

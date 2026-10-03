@@ -3,11 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
-  "exports": { "./*": "./src/*.cjs", "./package.json": "./package.json" },
+  "exports": {
+    "./*": "./src/*.cjs",
+    "./package.json": "./package.json",
+    "./bootstrap": {
+      "types": "./src/bootstrap.d.cts",
+      "default": "./src/bootstrap.cjs"
+    }
+  },
   "scripts": {
     "start": "node src/cli.cjs",
     "test": "node --test src/*.test.cjs"
   },
-  "dependencies": { "@milagre/core": "0.1.0" },
-  "engines": { "node": ">=24" }
+  "dependencies": {
+    "@milagre/core": "0.1.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
 }

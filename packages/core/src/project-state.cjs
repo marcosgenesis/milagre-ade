@@ -7,14 +7,8 @@ function emptyState(projectName) {
     projects: { 1: { id: 1, name: projectName } },
     worktrees: {},
     sessions: {},
-    connections: {},
-    events: [],
     messages: [],
-    approvals: [],
     tasks: {},
-    artifacts: {},
-    outputs: [],
-    conflicts: [],
   };
 }
 
@@ -56,11 +50,11 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     projects: { 1: { id: 1, name: projectName } },
     worktrees,
     sessions,
-    connections: Object.fromEntries(Object.entries(state.connections ?? {}).filter(([, connection]) => validWorktreeIds.has(connection.left_worktree_id) && validWorktreeIds.has(connection.right_worktree_id))),
-    events,
+    ...(state.connections ? { connections: Object.fromEntries(Object.entries(state.connections ?? {}).filter(([, connection]) => validWorktreeIds.has(connection.left_worktree_id) && validWorktreeIds.has(connection.right_worktree_id))) } : {}),
+    ...(state.events ? { events } : {}),
     messages: (state.messages ?? []).filter((message) => validSessionIds.has(message.session_id)),
     tasks,
-    artifacts,
+    ...(state.artifacts ? { artifacts } : {}),
   };
   return rawState && JSON.stringify(next) === JSON.stringify(rawState) ? rawState : next;
 }

@@ -61,3 +61,16 @@ test("a pasted image's data URL copies and saves without a file", async (t) => {
   assert.equal(imageData("data:text/html;base64,PGI+"), null);
   await assert.rejects(copyImage("data:text/html;base64,PGI+", { createFromPath: () => ({ isEmpty: () => false }), writeImage: () => {} }), /Not an image/);
 });
+
+test('copyImage waits for the asynchronous clipboard write and reports rejection', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const image = { isEmpty: () => false };
+  const input = 'data:image/png;base64,cG5n';
+  let done = false;
+  const copying = copyImage(input, { createFromBuffer: () => image, writeImage: () => pending }).then(() => { done = true; });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(done, false);
+  finish(); await copying; assert.equal(done, true);
+  await assert.rejects(copyImage(input, { createFromBuffer: () => image, writeImage: async () => { throw new Error('Clipboard blocked'); } }), /Clipboard blocked/);
+});

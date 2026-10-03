@@ -1,8 +1,8 @@
+import { providerName } from "./providers.mjs";
 // System notifications for chats that wait on the user, built by the main process, which sees every
 // project's chats (see notifications.cjs). Types: attention.d.mts.
 import { chatTitle } from "./chats.mjs";
 
-const AGENT_NAMES = { claude: "Claude", codex: "Codex" };
 
 /**
  * The notification for an approval or question a turn waits on, e.g. "shop / fix-login - Claude needs input",
@@ -11,7 +11,7 @@ const AGENT_NAMES = { claude: "Claude", codex: "Codex" };
 export function attentionNotice(event, context) {
   if (event.type !== "permission-request" && event.type !== "question-request") return null;
   const where = context.worktreeName && context.worktreeName !== context.projectName ? `${context.projectName} / ${context.worktreeName}` : context.projectName;
-  const agent = context.provider ? AGENT_NAMES[context.provider] : "Agent";
+  const agent = context.provider ? providerName(context.provider) : "Agent";
   const subtitle = context.chatTitle || undefined;
   if (event.type === "question-request") {
     const [first, ...rest] = event.questions;

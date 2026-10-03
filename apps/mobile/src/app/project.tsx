@@ -1,3 +1,4 @@
+import { providerName } from "@milagre/shared/providers";
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { Redirect, Stack, router } from 'expo-router';
@@ -16,7 +17,7 @@ export default function ProjectScreen() {
     <Toggle title="Show archived Chats" selected={archived} onPress={() => setArchived(!archived)} />
     {session.error ? <ErrorNotice message={session.error} retry={() => router.push('/')} /> : null}
     {worktrees.map(worktree => <View style={styles.card} key={worktree.id}><Text style={styles.label}>Worktree</Text><Text style={styles.subtitle}>{worktree.name}</Text><WorktreeStatus worktree={worktree} />
-      {chats.filter(chat => chat.worktree_id === worktree.id).map(chat => { const run = runs.runs[`${project.path}#${chat.id}`]; return <View key={chat.id}><ListRow title={chat.title || chat.generatedTitle || chat.agent_name || 'Chat'} subtitle={chat.provider === 'claude' ? 'Claude' : chat.provider === 'codex' ? 'Codex' : 'New Chat'} onPress={() => router.push({ pathname: '/chat', params: { id: String(chat.id) } })} /><ChatStatus chat={chat} run={run} messages={project.state.messages.filter(message => message.session_id === chat.id)} /><AgentStatus agents={chat.subagents || []} /></View>; })}
+      {chats.filter(chat => chat.worktree_id === worktree.id).map(chat => { const run = runs.runs[`${project.path}#${chat.id}`]; return <View key={chat.id}><ListRow title={chat.title || chat.generatedTitle || chat.agent_name || 'Chat'} subtitle={chat.provider ? providerName(chat.provider) : 'New Chat'} onPress={() => router.push({ pathname: '/chat', params: { id: String(chat.id) } })} /><ChatStatus chat={chat} run={run} messages={project.state.messages.filter(message => message.session_id === chat.id)} /><AgentStatus agents={chat.subagents || []} /></View>; })}
       {!archived && <Button title="New Chat" onPress={() => router.push({ pathname: '/chat', params: { worktreeId: String(worktree.id) } })} />}
       <Button title="View changes" secondary onPress={() => router.push({ pathname: '/changes', params: { worktreeId: String(worktree.id) } })} />
     </View>)}

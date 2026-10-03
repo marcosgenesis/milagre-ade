@@ -1,3 +1,5 @@
+import { ipcErrorMessage } from "@milagre/shared/result";
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -113,11 +115,11 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
           width={280}
           value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
           onChange={(defaultModelId) => updateSettings({ defaultModelId })}
-          options={(["codex", "claude"] as const).flatMap((provider) => models.filter((model) => model.provider === provider).map((model) => ({
+          options={PROVIDERS.flatMap((provider) => models.filter((model) => model.provider === provider).map((model) => ({
             value: model.id,
             label: model.name,
             icon: <ProviderLogo provider={provider} size={14} />,
-            group: provider === "codex" ? "Codex" : "Claude",
+            group: providerName(provider),
           })))}
         />
       </Row>
@@ -303,7 +305,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     if (next === null) return;
     window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).then(
       () => setSaveError(null),
-      (error) => setSaveError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error)),
+      (error) => setSaveError(ipcErrorMessage(error)),
     );
   };
 
@@ -386,7 +388,6 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   );
 }
 
-const ipcMessage = (error: unknown) => (error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
 
 /* ─────────────────────────────────────────────────────────
  * SETUP COMMAND
@@ -410,7 +411,7 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     window.milagre.saveWorktreeSetup(projectPath, next).then((saved) => {
       setResolved(saved);
       setError(null);
-    }, (failure) => setError(`Couldn't save: ${ipcMessage(failure)}`));
+    }, (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`));
   };
 
   // .milagre/worktree.json can change in an editor while Settings is open.
@@ -430,7 +431,7 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
       setText(saved.setupCommand);
       setResolved(saved);
     }, (failure) => {
-      if (!cancelled) setError(`Couldn't read the setup command: ${ipcMessage(failure)}`);
+      if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
     });
     // Leaving Settings saves what was typed last.
     return () => {

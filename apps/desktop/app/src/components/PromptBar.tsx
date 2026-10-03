@@ -1,3 +1,4 @@
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useMemo, useState } from "react";
 import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -80,9 +81,9 @@ export function PromptBar({
                 <Icon icon={SlidersHorizontalIcon} size={16} />
               </div>
               <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => (
+                {PROVIDERS.map((item) => (
                   <button key={item} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold transition-colors ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}>
-                    <ProviderIcon provider={item} size={14} /> {item === "codex" ? "Codex" : "Claude"}
+                    <ProviderIcon provider={item} size={14} /> {providerName(item)}
                     <span className="text-[10px] text-ink-3">{MODEL_CATALOG.filter((model) => model.provider === item).length}</span>
                   </button>
                 ))}

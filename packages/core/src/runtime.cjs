@@ -1,3 +1,4 @@
+const { PROVIDERS } = require("@milagre/shared/providers");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
@@ -308,7 +309,7 @@ function createRuntime(options) {
     diffs.observe(chatId, event);
     // A turn that just failed on a login problem makes a "ready" picker status out of date.
     if (event.type === "turn-failed" && event.login) {
-      for (const name of ["claude", "codex"]) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
+      for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
     }
     emit("agent:event", { chatId, event, ...(state ? { state } : {}), ...(seq ? { seq } : {}) });
   }

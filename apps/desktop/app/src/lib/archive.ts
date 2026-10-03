@@ -1,3 +1,5 @@
+import { GIT_CODES, gitMessage } from "@milagre/shared/git-codes";
+import { ipcErrorMessage, ipcErrorCode } from "@milagre/shared/result";
 import type { CoordinatorState, Worktree } from "../model";
 
 /** What archiving a chat would lose from its worktree, as `worktree:status` reports it. */
@@ -83,9 +85,8 @@ export function archiveChoices({ plan, running }: { plan: ArchivePlan; running: 
  * (hide-only archive would leave the worktree invisible), and the notice says so.
  */
 export function removeFailureNotice(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
   // Main refuses a removal that the worktree outgrew after the user looked at it.
-  if (raw.includes("WORKTREE_CHANGED")) return "It changed after you checked, so the chat and its worktree stay.";
-  const message = raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "").replace(/^fatal: /, "").trim().replace(/[.\s]+$/, "");
+  if (ipcErrorCode(error) === GIT_CODES.WORKTREE_CHANGED) return gitMessage(GIT_CODES.WORKTREE_CHANGED);
+  const message = ipcErrorMessage(error).replace(/^fatal: /, "").trim().replace(/[.\s]+$/, "");
   return `Couldn't remove the worktree: ${message}. The chat stays so you can find it.`;
 }

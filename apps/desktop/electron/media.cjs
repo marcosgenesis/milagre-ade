@@ -26,7 +26,7 @@ function createMediaHandler(fetch) {
       const end = match[1] && match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= stat.size) return invalid();
       const types = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.ogv': 'video/ogg', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
-      return new Response(Readable.toWeb(createReadStream(real, { start, end })), { status: 206, headers: {
+      return new Response(/** @type {ReadableStream<Uint8Array>} */ (/** @type {unknown} */ (Readable.toWeb(createReadStream(real, { start, end })))), { status: 206, headers: {
         'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes',
         'Content-Length': String(end - start + 1), 'Content-Type': types[ext] || `image/${ext.slice(1)}`,
       } });

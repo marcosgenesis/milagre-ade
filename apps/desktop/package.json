@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5180\" \"wait-on http://127.0.0.1:5180 && MILAGRE_DEV_SERVER_URL=http://127.0.0.1:5180 node ../../scripts/launch-electron.cjs\"",
     "start": "node ../../scripts/launch-electron.cjs",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json",
     "test:agent": "node --test electron/*.test.cjs app/src/lib/*.test.ts",
     "test:ui": "node --test \"app/src/**/*.test.ts\""
   },

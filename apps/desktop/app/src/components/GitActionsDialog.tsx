@@ -1,3 +1,5 @@
+import { gitMessage } from "@milagre/shared/git-codes";
+import { ipcErrorMessage } from "@milagre/shared/result";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -20,7 +22,6 @@ type Fields = { commitMessage: string; prTitle: string; prBody: string };
 type StepState = { step: GitStep; status: "running" | "done" | "failed"; detail?: string };
 type Failure = { message: string; output?: string; hint?: string; hook?: boolean };
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
 function Spinner({ size = 12 }: { size?: number }) {
   return <span aria-hidden className="inline-block shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ width: size, height: size, animation: "spin 0.9s linear infinite" }} />;
@@ -219,7 +220,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
       if (mounted.current) setChanges(next);
       return next;
     } catch (error) {
-      if (mounted.current) setReadError(errorText(error));
+      if (mounted.current) setReadError(ipcErrorMessage(error));
       return null;
     }
   }, [cwd, base]);
@@ -311,7 +312,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
           if (!committed.ok) {
             failed = true;
             // Only a hook's complaint is something the agent can fix; a signing key isn't.
-            setFailure(committed.kind === "hook" ? { message: committed.message, output: committed.output, hook: true } : { message: committed.message, output: committed.output });
+            setFailure(committed.kind === "hook" ? { message: committed.code ? gitMessage(committed.code) : committed.message, output: committed.output, hook: true } : { message: committed.code ? gitMessage(committed.code) : committed.message, output: committed.output });
           } else {
             outcome.shortSha = committed.shortSha;
             update(step, "done", `Committed ${committed.shortSha}`);
@@ -320,7 +321,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
           const pushed = await window.milagre.git.push({ cwd });
           if (!pushed.ok) {
             failed = true;
-            setFailure({ message: pushed.message, hint: pushed.hint });
+            setFailure({ message: pushed.code ? gitMessage(pushed.code) : pushed.message, hint: pushed.hint });
           } else {
             outcome.pushedBranch = pushed.branch;
             update(step, "done", `Pushed to ${pushed.remote}/${pushed.branch}`);
@@ -329,7 +330,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
           const opened = await window.milagre.git.openPr({ cwd, base, title: prTitle, body: prBody });
           if (!opened.ok) {
             failed = true;
-            setFailure({ message: opened.message });
+            setFailure({ message: opened.code ? gitMessage(opened.code) : opened.message });
           } else {
             outcome.pr = { url: opened.url, number: opened.number, created: true };
             update(step, "done", opened.number ? `Opened PR #${opened.number}` : "Opened the PR");
@@ -337,7 +338,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
         }
       } catch (error) {
         failed = true;
-        setFailure({ message: errorText(error) });
+        setFailure({ message: ipcErrorMessage(error) });
       }
       if (failed) {
         update(step, "failed");

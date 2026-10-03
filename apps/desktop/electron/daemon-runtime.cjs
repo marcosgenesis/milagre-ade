@@ -2,6 +2,7 @@ const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
 
 async function connectDesktopRuntime(options) {
   const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
+  /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
   let client = await ensureDaemon(options);
   const status = await client.call('daemon:status');
   let closed = false;
@@ -56,7 +57,7 @@ async function connectDesktopRuntime(options) {
         catch (error) {
           // A Project removed while the host was offline must not prevent the
           // remaining Projects, or the folder picker, from becoming usable.
-          if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
+          if (!(error instanceof Error) || !('code' in error) || !['ENOENT', 'ENOTDIR'].includes(String(error.code))) throw error;
           projects.delete(projectPath);
           if (currentProject === projectPath) { currentProject = null; currentChat = null; }
         }
@@ -80,7 +81,7 @@ async function connectDesktopRuntime(options) {
       if (client === connection) client = null;
       connection?.close();
       if (!closed) {
-        emit('runtime:connection', { connected: false, message: `Host unavailable: ${error.message}` });
+        emit('runtime:connection', { connected: false, message: `Host unavailable: ${error instanceof Error ? error.message : String(error)}` });
         scheduleReconnect();
       }
     }
@@ -89,7 +90,7 @@ async function connectDesktopRuntime(options) {
   async function invoke(method, args = []) {
     if (closed || !client || recovering) throw new Error('Milagre host is disconnected. Your command was not sent.');
     const result = await client.call(method, args);
-    if (['project:open', 'project:current', 'project:switch'].includes(method) && result?.path) {
+    if (['project:open', 'project:current', 'project:switch'].includes(method) && result && typeof result === 'object' && 'path' in result && typeof result.path === 'string') {
       currentProject = result.path; projects.add(result.path);
     }
     if (method === 'chat:set-open') currentChat = args[0] ?? null;
@@ -118,7 +119,7 @@ async function connectDesktopRuntime(options) {
           deadline = setTimeout(() => reject(new Error('The host has not stopped. The update was not installed.')), 30000);
         });
         try { await Promise.all([connection.call('daemon:stop'), stopped]); }
-        finally { clearTimeout(deadline); connection.off('close', onClose); }
+        finally { clearTimeout(deadline); if (onClose) connection.off('close', onClose); }
       } else if (client && !recovering) await client.call('daemon:flush');
       closed = true;
       clearTimeout(timer);

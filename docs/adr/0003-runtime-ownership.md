@@ -2,7 +2,7 @@
 
 This refines ADR-0001. The single writer is `@milagre/core`, hosted either in Electron or in the optional Node daemon. Desktop still embeds that runtime and quits its agents as before. Connecting desktop and mobile clients to a persistent daemon is a later phase. The Delegation rules in ADR-0002 are unchanged.
 
-Each runtime owns its data directory and every Project it opens. Atomic directory locks prevent two current Milagre hosts from writing the same state. Real paths determine ownership, so symlinks cannot bypass it. The saved Chat format, provider IDs and data locations stay unchanged.
+Each runtime owns its data directory and every Project it opens. Atomic directory locks prevent two current Milagre hosts from writing the same state. Real paths determine ownership, so symlinks cannot bypass it. A lock in the common Git directory covers linked checkouts as well. Worktree mutations acquire ownership before running git. The saved Chat format, provider IDs and data locations stay unchanged.
 
 Shutdown rejects new commands, waits for accepted commands and background work, saves resumable turns, stops agent/setup processes, drains writes and releases its locks. Desktop quit now waits for that drain instead of forcing exit after five seconds. Slow operations can delay quit; exiting early could leave unfinished writes or release ownership too soon.
 

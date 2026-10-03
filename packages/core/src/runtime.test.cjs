@@ -121,3 +121,36 @@ test('a turn waiting for CLI discovery cannot create an agent after shutdown beg
   assert.equal(saved.messages[0].body, 'Pending start');
   assert.ok(saved.sessions[session.id].resumeTurn);
 });
+
+for (const operation of ['create', 'remove']) {
+  test(`worktree:${operation} cannot mutate a Project owned by another runtime`, async t => {
+    const { project, dataDir, make } = await fixture(t);
+    execFileSync('git', ['-C', project, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+    const worktreeRoot = path.join(path.dirname(project), 'worktrees');
+    const target = path.join(worktreeRoot, 'existing');
+    await fs.mkdir(worktreeRoot);
+    if (operation === 'remove') execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'existing', target, 'main'], { stdio: 'ignore' });
+    const owner = make({ worktreeRoot });
+    await owner.openProject(project);
+    const other = make({ dataDir: dataDir + '-other', worktreeRoot });
+    const listing = () => execFileSync('git', ['-C', project, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+    const before = listing();
+    if (operation === 'create') {
+      await assert.rejects(other.invoke('worktree:create', [{ projectPath: project, baseBranch: 'main', prompt: 'Ownership check' }]), /already owned/);
+    } else {
+      await assert.rejects(other.invoke('worktree:remove', [target, { projectPath: project, base: 'main' }]), /already owned/);
+    }
+    assert.equal(listing(), before, 'A rejected command must leave every Worktree in place');
+  });
+}
+
+test('opening a linked checkout cannot bypass the repository runtime owner', async t => {
+  const { project, dataDir, make } = await fixture(t);
+  execFileSync('git', ['-C', project, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const linked = path.join(path.dirname(project), 'linked');
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'linked', linked], { stdio: 'ignore' });
+  await make().openProject(project);
+  const other = make({ dataDir: dataDir + '-other' });
+  await assert.rejects(other.openProject(linked), /already owned/);
+  await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
+});

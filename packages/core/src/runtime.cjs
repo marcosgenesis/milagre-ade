@@ -52,6 +52,7 @@ function createRuntime(options) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const dataOwner = acquireOwnership(path.join(realpathSync(dataDir), "runtime.lock"));
   const projectOwners = new Map();
+  const repositoryOwners = new Map();
   const active = new Set();
   const starting = new Set();
   const background = new Set();
@@ -67,11 +68,32 @@ function createRuntime(options) {
     if (closing) return Promise.reject(new Error("Milagre runtime is closing"));
     return track(work);
   }
-  function ownProject(projectPath) {
+  async function ownProject(projectPath) {
+    if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("An absolute Project path is required");
     const real = realpathSync(projectPath);
-    const existing = projectOwners.get(real);
-    if (existing && existing.openedAs !== projectPath) throw new Error(`Project is already open as ${existing.openedAs}`);
-    if (!existing) projectOwners.set(real, { openedAs: projectPath, owner: acquireOwnership(path.join(real, ".milagre", "runtime.lock")) });
+    const checkAlias = existing => {
+      if (existing.openedAs !== projectPath) throw new Error(`Project is already open as ${existing.openedAs}`);
+    };
+    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    let common;
+    try {
+      const { stdout } = await execFileAsync("git", ["-C", real, "rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 10000 });
+      common = realpathSync(path.resolve(real, stdout.trim()));
+    } catch (error) {
+      if (error.code !== 128 || !/not a git repository/i.test(error.stderr ?? "")) throw error;
+    }
+    // Another open of this path may have finished while git was running.
+    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    let repositoryOwner;
+    if (common && !repositoryOwners.has(common)) repositoryOwner = acquireOwnership(path.join(common, "milagre-runtime.lock"));
+    try {
+      const owner = acquireOwnership(path.join(real, ".milagre", "runtime.lock"));
+      projectOwners.set(real, { openedAs: projectPath, owner });
+      if (repositoryOwner) repositoryOwners.set(common, repositoryOwner);
+    } catch (error) {
+      repositoryOwner?.release();
+      throw error;
+    }
   }
   const handlers = new Map();
   const commands = { handle(name, handler) {
@@ -106,7 +128,7 @@ function createRuntime(options) {
   }
 
   async function readStoredState(projectPath) {
-    ownProject(projectPath);
+    await ownProject(projectPath);
     try {
       return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
     } catch (error) {
@@ -140,7 +162,7 @@ function createRuntime(options) {
   // state this run has built, so a chat's turn that's still running isn't lost.
   // A subagent saved as running without a live agent session behind it (after a restart) is marked disconnected.
   async function readProject(projectPath) {
-    ownProject(projectPath);
+    await ownProject(projectPath);
     const discovered = await discoverWorktrees(projectPath);
     const live = (sessionId) => {
       const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
@@ -197,6 +219,7 @@ function createRuntime(options) {
   // The path and branch are read from git as they are now, so a branch renamed after creation is found as it is.
   commands.handle("worktree:remove", async (_event, worktreePath, options = {}) => {
     const { force, base, projectPath, chatId, seen } = options;
+    await ownProject(projectPath);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -257,6 +280,7 @@ function createRuntime(options) {
   commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt }) => {
     // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
     const request = { projectPath, baseBranch, prompt };
+    await ownProject(projectPath);
     await environmentReady;
     const settings = await projectSettings().get(projectPath);
     // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
@@ -525,6 +549,7 @@ function createRuntime(options) {
       await states.close();
       await usageStore.idle();
       for (const { owner } of projectOwners.values()) owner.release();
+      for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();
     })();
     return closed;

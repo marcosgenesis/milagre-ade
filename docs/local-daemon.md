@@ -23,7 +23,7 @@ A foreground daemon stays alive when clients disconnect. Keep its terminal and h
 
 ## Ownership and recovery
 
-The profile's `runtime.lock/owner.json` and each Project's `.milagre/runtime.lock/owner.json` record the owner PID, start time and token. A second host fails before reading or changing that state. A damaged transcript also fails without replacing it with an empty Project.
+The profile's `runtime.lock/owner.json`, each Project's `.milagre/runtime.lock/owner.json` and the repository's `<git-common-dir>/milagre-runtime.lock/owner.json` record the owner PID, start time and token. A second host fails before reading or changing that state. The common Git directory lock also covers linked checkouts, so opening another Worktree cannot bypass the owner. A damaged transcript also fails without replacing it with an empty Project.
 
 After a crash, inspect each reported owner record and verify its process is no longer running, for example with `ps -p <pid> -o pid,lstart,command`. If a process is alive or its identity is unclear, leave its lock alone. Once the owner is confirmed gone, remove only that reported `runtime.lock` directory. Preserve `coordination.json`, settings, recent Projects and handovers. A stale socket may remain too; the startup error names its path under `/tmp/milagre-<uid>/`. Remove that socket only after the same owner check. Retry the original command.
 

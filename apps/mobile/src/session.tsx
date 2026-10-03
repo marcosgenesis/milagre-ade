@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { savedConnection } from './connection-native';
 
 function useSessionState() {
   const [client, setClient] = useState<Client | null>(null);
@@ -10,7 +11,7 @@ function useSessionState() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
-  const connect = async (address: string, token: string) => {
+  const connect = async (address: string, token: string, remember = true) => {
     const next = createClient(address, token);
     const current = ++generation.current;
     const previous = selection.current;
@@ -18,8 +19,16 @@ function useSessionState() {
     try {
       await next.call('daemon:status');
       const projects = await next.call<RecentProject[]>('project:recent');
-      if (current !== generation.current) return;
+      if (current !== generation.current) return false;
+      if (process.env.EXPO_PUBLIC_DEMO !== '1') {
+        try {
+          if (remember) await savedConnection.save({ address: next.url, token: token.trim() });
+          else await savedConnection.forget();
+        } catch { throw new Error('Could not save this connection on your device. Turn off Remember this computer to connect without saving it.'); }
+      }
+      if (current !== generation.current) return false;
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
+      return true;
     } catch (error) {
       if (current === generation.current) selection.current = previous;
       throw error;

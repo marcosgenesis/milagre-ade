@@ -7,9 +7,10 @@ export type RecentProject = { path: string; name?: string };
 
 export function localEndpoint(input: string): string {
   let url: URL;
-  try { url = new URL(input.trim()); } catch { throw new Error('Enter a local simulator address, such as http://127.0.0.1:8787'); }
-  if (url.protocol !== 'http:' || !['127.0.0.1', '10.0.2.2'].includes(url.hostname) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    throw new Error('Use a local simulator address: 127.0.0.1 on iOS or 10.0.2.2 on Android');
+  try { url = new URL(input.trim()); } catch { throw new Error('Enter your computer\'s HTTPS address or a local simulator address.'); }
+  const local = url.protocol === 'http:' && ['127.0.0.1', '10.0.2.2'].includes(url.hostname);
+  if ((!local && url.protocol !== 'https:') || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('Use an HTTPS address, or 127.0.0.1 on iOS / 10.0.2.2 on Android for a local simulator. Enter the token separately.');
   }
   return url.origin;
 }
@@ -24,10 +25,11 @@ export function createClient(address: string, token: string, fetcher: typeof fet
       try {
         response = await fetcher(url + route, { method: body === undefined ? 'GET' : 'POST',
           headers: { Authorization: `Bearer ${token.trim()}`, 'Content-Type': 'application/json' },
-          body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal });
+          body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, redirect: 'error' });
       } catch {
-        throw new Error('Connection lost. Reconnect to the local daemon. Check the Chat before sending again.');
+        throw new Error('Connection lost. Reconnect to your computer. Check the Chat before sending again.');
       }
+      if (response.redirected || (response.url && new URL(response.url).origin !== url)) throw new Error('The computer address redirected. Enter its direct HTTPS address.');
       const value = await response.json();
       if (value?.v !== 1) throw new Error('Incompatible daemon response. Update the app and daemon together.');
       if (!response.ok || value.error) throw new Error(value.error?.message || `Request failed (${response.status})`);

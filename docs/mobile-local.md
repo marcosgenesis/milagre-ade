@@ -23,6 +23,18 @@ The demo is deterministic and uses no provider account. It never opens your deve
 
 ## Use an installed provider
 
+The persistent host starts the real providers installed and logged in on your Mac:
+
+```sh
+npm run mobile:host -- --project /absolute/path/to/a/Project --stay-awake
+```
+
+Omit `--project` to choose a Project in the app. The separate profile defaults to `~/.milagre-mobile`; use `--data-dir /absolute/profile` to choose another. The command prints the private connection-file path, never its token. Enter its address and token in the app and leave **Remember this computer** selected to save them in platform secure storage. **Forget this computer** removes the saved connection. Tokens remain stable across host restarts; to rotate one, stop the host, remove its `mobile-connection.json`, restart and connect again.
+
+Ctrl+C stops the host cleanly. On macOS, `--stay-awake` keeps the computer awake while the host runs; it does not keep a closed laptop lid awake. The separate daemon/bridge commands below remain available.
+
+### Separate daemon and bridge processes
+
 Close the chosen Project in other Milagre hosts first. The current desktop still embeds its own runtime; this preview controls a separate daemon. Ownership errors name the lock to investigate. Never remove a lock while its owner is running; see [daemon recovery](local-daemon.md).
 
 Run each command in a separate terminal, from this repository root:
@@ -46,13 +58,25 @@ Stop Metro and the bridge with Ctrl+C. Stop the daemon cleanly with:
 npm run daemon -- stop --data-dir /tmp/milagre-local-profile
 ```
 
-The connection token is regenerated on each bridge launch. Use a new connection-file path or remove the old file after its bridge has stopped. Tokens stay in memory on mobile. Failed sends retain the draft and are never automatically retried; check the Chat after reconnecting before sending again.
+The connection token is regenerated on each bridge launch. Use a new connection-file path or remove the old file after its bridge has stopped. With Remember this computer selected, the mobile app keeps the token in platform secure storage. Turn it off for a connection held only in memory. Failed sends retain the draft and are never automatically retried; check the Chat after reconnecting before sending again.
+
+## Connect through HTTPS
+
+Use an HTTPS endpoint from your own reverse proxy, VPN or configured tunnel. It must forward to the loopback bridge and rewrite the Host header to that bridge's address. For an already configured ngrok account:
+
+```sh
+ngrok http http://127.0.0.1:8787 --host-header=rewrite --inspect=false
+```
+
+Enter the HTTPS endpoint and the host's connection token in the app. `--public-url https://your-endpoint` makes `mobile:host` write that address into its connection file. The token is still required for every request. Browser Origins are rejected. Remote plaintext HTTP and redirected endpoints are rejected by the client; use the endpoint's direct HTTPS origin.
+
+TLS terminates at the proxy or tunnel provider, which can see traffic. This is not Paseo's encrypted relay. Keep HTTP request inspection off so connection tokens and Chat content are not recorded there. No remote endpoint starts automatically. Stop a test tunnel with Ctrl+C. Physical devices also need an installed build or access to the development bundler; the standalone simulator build does not need Metro.
 
 ## Boundaries
 
 - The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. Request bodies are capped at 1 MiB and concurrent requests at 16.
 - Foreground snapshots poll once per second. Text and tool summaries are supported. Images, full desktop tools, rich markdown and large-history rendering remain desktop capabilities.
-- This is local simulator access. Internet access, device pairing, relay/TLS, push notifications and production background services come later.
+- Local simulator and direct HTTPS host access are supported. An encrypted relay, QR device pairing, push notifications and production background services come later.
 - iOS uses Expo Go. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
 - Demo connection defaults are injected into a local development bundle. Never publish that bundle or use this mechanism for a real remote token. The real workflow enters the token in the app.
 

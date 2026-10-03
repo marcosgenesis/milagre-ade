@@ -648,7 +648,8 @@ app.whenReady().then(async () => {
 
 // Only a quit closes the last window on macOS; elsewhere closing it quits.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // A quit Electron started for a termination signal can end here, windows closed and the app still running.
+  if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
 // Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they

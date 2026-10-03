@@ -162,6 +162,13 @@ async function browserChecks() {
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
     await evaluate('window.setModel("claude-sonnet-5-5")');
     await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    // Codex models have it too (the priority tier); the toggle keeps its state across models.
+    await evaluate('window.setModel("gpt-6.1-sol")');
+    await waitFor('document.querySelector("[aria-label=\\"Fast mode\\"]")?.getAttribute("aria-pressed") === "true"');
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, "codex-fast-mode.png"), image.toPNG()));
+    await evaluate('window.setModel("claude-fable-5-1")');
+    await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    await evaluate('window.setModel("claude-sonnet-5-5")');
     // A composer narrow enough that the empty prompt's placeholder wraps must not flip between layouts forever.
     window.webContents.setZoomFactor(3);
     await delay(250);
@@ -174,7 +181,7 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top'), compactTop, "The empty prompt is compact again");
     console.log("PASS: long chats open at the bottom before paint, including after reading older messages");
     console.log("PASS: PR action pill placement, click action, disabled state, tones, and removal");
-    console.log("PASS: fast mode appears only for supported Opus models, the prompt expands on wrapping, and a narrow empty prompt settles");
+    console.log("PASS: fast mode appears for Codex models and the Opus models that have it, the prompt expands on wrapping, and a narrow empty prompt settles");
     console.log("PASS: message previews stay inside the conversation and above the prompt");
     app.exit(0);
   } catch (error) {

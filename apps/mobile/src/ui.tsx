@@ -69,6 +69,16 @@ export function Select({ label, value, options, onChange, disabled = false }: { 
     </Picker>}
   </Host></View>{selected?.description ? <Text style={styles.caption}>{selected.description}</Text> : null}</View>;
 }
+/** iOS segmented control (a native SwiftUI Picker); Android falls back to the dropdown Picker. */
+export function Segmented({ label, value, options, onChange }: { label: string; value: string; options: { value: string; title: string }[]; onChange: (value: string) => void }) {
+  return <Host ignoreSafeArea="all" matchContents={{ vertical: true }} style={{ minHeight: 32, width: '100%' }}>
+    {Platform.OS === 'ios' ? <IOSPicker label={label} selection={value} onSelectionChange={onChange} modifiers={[pickerStyle('segmented'), accessibilityLabel(label)]} testID={`segmented-${label}`}>
+      {options.map(option => <IOSText key={option.value} modifiers={[tag(option.value)]}>{option.title}</IOSText>)}
+    </IOSPicker> : <Picker selectedValue={value} onValueChange={onChange} testID={`segmented-${label}`}>
+      {options.map(option => <Picker.Item key={option.value} value={option.value} label={option.title} />)}
+    </Picker>}
+  </Host>;
+}
 export function ListRow({ title, subtitle, onPress, disabled = false, leading, trailing }: { title: string; subtitle?: string; onPress: () => void; disabled?: boolean; leading?: React.ReactNode; trailing?: React.ReactNode }) {
   return <Pressable accessibilityRole="button" accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, minHeight: 52, opacity: disabled ? 0.4 : pressed ? 0.5 : 1 })}>{leading}<View style={{ flex: 1, gap: 3 }}><Text numberOfLines={1} style={[styles.text, { fontWeight: '500' }]}>{title}</Text>{/* One line each; long paths keep their start and end. */}{subtitle && <Text style={styles.caption} numberOfLines={1} ellipsizeMode="middle">{subtitle}</Text>}</View>{trailing ?? <Icon icon={ArrowRight01Icon} tone="ink3" size={16} />}</Pressable>;
 }

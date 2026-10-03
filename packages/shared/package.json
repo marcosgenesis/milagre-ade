@@ -46,7 +46,10 @@
     },
     "./reply-parts": "./src/reply-parts.ts",
     "./streaming-markdown": "./src/streaming-markdown.ts",
-    "./pr-blockers": "./src/pr-blockers.ts"
+    "./pr-blockers": "./src/pr-blockers.ts",
+    "./diff-parse": "./src/diff-parse.ts",
+    "./diff-tree": "./src/diff-tree.ts",
+    "./diff-layout": "./src/diff-layout.ts"
   },
   "files": [
     "src/*.mjs",
@@ -57,7 +60,10 @@
     "src/model-copy.ts",
     "src/reply-parts.ts",
     "src/streaming-markdown.ts",
-    "src/pr-blockers.ts"
+    "src/pr-blockers.ts",
+    "src/diff-parse.ts",
+    "src/diff-tree.ts",
+    "src/diff-layout.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts",

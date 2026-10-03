@@ -3,7 +3,7 @@ const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
 
-const FIELDS = "number,url,state,title,isDraft,reviewDecision,mergeStateStatus";
+const FIELDS = "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup";
 // What a chat's commands can name: a PR URL or a number in the chat's repository. Nothing gh reads as a flag.
 const PR_REF = /^(?:\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/;
 // A chat that ran a long loop of `gh pr create` still makes a bounded number of lookups.
@@ -56,7 +56,31 @@ function toPullRequest(pr) {
   // BEHIND only shows up when the base branch requires PRs to be up to date before merging.
   const isBehind = pr.state === "OPEN" && pr.mergeStateStatus === "BEHIND";
   const changesRequested = pr.state === "OPEN" && pr.reviewDecision === "CHANGES_REQUESTED";
-  return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts, conflictStatusKnown, isBehind, changesRequested };
+  const checks = pr.state === "OPEN" ? checksState(pr.statusCheckRollup) : undefined;
+  return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts, conflictStatusKnown, isBehind, changesRequested, ...(checks && { checks }) };
+}
+
+// GitHub counts these check-run conclusions and commit-status states against the PR, as its merge box does.
+const FAILED_CONCLUSIONS = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
+const RUNNING_STATES = new Set(["PENDING", "EXPECTED"]);
+
+/**
+ * "failed" when any check or commit status failed, "running" when none failed but some are still
+ * to finish; nothing when they all passed or the PR has none. A failure outranks running checks,
+ * since the branch needs a fix either way.
+ */
+function checksState(rollup) {
+  if (!Array.isArray(rollup)) return undefined;
+  let running = false;
+  for (const check of rollup) {
+    if (!check || typeof check !== "object") continue;
+    // A check run reports status + conclusion; a commit status (legacy API) reports a single state.
+    const outcome = typeof check.conclusion === "string" ? check.conclusion : typeof check.state === "string" ? check.state : "";
+    if (FAILED_CONCLUSIONS.has(outcome)) return "failed";
+    const done = typeof check.status === "string" ? check.status === "COMPLETED" : !RUNNING_STATES.has(outcome);
+    if (!done) running = true;
+  }
+  return running ? "running" : undefined;
 }
 
 module.exports = { readPullRequest, readPullRequests };

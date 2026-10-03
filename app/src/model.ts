@@ -138,6 +138,8 @@ export interface PullRequest {
   isBehind?: boolean;
   /** A reviewer requested changes, so the PR can't merge until they're addressed. */
   changesRequested?: boolean;
+  /** CI on the open PR: still running, or failed. Unset once every check passed or when it has none. */
+  checks?: "running" | "failed";
 }
 
 export interface Worktree {

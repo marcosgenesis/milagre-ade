@@ -7,6 +7,7 @@ import {
   Archive02Icon,
   BubbleChatIcon,
   EthernetPortIcon,
+  CircleDotIcon,
   CircleIcon,
   Copy01Icon,
   FileEditIcon,
@@ -313,25 +314,28 @@ export function ChatRow({
   );
 }
 
-/** Merged is purple, a blocked PR takes its first blocker's tone, other open PRs are green. */
+/** Merged is purple, a blocked PR takes its first blocker's tone, running CI is orange like GitHub's own dot, other open PRs are green. */
 function prTone(pr: PullRequest) {
   const blocker = pullRequestBlockers(pr)[0];
-  return pr.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : "text-green";
+  return pr.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : isChecking(pr) ? "text-orange" : "text-green";
 }
 
 function prIcon(pr: PullRequest) {
-  return pr.state === "MERGED" ? GitMergeIcon : isReadyToMerge(pr) ? Tick02Icon : GitPullRequestIcon;
+  return pr.state === "MERGED" ? GitMergeIcon : isReadyToMerge(pr) ? Tick02Icon : isChecking(pr) ? CircleDotIcon : GitPullRequestIcon;
 }
 
 const isReadyToMerge = (pr: PullRequest) => pr.state === "OPEN" && pr.readyToMerge && pullRequestBlockers(pr).length === 0;
+/** CI is still running and nothing else blocks the PR; a failure is a blocker and shows as one. */
+const isChecking = (pr: PullRequest) => pr.state === "OPEN" && pr.checks === "running" && pullRequestBlockers(pr).length === 0;
 
 /** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
   const blocker = pullRequestBlockers(pr)[0];
   const readyToMerge = isReadyToMerge(pr);
+  const checking = isChecking(pr);
   return (
     <Tooltip
-      label={blocker ? `${BLOCKERS[blocker].long} · Pull request #${pr.number}` : readyToMerge ? `Ready to merge · Pull request #${pr.number}` : `${pr.state === "MERGED" ? "Merged" : "Open"} pull request #${pr.number}`}
+      label={blocker ? `${BLOCKERS[blocker].long} · Pull request #${pr.number}` : readyToMerge ? `Ready to merge · Pull request #${pr.number}` : checking ? `CI checks running · Pull request #${pr.number}` : `${pr.state === "MERGED" ? "Merged" : "Open"} pull request #${pr.number}`}
       side="bottom"
       className="min-w-0"
     >
@@ -339,7 +343,7 @@ function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean 
         href={pr.url}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={`Open ${pr.state === "MERGED" ? "merged " : ""}pull request #${pr.number}${blocker ? `, ${BLOCKERS[blocker].short.toLowerCase()}` : readyToMerge ? ", ready to merge" : ""}`}
+        aria-label={`Open ${pr.state === "MERGED" ? "merged " : ""}pull request #${pr.number}${blocker ? `, ${BLOCKERS[blocker].short.toLowerCase()}` : readyToMerge ? ", ready to merge" : checking ? ", CI running" : ""}`}
         data-chat-pr
         className="group/pr inline-flex min-w-0 items-center gap-1 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         onClick={(event) => event.stopPropagation()}
@@ -353,6 +357,7 @@ function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean 
         <span className="truncate">#{pr.number}</span>
         {labelled && blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
         {labelled && readyToMerge && <span className="shrink-0 text-green">Ready</span>}
+        {labelled && checking && <span className="shrink-0 text-orange">CI running</span>}
       </a>
     </Tooltip>
   );
@@ -454,6 +459,7 @@ function ChatHoverCard({ item, position, onPointerEnter, onPointerLeave, onOpenL
                   <span className="min-w-0 flex-1 truncate leading-snug"><span className="tabular-nums">#{pr.number}</span>{pr.title ? ` · ${pr.title}` : ""}</span>
                   {blocker && <span className={`shrink-0 ${toneClass[BLOCKERS[blocker].tone]}`}>{BLOCKERS[blocker].short}</span>}
                   {isReadyToMerge(pr) && <span className="shrink-0 text-green">Ready to merge</span>}
+                  {isChecking(pr) && <span className="shrink-0 text-orange">CI running</span>}
                 </a>
               );
             })}

@@ -40,7 +40,7 @@ test("missing PRs, unavailable gh, authentication failures and malformed respons
 test("uses the checked-out branch for fork PRs instead of its upstream base", async () => {
   const exec = async (command, args) => {
     if (command === "git") {
-      assert.deepEqual(args, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+      assert.deepEqual(args, ["-C", "/project", "symbolic-ref", "--quiet", "--short", "HEAD"]);
       return { stdout: "project-menu\n" };
     }
     assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup"]);

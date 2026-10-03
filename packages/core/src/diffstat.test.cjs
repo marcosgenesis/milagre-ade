@@ -41,16 +41,27 @@ test("readDiffStat with no usable base counts only uncommitted work", async (t) 
   assert.deepEqual(await readDiffStat(project), { added: 1, removed: 0 });
 });
 
-test("diffBase prefers the stored base, then the upstream", async (t) => {
+test("diffBase shares the recorded/default branch rule with Changes", async (t) => {
   const { root, project } = await fixture(t);
   const clone = path.join(root, "clone");
   execFileSync("git", ["clone", "--quiet", project, clone]);
   assert.equal(await diffBase(clone, "main"), "main");
-  assert.equal(await diffBase(clone, "missing"), "@{upstream}");
-  assert.equal(await diffBase(project, undefined), "HEAD");
+  assert.equal(await diffBase(clone, "missing"), "refs/remotes/origin/main");
+  assert.equal(await diffBase(project, undefined), "refs/heads/main");
 });
 
 test("readDiffStat returns null outside a repository", async (t) => {
   const { root } = await fixture(t);
   assert.equal(await readDiffStat(root, "main"), null);
+});
+
+
+test("sidebar totals include branch commits when its upstream is the feature branch", async t => {
+  const { project, git } = await fixture(t);
+  git('checkout', '-b', 'feature');
+  await fs.appendFile(path.join(project, 'README.md'), 'four\n');
+  git('commit', '-am', 'feature work');
+  git('branch', 'upstream-feature');
+  git('branch', '--set-upstream-to=upstream-feature');
+  assert.deepEqual(await readDiffStat(project), { added: 1, removed: 0 });
 });

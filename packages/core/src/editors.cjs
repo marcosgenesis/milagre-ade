@@ -1,3 +1,4 @@
+const { createGit } = require("./git/client.cjs");
 const { execFile } = require("node:child_process");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
@@ -94,10 +95,8 @@ async function requireWorktreeRoot(root, { topLevel = gitTopLevel } = {}) {
   }
 }
 
-function gitTopLevel(directory) {
-  return new Promise((resolve, reject) => {
-    execFile("git", ["-C", directory, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout: 5000 }, (error, stdout) => (error ? reject(error) : resolve(stdout.trim())));
-  });
+async function gitTopLevel(directory) {
+  return (await createGit().read.text(directory, ["rev-parse", "--show-toplevel"])).trim();
 }
 
 function runProgram(file, args) {

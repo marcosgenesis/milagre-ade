@@ -22,6 +22,11 @@ class ProjectStates {
     return [...this.states.keys()];
   }
 
+  /** Active Worktree folders already reconciled by readProject; never starts a Git process. */
+  worktreePaths() {
+    return [...this.states.values()].flatMap(state => Object.values(state.worktrees ?? {}).map(worktree => worktree.path));
+  }
+
   /** The project's latest state, read first if it hasn't been. */
   async get(projectPath) {
     return (await this.update(projectPath, (state) => state)).state;

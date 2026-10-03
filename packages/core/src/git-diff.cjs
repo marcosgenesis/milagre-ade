@@ -1,4 +1,4 @@
-const childProcess = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { PATHSPEC } = require("./diffstat.cjs");
@@ -9,7 +9,6 @@ const { PATHSPEC } = require("./diffstat.cjs");
 const NOT_REPO = "This chat's folder isn't a git repository.";
 const FILE_LIMIT = 1000;
 const PATCH_LIMIT = 1024 * 1024;
-const READ_TIMEOUT = 20_000;
 // Untracked files are counted one git call each; a few at a time, so a fresh node_modules can't fork hundreds of processes.
 const UNTRACKED_CONCURRENCY = 8;
 // The tree of an empty repository, to diff against before the first commit.
@@ -24,46 +23,8 @@ function checkPath(file) {
   return file;
 }
 
-function createGitDiff({ execFile = childProcess.execFile, env = process.env } = {}) {
-  // No prompt may wait on a terminal nobody sees.
-  const baseEnv = () => ({ ...env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes" });
-
-  /** Runs git and settles with its outcome; it never throws. */
-  function run(cwd, args) {
-    return new Promise((resolve) => {
-      try {
-        execFile("git", ["-C", cwd, ...args], { cwd, env: baseEnv(), encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: READ_TIMEOUT }, (error, stdout, stderr) => {
-          const overflow = error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          resolve({ ok: !error, code: error ? (typeof error.code === "number" ? error.code : null) : 0, overflow, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-        });
-      } catch (error) {
-        resolve({ ok: false, code: null, stdout: "", stderr: error.message });
-      }
-    });
-  }
-  const gitOut = async (cwd, args) => {
-    const result = await run(cwd, args);
-    return result.ok ? result.stdout.trim() : null;
-  };
-  const refExists = async (cwd, ref) => (await run(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).ok;
-
-  /** Same rules as git-actions: the recorded base, then the remote's default branch, then a local main or master. */
-  async function resolveBase(cwd, recorded) {
-    // A leading "-" would read as an option.
-    if (recorded && !recorded.startsWith("-") && (await refExists(cwd, recorded))) {
-      const full = await gitOut(cwd, ["rev-parse", "--symbolic-full-name", recorded]);
-      const remote = /^refs\/remotes\/[^/]+\/(.+)$/.exec(full ?? "");
-      const local = /^refs\/heads\/(.+)$/.exec(full ?? "");
-      if (remote || local) return { name: (remote ?? local)[1], ref: recorded };
-    }
-    const remoteHead = await gitOut(cwd, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
-    const name = remoteHead?.replace(/^refs\/remotes\/origin\//, "")
-      || ((await refExists(cwd, "refs/heads/main")) || (await refExists(cwd, "refs/remotes/origin/main")) ? "main"
-        : (await refExists(cwd, "refs/heads/master")) || (await refExists(cwd, "refs/remotes/origin/master")) ? "master"
-          : "main");
-    for (const ref of [`refs/remotes/origin/${name}`, `refs/heads/${name}`]) if (await refExists(cwd, ref)) return { name, ref };
-    return { name, ref: null };
-  }
+function createGitDiff(options = {}) {
+  const { run, out: gitOut, refExists, resolveBase } = createGit(options).read;
 
   /**
    * The refs `git diff` compares for a mode, or null when there is nothing to compare: uncommitted work

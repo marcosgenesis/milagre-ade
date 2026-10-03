@@ -1,4 +1,5 @@
 const childProcess = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { PATHSPEC, fileLineCount } = require("./diffstat.cjs");
@@ -21,9 +22,6 @@ const OUTPUT_LIMIT = 6000;
 const FILE_LIMIT = 300;
 const DIFF_LIMIT = 40_000;
 // Hooks may run tests, so commits and pushes get time; reads stay quick.
-const READ_TIMEOUT = 20_000;
-const COMMIT_TIMEOUT = 5 * 60_000;
-const PUSH_TIMEOUT = 5 * 60_000;
 const GH_TIMEOUT = 60_000;
 // The tree of an empty repository, to diff against before the first commit.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -84,7 +82,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   });
 
   /** Runs a program and settles with its outcome; it never throws. */
-  function run(command, args, { cwd, input, timeout = READ_TIMEOUT } = {}) {
+  function run(command, args, { cwd, input, timeout = GH_TIMEOUT } = {}) {
     return new Promise((resolve) => {
       let child;
       try {
@@ -107,11 +105,9 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     });
   }
 
-  const git = (cwd, args, options) => run("git", ["-C", cwd, ...args], { cwd, ...options });
-  const gitOut = async (cwd, args) => {
-    const result = await git(cwd, args);
-    return result.ok ? result.stdout.trim() : null;
-  };
+  const client = createGit({ execFile, env });
+  const { run: git, out: gitOut, refExists, resolveBase } = client.read;
+  const write = client.write.run;
   const gitList = async (cwd, args) => {
     const result = await git(cwd, args);
     return result.ok ? result.stdout.split("\0").filter(Boolean) : [];
@@ -140,10 +136,6 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     return (await git(cwd, ["remote", "get-url", "origin"])).ok;
   }
 
-  async function refExists(cwd, ref) {
-    return (await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).ok;
-  }
-
   async function gitPathExists(cwd, name) {
     const found = await gitOut(cwd, ["rev-parse", "--git-path", name]);
     if (!found) return false;
@@ -162,27 +154,6 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     }
     const unmerged = await gitOut(cwd, ["ls-files", "-u"]);
     return unmerged ? CONFLICTS : null;
-  }
-
-  /**
-   * The branch a PR goes into, as the remote names it, and a ref to compare with: the base the worktree
-   * was created from (a remote-tracking `origin/main` names `main`), else the remote's default branch,
-   * else a local main or master.
-   */
-  async function resolveBase(cwd, recorded) {
-    if (recorded && (await refExists(cwd, recorded))) {
-      const full = await gitOut(cwd, ["rev-parse", "--symbolic-full-name", recorded]);
-      const remote = /^refs\/remotes\/[^/]+\/(.+)$/.exec(full ?? "");
-      const local = /^refs\/heads\/(.+)$/.exec(full ?? "");
-      if (remote || local) return { name: (remote ?? local)[1], ref: recorded };
-    }
-    const remoteHead = await gitOut(cwd, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
-    const name = remoteHead?.replace(/^refs\/remotes\/origin\//, "")
-      || ((await refExists(cwd, "refs/heads/main")) || (await refExists(cwd, "refs/remotes/origin/main")) ? "main"
-        : (await refExists(cwd, "refs/heads/master")) || (await refExists(cwd, "refs/remotes/origin/master")) ? "master"
-          : "main");
-    for (const ref of [`refs/remotes/origin/${name}`, `refs/heads/${name}`]) if (await refExists(cwd, ref)) return { name, ref };
-    return { name, ref: null };
   }
 
   async function countCommits(cwd, args) {
@@ -307,22 +278,22 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     if (!(await currentBranch(cwd))) return { ok: false, kind: "blocked", message: DETACHED_COMMIT };
     const hasHead = await refExists(cwd, "HEAD");
     // The index as the user left it, to go back to if the commit is refused.
-    const before = await gitOut(cwd, ["write-tree"]);
-    const added = await git(cwd, ["add", "-A", ...PATHSPEC], { timeout: COMMIT_TIMEOUT });
+    const before = (await write(cwd, ["write-tree"])).stdout.trim() || null;
+    const added = await write(cwd, ["add", "-A", ...PATHSPEC], { profile: "COMMIT" });
     if (!added.ok) return { ok: false, kind: "error", message: capOutput(added.stderr || added.stdout) };
     // A .milagre path staged earlier (by an agent, say) isn't the chat's work either.
-    await git(cwd, hasHead ? ["reset", "-q", "--", ".milagre"] : ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".milagre"]);
+    await write(cwd, hasHead ? ["reset", "-q", "--", ".milagre"] : ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".milagre"]);
     // Without rename detection a `git mv x .env` is an added .env, not a rename that slips past the filter.
     const secrets = (await gitList(cwd, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=AM"])).filter(looksSecret);
     if (secrets.length) {
       if (before) {
-        await git(cwd, ["read-tree", before]);
-        await git(cwd, ["update-index", "-q", "--refresh"]);
+        await write(cwd, ["read-tree", before]);
+        await write(cwd, ["update-index", "-q", "--refresh"]);
       }
       return { ok: false, kind: "secrets", message: `These look like secrets and would be committed: ${secrets.join(", ")}. Add them to .gitignore, or commit them yourself if you mean to.` };
     }
     if ((await git(cwd, ["diff", "--cached", "--quiet"])).ok) return { ok: false, kind: "nothing", message: "There's nothing to commit." };
-    const committed = await git(cwd, ["commit", "-F", "-"], { input: `${text}\n`, timeout: COMMIT_TIMEOUT });
+    const committed = await write(cwd, ["commit", "-F", "-"], { input: `${text}\n`, profile: "COMMIT" });
     if (!committed.ok) {
       const output = capOutput([committed.stdout, committed.stderr].filter((part) => part.trim()).join("\n"));
       if (committed.timedOut) return { ok: false, kind: "error", message: "The commit took too long and was stopped.", output };
@@ -344,7 +315,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN };
     const branch = await currentBranch(cwd);
     if (!branch) return { ok: false, kind: "error", message: DETACHED };
-    const result = await git(cwd, ["push", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { timeout: PUSH_TIMEOUT });
+    const result = await write(cwd, ["push", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { profile: "PUSH" });
     if (result.ok) return { ok: true, branch, remote: "origin" };
     const output = capOutput(result.stderr || result.stdout);
     if (/\[rejected\]|non-fast-forward|fetch first|\(stale info\)/i.test(output)) return { ok: false, kind: "rejected", message: output, hint: PUSH_REJECTED_HINT };

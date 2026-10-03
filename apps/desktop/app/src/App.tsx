@@ -915,6 +915,7 @@ function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={() => void sendMessage()}
+            onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
             pullRequestAction={selectedSession && selectedPullRequest && pullRequestBlocker
               ? {
                 label: BLOCKERS[pullRequestBlocker].action,

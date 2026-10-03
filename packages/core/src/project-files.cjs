@@ -1,7 +1,6 @@
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
+const { createGit } = require('./git/client.cjs');
 const path = require('node:path');
-const run = promisify(execFile);
+const git = createGit().read;
 
 function createFileSearch({ now = Date.now, ttl = 5000 } = {}) {
   const cache = new Map();
@@ -9,7 +8,7 @@ function createFileSearch({ now = Date.now, ttl = 5000 } = {}) {
     if (typeof root !== 'string' || !path.isAbsolute(root) || typeof query !== 'string') throw new Error('Choose a worktree to search.');
     let entry = cache.get(root);
     if (!entry || now() - entry.at > ttl) {
-      const promise = run('git', ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 10000 })
+      const promise = git.checked(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
         .then(({ stdout }) => [...new Set(stdout.split('\0').filter(Boolean))]);
       entry = { at: now(), promise };
       cache.set(root, entry);

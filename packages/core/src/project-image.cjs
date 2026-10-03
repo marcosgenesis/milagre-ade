@@ -1,14 +1,16 @@
 const fs = require("node:fs/promises");
+const { createGit } = require("./git/client.cjs");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
+const client = createGit().read;
 const MAX_BYTES = 5 * 1024 * 1024;
 const MIME_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 
 async function git(projectPath, ...args) {
-  const { stdout } = await execFileAsync("git", ["-C", projectPath, ...args], { timeout: 3000, maxBuffer: 64 * 1024 });
+  const { stdout } = await client.checked(projectPath, args);
   return stdout.trim();
 }
 

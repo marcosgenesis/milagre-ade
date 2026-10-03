@@ -4,17 +4,17 @@ const { parseArgs } = require('node:util');
 const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
 const { version } = require('../package.json');
-const { KeepAwake } = require('@milagre/core/keep-awake');
-const { createPowerBlocker } = require('./power.cjs');
 const fs = require('node:fs/promises');
 const { randomBytes } = require('node:crypto');
 const { startMobileBridge } = require('./mobile-bridge.cjs');
+const { KeepAwake } = require('@milagre/core/keep-awake');
+const { createPowerBlocker } = require('./power.cjs');
 
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     'data-dir': { type: 'string' }, help: { type: 'boolean', short: 'h' },
-    'app-version': { type: 'string' }, cwd: { type: 'string' }, 'worktree-root': { type: 'string' },
     port: { type: 'string' }, 'connection-file': { type: 'string' },
+    'app-version': { type: 'string' }, cwd: { type: 'string' }, 'worktree-root': { type: 'string' },
   } });
   if (values.help) {
     console.log('milagre daemon <serve|status|stop|request METHOD [JSON_ARGS]> --data-dir /absolute/path\nmilagre daemon bridge --data-dir /absolute/path --connection-file /absolute/new-file.json [--port 8787]\n\nLocal macOS/Linux daemon. Use a separate profile and close these Projects in older desktop releases.');

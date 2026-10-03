@@ -1,35 +1,17 @@
-const { execFile } = require("node:child_process");
+const { createGit, callbackExec, LIMITS } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
+const defaultClient = createGit();
+const { text: git, commitOf } = defaultClient.read;
 
 // A hung git must not leave the archive menu on "Checking worktree…": the check fails and the chat only hides.
-const GIT_TIMEOUT_MS = 10_000;
+const GIT_TIMEOUT_MS = LIMITS.READ.timeout;
 // Removing a worktree with big ignored folders (node_modules, build output) can take minutes, and killing git
 // halfway would leave it half-deleted and still registered. Only the checks are on the short leash.
-const REMOVE_TIMEOUT_MS = 5 * 60_000;
+const REMOVE_TIMEOUT_MS = LIMITS.REMOVE.timeout;
 
 // The message a removal refused because the worktree changed after the user looked; the renderer words the notice.
 const CHANGED_AFTER_CHECK = "WORKTREE_CHANGED";
-
-async function git(cwd, args, { timeout = GIT_TIMEOUT_MS, exec = execFileAsync } = {}) {
-  try {
-    return (await exec("git", ["-C", cwd, ...args], { encoding: "utf8", timeout })).stdout;
-  } catch (error) {
-    throw new Error(error.stderr?.trim() || error.message);
-  }
-}
-
-/** The commit a ref names, or null. `--end-of-options` keeps a ref that looks like a flag from being one. */
-async function commitOf(cwd, ref) {
-  try {
-    return (await git(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`])).trim() || null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * What archiving a chat would lose from its worktree. `uncommitted` counts `git status` entries (untracked
@@ -74,13 +56,14 @@ const sameStatus = (now, seen) => Boolean(seen) && now.head === seen.head && now
  * or HEAD moved. Either refusal throws CHANGED_AFTER_CHECK. The safe remove is git's own (a dirty worktree is
  * refused) with `branch -d` (an unmerged branch is kept: it's pushed or empty); the forced one uses --force and -D.
  */
-async function removeWorktree({ path: worktreePath, root, projectPath, base, seen, force = false, closeSession, exec = execFileAsync }) {
-  const g = (cwd, args, options = {}) => git(cwd, args, { exec, ...options });
+async function removeWorktree({ path: worktreePath, root, projectPath, base, seen, force = false, closeSession, exec }) {
+  const client = exec ? createGit({ execFile: callbackExec(exec) }) : defaultClient;
+  const g = client.read.text;
   const realRoot = await fs.realpath(root).catch(() => null);
   const real = await fs.realpath(worktreePath);
   if (!realRoot || !isInside(realRoot, real)) throw new Error(`${worktreePath} is outside Milagre's worktree folder.`);
-  const listing = await g(real, ["worktree", "list", "--porcelain"]);
-  const main = listing.match(/^worktree (.+)$/m)?.[1];
+  const listing = await client.worktreeList(real);
+  const main = listing[0]?.path;
   if (!main) throw new Error(`${worktreePath} is not a git worktree.`);
   const realMain = await fs.realpath(main);
   if (realMain === real) throw new Error(`${worktreePath} is the main checkout.`);
@@ -90,21 +73,20 @@ async function removeWorktree({ path: worktreePath, root, projectPath, base, see
   if (!projectPath) throw new Error("No project was given, so the worktree is kept.");
   const realProject = await fs.realpath(projectPath);
   if (realProject === real) throw new Error(`${worktreePath} is the project folder.`);
-  const commonDir = async (cwd) => fs.realpath(path.resolve(cwd, (await g(cwd, ["rev-parse", "--git-common-dir"])).trim()));
-  if ((await commonDir(real)) !== (await commonDir(realProject))) throw new Error(`${worktreePath} belongs to another repository.`);
+  if ((await client.commonDir(real)) !== (await client.commonDir(realProject))) throw new Error(`${worktreePath} belongs to another repository.`);
 
   // The agent may still be writing: close its session, then look at the folder as it is now.
   await closeSession?.();
   const now = await worktreeStatus(real, base);
   if (force ? !sameStatus(now, seen) : !now.removable) throw new Error(`${CHANGED_AFTER_CHECK}: ${worktreePath} changed after it was checked.`);
 
-  await g(realMain, ["worktree", "remove", ...(force ? ["--force"] : []), real], { timeout: REMOVE_TIMEOUT_MS, exec });
+  await client.write.checked(realMain, ["worktree", "remove", ...(force ? ["--force"] : []), real], { profile: "REMOVE" });
 
   // Only branches Milagre made: a chat that switched its worktree to another branch must not delete it.
   let branchDeleted = false;
   if (now.branch?.startsWith("milagre/")) {
     try {
-      await g(realMain, ["branch", force ? "-D" : "-d", now.branch], { timeout: REMOVE_TIMEOUT_MS, exec });
+      await client.write.checked(realMain, ["branch", force ? "-D" : "-d", now.branch], { profile: "REMOVE" });
       branchDeleted = true;
     } catch {}
   }

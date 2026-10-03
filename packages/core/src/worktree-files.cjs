@@ -1,10 +1,8 @@
-const { execFile, spawn } = require("node:child_process");
+const { createGit, GitError } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
+const git = createGit().read;
 
 // Files a new worktree gets from the project's main checkout, after Conductor's "Files to copy":
 // untracked files that git ignores and that match the project's patterns (.gitignore syntax).
@@ -45,7 +43,6 @@ async function staysInside(realRoot, directory) {
 }
 
 const COPY_LIMITS = { maxFiles: 500, maxBytes: 100 * 1024 * 1024 };
-const GIT_LIMITS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 30_000 };
 
 function patternLines(text) {
   return text.split(/\r?\n/);
@@ -63,28 +60,11 @@ async function resolvePatterns(projectPath, setting) {
   return { source: "default", patterns: DEFAULT_PATTERNS, worktreeInclude: null };
 }
 
-// check-ignore reads the paths from stdin, which execFile can't feed.
-function gitWithInput(cwd, args, input) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("git", ["-C", cwd, ...args], { stdio: ["pipe", "pipe", "pipe"] });
-    const out = [];
-    const err = [];
-    const timer = setTimeout(() => child.kill(), GIT_LIMITS.timeout);
-    child.stdout.on("data", (chunk) => out.push(chunk));
-    child.stderr.on("data", (chunk) => err.push(chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      // check-ignore exits 1 when none of the paths is ignored.
-      if (code === 0 || code === 1) resolve(Buffer.concat(out).toString("utf8"));
-      else reject(new Error(Buffer.concat(err).toString("utf8").trim() || `git exited with ${code}`));
-    });
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
-  });
+// check-ignore exits 1 when no path is ignored; the shared runner still preserves its output.
+async function gitWithInput(cwd, args, input) {
+  const result = await git.run(cwd, args, { input });
+  if (!result.ok && result.code !== 1) throw new GitError(result);
+  return result.stdout;
 }
 
 /** The regular files in `projectPath` that the patterns pick and git ignores, as { path, size }, sorted. */
@@ -96,7 +76,7 @@ async function findFilesToCopy(projectPath, patterns) {
     const patternFile = path.join(scratch, "patterns");
     await fs.writeFile(patternFile, `${patterns.join("\n")}\n`);
     const skipped = excludedFolders(patterns).map((folder) => `:(exclude,glob)**/${folder}/**`);
-    const { stdout } = await execFileAsync("git", ["-C", projectPath, "ls-files", "-z", "--others", "--ignored", `--exclude-from=${patternFile}`, "--", ".", ...skipped], GIT_LIMITS);
+    const { stdout } = await git.checked(projectPath, ["ls-files", "-z", "--others", "--ignored", `--exclude-from=${patternFile}`, "--", ".", ...skipped]);
     candidates = stdout.split("\0").filter(Boolean);
   } finally {
     await fs.rm(scratch, { recursive: true, force: true });

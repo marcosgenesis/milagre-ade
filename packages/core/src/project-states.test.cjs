@@ -91,3 +91,14 @@ test("flush waits for every change already asked for", async () => {
 
   assert.equal(saves.length, 2);
 });
+
+test('known Worktree folders come from loaded state and update without another read', async () => {
+  let reads = 0;
+  const states = new ProjectStates({ read: async p => { reads++; return { worktrees: { 1: { path: `${p}/main` } } }; }, save: async () => {} });
+  assert.deepEqual(states.worktreePaths(), []);
+  await states.get('/one'); await states.get('/two');
+  assert.deepEqual(states.worktreePaths(), ['/one/main', '/two/main']);
+  await states.update('/one', s => ({ ...s, worktrees: { 2: { path: '/one/new' } } }));
+  assert.deepEqual(states.worktreePaths(), ['/one/new', '/two/main']);
+  assert.equal(reads, 2);
+});

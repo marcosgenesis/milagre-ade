@@ -1,10 +1,9 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
-const { execFile } = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
-const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -44,7 +43,7 @@ const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const { createFileSearch } = require("./project-files.cjs");
-const execFileAsync = promisify(execFile);
+const git = createGit().read;
 
 // The composition root shared by Electron and the local daemon. Storage paths and
 // OS/UI actions belong to the host; command names and payloads match the preload.
@@ -79,8 +78,7 @@ function createRuntime(options) {
     if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
     let common;
     try {
-      const { stdout } = await execFileAsync("git", ["-C", real, "rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 10000 });
-      common = realpathSync(path.resolve(real, stdout.trim()));
+      common = await git.commonDir(real);
     } catch (error) {
       if (error.code !== 128 || !/not a git repository/i.test(error.stderr ?? "")) throw error;
     }
@@ -110,11 +108,8 @@ function createRuntime(options) {
   const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
 
   async function discoverWorktrees(projectPath) {
-    try {
-      return await activeWorktrees(projectPath);
-    } catch {
-      return [];
-    }
+    // A failed read is not evidence that every Worktree was removed.
+    return activeWorktrees(projectPath);
   }
 
   async function readStoredState(projectPath) {
@@ -172,8 +167,7 @@ function createRuntime(options) {
   }
 
   commands.handle("project:files", async (_event, root, query) => {
-    const known = (await Promise.all(states.projects().map(discoverWorktrees))).flat();
-    if (!known.some(worktree => worktree.path === root)) throw new Error("Choose an open project's worktree.");
+    if (!states.worktreePaths().includes(root)) throw new Error("Choose an open project's worktree.");
     return searchFiles(root, query);
   });
   commands.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
@@ -393,7 +387,7 @@ function createRuntime(options) {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
       brief: ({ cwd, ...input }) => generateBrief({
         ...input,
-        changedFiles: async () => (await execFileAsync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" })).stdout.split("\n").filter(Boolean).map((line) => line.slice(3)),
+        changedFiles: async () => (await git.text(cwd, ["status", "--porcelain"])).split("\n").filter(Boolean).map((line) => line.slice(3)),
       }, { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: version })) }),
     },
   });
@@ -416,7 +410,7 @@ function createRuntime(options) {
     cli: (name) => agentCli(name),
     ready: () => environmentReady,
     clientVersion: version,
-    knownFolders: async () => (await Promise.all(states.projects().map(discoverWorktrees))).flat().map((worktree) => worktree.path),
+    knownFolders: () => states.worktreePaths(),
   });
 
   commands.handle("chat:send", (_event, request) => {

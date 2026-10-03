@@ -17,6 +17,7 @@ window.escapes = 0;
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && !event.defaultPrevented) window.escapes++; });
 window.agentEvent = payload => window.agentHandlers.forEach(handler => handler(payload));
 window.milagre = new Proxy({
+  getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
   // The check raises a question in the open chat by sending the events the main process would.

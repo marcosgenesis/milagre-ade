@@ -1,9 +1,8 @@
-const { execFile } = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
+const client = createGit().read;
+const git = client.text;
 
 // Lines a worktree adds and removes against the commit it branched from, uncommitted and untracked
 // files included: what the chat's hover card shows. Read in the background and cached in the
@@ -14,32 +13,9 @@ const UNTRACKED_SIZE_LIMIT = 1024 * 1024;
 // Milagre's own state lives in the project, and isn't the chat's work even where it isn't ignored.
 const PATHSPEC = ["--", ".", ":(exclude).milagre"];
 
-async function git(cwd, args) {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
-  return stdout;
-}
-
-async function resolves(cwd, ref) {
-  try {
-    await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The ref a worktree is compared with: the one it was created from, else its branch's upstream,
- * else the remote's default branch, else HEAD (so only uncommitted work counts).
- */
+/** Same recorded/default comparison branch as Changes and the commit dialog. */
 async function diffBase(cwd, base) {
-  if (base && (await resolves(cwd, base))) return base;
-  if (await resolves(cwd, "@{upstream}")) return "@{upstream}";
-  try {
-    const remoteHead = (await git(cwd, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])).trim();
-    if (remoteHead && (await resolves(cwd, remoteHead))) return remoteHead;
-  } catch {}
-  return "HEAD";
+  return (await client.resolveBase(cwd, base)).ref ?? 'HEAD';
 }
 
 function sumNumstat(output) {

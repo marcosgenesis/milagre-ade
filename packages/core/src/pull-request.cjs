@@ -1,3 +1,4 @@
+const { createGit, callbackExec } = require("./git/client.cjs");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 
@@ -18,7 +19,8 @@ const execOptions = (cwd) => ({
 async function readPullRequest(cwd, exec = execFileAsync) {
   try {
     const options = execOptions(cwd);
-    const { stdout: branchOutput } = await exec("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], options);
+    const git = createGit({ execFile: callbackExec(exec) }).read;
+    const { stdout: branchOutput } = await git.checked(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     const branch = branchOutput.trim();
     if (!branch) return null;
     // `pr view` can infer the wrong head repository for a fork or a branch tracking main.

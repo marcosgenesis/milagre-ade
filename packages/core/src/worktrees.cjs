@@ -1,30 +1,19 @@
-const { execFile } = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { promisify } = require("node:util");
 const { copyFilesToWorktree } = require("./worktree-files.cjs");
 
-const execFileAsync = promisify(execFile);
+const client = createGit();
+const git = client.read.checked;
 
 // Worktrees live outside the project so they never show up as untracked files in it.
 const DEFAULT_WORKTREE_ROOT = path.join(os.homedir(), ".milagre", "worktrees");
 
-async function git(cwd, args, options = {}) {
-  try {
-    return await execFileAsync("git", ["-C", cwd, ...args], { encoding: "utf8", ...options });
-  } catch (error) {
-    throw new Error(error.stderr?.trim() || error.message);
-  }
-}
-
-// A fetch that can't reach the remote gives up instead of prompting for credentials.
-const FETCH_OPTIONS = { timeout: 15_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes" } };
-
 // The commit a new worktree starts from. A local branch that only trails its upstream (a `main` behind
 // `origin/main`) starts from the freshly fetched upstream; one with commits of its own, one without an
 // upstream, or one whose remote can't be reached starts from itself.
-async function resolveBase(projectPath, baseBranch) {
+async function resolveStartRef(projectPath, baseBranch) {
   let upstream = [];
   try {
     const { stdout } = await git(projectPath, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream:short)", `refs/heads/${baseBranch}`]);
@@ -34,7 +23,7 @@ async function resolveBase(projectPath, baseBranch) {
   // "." is an upstream that is itself a local branch: nothing to fetch.
   if (!remote || remote === "." || !remoteRef || !trackingRef) return baseBranch;
   try {
-    await git(projectPath, ["fetch", "--quiet", remote, `+${remoteRef}:refs/remotes/${trackingRef}`], FETCH_OPTIONS);
+    await client.write.checked(projectPath, ["fetch", "--quiet", remote, `+${remoteRef}:refs/remotes/${trackingRef}`], { profile: "NETWORK" });
   } catch {
     // Offline: the last fetched upstream is still newer than nothing.
   }
@@ -74,9 +63,9 @@ async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEF
   const branch = `milagre/${name}`;
   const worktreePath = path.join(root, path.basename(projectPath), name);
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-  const start = await resolveBase(projectPath, baseBranch);
+  const start = await resolveStartRef(projectPath, baseBranch);
   // --no-track: the chat's branch must not push to, or pull from, the branch it started on.
-  await git(projectPath, ["worktree", "add", "--no-track", "-b", branch, worktreePath, start]);
+  await client.write.checked(projectPath, ["worktree", "add", "--no-track", "-b", branch, worktreePath, start]);
   // Ignored files the project needs (env files) come along; a failed copy never fails the worktree.
   const copy = await copyFilesToWorktree({ projectPath, worktreePath, setting: copyPatterns, limits: copyLimits });
   // `base` is what the chat's changes are measured against (see diffstat.cjs).
@@ -93,7 +82,7 @@ async function renameWorktreeBranch({ worktreePath, branch, slug }) {
   const renamed = `milagre/${name}-${suffix}`;
   if (renamed === branch) return null;
   try {
-    await git(worktreePath, ["branch", "-m", branch, renamed]);
+    await client.write.checked(worktreePath, ["branch", "-m", branch, renamed]);
     return renamed;
   } catch {
     return null;

@@ -1,26 +1,13 @@
-const { execFile } = require("node:child_process");
+const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
+const client = createGit().read;
 
 async function git(cwd, ...args) {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10_000 });
-  return stdout.trim();
+  return (await client.text(cwd, args)).trim();
 }
 
-async function listedWorktrees(cwd) {
-  const listing = await git(cwd, "worktree", "list", "--porcelain");
-  return listing.split(/\n(?=worktree )/).filter(Boolean).map((block) => {
-    const worktreePath = block.match(/^worktree (.+)$/m)?.[1];
-    const branchRef = block.match(/^branch (.+)$/m)?.[1];
-    return worktreePath ? {
-      path: worktreePath,
-      name: branchRef?.replace(/^refs\/heads\//, "") || path.basename(worktreePath),
-    } : null;
-  }).filter(Boolean);
-}
+const listedWorktrees = cwd => client.worktreeList(cwd);
 
 async function isDirectory(folder) {
   try { return (await fs.stat(folder)).isDirectory(); } catch { return false; }
@@ -38,7 +25,7 @@ async function resolveProject(openedPath) {
   if (typeof openedPath !== "string" || !path.isAbsolute(openedPath)) throw new Error("Choose a Git worktree.");
   const opened = await fs.realpath(openedPath);
   const top = await fs.realpath(await git(opened, "rev-parse", "--show-toplevel"));
-  const commonDir = await fs.realpath(path.resolve(top, await git(top, "rev-parse", "--git-common-dir")));
+  const commonDir = await client.commonDir(top);
   const main = (await listedWorktrees(top))[0]?.path;
   if (!main || !await isDirectory(main)) throw new Error("The Project's main checkout is missing.");
   const projectPath = await fs.realpath(main);

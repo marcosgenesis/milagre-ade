@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -7,6 +7,7 @@ import { mediaUrl } from "../../lib/media";
 import { ImageGeneration } from "./ImageGeneration";
 import type { ImageGenerationStatus } from "./ImageGeneration";
 import { StepRow } from "./StepRow";
+import { MediaLightbox } from "../motion/MediaLightbox";
 import Tooltip from "../primitives/Tooltip";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
@@ -18,7 +19,7 @@ function ImageAction({ label, icon, onClick }: { label: string; icon: IconData; 
         type="button"
         aria-label={label}
         onClick={onClick}
-        className="grid size-7 place-items-center rounded-[8px] bg-surface/80 text-ink-2 shadow-[var(--shadow-hairline)] backdrop-blur-sm transition-colors hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"
+        className="grid size-7 place-items-center rounded-[8px] bg-surface/80 text-ink-2 shadow-[var(--shadow-hairline)] backdrop-blur-chip transition-colors hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-ink-3"
       >
         <HugeiconsIcon icon={icon} size={14} strokeWidth={1.8} color="currentColor" aria-hidden />
       </button>
@@ -30,12 +31,16 @@ function ImageAction({ label, icon, onClick }: { label: string; icon: IconData; 
  * An image the agent generated, from its image step. Codex reports no progress between start and
  * finish, so the surface stays in "generating" until the saved file has loaded. A generation that
  * failed has no image to hold a place for, so it is a failed step row like any other. The image
- * copies or saves from its buttons or its right-click menu.
+ * opens full size on click, and copies or saves from its buttons or its right-click menu.
  */
 export const GeneratedImage = memo(function GeneratedImage({ step }: { step: ChatStep }) {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [broken, setBroken] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const thumb = useRef<HTMLButtonElement>(null);
+  const thumbFor = useCallback(() => thumb.current, []);
+  const close = useCallback(() => setOpen(false), []);
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(false), 1500);
@@ -67,8 +72,12 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
           <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
         </>}
       >
-        {src ? <img src={src} alt="" draggable={false} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setBroken(true)} /> : null}
+        {src ? <button ref={thumb} type="button" aria-label="Preview generated image" disabled={status !== "complete"} onClick={() => setOpen(true)} className="block cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink-3 disabled:cursor-default">
+          {/* Hidden while the viewer shows it, so the image morphs out of and back into its place. */}
+          <img src={src} alt="" draggable={false} className={open ? "opacity-0" : undefined} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setBroken(true)} />
+        </button> : null}
       </ImageGeneration>
+      {open && src && <MediaLightbox items={[{ id: step.id, name: file.split("/").at(-1) || "Generated image", src, kind: "image", file }]} start={0} thumbFor={thumbFor} close={close} />}
     </div>
   );
 });

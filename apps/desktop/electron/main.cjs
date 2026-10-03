@@ -303,15 +303,15 @@ ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
-// A generated image in a chat: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
-const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), writeImage: (image) => clipboard.writeImage(image) });
-const saveImageFile = (event, file) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) });
+// An image in a chat, generated or attached: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.writeImage(image) });
+const saveImageFile = (event, file, name) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) }, name);
 ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
-ipcMain.handle("image:save", (event, file) => saveImageFile(event, file));
-ipcMain.handle("image:menu", (event, file) => {
+ipcMain.handle("image:save", (event, file, name) => saveImageFile(event, file, name));
+ipcMain.handle("image:menu", (event, file, name) => {
   Menu.buildFromTemplate([
     { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
-    { label: "Save Image…", click: () => void saveImageFile(event, file).catch(() => {}) },
+    { label: "Save Image…", click: () => void saveImageFile(event, file, name).catch(() => {}) },
   ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
 });
 

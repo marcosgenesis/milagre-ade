@@ -9,7 +9,7 @@ import React, { Profiler, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
 import { DotBackground } from "/src/components/DotBackground";
-import { MODEL_CATALOG, capabilityFor } from "/src/model";
+import { MODEL_CATALOG, capabilityFor } from "@milagre/shared/model";
 import "/src/styles.css";
 const noop = () => {};
 window.subagentProfilerCommits = [];

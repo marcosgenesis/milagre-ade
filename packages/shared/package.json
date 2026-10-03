@@ -1,0 +1,37 @@
+{
+  "name": "@milagre/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./model": "./src/model.ts",
+    "./agent-runs": {
+      "types": "./src/agent-runs.d.mts",
+      "default": "./src/agent-runs.mjs"
+    },
+    "./project-edits": {
+      "types": "./src/project-edits.d.mts",
+      "default": "./src/project-edits.mjs"
+    },
+    "./chats": {
+      "types": "./src/chats.d.mts",
+      "default": "./src/chats.mjs"
+    },
+    "./attention": {
+      "types": "./src/attention.d.mts",
+      "default": "./src/attention.mjs"
+    }
+  },
+  "files": [
+    "src/*.mjs",
+    "src/*.d.mts",
+    "src/model.ts"
+  ],
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

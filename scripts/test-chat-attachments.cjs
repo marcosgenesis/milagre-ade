@@ -55,7 +55,7 @@ window.milagre = new Proxy({
  },
  notifyCompletion: async notice => { window.notices.push(notice); },
  syncNotifications: async value => { window.synced.push(value); },
- interruptAgent: async () => { window.interrupted = true; },
+ interruptAgent: async chatId => { window.interrupted = chatId; },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null); } });
 localStorage.setItem('milagre-settings', JSON.stringify({ theme: 'dark' }));
 const { default: App } = await import('/src/App');
@@ -65,7 +65,7 @@ async function browserChecks() {
  const { app, BrowserWindow, protocol, net, session } = require('electron');
  protocol.registerSchemesAsPrivileged([{ scheme: 'milagre-media', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
  await app.whenReady();
- const handleMedia = require('../electron/media.cjs').createMediaHandler((url, options) => net.fetch(url, options));
+ const handleMedia = require('../apps/desktop/electron/media.cjs').createMediaHandler((url, options) => net.fetch(url, options));
  session.fromPartition('issues-test').protocol.handle('milagre-media', request => {
    const url = new URL(request.url);
    url.searchParams.set('path', path.join(__dirname, 'fixtures', path.basename(url.searchParams.get('path'))));
@@ -156,6 +156,9 @@ async function browserChecks() {
   await waitFor(String.raw`!document.querySelector("dialog")`);
   await click('[aria-label="Send"]');
   await waitFor(String.raw`window.calls.length === 1`);
+  await waitFor(String.raw`!!document.querySelector('[aria-label="Stop agent"]')`);
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Stop agent"]').disabled`), false, 'An empty draft can stop a running agent');
+  await screenshot('agent-stop-button');
   assert.deepEqual(await evaluate('window.calls[0].images.map(i=>i.name)'), ['photo.png']);
   assert.ok(await evaluate('window.calls[0].prompt.includes("/fixture/files/note.txt") && window.calls[0].prompt.includes("/fixture/files/clip.mp4")'));
   assert.deepEqual(await evaluate('window.saved.messages.at(-1).files'), ['/fixture/files/note.txt','/fixture/files/clip.mp4','/fixture/files/photo.png']);
@@ -194,7 +197,12 @@ async function browserChecks() {
   await key('Escape');
   await waitFor(String.raw`!document.querySelector("dialog")`);
   await type('Review these');
-  await click('[aria-label="Send"]');
+  await click('[aria-label="Stop agent"]');
+  assert.equal(await evaluate('window.interrupted'), '/fixture#3', 'Stop targets the open chat');
+  assert.equal(await evaluate('document.querySelector("textarea").value'), 'Review these', 'Stopping preserves the draft');
+  assert.equal(await evaluate('window.calls.length'), 1, 'Stop does not send the draft');
+  await evaluate('document.querySelector("textarea").focus()');
+  await key('Enter');
   await waitFor('window.calls.length === 2');
   assert.ok(await evaluate('window.calls[1].prompt.includes("/fixture/media/photo.png") && window.calls[1].prompt.includes("/fixture/media/clip.mp4")'));
   assert.equal(await evaluate('window.saved.messages.at(-1).body'), 'Review these');
@@ -215,6 +223,7 @@ async function browserChecks() {
   await waitFor(String.raw`window.synced.at(-1)?.unread.includes("/fixture#3")`);
   await key('2', { metaKey: true });
   await waitFor(String.raw`!window.synced.at(-1)?.unread.includes("/fixture#3")`);
+  await waitFor(String.raw`!!document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Stop agent"]')`);
   await delay(250);
   require('node:fs').writeFileSync('/tmp/milagre-attachments.png', (await window.webContents.capturePage()).toPNG());
   await key(',', { metaKey:true });

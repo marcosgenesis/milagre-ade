@@ -1,9 +1,9 @@
 /target/
 /.milagre/
-/node_modules/
-/dist/
+node_modules/
+dist/
 /release/
-/.vite/
+.vite/
 .DS_Store
 .env
 .env.*

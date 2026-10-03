@@ -56,7 +56,7 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 // A fake agent with an MCP-like child in its own group and a command shell that starts a server in the background.
 async function realProcessCheck() {
   const { spawn } = require("node:child_process");
-  const { PortWatcher } = require("../electron/agents/ports.cjs");
+  const { PortWatcher } = require("../packages/core/src/agents/ports.cjs");
   const agentSource = `
     const { spawn } = require("node:child_process");
     const net = require("node:net");
@@ -104,7 +104,7 @@ async function realProcessCheck() {
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
-  const { guardNavigation } = require("../electron/links.cjs");
+  const { guardNavigation } = require("../apps/desktop/electron/links.cjs");
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-ports-ui-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 1000, height: 560, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });

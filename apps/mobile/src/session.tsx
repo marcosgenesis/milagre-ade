@@ -9,26 +9,49 @@ function useSessionState() {
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const generation = useRef(0);
+  const selection = useRef<{ client: Client; path: string } | null>(null);
   const connect = async (address: string, token: string) => {
     const next = createClient(address, token);
-    await next.call('daemon:status');
-    const projects = await next.call<RecentProject[]>('project:recent');
-    generation.current++;
-    setClient(next); setRecent(projects); setSnapshot(null); setError('');
+    const current = ++generation.current;
+    const previous = selection.current;
+    selection.current = null;
+    try {
+      await next.call('daemon:status');
+      const projects = await next.call<RecentProject[]>('project:recent');
+      if (current !== generation.current) return;
+      setClient(next); setRecent(projects); setSnapshot(null); setError('');
+    } catch (error) {
+      if (current === generation.current) selection.current = previous;
+      throw error;
+    }
   };
   const open = async (projectPath: string) => {
     if (!client) throw new Error('Connect to your computer first.');
     const current = ++generation.current;
-    const project = await client.call<OpenProject>('project:open', [projectPath]);
-    const state = await client.snapshot(project.path);
-    if (current === generation.current) { setSnapshot(state); setError(''); }
+    const previous = selection.current;
+    selection.current = null;
+    try {
+      const project = await client.call<OpenProject>('project:open', [projectPath]);
+      const state = await client.snapshot(project.path);
+      if (current === generation.current) {
+        selection.current = { client, path: project.path };
+        setSnapshot(state); setError('');
+      }
+    } catch (error) {
+      if (current === generation.current) selection.current = previous;
+      throw error;
+    }
   };
   const projectPath = snapshot?.project.path;
   const refresh = useCallback(async () => {
-    if (!client || !projectPath) return;
-    const current = generation.current;
-    const state = await client.snapshot(projectPath);
-    if (current === generation.current) { setSnapshot(state); setError(''); }
+    const current = selection.current;
+    if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
+    try {
+      const state = await client.snapshot(projectPath);
+      if (current === selection.current) { setSnapshot(state); setError(''); }
+    } catch (error) {
+      if (current === selection.current) throw error;
+    }
   }, [client, projectPath]);
   useEffect(() => {
     if (!client || !projectPath) return;
@@ -45,7 +68,7 @@ function useSessionState() {
     const subscription = AppState.addEventListener('change', state => { clearTimeout(timer); if (state === 'active') void poll(); });
     return () => { cancelled = true; clearTimeout(timer); subscription.remove(); };
   }, [client, projectPath, refresh]);
-  const disconnect = () => { generation.current++; setClient(null); setSnapshot(null); setError(''); };
+  const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
   return { client, recent, snapshot, error, setError, drafts, setDrafts, connect, open, refresh, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);

@@ -23,7 +23,7 @@ export default function ChatScreen() {
   const client = session.client;
   const { project, runs } = session.snapshot;
   const chat = params.id ? project.state.sessions[Number(params.id)] : null;
-  const chatId = `${project.path}#${chat?.id ?? `new:${params.worktreeId}`}`;
+  const chatId = `${project.path}#${params.id ?? `new:${params.worktreeId}`}`;
   const draft = session.drafts[chatId] || '';
   const run = chat ? runs.runs[chatId] : undefined;
   const messages = chat ? project.state.messages.filter(m => m.session_id === chat.id) : [];
@@ -40,11 +40,17 @@ export default function ChatScreen() {
   async function send() {
     const sent = draft;
     await action(async () => {
-      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, sessionId: chat?.id ?? null, worktreeId: Number(params.worktreeId), body: sent, provider: actualProvider, model: actualModel, permissionMode: 'ask' }]);
-      session.setDrafts(current => current[chatId] === sent ? { ...current, [chatId]: '' } : current);
+      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, sessionId: params.id ? Number(params.id) : null, worktreeId: Number(params.worktreeId), body: sent, provider: actualProvider, model: actualModel, permissionMode: 'ask' }]);
+      session.setDrafts(current => {
+        const remaining = current[chatId] === sent ? '' : current[chatId] || '';
+        const destination = `${project.path}#${result.sessionId}`;
+        const next = { ...current, [destination]: remaining };
+        if (destination !== chatId) delete next[chatId];
+        return next;
+      });
       following.current = true;
       Keyboard.dismiss();
-      if (!chat) router.setParams({ id: String(result.sessionId) });
+      if (!params.id) router.setParams({ id: String(result.sessionId) });
     });
   }
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>

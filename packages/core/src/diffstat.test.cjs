@@ -65,3 +65,40 @@ test("sidebar totals include branch commits when its upstream is the feature bra
   git('branch', '--set-upstream-to=upstream-feature');
   assert.deepEqual(await readDiffStat(project), { added: 1, removed: 0 });
 });
+
+test("cachedDiffBase resolves a base once per TTL and per (cwd, base)", async (t) => {
+  const { project, git } = await fixture(t);
+  const { BASE_TTL, cachedDiffBase } = require("./diffstat.cjs");
+  let clock = 1000;
+  const now = () => clock;
+  assert.equal(await cachedDiffBase(project, "main", now), "main");
+  // The branch is renamed, but the answer is remembered until the TTL passes.
+  git("branch", "-m", "main", "trunk");
+  assert.equal(await cachedDiffBase(project, "main", now), "main");
+  assert.equal(await cachedDiffBase(project, "other", now), "HEAD");
+  clock += BASE_TTL + 1;
+  assert.equal(await cachedDiffBase(project, "main", now), "HEAD");
+});
+
+test("an edited untracked file is counted again, a removed one drops out", async (t) => {
+  const { project } = await fixture(t);
+  await fs.writeFile(path.join(project, "a.md"), "1\n2\n");
+  await fs.writeFile(path.join(project, "b.md"), "1\n");
+  assert.deepEqual(await readDiffStat(project), { added: 3, removed: 0 });
+  await fs.writeFile(path.join(project, "b.md"), "1\n2\n3\n4\n");
+  assert.deepEqual(await readDiffStat(project), { added: 6, removed: 0 });
+  await fs.rm(path.join(project, "a.md"));
+  assert.deepEqual(await readDiffStat(project), { added: 4, removed: 0 });
+});
+
+test("an untracked file whose size and mtime are unchanged is not read again", async (t) => {
+  const { project } = await fixture(t);
+  const file = path.join(project, "a.md");
+  await fs.writeFile(file, "1\n2\n");
+  await fs.utimes(file, 1e9, 1e9); // whole seconds, so utimes can restore the exact mtime
+  assert.deepEqual(await readDiffStat(project), { added: 2, removed: 0 });
+  // Same size and mtime, different content: the cached count answers without a read.
+  await fs.writeFile(file, "x\n\n\n");
+  await fs.utimes(file, 1e9, 1e9);
+  assert.deepEqual(await readDiffStat(project), { added: 2, removed: 0 });
+});

@@ -4,6 +4,8 @@ const { withDiffStats } = require("@milagre/shared/project-edits");
 // A burst of edits makes one git call; focusing a window again re-reads at most this often.
 const EDIT_DEBOUNCE = 1200;
 const FOCUS_THROTTLE = 5000;
+// Only these steps can change files; reads, searches, thinking, setup and image steps leave the stat as it was.
+const FILE_STEP_KINDS = new Set(["edit", "shell", "other"]);
 
 // Keeps each worktree's diff stat in its project's state, in every project, so a chat's hover card
 // shows it at once. Re-read when a project is read, when a window regains focus (edits made outside
@@ -17,7 +19,7 @@ class DiffRefresher {
     Object.assign(this, { states, readDiffStat, update, debounceMs, throttleMs, now });
     this.timers = new Map();
     this.lastFocus = new Map();
-    this.thinking = new Map();
+    this.stepKinds = new Map();
     this.pending = [];
     this.active = 0;
   }
@@ -25,12 +27,18 @@ class DiffRefresher {
   /** Re-reads a chat's worktree shortly after one of its agent's tool steps or turns ends. */
   observe(chatId, event) {
     if (this.closed) return;
-    if (event.type === "step-started" && event.step?.kind === "thinking") {
-      if (!this.thinking.has(chatId)) this.thinking.set(chatId, new Set());
-      this.thinking.get(chatId).add(event.step.id);
+    // step-completed doesn't carry its kind; remember it from step-started. A step seen only at its end still refreshes.
+    if (event.type === "step-started" && event.step) {
+      if (!this.stepKinds.has(chatId)) this.stepKinds.set(chatId, new Map());
+      this.stepKinds.get(chatId).set(event.step.id, event.step.kind);
     }
-    if (event.type === "step-completed" && this.thinking.get(chatId)?.delete(event.id)) return;
-    if (isTurnEnd(event)) this.thinking.delete(chatId);
+    if (event.type === "step-completed") {
+      const kinds = this.stepKinds.get(chatId);
+      const kind = kinds?.get(event.id);
+      kinds?.delete(event.id);
+      if (kind !== undefined && !FILE_STEP_KINDS.has(kind)) return;
+    }
+    if (isTurnEnd(event)) this.stepKinds.delete(chatId);
     if (event.type !== "step-completed" && !isTurnEnd(event)) return;
     clearTimeout(this.timers.get(chatId));
     const timer = setTimeout(() => {
@@ -46,7 +54,7 @@ class DiffRefresher {
     this.closed = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    this.thinking.clear();
+    this.stepKinds.clear();
     for (const job of this.pending.splice(0)) job.resolve(null);
   }
 

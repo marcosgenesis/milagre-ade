@@ -18,6 +18,20 @@ async function diffBase(cwd, base) {
   return (await client.resolveBase(cwd, base)).ref ?? 'HEAD';
 }
 
+// resolveBase is up to six git processes and its answer rarely changes, while every agent step
+// re-reads the stat; remember it per (cwd, base) for a short while.
+const BASE_TTL = 30_000;
+const baseCache = new Map();
+async function cachedDiffBase(cwd, base, now = Date.now) {
+  const key = `${cwd}\0${base ?? ''}`;
+  const hit = baseCache.get(key);
+  if (hit && now() - hit.at < BASE_TTL) return hit.ref;
+  const ref = await diffBase(cwd, base);
+  if (baseCache.size >= 200) baseCache.delete(baseCache.keys().next().value);
+  baseCache.set(key, { ref, at: now() });
+  return ref;
+}
+
 function sumNumstat(output) {
   let added = 0;
   let removed = 0;
@@ -44,17 +58,33 @@ async function fileLineCount(fullPath) {
   }
 }
 
+// Per worktree: each untracked file's line count with the size and mtime it was counted at. A file
+// whose stat hasn't moved isn't read again, so a settled worktree costs one ls-files and a stat per
+// file instead of up to 500 reads; one an agent is still editing is re-counted.
+const untrackedCache = new Map();
 async function untrackedLines(cwd) {
   const files = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z", ...PATHSPEC])).split("\0").filter(Boolean).slice(0, UNTRACKED_FILE_LIMIT);
+  const known = untrackedCache.get(cwd);
+  const counted = new Map();
   let lines = 0;
-  for (const file of files) lines += await fileLineCount(path.join(cwd, file));
+  for (const file of files) {
+    const full = path.join(cwd, file);
+    const stat = await fs.stat(full).catch(() => null);
+    const before = known?.get(file);
+    const entry = stat && before && before.size === stat.size && before.mtimeMs === stat.mtimeMs
+      ? before : { size: stat?.size, mtimeMs: stat?.mtimeMs, lines: await fileLineCount(full) };
+    counted.set(file, entry);
+    lines += entry.lines;
+  }
+  if (!known && untrackedCache.size >= 200) untrackedCache.delete(untrackedCache.keys().next().value);
+  untrackedCache.set(cwd, counted);
   return lines;
 }
 
 /** `{ added, removed }` for the worktree at `cwd` against `base`, or null outside a repository. */
 async function readDiffStat(cwd, base) {
   try {
-    const ref = await diffBase(cwd, base);
+    const ref = await cachedDiffBase(cwd, base);
     const mergeBase = ref === "HEAD" ? "HEAD" : (await git(cwd, ["merge-base", ref, "HEAD"])).trim();
     const tracked = sumNumstat(await git(cwd, ["diff", "--numstat", mergeBase, ...PATHSPEC]));
     return { added: tracked.added + (await untrackedLines(cwd)), removed: tracked.removed };
@@ -63,4 +93,4 @@ async function readDiffStat(cwd, base) {
   }
 }
 
-module.exports = { PATHSPEC, diffBase, fileLineCount, readDiffStat };
+module.exports = { PATHSPEC, BASE_TTL, cachedDiffBase, diffBase, fileLineCount, readDiffStat };

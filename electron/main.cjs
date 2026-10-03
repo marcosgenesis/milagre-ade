@@ -44,7 +44,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("./shared/attention.mjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
-const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -486,6 +486,10 @@ ipcMain.handle("chat:send", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
   return chats.send(request);
 });
+ipcMain.handle("chat:resume", (_event, projectPath, sessionId) => {
+  if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
+  return chats.resumeChat(projectPath, Number(sessionId));
+});
 ipcMain.handle("chat:handover", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
   return chats.handover(request);
@@ -604,7 +608,16 @@ async function openProject(projectPath) {
   return project;
 }
 
-ipcMain.handle("project:current", () => openProject(process.cwd()));
+ipcMain.handle("project:current", async () => openProject(await launchProject(recentProjects(), process.cwd())));
+
+// Chats a quit stopped continue on launch in every recent project, not only the one on screen.
+async function resumeRecentProjects() {
+  for (const { path: projectPath } of await recentProjects().list()) {
+    const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+    if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
+    await readProject(projectPath).catch((error) => console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message));
+  }
+}
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({
     title: "Open project",
@@ -625,6 +638,7 @@ app.whenReady().then(async () => {
     if (!appIcon.isEmpty()) app.dock.setIcon(appIcon);
   }
   createWindow();
+  void resumeRecentProjects();
   app.on("browser-window-focus", () => {
     diffs.focused();
     void readOpenChat().catch(() => {});
@@ -644,7 +658,8 @@ app.whenReady().then(async () => {
 
 // Only a quit closes the last window on macOS; elsewhere closing it quits.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // A quit Electron started for a termination signal can end here, windows closed and the app still running.
+  if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
 // Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they

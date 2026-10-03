@@ -905,6 +905,7 @@ function App() {
               brief: handoverDraft,
               onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
             } : undefined}
+            resume={project && selectedSession?.resumeTurn ? { onContinue: () => void window.milagre.resumeChat(project.path, selectedSession.id).catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)) } : undefined}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}

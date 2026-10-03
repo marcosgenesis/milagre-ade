@@ -308,6 +308,15 @@ export type QuestionAnswers = Record<string, string[]>;
 
 export type QuestionOutcome = "answered" | "dismissed" | "cancelled";
 
+/** An observed message between agents. A null endpoint is the main agent. */
+export interface SubagentCommunication {
+  id: string;
+  fromId: string | null;
+  toId: string | null;
+  text: string;
+  at: number;
+}
+
 export interface Subagent {
   id: string;
   archived?: boolean;
@@ -319,6 +328,7 @@ export interface Subagent {
   updatedAt: number;
   endedAt?: number;
   latestActivity?: string;
+  communications?: SubagentCommunication[];
   transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
 }
 

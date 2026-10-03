@@ -10,7 +10,7 @@ import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
 import { ChatReply } from '../chat-reply';
-import { BottomFade } from '../bottom-fade';
+import { BottomFade, EdgeFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
@@ -142,6 +142,8 @@ export default function ChatScreen() {
     </PageScroll>
     {/* The composer floats over the transcript, which blurs and fades under it like desktop's. */}
     <BottomFade height={dockHeight + 48} />
+    {/* iOS's soft edge only covers the status bar here, so text under the title fades out the same way. */}
+    <EdgeFade edge="top" height={insets.top + 72} />
     <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 12), gap: 8 }}>
       {(blockers.length > 0 || agents.length > 0) && !question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}

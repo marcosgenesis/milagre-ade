@@ -69,6 +69,7 @@ import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore } from "./lib/draft-store";
+import { restoredChatsNotice } from "./lib/restored-chats";
 import { lazyView } from "./lib/lazy-view";
 import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
 import { reuseRows, useEvent, useStableSet } from "./lib/stable";
@@ -593,6 +594,8 @@ function App() {
       setGitDialog(null);
       setView("chat");
     });
+    const restored = restoredChatsNotice(nextProject.restoredChats);
+    if (restored) setNotice(restored);
   }
 
   // Opens a project in place of the one shown; a cancelled dialog, or the project already open, changes nothing.

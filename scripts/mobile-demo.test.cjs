@@ -36,6 +36,14 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   await client.call('agent:interrupt', [chatId]);
   const stopped = await wait(state => !state.runs.runs[chatId]);
   assert.equal(stopped.project.state.messages.at(-1).outcome, 'cancelled');
+  await send('tools failure');
+  await wait(state => state.runs.runs[chatId]?.steps.some(step => step.status === 'running'));
+  const finished = await wait(state => !state.runs.runs[chatId]);
+  const reply = finished.project.state.messages.at(-1);
+  assert.equal(reply.steps.length, 2);
+  assert.equal(reply.steps[1].status, 'failed');
+  assert.match(reply.steps[1].detail, /demo assertion/);
+  assert.match(reply.body, /## Preview ready/);
   await demo.close();
   await assert.rejects(fs.stat(`${demo.dataDir}/runtime.lock`), { code: 'ENOENT' });
 });

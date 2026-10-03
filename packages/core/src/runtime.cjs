@@ -37,6 +37,8 @@ const { attentionContext, attentionNotice } = require("@milagre/shared/attention
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
+const { createProjectRegistry } = require("./project-registry.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -107,7 +109,7 @@ function createRuntime(options) {
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
-    return git.worktreeList(projectPath);
+    return activeWorktrees(projectPath);
   }
 
   async function readStoredState(projectPath) {
@@ -490,10 +492,14 @@ function createRuntime(options) {
 
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
+  let registryStore = null;
+  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json")));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
   async function openProject(projectPath) {
-    const project = await readProject(projectPath);
-    await rememberProject(recentProjects(), projectPath);
+    const identity = await resolveProject(projectPath);
+    const project = await readProject(identity.path);
+    await projectRegistry().add(identity);
+    await rememberProject(recentProjects(), identity.path);
     return project;
   }
 
@@ -509,6 +515,8 @@ function createRuntime(options) {
       } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }
     }
   }
+  commands.handle("project:registry", () => projectRegistry().list());
+  commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("project:recent", () => recentProjects().list());
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");

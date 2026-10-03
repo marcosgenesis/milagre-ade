@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { CodexSession, saveGeneratedImage } = require("./codex-provider.cjs");
+const { CodexSession, saveGeneratedImage, recoverCodexSubagents } = require("./codex-provider.cjs");
 const { MILAGRE_INSTRUCTIONS, RESUME_FAILED_MESSAGE, crashMessage, isTerminal, loginMessage, missingCliMessage, failedWith } = require("./events.cjs");
 const { decodeImages } = require("../image-input.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
@@ -645,4 +645,261 @@ test("a generated image Codex didn't save is written out from its base64", () =>
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('a completed child catches up to a follow-up turn after native interaction without replaying history', async t => {
+ const events=[];
+ const session=new CodexSession({emit:event=>events.push(event)});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
+ const firstTurn={id:'first',status:'completed',items:[{type:'agentMessage',id:'old-answer',text:'First review finished'}]};
+ let snapshot={id:'child',status:{type:'idle'},turns:[firstTurn]};
+ let reads=0;
+ session.rpc={close:async()=>{},request:async(method,params)=>{
+  assert.equal(method,'thread/read');
+  assert.equal(params.threadId,'child');
+  reads++;
+  return {thread:structuredClone(snapshot)};
+ }};
+ await session.refreshSubagents();
+ const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
+ session.handleNotification('item/completed',interaction);
+ assert.equal(session.state.subagents.get('child').status,'completed');
+ // The provider may return the old completed turn before it has flushed the follow-up.
+ await session.refreshSubagents();
+ assert.equal(reads,2);
+ assert.equal(session.state.subagents.get('child').status,'completed');
+ const followup={id:'followup',status:'inProgress',items:[]};
+ snapshot={id:'child',status:{type:'active',activeFlags:['waitingOnApproval']},turns:[firstTurn,followup]};
+ await session.refreshSubagents();
+ assert.equal(session.state.subagents.get('child').status,'waiting');
+ assert.equal(session.state.subagents.get('child').endedAt,undefined);
+ snapshot={...snapshot,status:{type:'active',activeFlags:[]}};
+ await session.refreshSubagents();
+ assert.equal(session.state.subagents.get('child').status,'running');
+ snapshot={...snapshot,status:{type:'idle'},turns:[firstTurn,{...followup,status:'completed',items:[{type:'agentMessage',id:'new-answer',text:'Follow-up finished'}]}]};
+ await session.refreshSubagents();
+ assert.equal(session.state.subagents.get('child').status,'completed');
+ assert.deepEqual(session.state.subagents.get('child').transcript.map(entry=>entry.text),['First review finished','Follow-up finished']);
+ const saved=structuredClone(session.state.subagents.get('child'));
+ session.handleNotification('item/completed',interaction);
+ await session.refreshSubagents();
+ assert.deepEqual(session.state.subagents.get('child'),saved);
+ assert.equal(saved.communications.length,1);
+ assert.equal(events.some(event=>event.type==='turn-started' || event.type==='turn-completed'),false);
+});
+
+test('a new interaction briefly polls a finished child without claiming a message restarted it', async t => {
+ let now=1000;
+ t.mock.method(Date,'now',()=>now);
+ const events=[];
+ const session=new CodexSession({emit:event=>events.push(event)});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
+ let reads=0;
+ session.rpc={close:async()=>{},request:async()=>{reads++;return {thread:{id:'child',status:{type:'idle'},turns:[{id:'done',status:'completed',items:[]}]}};}};
+ await session.refreshSubagents();
+ const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'message',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
+ session.handleNotification('item/completed',interaction);
+ await session.refreshSubagents();
+ assert.equal(reads,2);
+ assert.equal(session.state.subagents.get('child').status,'completed');
+ now+=1500;
+ await session.refreshSubagents();
+ assert.equal(reads,3);
+ now+=60000;
+ await session.refreshSubagents();
+ assert.equal(reads,3);
+ session.handleNotification('item/completed',interaction);
+ await session.refreshSubagents();
+ assert.equal(reads,3);
+ assert.equal(events.some(event=>event.type==='subagent-update' && event.agent.status!=='completed'),false);
+});
+
+test('a resumed child latest in-progress turn corrects an earlier completion record', async t => {
+ const session=new CodexSession({emit:()=>{}});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
+ session.rpc={close:async()=>{},request:async()=>({thread:{id:'child',status:{type:'notLoaded'},turns:[{id:'old',status:'completed',items:[]},{id:'new',status:'inProgress',items:[]}]}})};
+ await session.refreshSubagents();
+ assert.equal(session.state.subagents.get('child').status,'running');
+ assert.equal(session.state.subagents.get('child').endedAt,undefined);
+});
+
+test('child turn notifications remain live after the parent finishes', t => {
+ const events=[];
+ const session=new CodexSession({emit:event=>events.push(event)});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
+ session.handleNotification('turn/started',{threadId:'child',turn:{id:'followup',status:'inProgress',items:[]}});
+ assert.equal(session.state.subagents.get('child').status,'running');
+ assert.equal(events.some(event=>event.type==='turn-started'),false);
+ session.handleNotification('turn/started',{threadId:'parent',turn:{id:'stale-parent',status:'inProgress',items:[]}});
+ assert.equal(events.some(event=>event.type==='turn-started'),false);
+});
+
+test('the scheduled child poll continues through stale completion until a follow-up appears', async t => {
+ t.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
+ const session=new CodexSession({emit:()=>{}});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
+ let reads=0;
+ let followup=false;
+ session.rpc={close:async()=>{},request:async()=>{
+  reads++;
+  return {thread:{id:'child',status:{type:followup?'active':'idle',...(followup?{activeFlags:[]}:{})},turns:[{id:followup?'followup':'first',status:followup?'inProgress':'completed',items:[]}]}};
+ }};
+ await session.refreshSubagents();
+ session.handleNotification('item/completed',{threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}});
+ t.mock.timers.tick(1500);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(reads,2);
+ followup=true;
+ t.mock.timers.tick(1500);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(reads,3);
+ assert.equal(session.state.subagents.get('child').status,'running');
+});
+
+const savedUnknownChild = id => ({id,title:'Review auth',status:'unknown',startedAt:1,updatedAt:10,endedAt:9,parentId:'review-parent',latestActivity:'Responding',transcript:[{id:'saved',kind:'message',text:'Saved output'}],communications:[{id:'sent',fromId:null,toId:id,text:'Review auth',at:3}]});
+
+test('read-only recovery restores only authoritative latest terminal child outcomes', async t => {
+ t.mock.method(Date,'now',()=>100);
+ const agents=['done','failed','stopped','unfinished','empty','active','unreadable','archived','known'].map(savedUnknownChild);
+ agents.find(agent=>agent.id==='archived').archived=true;
+ agents.find(agent=>agent.id==='known').status='completed';
+ agents.find(agent=>agent.id==='done').latestActivity='Session disconnected. Last received activity is shown below.';
+ const saved=structuredClone(agents);
+ const reads=[];
+ let starts=0,closes=0;
+ const rpc={
+  start:()=>{starts++;},notify:method=>assert.equal(method,'initialized'),close:async()=>{closes++;},
+  request:async(method,params)=>{
+   if(method==='initialize') return {};
+   if(method==='thread/read') {
+    reads.push(params.threadId);
+    if(params.threadId==='unreadable') throw new Error('Read failed');
+    return {thread:{id:params.threadId,status:{type:params.threadId==='active'?'active':'notLoaded'},turns:[]}};
+   }
+   assert.equal(method,'thread/turns/list');
+   const status={done:'completed',failed:'failed',stopped:'interrupted',unfinished:'inProgress',active:'completed'}[params.threadId];
+   return {data:status?[{id:'latest',status,items:[]}]:[],nextCursor:null};
+  },
+ };
+ const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents,clientVersion:'test',createRpc:()=>rpc});
+ assert.deepEqual(events.map(event=>[event.type,event.agent.id,event.agent.status]),[['subagent-update','done','completed'],['subagent-update','failed','failed'],['subagent-update','stopped','cancelled']]);
+ assert.equal(starts,1);
+ assert.equal(closes,1);
+ assert.deepEqual(reads,['done','failed','stopped','unfinished','empty','active','unreadable']);
+ assert.deepEqual(agents,saved);
+ for(const {agent} of events) {
+  const previous=saved.find(item=>item.id===agent.id);
+  assert.deepEqual(agent.transcript,previous.transcript);
+  assert.deepEqual(agent.communications,previous.communications);
+  assert.equal(agent.parentId,'review-parent');
+  assert.equal(agent.startedAt,1);
+  assert.equal(agent.endedAt,9);
+  assert.equal(agent.updatedAt,100);
+ }
+ assert.equal(events[0].agent.latestActivity,'Finished');
+ assert.equal(events[1].agent.latestActivity,'Responding');
+});
+
+test('read-only child recovery uses paginated latest turns without replaying old output', async () => {
+ let closed=false;
+ const calls=[];
+ const rpc={start:()=>{},notify:()=>{},close:async()=>{closed=true;},request:async(method,params)=>{
+  calls.push(method);
+  if(method==='initialize') return {};
+  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('Use paginated history'),{rpcError:true});
+  if(method==='thread/read') return {thread:{id:'child',status:{type:'notLoaded'}}};
+  assert.equal(method,'thread/turns/list');
+  assert.equal(params.sortDirection,'desc');
+  return {data:[{id:'latest',status:'failed',items:[]},{id:'older',status:'completed',items:[]}],nextCursor:null};
+ }};
+ const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
+ assert.equal(events[0]?.agent.status,'failed');
+ assert.deepEqual(calls,['initialize','thread/read','thread/turns/list']);
+ assert.equal(closed,true);
+});
+
+test('child recovery closes an unreadable provider and leaves unknown outcomes unchanged', async () => {
+ let closes=0;
+ const agents=[savedUnknownChild('child')];
+ const rpc={start:()=>{},notify:()=>{},close:async()=>{closes++;},request:async()=>{throw new Error('Provider unavailable');}};
+ assert.deepEqual(await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents,createRpc:()=>rpc}),[]);
+ assert.equal(closes,1);
+ assert.equal(agents[0].status,'unknown');
+ let created=false;
+ assert.deepEqual(await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[{...agents[0],status:'completed'}],createRpc:()=>{created=true;return rpc;}}),[]);
+ assert.equal(created,false);
+});
+
+test('polling remembers paginated child history instead of retrying a rejected full read', async () => {
+ const calls=[];
+ const session=new CodexSession({emit:()=>{}});
+ session.rpc={request:async(method,params)=>{
+  calls.push({method,params});
+  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('Use paginated history'),{rpcError:true});
+  if(method==='thread/read') return {thread:{id:'child',status:{type:'active',activeFlags:[]}}};
+  return {data:[{id:'latest',status:'inProgress',items:[]}],nextCursor:null};
+ }};
+ const first=await session.readSubagentThread('child');
+ const second=await session.readSubagentThread('child');
+ assert.deepEqual(first,second);
+ assert.equal(calls.filter(call=>call.params.includeTurns).length,1);
+ assert.equal(calls.length,5);
+});
+
+test('concurrent child refreshes share one read and one output update', async t => {
+ const events=[];
+ const session=new CodexSession({emit:event=>events.push(event)});
+ t.after(()=>session.close());
+ session.state.threadId='parent';
+ session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:2,transcript:[]}]]);
+ const waiting=[];
+ session.rpc={close:async()=>{},request:()=>new Promise(resolve=>waiting.push(resolve))};
+ const first=session.refreshSubagents();
+ const second=session.refreshSubagents();
+ const reads=waiting.length;
+ for(const resolve of waiting) resolve({thread:{id:'child',status:{type:'active',activeFlags:[]},turns:[{id:'review',status:'inProgress',items:[{id:'answer',type:'agentMessage',text:'Reviewing auth'}]}]}});
+ await Promise.all([first,second]);
+ assert.equal(reads,1);
+ assert.equal(session.state.subagents.get('child').transcript[0].text,'Reviewing auth');
+ assert.equal(events.filter(event=>event.type==='subagent-update' && event.agent.transcript.length).length,2);
+});
+
+test('unknown recovery reads one latest turn without downloading historical items', async () => {
+ const calls=[];
+ const rpc={start:()=>{},notify:()=>{},close:async()=>{},request:async(method,params)=>{
+  calls.push({method,params});
+  if(method==='initialize') return {};
+  if(method==='thread/read') return {thread:{id:'child',status:{type:'notLoaded'},turns:params.includeTurns?[{id:'latest',status:'completed',items:[]}]:[]}};
+  return {data:[{id:'latest',status:'completed',items:[]}],nextCursor:'older-turns'};
+ }};
+ const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
+ assert.equal(events[0]?.agent.status,'completed');
+ const reads=calls.filter(call=>call.method!=='initialize');
+ assert.deepEqual(reads,[
+  {method:'thread/read',params:{threadId:'child'}},
+  {method:'thread/turns/list',params:{threadId:'child',limit:1,sortDirection:'desc',itemsView:'notLoaded'}},
+ ]);
+});
+
+test('unknown recovery still supports providers without paginated history', async () => {
+ const calls=[];
+ const rpc={start:()=>{},notify:()=>{},close:async()=>{},request:async(method,params)=>{
+  calls.push({method,params});
+  if(method==='initialize') return {};
+  if(method==='thread/turns/list') throw Object.assign(new Error('Unknown method'),{rpcError:true});
+  return {thread:{id:'child',status:{type:'notLoaded'},turns:params.includeTurns?[{id:'latest',status:'interrupted',items:[]}]:[]}};
+ }};
+ const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
+ assert.equal(events[0]?.agent.status,'cancelled');
+ assert.deepEqual(calls.map(call=>call.method),['initialize','thread/read','thread/turns/list','thread/read']);
 });

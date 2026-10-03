@@ -25,3 +25,41 @@ test("archive finished hides only known terminal children and preserves their ou
  assert.equal(archiveFinishedSubagents(next, 1), next);
  assert.equal(archiveFinishedSubagents(state, 42), state);
 });
+
+test("provider replay keeps the original message time and spawning parent", () => {
+ const state = base();
+ state.sessions[1].subagents = [{...child,parentId:"parent",archived:true,communications:[{id:"sent",fromId:null,toId:"child",text:"Check auth",at:10}]}];
+ const update = {...child,updatedAt:30,communications:[{id:"sent",fromId:null,toId:"child",text:"Check auth",at:30},{id:"reply",fromId:"child",toId:null,text:"Done",at:25}]};
+ const result = applyAgentEvent(state,{},"/repo","/repo#1",{type:"subagent-update",agent:update});
+ const saved = result.state.sessions[1].subagents?.[0];
+ assert.equal(saved?.parentId,"parent");
+ assert.equal(saved?.archived,true);
+ assert.deepEqual(saved?.communications?.map(({id,at})=>({id,at})),[{id:"sent",at:10},{id:"reply",at:25}]);
+});
+
+test("the main provider thread never becomes its own saved subagent", () => {
+ const state = base();
+ state.sessions[1].native_session_id = "root";
+ const result = applyAgentEvent(state,{},"/repo","/repo#1",{type:"subagent-update",agent:{...child,id:"root"}});
+ assert.equal(result.changed,false);
+ assert.equal(result.state,state);
+});
+
+test("a child update removes an earlier phantom main agent from saved state", () => {
+ const state = base();
+ state.sessions[1].native_session_id = "root";
+ state.sessions[1].subagents = [child,{...child,id:"root"}];
+ const result = applyAgentEvent(state,{},"/repo","/repo#1",{type:"subagent-update",agent:{...child,updatedAt:3}});
+ assert.deepEqual(result.state.sessions[1].subagents?.map(agent=>agent.id),["child"]);
+});
+
+test("saved communication history retains the most recent twenty messages", () => {
+ const state = base();
+ state.sessions[1].subagents = [{...child,communications:Array.from({length:20},(_,index)=>({id:`m-${index}`,fromId:null,toId:"child",text:`Message ${index}`,at:index+10}))}];
+ const result = applyAgentEvent(state,{},"/repo","/repo#1",{type:"subagent-update",agent:{...child,updatedAt:3,communications:[{id:"older",fromId:null,toId:"child",text:"Older history",at:1},{id:"newest",fromId:"child",toId:null,text:"Done",at:40}]}});
+ const saved = result.state.sessions[1].subagents?.[0].communications;
+ assert.equal(saved?.length,20);
+ assert.equal(saved?.[0].id,"m-1");
+ assert.equal(saved?.at(-1)?.id,"newest");
+ assert.equal(saved?.some(entry=>entry.id==="older"),false);
+});

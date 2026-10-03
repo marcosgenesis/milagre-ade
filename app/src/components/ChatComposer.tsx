@@ -1,8 +1,9 @@
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -329,6 +330,8 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
   );
 }
 
+const EMPTY_SUBAGENTS: Subagent[] = [];
+
 export function ChatComposer({
   imageDraft,
   projectPath,
@@ -341,7 +344,7 @@ export function ChatComposer({
   sendBlocked,
   streamingText,
   streamingSteps,
-  subagents = [],
+  subagents = EMPTY_SUBAGENTS,
   onArchiveFinishedSubagents,
   onArchiveSubagent,
   waitingForSubagents = false,
@@ -391,6 +394,13 @@ export function ChatComposer({
   onDismissNotice,
 }: ChatComposerProps) {
   const root = useRef<HTMLDivElement>(null);
+  const chatId = messages[0]?.session_id ?? "new";
+  const [canvasChat, setCanvasChat] = useState<number | string | null>(null);
+  const canvasOpened = canvasChat === chatId;
+  const closeCanvas = useCallback(() => {
+    setCanvasChat(null);
+    requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>("[data-slot=subagent-track] > button")?.focus());
+  }, []);
   // Preparing a worktree is not a conversation yet. Move the composer only
   // when the first message is committed and its draft is cleared together.
   const isNewChat = messages.length === 0 && !handover?.live;
@@ -419,6 +429,8 @@ export function ChatComposer({
       onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
       onDrop={handleFileDrop}
     >
+      <SubagentCanvas key={`canvas-${chatId}`} opened={canvasOpened} agents={subagents} working={isSending} waiting={waitingForSubagents} onClose={closeCanvas} />
+      <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
       {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
@@ -503,7 +515,7 @@ export function ChatComposer({
         )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
-        <SubagentTrack key={messages[0]?.session_id ?? "new"} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
+        <SubagentTrack key={chatId} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onOpenCanvas={() => setCanvasChat(chatId)} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
@@ -542,6 +554,7 @@ export function ChatComposer({
           alwaysExpanded={isNewChat}
         />
         {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
+      </div>
       </div>
     </div>
   );

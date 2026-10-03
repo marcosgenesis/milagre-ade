@@ -21,6 +21,8 @@ export interface ModelCapability {
   defaultEffort?: EffortLevel;
   /** Claude only: standing multi-agent orchestration on top of any effort level. */
   ultracode: boolean;
+  /** Faster output at higher usage rates: Claude's fast mode (some Opus models), Codex's "priority" tier. */
+  fastMode: boolean;
 }
 
 export type ModelCapabilities = Record<ModelProvider, Record<string, ModelCapability>>;
@@ -39,14 +41,19 @@ export function effortCopy(level: EffortLevel) {
   return EFFORT_COPY[level] ?? { name: level, description: "" };
 }
 
+/** The Claude models Claude Code 2.1.288 offers fast mode on; a guess until Claude reports its own list. */
+const CLAUDE_FAST_MODELS = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+
 /** What the agent reported for this model, or a cautious guess while it hasn't answered. */
 export function capabilityFor(model: ModelOption, capabilities: ModelCapabilities | null): ModelCapability {
   const reported = capabilities?.[model.provider][model.id];
   if (reported) return reported;
-  if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false };
-  if (model.id.includes("haiku")) return { efforts: [], ultracode: false };
+  // Every GPT model codex-cli 0.160.0 lists has the "priority" tier.
+  if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false, fastMode: true };
+  const fastMode = CLAUDE_FAST_MODELS.includes(model.id);
+  if (model.id.includes("haiku")) return { efforts: [], ultracode: false, fastMode };
   const modern = /claude-(opus|sonnet|fable)-5/.test(model.id);
-  return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern };
+  return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern, fastMode };
 }
 
 /** Keeps the chosen effort when the model takes it, else its default, else the nearest middle level. */
@@ -66,18 +73,14 @@ export interface ModelOption {
   recommended?: boolean;
 }
 
-/** Claude's faster inference is offered only on these Opus models. */
-export function supportsFastMode(model: Pick<ModelOption, "provider" | "id">): boolean {
-  return model.provider === "claude" && ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(model.id);
-}
-
 /**
- * The maintained list: what codex-cli 0.158.0 and Claude Code 2.1.287 report, recommended model first.
+ * The maintained list: what codex-cli 0.160.0 and Claude Code 2.1.288 report, recommended model first.
  * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
  * CLI is missing, too old or couldn't be asked.
  */
 export const MODEL_CATALOG: ModelOption[] = [
-  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work", recommended: true },
+  { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", provider: "codex", description: "Latest generation workhorse model", recommended: true },
+  { id: "gpt-6-astra", name: "GPT-6-Astra", provider: "codex", description: "Frontier intelligence for the most demanding work" },
   { id: "gpt-6-sol", name: "GPT-6-Sol", provider: "codex", description: "Previous generation workhorse model" },
   { id: "gpt-6-luna", name: "GPT-6-Luna", provider: "codex", description: "Fast and affordable model for easier tasks" },
   { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", provider: "codex", description: "Older generation workhorse model" },
@@ -132,6 +135,14 @@ export interface PullRequest {
   url: string;
   state: "OPEN" | "MERGED";
   readyToMerge: boolean;
+  hasConflicts: boolean;
+  conflictStatusKnown?: boolean;
+  /** The base branch requires PRs to be up to date and this one isn't. */
+  isBehind?: boolean;
+  /** A reviewer requested changes, so the PR can't merge until they're addressed. */
+  changesRequested?: boolean;
+  /** CI on the open PR: still running, or failed. Unset once every check passed or when it has none. */
+  checks?: "running" | "failed";
 }
 
 export interface Worktree {
@@ -156,12 +167,26 @@ export interface AgentSession {
   /** Claude session id or Codex thread id, used to resume the agent's memory. */
   native_session_id?: string;
   subagents?: Subagent[];
-  /** A name the user gave the chat; otherwise it's named after its first message. */
+  /** Automatic title from the first message; a manual title takes precedence. */
+  generatedTitle?: string;
+  /** Persisted until background naming finishes, including across restarts. */
+  titlePending?: boolean;
+  /** A name the user gave the chat. */
   title?: string;
   /** A turn ended while the chat wasn't open, or the user marked it unread. */
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** The chat this one was handed over to, on the other provider. */
+  handedOverTo?: number;
+  /** The chat this one was handed over from. */
+  handedOverFrom?: number;
+  /** Set while the handover brief is being written; the composer waits. */
+  handoverPending?: boolean;
+  /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
+  handoverDraft?: string;
+  /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
+  resumeTurn?: { stoppedAt?: number };
 }
 
 export interface Connection {
@@ -189,15 +214,17 @@ export interface ChatMessage {
   model?: string;
   images?: ImageAttachment[];
   files?: string[];
+  /** On the first message of a handed-over chat: the brief it was sent with, ahead of `body`. */
+  handoverBrief?: string;
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
 }
 
-export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking";
+export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image";
 
-/** One tool call in an agent's reply (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
+/** One tool call in an agent's reply (a `setup` step is the worktree's setup command, which Milagre ran, not the agent) (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
 export interface ChatStep {
   id: string;
   kind: StepKind;
@@ -207,8 +234,10 @@ export interface ChatStep {
   status: "running" | "done" | "failed";
   /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
-  /** The file a read or edit worked on, as the tool named it; the title shows only its name. */
+  /** The file a read or edit worked on, as the tool named it; the title shows only its name. For an image step, the generated image. */
   file?: string;
+  /** Muted text after the title, e.g. "3s" or "exited with code 1 after 4s". */
+  note?: string;
   /** How long a thinking step took. */
   durationMs?: number;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
@@ -293,16 +322,43 @@ export interface Subagent {
   transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
 }
 
+/** One item of the agent's to-do list. */
+export interface AgentTask {
+  id: string;
+  content: string;
+  /** Present-continuous wording for while the task is in progress ("Running tests"). */
+  activeForm?: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+/** A TCP port a chat's commands listen on, such as a dev server. */
+export interface AgentPort {
+  port: number;
+  pid: number;
+  /** The listening process's name, as lsof reports it ("node"). */
+  command: string;
+  /** The address it listens on: "*", "127.0.0.1", "::1". */
+  address: string;
+}
+
+/** Every chat's listening ports, by chat key; a chat with none is absent. */
+export type AgentPorts = Record<string, AgentPort[]>;
+
 export type AgentEvent =
+  /** Milagre's own event: the user's message was saved, so a turn starts, or a running one is steered and its reply split. */
+  | { type: "message-sent"; model: string }
+  /** Milagre's own event: the user's answers to a question were saved as their message, after the reply so far. */
+  | { type: "answers-sent" }
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
+  | { type: "tasks-updated"; tasks: AgentTask[] }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   | { type: "turn-started"; turnId: string | null }
   | { type: "text-delta"; messageId: string | null; text: string }
   | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }
-  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; detail?: string; durationMs?: number }
+  | { type: "step-completed"; id: string; status: "done" | "failed"; title?: string; note?: string; detail?: string; durationMs?: number; file?: string }
   | ({ type: "permission-request" } & PermissionRequest)
   | { type: "permission-resolved"; requestId: string; decision: PermissionDecision | "cancelled" }
   | ({ type: "question-request" } & QuestionRequest)
@@ -312,12 +368,21 @@ export type AgentEvent =
   /** `notice`: a message Milagre wrote (it names the CLI and the fix), shown as it is; otherwise it is the agent's own error. */
   | { type: "turn-failed"; message: string; notice?: boolean; login?: boolean };
 
-export interface AgentStartTurnRequest {
-  /** The chat key, `${projectPath}#${sessionId}` (see `chatKey` in lib/agent-runs). */
-  chatId: string;
+/** A message for a chat. The main process saves it, then starts or steers the chat's turn. */
+export interface ChatSendRequest {
+  projectPath: string;
+  /** The chat to send to, or null for a new chat in the worktree. */
+  sessionId: number | null;
+  worktreeId: number;
+  /** The message as the chat shows it. */
+  body: string;
+  images: ImageAttachment[];
+  /** Paths of the files attached to the message. */
+  files: string[];
+  /** What the agent is sent: the body with the attached files listed. */
+  prompt: string;
   provider: ModelProvider;
   model: string;
-  cwd: string;
   permissionMode: PermissionMode;
   effort?: EffortLevel;
   ultracode?: boolean;
@@ -327,10 +392,10 @@ export interface AgentStartTurnRequest {
   replies?: "concise" | "normal";
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
-  prompt: string;
-  images: ImageAttachment[];
-  resumeId?: string;
 }
+
+/** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
+export type ChatHandoverRequest = Pick<ChatSendRequest, "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {
@@ -362,25 +427,7 @@ export interface CoordinatorState {
 export interface OpenProject {
   path: string;
   name: string;
-  state: CoordinatorState | null;
-}
-
-export function createInitialState(projectName: string, projectPath: string): CoordinatorState {
-  const projectId = 1;
-  return {
-    next_id: 1,
-    projects: { [projectId]: { id: projectId, name: projectName } },
-    worktrees: {},
-    sessions: {},
-    connections: {},
-    events: [],
-    messages: [],
-    approvals: [],
-    tasks: {},
-    artifacts: {},
-    outputs: [],
-    conflicts: [],
-  };
+  state: CoordinatorState;
 }
 
 export function sortedWorktrees(state: CoordinatorState) {
@@ -418,6 +465,8 @@ export interface ProviderUsage {
   windows: UsageWindow[];
   updatedAt: string;
   message?: string;
+  /** Rate-limit resets the account has banked; absent when there are none. */
+  bankedResets?: number;
 }
 
 export interface UsageSnapshot {

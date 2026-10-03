@@ -110,7 +110,6 @@ export function MessageScroller({
   const followingRef = useRef(followOutput);
   const programmaticScrollRef = useRef(false);
   const scrollTimerRef = useRef<number | undefined>(undefined);
-  const frameRef = useRef<number | undefined>(undefined);
   const railFrameRef = useRef<number | undefined>(undefined);
   const railIdRef = useRef(new WeakMap<HTMLElement, string>());
   const railIdCounterRef = useRef(0);
@@ -265,10 +264,8 @@ export function MessageScroller({
   useLayoutEffect(() => {
     followingRef.current = followOutput;
     if (!followOutput) return;
-    frameRef.current = requestAnimationFrame(() => scrollToEnd("auto"));
-    return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    };
+    // Position a newly opened conversation before the browser can paint its top.
+    scrollToEnd("instant");
   }, [followOutput, scrollToEnd]);
 
   useEffect(() => {
@@ -316,7 +313,6 @@ export function MessageScroller({
   useEffect(
     () => () => {
       if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
     },
     [],

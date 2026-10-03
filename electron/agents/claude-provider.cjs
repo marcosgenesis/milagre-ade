@@ -77,6 +77,11 @@ class ClaudeSession {
     return this.state.sessionId;
   }
 
+  /** The Claude Code process, while it runs; the ports its commands open belong to the chat. */
+  get pid() {
+    return this.closed ? null : this.child?.pid ?? null;
+  }
+
   async startTurn(request) {
     if (this.closed) throw Object.assign(new Error("This Claude session is closed."), { sessionClosed: true });
     if (this.turnActive) return this.steer(request);

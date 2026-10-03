@@ -1,48 +1,24 @@
-import type { AgentSession, ChatMessage, CoordinatorState, DiffStat } from "../model";
+import type { ChatMessage } from "../model";
+export { chatTitle } from "../../../electron/shared/chats.mjs";
 
 /** What the mark at the left of a chat row shows; the first that applies wins. */
-export type ChatMark = "waiting" | "running" | "unread" | "idle";
+export type ChatMark = "question" | "waiting" | "running" | "unread" | "idle";
 
-export function chatMark({ waiting, running, unread }: { waiting: boolean; running: boolean; unread: boolean }): ChatMark {
+export function chatMark({ asking = false, waiting, running, unread }: { asking?: boolean; waiting: boolean; running: boolean; unread: boolean }): ChatMark {
+  if (asking) return "question";
   if (waiting) return "waiting";
   if (running) return "running";
   if (unread) return "unread";
   return "idle";
 }
 
-/** The chat's name: the one the user gave it, else the first line of its first message. */
-export function chatTitle(session: AgentSession, messages: ChatMessage[]): string {
-  if (session.title?.trim()) return session.title.trim();
-  const line = messages.find((message) => message.role !== "assistant" && message.body.trim())?.body.trim().split("\n")[0] ?? "";
-  if (!line) return session.agent_name;
-  return line.length > 60 ? `${line.slice(0, 57)}…` : line;
-}
+/** How the sidebar orders chats: by when they started, or by their latest message. Newest first either way. */
+export type ChatOrder = "created" | "recent";
 
-type SessionPatch = Partial<Pick<AgentSession, "title" | "unread" | "archived">>;
-
-/** The state with one session changed; a field patched to undefined, false or "" is removed. Unchanged state is returned as is. */
-export function patchSession(state: CoordinatorState, sessionId: number, patch: SessionPatch): CoordinatorState {
-  const session = state.sessions[sessionId];
-  if (!session) return state;
-  const next: Record<string, unknown> = { ...session };
-  for (const [field, value] of Object.entries(patch)) {
-    if (value === undefined || value === false || value === "") delete next[field];
-    else next[field] = value;
-  }
-  if (JSON.stringify(next) === JSON.stringify(session)) return state;
-  return { ...state, sessions: { ...state.sessions, [sessionId]: next as unknown as AgentSession } };
-}
-
-/** The state with fresh diff stats for some worktrees (by id); unchanged state is returned as is. */
-export function withDiffStats(state: CoordinatorState, stats: Record<number, DiffStat | null>): CoordinatorState {
-  let worktrees = state.worktrees;
-  for (const [id, stat] of Object.entries(stats)) {
-    const worktree = worktrees[id];
-    if (!worktree || !stat) continue;
-    if (worktree.diff?.added === stat.added && worktree.diff?.removed === stat.removed) continue;
-    worktrees = { ...worktrees, [id]: { ...worktree, diff: { added: stat.added, removed: stat.removed } } };
-  }
-  return worktrees === state.worktrees ? state : { ...state, worktrees };
+/** Chats newest first. Message ids only grow, so a chat's first message dates its start and its last one its latest activity. */
+export function orderChats<T extends { sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
+  const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
+  return [...chats].sort((a, b) => key(b) - key(a));
 }
 
 /** A line count in a few characters: 980, 2.1k, 14k, 2.1m. */

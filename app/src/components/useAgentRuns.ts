@@ -1,114 +1,72 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AgentStartTurnRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
-import { applyAgentEvent, chatInProject, clearAnswered, markAnswered, sessionIdFromKey, splitRunForSteer, startRun } from "../lib/agent-runs";
-import { patchSession } from "../lib/chat-list";
-import { stopTurns } from "../lib/project-switch";
+import type { ChatSendRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
+import { applyRunEvent, clearAnswered, markAnswered, projectOfKey } from "../lib/agent-runs";
+import { answerSummary } from "../lib/question-answers";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
-const TURN_ENDS = new Set<AgentEvent["type"]>(["turn-completed", "turn-cancelled", "turn-failed"]);
-
 /**
- * Streams agent turns per chat and saves each finished turn into the open project's state.
- * Chats are named by chat key (`chatKey`); events for another project's chats are ignored.
- * A turn that ends in a chat that isn't open (`isOpen`) leaves the chat unread.
+ * Streams agent turns per chat, in every project, so a chat in a project that isn't open keeps
+ * its run and its cards for when the project opens again, and a reload picks them up. The main process saves each turn; an
+ * event that changed a project's state brings that state along, handed to `onState`.
+ * `modelFor(chatId)` names the model of a turn that starts without a message from this window.
  */
-export function useAgentRuns(projectPath: string, getState: () => CoordinatorState | null, commit: (next: CoordinatorState) => void, isOpen: (sessionId: number) => boolean = () => false) {
+export function useAgentRuns(onState: (projectPath: string, state: CoordinatorState) => void, modelFor: (chatId: string) => string = () => "") {
   const [runs, setRuns] = useState<AgentRuns>({});
   const runsRef = useRef(runs);
-  const projectPathRef = useRef(projectPath);
-  const getStateRef = useRef(getState);
-  const commitRef = useRef(commit);
-  const isOpenRef = useRef(isOpen);
-  isOpenRef.current = isOpen;
-  projectPathRef.current = projectPath;
-  getStateRef.current = getState;
-  commitRef.current = commit;
+  const onStateRef = useRef(onState);
+  const modelForRef = useRef(modelFor);
+  onStateRef.current = onState;
+  modelForRef.current = modelFor;
 
-  const apply = useCallback((chatId: string, event: AgentEvent) => {
-    const state = getStateRef.current();
-    if (!state) return;
-    const result = applyAgentEvent(state, runsRef.current, projectPathRef.current, chatId, event);
-    runsRef.current = result.runs;
-    setRuns(result.runs);
-    if (!result.changed) return;
-    const sessionId = sessionIdFromKey(chatId);
-    const ended = TURN_ENDS.has(event.type) && !isOpenRef.current(sessionId) && !result.state.sessions[sessionId]?.archived;
-    commitRef.current(ended ? patchSession(result.state, sessionId, { unread: true }) : result.state);
+  const setAll = useCallback((next: AgentRuns) => {
+    runsRef.current = next;
+    setRuns(next);
   }, []);
 
-  useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
-    if (chatInProject(projectPathRef.current, chatId)) apply(chatId, event);
-  }), [apply]);
-
-  // A switch stops the project's turns and waits for them first (stopProject). One that still hadn't ended
-  // is interrupted here and forgotten; as when the window closes, its partial reply is not saved.
+  // The run and the state change in one render, so a finished reply never shows twice or goes missing.
+  // A window that loads mid-turn takes the turns from the main process, and skips the events they hold.
   useEffect(() => {
-    const left = Object.keys(runsRef.current).filter((chatId) => !chatInProject(projectPath, chatId));
-    if (!left.length) return;
-    for (const chatId of left) void window.milagre.interruptAgent(chatId).catch(() => {});
-    runsRef.current = Object.fromEntries(Object.entries(runsRef.current).filter(([chatId]) => chatInProject(projectPath, chatId)));
-    setRuns(runsRef.current);
-  }, [projectPath]);
+    let taken = 0;
+    const unsubscribe = window.milagre.onAgentEvent(({ chatId, event, state, seq }) => {
+      if (seq === undefined || seq > taken) setAll(applyRunEvent(runsRef.current, chatId, event, event.type === "turn-started" ? modelForRef.current(chatId) : ""));
+      if (state) onStateRef.current(projectOfKey(chatId), state);
+    });
+    void window.milagre.getRuns().then((snapshot) => {
+      taken = snapshot.seq;
+      setAll(snapshot.runs);
+    }).catch(() => {});
+    return unsubscribe;
+  }, [setAll]);
 
-  const start = useCallback(async (request: AgentStartTurnRequest) => {
-    // A chat whose turn is running keeps its run: the message steers that turn.
-    if (!runsRef.current[request.chatId]) {
-      runsRef.current = startRun(runsRef.current, request.chatId, request.model);
-      setRuns(runsRef.current);
-    }
-    try {
-      await window.milagre.startTurn(request);
-      // The project was left while the turn was starting, before it could be interrupted.
-      if (!runsRef.current[request.chatId] && !chatInProject(projectPathRef.current, request.chatId)) void window.milagre.interruptAgent(request.chatId).catch(() => {});
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      apply(request.chatId, { type: "turn-failed", message: message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") });
-    }
-  }, [apply]);
+  /** Saves the message and starts or steers its chat's turn; resolves with the chat's session id. */
+  const send = useCallback((request: ChatSendRequest) => window.milagre.sendMessage(request), []);
 
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
 
-  /** The project's chats with a turn running right now (the rendered runs can lag behind an event). */
-  const runningIn = useCallback((path: string) => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId)), []);
-
-  /** Stops the project's turns and waits (5 seconds at most) until they have ended, each reply so far saved in its chat. */
-  const stopProject = useCallback((path: string) => {
-    const running = () => Object.keys(runsRef.current).filter((chatId) => chatInProject(path, chatId));
-    return stopTurns({ chatIds: running(), interrupt: (chatId) => window.milagre.interruptAgent(chatId), remaining: running });
-  }, []);
-
-  /** Saves the reply streamed so far in a chat, so a steering message can follow it. */
-  const splitForSteer = useCallback((chatId: string) => {
-    const state = getStateRef.current();
-    if (!state) return;
-    const result = splitRunForSteer(state, runsRef.current, projectPathRef.current, chatId);
-    if (!result.changed) return;
-    runsRef.current = result.runs;
-    setRuns(result.runs);
-    commitRef.current(result.state);
-  }, []);
-
   /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
-  const send = useCallback(async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
-    const setAnswers = (next: AgentRuns) => {
-      runsRef.current = next;
-      setRuns(next);
-    };
-    setAnswers(markAnswered(runsRef.current, chatId, requestId, sent));
+  const answer = useCallback(async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
+    setAll(markAnswered(runsRef.current, chatId, requestId, sent));
     try {
       const accepted = await deliver();
-      if (!accepted) setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      if (!accepted) setAll(clearAnswered(runsRef.current, chatId, requestId));
       return accepted;
     } catch (error) {
-      setAnswers(clearAnswered(runsRef.current, chatId, requestId));
+      setAll(clearAnswered(runsRef.current, chatId, requestId));
       throw error;
     }
-  }, []);
+  }, [setAll]);
 
-  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => send(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [send]);
+  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => answer(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [answer]);
 
-  /** Sends the answers to a question, or dismisses it (null). */
-  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => send(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers)), [send]);
+  /**
+   * Sends the answers to a question, or dismisses it (null). The main process shows the answers in the chat
+   * as the user's message, so whatever the agent streams next lands below them, and takes them back if they don't arrive.
+   */
+  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => {
+    const request = runsRef.current[chatId]?.questions.find((item) => item.requestId === requestId);
+    const summary = answers && request ? answerSummary(request.questions, answers) : "";
+    return answer(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers, summary));
+  }, [answer]);
 
-  return { runs, start, interrupt, runningIn, stopProject, respond, answerQuestion, splitForSteer };
+  return { runs, send, interrupt, respond, answerQuestion };
 }

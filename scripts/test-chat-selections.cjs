@@ -5,15 +5,17 @@ const { setTimeout: delay } = require("node:timers/promises");
 const fixture = `
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { createInitialState } from "/src/model";
 import "/src/styles.css";
-const state = createInitialState("Fixture", "/fixture");
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: "Fixture" } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 }, 2: { id: 2, name: "develop", path: "/fixture-dev", project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle" } };
 state.messages = [{ id: 4, session_id: 3, role: "user", body: "Previous chat", context: null }];
 state.sessions[5] = { id: 5, worktree_id: 2, agent_name: "develop", status: "Idle" };
 state.next_id = 6;
 window.milagre = new Proxy({
+  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
+  getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
   listBranches: async () => ["main", "develop"],
   createWorktree: () => new Promise((resolve, reject) => {
@@ -24,6 +26,14 @@ window.milagre = new Proxy({
   getCachedUsage: async () => ({ providers: [] }),
   readUsage: async () => ({ providers: [] }),
   getUpdateState: async () => ({ status: "idle" }),
+  // Stands in for the main process, which saves the message and tells the window.
+  onProjectState: (fn) => { window.stateListener = fn; return () => {}; },
+  sendMessage: async (request) => {
+    const message = { id: state.next_id, session_id: request.sessionId, body: request.body, images: request.images, context: null, role: "user", model: request.model };
+    Object.assign(state, { next_id: state.next_id + 1, messages: [...state.messages, message] });
+    window.stateListener?.({ path: "/fixture", state: { ...state } });
+    return { sessionId: request.sessionId };
+  },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
 if (!localStorage.getItem("seeded")) {
   localStorage.setItem("milagre-settings", JSON.stringify({ defaultModelId: "gpt-6-astra", defaultPermissionMode: "ask" }));

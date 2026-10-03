@@ -1,0 +1,52 @@
+import { useEffect, useLayoutEffect, useState, type RefObject } from "react";
+
+/**
+ * Positions a nonmodal popover above its trigger (right edges aligned, kept inside the window) and wires
+ * Escape and outside clicks to close it. Escape returns focus to the trigger; the first button in the
+ * popover (or the popover itself, when it has none) takes focus when it opens. The popover is never taller
+ * than `height`, so a long list scrolls instead of climbing the window.
+ */
+export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: preferred, height = 360 }: {
+  opened: boolean;
+  setOpened: (opened: boolean) => void;
+  trigger: RefObject<HTMLElement | null>;
+  panel: RefObject<HTMLElement | null>;
+  width: number;
+  height?: number;
+}) {
+  const [bounds, setBounds] = useState({ left: 12, bottom: 60, width: preferred, maxHeight: Math.min(height, 320) });
+
+  useLayoutEffect(() => {
+    if (!opened) return;
+    const position = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(preferred, window.innerWidth - 24);
+      setBounds({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8, width, maxHeight: Math.max(60, Math.min(height, rect.top - 20)) });
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => { window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
+  }, [opened, preferred, height]);
+
+  useEffect(() => {
+    if (!opened) return;
+    const frame = requestAnimationFrame(() => (panel.current?.querySelector<HTMLButtonElement>("button") ?? panel.current)?.focus());
+    const outside = (event: PointerEvent) => {
+      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpened(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpened(false);
+      trigger.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
+  }, [opened]);
+
+  return bounds;
+}

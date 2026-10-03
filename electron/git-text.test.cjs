@@ -280,3 +280,21 @@ test("codexModel fails when the turn fails or Codex is missing, and always close
   assert.equal(rpc.closed, true);
   await assert.rejects(codexModel({ getCommand: async () => null, createRpc: () => fakeRpc(REPLY) })({ system: "", prompt: "", signal: new AbortController().signal }), /isn't installed/);
 });
+
+test("codexModel accepts a chat-title output schema instead of git fields", async () => {
+  const rpc = fakeRpc('{"title":"Fix login"}');
+  const schema = { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false };
+  await codexModel({ getCommand: async () => "/bin/codex", createRpc: () => rpc, outputSchema: schema })({ system: "Name the chat", prompt: "Fix login" });
+  assert.deepEqual(rpc.requests.find(request => request.method === "turn/start").params.outputSchema, schema);
+});
+
+test("a naming timeout during CLI discovery never starts a late Codex process", async () => {
+  const controller = new AbortController();
+  let created = false;
+  const call = codexModel({
+    getCommand: async () => { controller.abort(); return "/bin/codex"; },
+    createRpc: () => { created = true; return fakeRpc(REPLY); },
+  });
+  await assert.rejects(call({ system: "", prompt: "", signal: controller.signal }), { name: "AbortError" });
+  assert.equal(created, false);
+});

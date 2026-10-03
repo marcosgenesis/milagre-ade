@@ -2,17 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
 import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
+import { PANEL_TRANSLUCENCY_RANGE, WINDOW_TRANSLUCENCY_RANGE } from "../lib/settings";
+import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -88,6 +92,15 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
+function PercentSlider({ label, value, range, onChange }: { label: string; value: number; range: { min: number; max: number; step: number }; onChange: (value: number) => void }) {
+  return (
+    <span className="flex items-center gap-3">
+      <RangeSlider label={label} value={value} {...range} formatValueText={(v) => `${v}%`} onValueChange={onChange} className="w-44" />
+      <span className="w-10 text-right tabular-nums text-ink-2">{value}%</span>
+    </span>
+  );
+}
+
 function GeneralSettings({ models }: { models: ModelOption[] }) {
   const settings = useSettings();
   const { editors, editor } = useEditors();
@@ -97,7 +110,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       <Row label="Default model" description="Used for new chats; remembers your last selection">
         <Select
           label="Default model"
-          title="Choose a model"
           width={280}
           value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
           onChange={(defaultModelId) => updateSettings({ defaultModelId })}
@@ -112,7 +124,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       <Row label="Default permission" description="Used for new chats; remembers your last selection">
         <Select<PermissionMode>
           label="Default permission"
-          title="Agent permissions"
           width={340}
           value={settings.defaultPermissionMode}
           onChange={(defaultPermissionMode) => updateSettings({ defaultPermissionMode })}
@@ -143,6 +154,16 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
       </Row>
       <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
         <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+      </Row>
+    </Group>
+    <Group title="Sidebar">
+      <Row label="Chat order" description="Newest chat first keeps chats in place as replies arrive">
+        <Select<ChatOrder>
+          label="Chat order"
+          value={settings.chatOrder}
+          onChange={(chatOrder) => updateSettings({ chatOrder })}
+          options={[{ value: "created", label: "Newest chat first" }, { value: "recent", label: "Latest message first" }]}
+        />
       </Row>
     </Group>
     <Group title="Editor">
@@ -184,6 +205,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
 function AppearanceSettings() {
   const settings = useSettings();
   return (
+    <>
     <Group title="Theme">
       <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
         <Select<ThemePreference>
@@ -194,10 +216,43 @@ function AppearanceSettings() {
         />
       </Row>
     </Group>
+    {navigator.platform.startsWith("Mac") && (
+      <Group title="Window">
+        <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
+          <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+        </Row>
+        {settings.windowTranslucent && (
+          <>
+            <Row label="Window" description="How much of the desktop shows through the window itself.">
+              <PercentSlider label="Window translucency" value={settings.windowTranslucency} range={WINDOW_TRANSLUCENCY_RANGE} onChange={(windowTranslucency) => updateSettings({ windowTranslucency })} />
+            </Row>
+            <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
+              <PercentSlider label="Panel translucency" value={settings.panelTranslucency} range={PANEL_TRANSLUCENCY_RANGE} onChange={(panelTranslucency) => updateSettings({ panelTranslucency })} />
+            </Row>
+            <Row label="Dot grid" description="Keep the dots on the window background.">
+              <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
+            </Row>
+          </>
+        )}
+      </Group>
+    )}
+    </>
   );
 }
 
-function AboutSettings() {
+function updateDescription(update: UpdateState | null): string {
+  switch (update?.status) {
+    case "checking": return "Checking for updates…";
+    case "up-to-date": return "Milagre is up to date.";
+    case "downloading": return `Downloading ${update.version ? `Milagre ${update.version}` : "update"}… ${Math.round(update.progress)}%`;
+    case "downloaded": return `${update.version ? `Milagre ${update.version}` : "The update"} is ready to install.`;
+    case "error": return "Couldn't check for updates. Try again.";
+    case "unavailable": return "Update checks are available in the installed app.";
+    default: return "Check for the latest Milagre release.";
+  }
+}
+
+function AboutSettings({ update }: { update: UpdateState | null }) {
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     void window.milagre.getAppVersion().then(setVersion);
@@ -207,6 +262,16 @@ function AboutSettings() {
   return (
     <Group title="Milagre">
       <Row label="Version"><span className="tabular-nums">{version ?? "…"}</span></Row>
+      <Row label="Updates" description={updateDescription(update)}>
+        <button
+          type="button"
+          disabled={update?.status === "checking" || update?.status === "downloading" || update?.status === "unavailable"}
+          onClick={() => void (update?.status === "downloaded" ? window.milagre.installUpdate() : window.milagre.checkForUpdates())}
+          className="rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50"
+        >
+          {update?.status === "downloaded" ? "Update and restart" : "Check for updates"}
+        </button>
+      </Row>
       {electron && <Row label="Runtime"><span className="tabular-nums">Electron {electron} · Chromium {chrome}</span></Row>}
       <Row label="License">MIT</Row>
     </Group>
@@ -290,55 +355,145 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
 
   const locked = found?.source === "worktreeinclude";
   return (
-    <Group title="New worktrees">
-      <div className="grid gap-2 px-4 py-3">
-        <label htmlFor="files-to-copy" className="grid gap-0.5">
-          <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
-          <span className="text-[12px] text-ink-3">
-            Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
-          </span>
-        </label>
-        <textarea
-          id="files-to-copy"
-          rows={5}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          readOnly={locked}
-          disabled={text === null && !loadError}
-          value={locked ? found.worktreeInclude ?? "" : text ?? ""}
-          placeholder={DEFAULT_FILES_TO_COPY}
-          onChange={(event) => edit(event.target.value)}
-          className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
-        />
-        {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
-        {loadError ? (
-          <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
-        ) : (
-          <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
-        )}
-        {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
-      </div>
-    </Group>
+    <div className="grid gap-2 px-4 py-3">
+      <label htmlFor="files-to-copy" className="grid gap-0.5">
+        <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
+        <span className="text-[12px] text-ink-3">
+          Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
+        </span>
+      </label>
+      <textarea
+        id="files-to-copy"
+        rows={5}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        readOnly={locked}
+        disabled={text === null && !loadError}
+        value={locked ? found.worktreeInclude ?? "" : text ?? ""}
+        placeholder={DEFAULT_FILES_TO_COPY}
+        onChange={(event) => edit(event.target.value)}
+        className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
+      />
+      {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
+      {loadError ? (
+        <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
+      ) : (
+        <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
+      )}
+      {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
+    </div>
+  );
+}
+
+const ipcMessage = (error: unknown) => (error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
+
+/* ─────────────────────────────────────────────────────────
+ * SETUP COMMAND
+ * Runs once in each new worktree, before the chat's first turn
+ * (npm ci, uv sync). "setup" in .milagre/worktree.json at the
+ * repo root wins, like .worktreeinclude does for the files.
+ * ───────────────────────────────────────────────────────── */
+function SetupCommand({ projectPath }: { projectPath: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<WorktreeSetupSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<string | null>(null);
+  const saveTimer = useRef<number | null>(null);
+
+  const flush = () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const next = pending.current;
+    pending.current = null;
+    if (next === null) return;
+    window.milagre.saveWorktreeSetup(projectPath, next).then((saved) => {
+      setResolved(saved);
+      setError(null);
+    }, (failure) => setError(`Couldn't save: ${ipcMessage(failure)}`));
+  };
+
+  // .milagre/worktree.json can change in an editor while Settings is open.
+  useEffect(() => {
+    const onFocus = () => void window.milagre.readWorktreeSetup(projectPath).then(setResolved, () => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [projectPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setText(null);
+    setResolved(null);
+    setError(null);
+    window.milagre.readWorktreeSetup(projectPath).then((saved) => {
+      if (cancelled) return;
+      setText(saved.setupCommand);
+      setResolved(saved);
+    }, (failure) => {
+      if (!cancelled) setError(`Couldn't read the setup command: ${ipcMessage(failure)}`);
+    });
+    // Leaving Settings saves what was typed last.
+    return () => {
+      cancelled = true;
+      flush();
+    };
+  }, [projectPath]);
+
+  const edit = (value: string) => {
+    setText(value);
+    pending.current = value;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flush, 600);
+  };
+
+  const locked = resolved?.source === "repo";
+  return (
+    <div className="grid gap-2 px-4 py-3">
+      <label htmlFor="setup-command" className="grid gap-0.5">
+        <span className="text-[13.5px] font-medium text-ink">Setup command</span>
+        <span className="text-[12px] text-ink-3">Runs once in each new worktree before the agent starts, e.g. npm ci.</span>
+      </label>
+      <input
+        id="setup-command"
+        type="text"
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        readOnly={locked}
+        disabled={text === null && !error}
+        value={locked ? resolved.command ?? "" : text ?? ""}
+        placeholder={locked ? "Nothing runs" : "npm ci"}
+        onChange={(event) => edit(event.target.value)}
+        className={`h-9 w-full rounded-control border border-line px-3 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
+      />
+      {locked && <p data-setup-command-locked className="text-[12px] text-ink-2">.milagre/worktree.json in the repo wins. Edit its "setup" to change the command.</p>}
+      {resolved?.note && <p data-setup-command-note className="break-words text-[12px] text-red">{resolved.note}</p>}
+      {error && <p data-setup-command-error className="break-words text-[12px] text-red">{error}</p>}
+    </div>
   );
 }
 
 function ProjectSettings({ projectPath }: { projectPath?: string }) {
   if (!projectPath) return <p className="mt-6 text-[13px] text-ink-3">Open a project to change its settings.</p>;
-  return <FilesToCopy projectPath={projectPath} />;
+  return (
+    <Group title="New worktrees">
+      <FilesToCopy projectPath={projectPath} />
+      <SetupCommand projectPath={projectPath} />
+    </Group>
+  );
 }
 
-export function SettingsPanel({ section, projectPath, models }: { section: SettingsSection; projectPath?: string; models: ModelOption[] }) {
+export function SettingsPanel({ section, projectPath, models, update }: { section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
-    <div className="h-full overflow-y-auto">
+    <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "appearance" && <AppearanceSettings />}
-        {section === "about" && <AboutSettings />}
+        {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>
-    </div>
+    </ScrollArea>
   );
 }

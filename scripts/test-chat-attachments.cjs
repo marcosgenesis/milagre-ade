@@ -7,16 +7,27 @@ const fixture = `
 window.imageBytes = ${JSON.stringify(imageBytes)};
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { createInitialState } from '/src/model';
 import '/src/styles.css';
-const state = createInitialState('Milagre', '/fixture');
+// A project's state as the main process reads it.
+const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'main', path: '/fixture', project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' }, 5: { id: 5, worktree_id: 1, agent_name: 'Other', provider: 'codex', status: 'Idle' } };
 state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }];
 state.next_id = 7;
 window.calls = []; window.searches = []; window.notices = []; window.synced = []; window.listeners = [];
-window.emitAgent = event => window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event }));
+window.stateListeners = [];
+// Stands in for the main process: it saves every project's state, and tells the window.
+const broadcast = () => { window.saved = { ...state }; window.stateListeners.forEach(fn => fn({ path: '/fixture', state: window.saved })); };
+// A turn that ends in a chat not on screen leaves it unread, and the state comes with the event (see ChatHost.receive).
+window.emitAgent = event => {
+  const ended = ['turn-completed', 'turn-failed', 'turn-cancelled'].includes(event.type);
+  if (ended && window.openChat !== '/fixture#3') state.sessions = { ...state.sessions, 3: { ...state.sessions[3], unread: true } };
+  window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event, ...(ended ? { state: { ...state } } : {}) }));
+};
 window.milagre = new Proxy({
+ // The main process always answers with a map of chat id to ports; null would crash the ports hook.
+ getAgentPorts: async () => ({}),
+ showImageMenu: async (file, name) => { (window.imageMenus ??= []).push([file, name]); },
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
  getCurrentProject: async () => ({ path: '/fixture', name: 'Milagre', state }),
@@ -24,12 +35,27 @@ window.milagre = new Proxy({
  getCachedUsage: async () => ({ providers: [] }), readUsage: async () => ({ providers: [] }), getUpdateState: async () => ({ status: 'idle' }),
  getPathForFile: file => '/fixture/files/' + file.name,
  searchProjectFiles: async (root, query) => { window.searches.push({root,query}); return ['src/my app.ts', 'src/model.ts', 'media/photo.png', 'media/clip.mp4'].filter(p => p.includes(query)); },
- startTurn: async request => { window.calls.push(request); window.emitAgent({ type: 'turn-started', turnId: 'test' }); return { turnId: 'test', steered: false }; },
+ // The main process saves the message, then starts the turn (see ChatHost.send).
+ sendMessage: async request => {
+   window.calls.push(request);
+   const message = { id: state.next_id, session_id: request.sessionId, body: request.body, images: request.images, ...(request.files.length ? { files: request.files } : {}), context: null, role: 'user', model: request.model };
+   Object.assign(state, { next_id: state.next_id + 1, messages: [...state.messages, message] });
+   window.saved = { ...state };
+   window.listeners.forEach(fn => fn({ chatId: '/fixture#' + request.sessionId, event: { type: 'message-sent', model: request.model }, state: window.saved }));
+   window.emitAgent({ type: 'turn-started', turnId: 'test' });
+   return { sessionId: request.sessionId };
+ },
  onAgentEvent: fn => { window.listeners.push(fn); return () => { window.listeners = window.listeners.filter(x => x !== fn); }; },
+ onProjectState: fn => { window.stateListeners.push(fn); return () => { window.stateListeners = window.stateListeners.filter(x => x !== fn); }; },
+ // Opening a chat reads it.
+ setOpenChat: async chatId => {
+   window.openChat = chatId;
+   const id = chatId ? Number(chatId.split('#').pop()) : null;
+   if (id !== null && state.sessions[id]?.unread) { state.sessions = { ...state.sessions, [id]: { ...state.sessions[id], unread: false } }; broadcast(); }
+ },
  notifyCompletion: async notice => { window.notices.push(notice); },
  syncNotifications: async value => { window.synced.push(value); },
  interruptAgent: async chatId => { window.interrupted = chatId; },
- saveProject: async (path, value) => { window.saved = value; },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null); } });
 localStorage.setItem('milagre-settings', JSON.stringify({ theme: 'dark' }));
 const { default: App } = await import('/src/App');
@@ -80,16 +106,54 @@ async function browserChecks() {
   assert.equal(await evaluate('document.querySelector("textarea").value'), '', 'Paths do not pollute draft text');
   assert.equal(await evaluate('document.querySelector("[aria-label=Send]").disabled'), false, 'File-only messages can send');
   await screenshot('attachments-draft');
+  // The lightbox steps through every image and video in the attachments, and zooms images.
+  const counter = String.raw`document.querySelector("dialog [aria-live]")?.textContent`;
   await click('[aria-label="Preview photo.png"]');
-  await waitFor(String.raw`!!document.querySelector("dialog[open]")`);
+  await waitFor(String.raw`document.querySelector("dialog[open] img")?.naturalWidth > 0`);
+  assert.equal(await evaluate(counter), '1 / 2');
+  assert.equal(await evaluate(`document.querySelector('[data-promptbar] [aria-label="Preview photo.png"] img').classList.contains('opacity-0')`), true, 'The open thumbnail hides behind the viewer');
+  await delay(500);
+  await screenshot('lightbox-image');
+  // Real mouse input, so pointer capture decides where each click lands, as it does for a user.
+  const mouseClick = async (x, y) => { for (const type of ['mouseDown', 'mouseUp']) { window.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 }); await delay(30); } };
+  const clickImage = async () => { const r = await evaluate(`(() => { const r = document.querySelector('dialog img').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`); await mouseClick(r.x, r.y); };
+  await clickImage();
+  await waitFor(String.raw`document.querySelector("dialog img")?.dataset.zoom === "2.50"`);
+  await key('ArrowRight');
+  await delay(100);
+  assert.equal(await evaluate(counter), '1 / 2', 'Arrow keys pan a zoomed image instead of changing item');
+  await delay(400);
+  await screenshot('lightbox-zoomed');
+  await clickImage();
+  await waitFor(String.raw`document.querySelector("dialog img")?.dataset.zoom === "1.00"`);
+  await key('ArrowRight');
+  await waitFor(`${counter} === '2 / 2' && !!document.querySelector('dialog video[controls]')`);
+  assert.equal(await evaluate('document.querySelector("dialog [aria-label=Next]").disabled'), true, 'Navigation stops at the last item');
+  await key('ArrowLeft');
+  await waitFor(`${counter} === '1 / 2'`);
+  // A click on the empty area around the image closes the viewer.
+  await mouseClick(60, 380);
+  await waitFor(String.raw`!document.querySelector("dialog")`);
+  assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), 'Preview photo.png', 'Focus returns to the thumbnail');
+  assert.equal(await evaluate(`document.querySelector('[data-promptbar] [aria-label="Preview photo.png"] img').classList.contains('opacity-0')`), false);
+  assert.equal(await evaluate('window.interrupted'), undefined);
+  // Right-clicking an image, as a thumbnail or full size, offers Copy Image and Save Image.
+  const rightClick = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+  await rightClick('[data-promptbar] [aria-label="Preview photo.png"]');
+  await click('[aria-label="Preview photo.png"]');
+  await waitFor(String.raw`document.querySelector("dialog[open] img")?.naturalWidth > 0`);
+  await rightClick('dialog img');
+  const menus = await evaluate('window.imageMenus');
+  assert.equal(menus.length, 2, 'One menu per right-click');
+  for (const [file, name] of menus) { assert.match(file, /photo\.png$|^data:image\/png;base64,/); assert.equal(name, 'photo.png'); }
   await key('Escape');
   await waitFor(String.raw`!document.querySelector("dialog")`);
-  assert.equal(await evaluate('window.interrupted'), undefined);
   await click('[aria-label="Preview clip.mp4"]');
   await waitFor(String.raw`document.querySelector("dialog video[controls]")?.videoWidth > 0`);
   await waitFor(String.raw`document.querySelector("dialog video")?.currentTime > 0`);
   await screenshot('video-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await click('[aria-label="Send"]');
   await waitFor(String.raw`window.calls.length === 1`);
   await waitFor(String.raw`!!document.querySelector('[aria-label="Stop agent"]')`);
@@ -102,6 +166,7 @@ async function browserChecks() {
   await waitFor(String.raw`!!document.querySelector("article [aria-label=\"Preview photo.png\"]")`);
   await click('article [aria-label="Preview photo.png"]');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   assert.equal(await evaluate('window.interrupted'), undefined, 'Preview Escape never stops active agent');
   await type('@src/');
   await waitFor(String.raw`document.querySelector("[aria-label=\"Project files\"]")?.textContent.includes("my app.ts")`);
@@ -125,10 +190,12 @@ async function browserChecks() {
   await waitFor(String.raw`document.querySelector('dialog img')?.naturalWidth > 0`);
   await screenshot('image-selected-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await click('[data-promptbar] [aria-label="Preview clip.mp4"]');
   await waitFor(String.raw`document.querySelector('dialog video')?.videoWidth > 0`);
   await screenshot('video-selected-preview');
   await key('Escape');
+  await waitFor(String.raw`!document.querySelector("dialog")`);
   await type('Review these');
   await click('[aria-label="Stop agent"]');
   assert.equal(await evaluate('window.interrupted'), '/fixture#3', 'Stop targets the open chat');
@@ -147,13 +214,14 @@ async function browserChecks() {
   await evaluate(`(() => { const dt = new DataTransfer(); dt.items.add(new File([Uint8Array.from(atob(window.imageBytes), c=>c.charCodeAt(0))], 'pasted.png', {type:'image/png'})); document.querySelector('textarea').dispatchEvent(new ClipboardEvent('paste', { bubbles:true, cancelable:true, clipboardData:dt })); })()`);
   await waitFor(String.raw`document.querySelector('[data-promptbar] img')?.src.startsWith('data:image/png')`);
   await chooseFiles([['discard.txt','text/plain']]);
-  await key('2', { metaKey: true });
+  // Sidebar chats keep creation order, newest first: Other chat (session 5) is ⌘1, Attachment test (session 3) is ⌘2.
+  await key('1', { metaKey: true });
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Other chat")`);
   assert.equal(await evaluate('!!document.querySelector("[data-promptbar] [aria-label=Attachments]")'), false, 'Switching chats in same worktree clears attachments');
   await evaluate('window.emitAgent({type:"text-delta", messageId:"test", text:"Done"}); window.emitAgent({type:"turn-completed"})');
   await waitFor(String.raw`window.notices.length === 1`);
   await waitFor(String.raw`window.synced.at(-1)?.unread.includes("/fixture#3")`);
-  await key('1', { metaKey: true });
+  await key('2', { metaKey: true });
   await waitFor(String.raw`!window.synced.at(-1)?.unread.includes("/fixture#3")`);
   await waitFor(String.raw`!!document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Stop agent"]')`);
   await delay(250);
@@ -168,7 +236,7 @@ async function browserChecks() {
   assert.equal(await evaluate('JSON.parse(localStorage.getItem("milagre-settings")).showDockBadge'), false, 'Notification preferences persist');
   await evaluate('window.openNotification("/other#10")');
   await waitFor(String.raw`document.querySelector("[aria-current=page]")?.textContent.includes("Notification destination")`);
-  console.log('PASS: native picker trigger, file-only send, saved attachments, image/video viewer, Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
+  console.log('PASS: native picker trigger, file-only send, saved attachments, image/video lightbox (counter, arrows, click to zoom, click outside to close, right-click copy/save, focus return), Escape isolation, @ file selection, same-worktree draft isolation, real video playback/Range, completion request, unread/read sync and cross-project notification routing');
   app.exit(0);
  } catch(error) { console.error(error); console.error(errors); console.error(await evaluate(`(() => { const v = document.querySelector('dialog video'); return v ? { src:v.src, error:v.error?.message, code:v.error?.code, ready:v.readyState, network:v.networkState } : null; })()`)); app.exit(1); }
 }

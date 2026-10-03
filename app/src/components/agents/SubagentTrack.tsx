@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Archive02Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -7,7 +7,9 @@ import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
+import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
+import { useAnchoredPopover } from "./useAnchoredPopover";
 
 const labels: Record<Subagent["status"], string> = { initializing: "Starting", running: "Running", waiting: "Waiting", completed: "Completed", failed: "Failed", cancelled: "Stopped", unknown: "Status unavailable" };
 function elapsed(agent: Subagent, now: number) {
@@ -45,48 +47,17 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
   const [opened, setOpened] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [archived, setArchived] = useState(false);
-  const [bounds, setBounds] = useState({ left: 12, bottom: 60, width: 420, maxHeight: 320 });
   const visible = agents.filter(agent => !agent.archived);
   const archivedCount = agents.length - visible.length;
   const rows = agents.filter(agent => Boolean(agent.archived) === archived);
   const child = rows.find(agent => agent.id === selected);
   const close = () => { setOpened(false); trigger.current?.focus(); };
 
-  useLayoutEffect(() => {
-    if (!opened) return;
-    const position = () => {
-      const rect = trigger.current?.getBoundingClientRect();
-      if (!rect) return;
-      const width = Math.min(child ? 480 : 420, window.innerWidth - 24);
-      setBounds({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8, width, maxHeight: Math.max(60, rect.top - 20) });
-    };
-    position();
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    return () => { window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
-  }, [opened, Boolean(child)]);
-
-  useEffect(() => {
-    if (!opened) return;
-    const frame = requestAnimationFrame(() => panel.current?.querySelector<HTMLButtonElement>("button")?.focus());
-    const outside = (event: PointerEvent) => {
-      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpened(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpened(false);
-      trigger.current?.focus();
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape, true);
-    return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
-  }, [opened]);
+  const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: child ? 480 : 420, height: child ? 520 : 360 });
 
   if (!agents.length) return null;
   const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
-  return <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 justify-end px-3" data-slot="subagent-track">
+  return <div className="flex" data-slot="subagent-track">
     <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface h-6 px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2">
       {visible.some(subagentActive) && <SpinnerRing size={12} />}
       Subagents <span className="tabular-nums">{visible.length}</span>
@@ -107,14 +78,14 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
           <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">{child.title}</h2>
           <button type="button" aria-label="Close subagents" onClick={close} className={actionClass}><HugeiconsIcon icon={Cancel01Icon} size={14} /></button>
         </header>
-        <div className="min-h-0 overflow-y-auto overscroll-contain"><SubagentTranscript agent={child} /></div>
+        <ScrollArea><SubagentTranscript agent={child} /></ScrollArea>
       </> : <>
         {!archived && <div className="mb-1 shrink-0 border-b border-line pb-1">
           <button type="button" data-subagent-archive-finished disabled={!onArchiveFinished || !visible.some(subagentFinished)} onClick={onArchiveFinished} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-ink-2 hover:bg-hover focus-visible:outline-2 disabled:opacity-40 disabled:hover:bg-transparent">
             <HugeiconsIcon icon={Archive02Icon} size={14} />Archive finished subagents
           </button>
         </div>}
-        <ul className="min-h-0 overflow-y-auto overscroll-contain">
+        <ScrollArea as="ul">
           {rows.map(agent => <li key={agent.id} data-subagent-row className="group flex items-center gap-1 rounded-md px-1 hover:bg-hover focus-within:bg-hover">
             <button type="button" data-subagent-open onClick={() => setSelected(agent.id)} title={`${agent.title} (${labels[agent.status]})`} className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-1 text-left text-[13px] focus-visible:outline-2">
               <span className="flex size-4 shrink-0 items-center justify-center text-ink-3">{subagentActive(agent) ? <SpinnerRing size={12} /> : <ProviderLogo provider={provider} size={14} />}</span>
@@ -124,7 +95,7 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
               <Tooltip label={archived ? "Restore subagent" : "Archive subagent"}><button type="button" aria-label={`${archived ? "Restore" : "Archive"} ${agent.title}`} disabled={!onArchive} onClick={() => onArchive?.(agent.id, !archived)} className={actionClass}><HugeiconsIcon icon={Archive02Icon} size={14} /></button></Tooltip>
             </span>
           </li>)}
-        </ul>
+        </ScrollArea>
         {!rows.length && <p className="px-3 py-5 text-[12px] text-ink-3">{archived ? "No archived subagents." : "No subagents to show."}</p>}
         {(archivedCount > 0 || archived) && <button type="button" data-subagent-archived-toggle onClick={() => setArchived(!archived)} className="mt-1 border-t border-line px-2 py-2 text-left text-[11px] text-ink-3 hover:text-ink">{archived ? "Back to subagents" : `Archived (${archivedCount})`}</button>}
       </>}

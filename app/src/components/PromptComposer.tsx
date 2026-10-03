@@ -10,15 +10,19 @@ import {
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { effortCopy, PERMISSION_MODES, supportsFastMode } from "../model";
+import { effortCopy, PERMISSION_MODES } from "../model";
+import Tooltip from "./primitives/Tooltip";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { ProviderLogo } from "./ProviderLogo";
+import { HandoverBriefChip, HandoverRow } from "./Handover";
+import { handoverBlocker, otherProvider, providerLabel } from "../lib/handover";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
 import { useSkills } from "./useSkills";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -54,12 +58,20 @@ interface PromptComposerProps {
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
   lockedProvider?: ModelProvider;
+  /** Opens a new chat on the other provider with this chat's context. */
+  onHandover?: (provider: ModelProvider) => void;
+  /** The chat has messages, so the model picker offers a handover instead of the provider tabs. A locked draft chat does not. */
+  canHandover?: boolean;
+  /** A handed-over chat's brief, attached to its first message: it can be sent with no text, and edited before. */
+  handoverBrief?: { brief: string; onSave: (text: string) => Promise<void> };
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
   /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
   cliStatus: AgentCliStatus | null;
   /** The model picker was opened; the status is checked again. */
   onModelPickerOpen: () => void;
+  onUpdateCli?: (provider: ModelProvider) => void;
+  updatingCli?: ModelProvider | null;
   selectedModel: ModelOption;
   onModelChange: (model: ModelOption) => void;
   capability: ModelCapability;
@@ -76,6 +88,8 @@ interface PromptComposerProps {
 }
 
 const POPOVER_GAP = 12;
+// In the tall layout the controls sit on the composer's bottom row, so a popover opens just above its own button.
+const POPOVER_BUTTON_GAP = 8;
 // Popovers stay clear of the window-drag strip across the top of the window.
 const POPOVER_TOP_INSET = 48;
 const POPOVER_BOTTOM_INSET = 16;
@@ -97,7 +111,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, onStop, sendBlocked, running = false, lockedProvider, models, cliStatus, onModelPickerOpen, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, onStop, sendBlocked, running = false, lockedProvider, onHandover, canHandover = false, handoverBrief, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -109,7 +123,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share the accent.
   const orchestrating = ultracode || effort === "ultra";
   const effortLabel = ultracode ? "Ultracode" : effortName;
-  const canUseFastMode = supportsFastMode(selectedModel);
+  const canUseFastMode = capability.fastMode;
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
@@ -123,7 +137,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const compactWidthRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const popoverRootRef = useRef<HTMLDivElement>(null);
-  const [anchor, setAnchor] = useState<{ left: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
+  const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number; below: boolean; alignRight: boolean }>({ left: 0, maxHeight: 480, below: false, alignRight: true });
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [rowBox, setRowBox] = useState<{ top: number; height: number } | null>(null);
 
@@ -149,7 +163,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const providerNotice = cliNotice(cliStatus?.[provider]);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canStop = running && Boolean(onStop);
-  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0;
+  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0 || handoverBrief !== undefined;
 
   useEffect(() => {
     setActive(0);
@@ -184,7 +198,9 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         }
       }
     } else if (!needsFullWidth && !expanded) {
-      needsFullWidth = contentHeight > 28;
+      // An empty draft never expands: the expanded branch collapses it again, so a placeholder that wraps
+      // in a narrow composer would flip the layout forever.
+      needsFullWidth = draft.length > 0 && contentHeight > 28;
     }
     if (needsFullWidth !== expanded) setExpanded(needsFullWidth);
   }, [draft, expanded, selectedModel.name, effortLabel, fastMode, alwaysExpanded]);
@@ -203,25 +219,38 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     return () => document.removeEventListener("pointerdown", close);
   }, [modelOpen, plusOpen, permissionOpen, effortOpen]);
 
-  // Right-align the popover with its trigger, or left-align when that would leave the composer.
-  // A tall composer has its controls at the bottom, so its popovers open below when there is room.
+  // Right-align the popover with its trigger, or left-align when that would leave the composer. It opens above the
+  // composer, or, in the tall layout, right above its button; below the button when there's more room there.
   function anchorTo(trigger: HTMLElement, width: number) {
     const root = popoverRootRef.current?.getBoundingClientRect();
     if (!root) return;
     const button = trigger.getBoundingClientRect();
     const alignRight = button.right - width >= root.left;
     const left = Math.max(0, Math.min((alignRight ? button.right - width : button.left) - root.left, root.width - width));
-    const roomBelow = window.innerHeight - root.bottom - POPOVER_GAP - POPOVER_BOTTOM_INSET;
+    const roomBelow = window.innerHeight - button.bottom - POPOVER_BUTTON_GAP - POPOVER_BOTTOM_INSET;
     const below = expanded && roomBelow >= POPOVER_MIN_BELOW;
-    setAnchor({ left, alignRight, below, maxHeight: below ? roomBelow : root.top - POPOVER_GAP - POPOVER_TOP_INSET });
+    const edge = expanded ? button.top - POPOVER_BUTTON_GAP : root.top - POPOVER_GAP;
+    setAnchor(below
+      ? { left, alignRight, below, top: button.bottom + POPOVER_BUTTON_GAP - root.top, maxHeight: roomBelow }
+      : { left, alignRight, below, bottom: root.bottom - edge, maxHeight: edge - POPOVER_TOP_INSET });
   }
 
-  const anchorClass = anchor.below ? "top-[calc(100%+0.75rem)]" : "bottom-[calc(100%+0.75rem)]";
   const anchorStyle = {
     left: anchor.left,
+    top: anchor.top,
+    bottom: anchor.bottom,
     maxHeight: anchor.maxHeight,
     transformOrigin: `${anchor.below ? "top" : "bottom"} ${anchor.alignRight ? "right" : "left"}`,
   };
+
+  // Sending moves on from whatever was being picked, and the composer's layout may change under an open popover.
+  function send() {
+    setModelOpen(false);
+    setPermissionOpen(false);
+    setEffortOpen(false);
+    setPlusOpen(false);
+    onSend();
+  }
 
   function chooseModel(model: ModelOption) {
     onModelChange(model);
@@ -282,7 +311,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      onSend();
+      send();
     }
   }
 
@@ -291,7 +320,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
       <div ref={popoverRootRef} className="relative">
         {menu && (
           <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
-            <div className="relative max-h-64 overflow-y-auto" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
+            <ScrollArea className="relative max-h-64" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
             <span aria-hidden className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover" style={{ top: rowBox?.top ?? 0, height: rowBox?.height ?? 0, opacity: rowBox && engaged ? 1 : 0, transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease" }} />
             {rows.map((row, index) => {
               const source = menu === "at" ? SOURCES.find((item) => item.key === row.key) : undefined;
@@ -308,7 +337,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             })}
             {menu === "at" && !plusOpen && fileSearch.error && <div role="status" className="px-2 text-xs text-red">{fileSearch.error}</div>}
             {rows.length === 0 && <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">{fileSearch.loading && menu === "at" ? "Searching files..." : `No matches for "${tokenQuery}"`}</div>}
-            </div>
+            </ScrollArea>
             {menu === "slash" && skillWarnings.length > 0 && <div role="status" title={skillWarnings.join("\n")} className="px-2 py-1 text-[11px] text-ink-3">{skillWarnings.length === 1 ? skillWarnings[0] : `${skillWarnings.length} skills could not be loaded. Hover for details.`}</div>}
             <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">{menu === "at" ? "Type to search files" : skillsLoading ? "Loading skills…" : "Type to search commands & skills"}</div>
           </div>
@@ -322,21 +351,54 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             placeholder="Search models…"
             emptyLabel="No models found."
             isEmpty={modelRows.length === 0}
-            className={`absolute w-[360px] ${anchorClass}`}
+            className="absolute w-[360px]"
             style={anchorStyle}
             header={
-              <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
-              </div>
+              lockedProvider !== undefined && onHandover && canHandover ? (
+                <HandoverRow
+                  provider={otherProvider(lockedProvider)}
+                  blocked={handoverBlocker({ running, cli: cliMessage(cliStatus?.[otherProvider(lockedProvider)]) ?? null })}
+                  onClick={() => { setModelOpen(false); onHandover(otherProvider(lockedProvider)); }}
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
+                      {(["codex", "claude"] as ModelProvider[]).map((item) => <button key={item} type="button" disabled={lockedProvider !== undefined && item !== lockedProvider} title={lockedProvider !== undefined && item !== lockedProvider ? `This chat runs on ${lockedProvider === "codex" ? "Codex" : "Claude"}. Start a new chat to use ${item === "codex" ? "Codex" : "Claude"}.` : cliMessage(cliStatus?.[item]) ?? undefined} className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`} onClick={() => setProvider(item)}><ProviderLogo provider={item} size={14} />{item === "codex" ? "Codex" : "Claude"}{cliTabLabel(cliStatus?.[item]) ? <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span> : <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>}</button>)}
+                </div>
+              )
             }
           >
-            {providerNotice && <p role="status" className="mx-1 mb-1 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">{messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}</p>}
+            {providerNotice && (
+              <div role="status" className="mx-1 mb-1 flex flex-col gap-2 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">
+                <p className="leading-snug">
+                  {messageParts(providerNotice).map((part, index) => (part.code ? <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">{part.text}</code> : part.text))}
+                </p>
+                {cliStatus?.[provider]?.state === "outdated" && onUpdateCli && (
+                  <div className="flex items-center justify-end pt-0.5">
+                    <button
+                      type="button"
+                      disabled={updatingCli === provider}
+                      onClick={() => onUpdateCli(provider)}
+                      className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {updatingCli === provider ? (
+                        <>
+                          <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                          <span>Updating…</span>
+                        </>
+                      ) : (
+                        <span>Update {provider === "codex" ? "Codex" : "Claude"}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {modelRows.map((model) => <PickerRow key={model.id} icon={<ProviderLogo provider={model.provider} size={14} />} label={model.name} description={model.description} selected={model.id === selectedModel.id} onClick={() => chooseModel(model)} />)}
           </PickerPanel>
         )}
 
         {effortOpen && (
-          <PickerPanel title="Thinking effort" className={`absolute w-[320px] ${anchorClass}`} style={anchorStyle}>
+          <PickerPanel title="Thinking effort" className="absolute w-[320px]" style={anchorStyle}>
             {effortLevels.map((level, index) => (
               <PickerRow
                 key={level}
@@ -366,7 +428,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
         )}
 
         {permissionOpen && (
-          <PickerPanel title="Agent permissions" className={`absolute w-[340px] ${anchorClass}`} style={anchorStyle}>
+          <PickerPanel title="Agent permissions" className="absolute w-[340px]" style={anchorStyle}>
             {PERMISSION_MODES.map((mode) => (
               <PickerRow
                 key={mode.id}
@@ -386,20 +448,20 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
         <div className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line bg-surface transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}>
           <input ref={fileInputRef} type="file" multiple hidden aria-label="Choose attachments" onChange={event => { void imageDraft.attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-          <Attachments images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} />
+          <Attachments images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} leading={handoverBrief && <HandoverBriefChip brief={handoverBrief.brief} onSave={handoverBrief.onSave} />} />
           {imageDraft.loading && <div role="status" className="px-2 text-xs text-ink-3">Loading images…</div>}
           {imageDraft.error && <div role="alert" className="px-2 text-xs text-red">{imageDraft.error}</div>}
 
           <div className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
-            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px]"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
+            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : handoverBrief && lockedProvider ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is` : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px] placeholder-shown:whitespace-nowrap placeholder:truncate"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}
-            {canUseFastMode && <button type="button" aria-label="Fast mode" title="Fast mode: faster Opus output at higher usage rates" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button>}
+            {canUseFastMode && <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster replies at higher usage rates`}><button type="button" aria-label="Fast mode" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button></Tooltip>}
             </div>
             <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
-            <button type="button" aria-label={canStop ? "Stop agent" : "Send"} disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)} onClick={canStop ? onStop : onSend} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}>{canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}</button>
+            <button type="button" aria-label={canStop ? "Stop agent" : "Send"} disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)} onClick={canStop ? onStop : send} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}>{canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}</button>
           </div>
         </div>
       </div>

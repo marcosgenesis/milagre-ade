@@ -1,8 +1,10 @@
 const { active: activeSubagent, settleSubagents } = require("./subagents.cjs");
 const fs = require("node:fs/promises");
+const { mkdirSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
+const { CODEX_FAST_TIER } = require("./models.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
@@ -31,6 +33,19 @@ async function writeImages(images) {
     paths.push(file);
   }
   return { paths, cleanup: () => fs.rm(directory, { recursive: true, force: true }) };
+}
+
+// A generated image Codex didn't save is only base64 in the item; it is written out so the chat can show it.
+function saveGeneratedImage(item, directory = path.join(os.tmpdir(), "milagre-generated-images")) {
+  if (item?.type !== "imageGeneration" || item.savedPath || typeof item.result !== "string" || !item.result) return item;
+  try {
+    const file = path.join(directory, `${String(item.id).replace(/[^\w.-]/g, "_")}.png`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(file, Buffer.from(item.result, "base64"));
+    return { ...item, savedPath: file };
+  } catch {
+    return item;
+  }
 }
 
 const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
@@ -66,6 +81,11 @@ class CodexSession {
     return this.state.threadId;
   }
 
+  /** The app-server process, while it runs; the ports its commands open belong to the chat. */
+  get pid() {
+    return this.closed ? null : this.rpc?.child?.pid ?? null;
+  }
+
   async startTurn(request) {
     if (this.turnActive) return this.steer(request);
     if (!this.command) {
@@ -85,7 +105,7 @@ class CodexSession {
     }
   }
 
-  async beginTurn({ prompt, images = [], model, permissionMode, effort }) {
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, fastMode = false }) {
     const policy = codexPolicy(permissionMode, this.cwd);
     this.permissions.setMode(permissionMode);
     try {
@@ -104,6 +124,9 @@ class CodexSession {
         ...(effort ? { effort } : {}),
         // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
         summary: "auto",
+        // The composer's fast mode toggle decides each turn's speed tier, as it does for Claude; off means
+        // standard speed even where ~/.codex/config.toml sets service_tier. Per turn, so the thread keeps none.
+        serviceTierForTurn: fastMode ? CODEX_FAST_TIER : "default",
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });
@@ -225,6 +248,7 @@ class CodexSession {
     // A turn this session isn't running (its start acknowledgement timed out) would open a run nothing ends.
     if (method === "turn/started" && !this.turnActive) return;
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
+    if (method === "item/completed" && params.item?.type === "imageGeneration") params = { ...params, item: saveGeneratedImage(params.item) };
     const events = mapCodexNotification(method, params, this.state);
     if (events.some(event => event.type === "subagent-update")) this.scheduleSubagents();
     if (!events.some(isTerminal)) {
@@ -406,4 +430,4 @@ class CodexSession {
   }
 }
 
-module.exports = { CodexSession, codexPolicy };
+module.exports = { CodexSession, codexPolicy, saveGeneratedImage };

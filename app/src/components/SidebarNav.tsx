@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -15,16 +15,15 @@ import {
   SidebarLeft01Icon,
   SidebarRight01Icon,
   SparklesIcon,
-  StopCircleIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
-import { useScrollFade } from "../lib/use-scroll-fade";
+import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
-import { projectRows, sameTarget, switchQuestion, switchStep, type ProjectRow, type RecentProject, type RunningChat, type SwitchTarget } from "@/lib/project-list";
+import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
@@ -76,8 +75,8 @@ const DEFAULT_RECENTS: SidebarRecent[] = [
 type SidebarNavProps = {
   workspaceName?: string;
   workspaceImage?: string | null;
-  /** Runs the folder dialog; `confirmed` when the menu asked first about a running turn and the user said go. */
-  onOpenProject?: (confirmed?: boolean) => void;
+  /** Runs the folder dialog. */
+  onOpenProject?: () => void;
   activeTitle?: string | null;
   /** Controlled selection of a recent by id; takes precedence over title matching. */
   activeId?: string | null;
@@ -90,14 +89,8 @@ type SidebarNavProps = {
   hintsEnabled?: boolean;
   /** The project folder, for the project menu's reveal and copy path. */
   projectPath?: string;
-  /** Opens a project from the recent list in the project menu; `confirmed` as for onOpenProject. */
-  onSwitchProject?: (path: string, confirmed: boolean) => void;
-  /** Opens the project picked in the dialog that the menu then asked about (a turn started while it was open). */
-  onOpenPicked?: (path: string) => void;
-  /** The chat with a turn running (or waiting on you) in the open project: while there is one, switching asks first. */
-  runningChat?: RunningChat | null;
-  /** Each new request opens the project menu asking about its target (⌘O while a turn runs, or a turn that started while the dialog was open). */
-  askToSwitch?: { seq: number; target: SwitchTarget } | null;
+  /** Opens a project from the recent list in the project menu. */
+  onSwitchProject?: (path: string) => void;
   onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
@@ -116,6 +109,18 @@ const SIDEBAR_MOTION = {
   copyOffset: 8,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
+
+// Dragging the sidebar's right edge widens it between these bounds; the width survives restarts.
+const SIDEBAR_MIN_WIDTH = SIDEBAR_MOTION.expandedWidth;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_WIDTH_KEY = "milagre.sidebarWidth";
+
+const clampSidebarWidth = (width: number) => Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+
+function readSidebarWidth() {
+  const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_MIN_WIDTH;
+}
 
 // Narrower than this, the sidebar collapses on its own so the chat keeps its room. It can still be expanded.
 const AUTO_COLLAPSE_QUERY = "(max-width: 1024px)";
@@ -203,11 +208,8 @@ function WorkspaceMenu({
   projectPath,
   onOpenProjectSettings,
   projects,
-  runningChat,
-  initialAsk,
   onSwitchProject,
   onOpenProject,
-  onOpenPicked,
   onForgetProject,
 }: {
   position: { top: number; left: number };
@@ -216,36 +218,20 @@ function WorkspaceMenu({
   projectPath?: string;
   onOpenProjectSettings?: () => void;
   projects: ProjectRow[];
-  runningChat: RunningChat | null;
-  /** What the menu opens asking about, if anything. */
-  initialAsk: SwitchTarget | null;
-  onSwitchProject?: (path: string, confirmed: boolean) => void;
-  onOpenProject?: (confirmed?: boolean) => void;
-  onOpenPicked?: (path: string) => void;
+  onSwitchProject?: (path: string) => void;
+  onOpenProject?: () => void;
   onForgetProject?: (path: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
-  // While a turn runs, the project (or "Open project…") clicked first: it asks before it goes.
-  const [asking, setAsking] = useState<SwitchTarget | null>(initialAsk);
   const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
   useLayoutEffect(() => {
-    const menu = menuRef.current;
-    // The question's confirm takes focus when it shows; otherwise the first row does.
-    (menu?.querySelector<HTMLElement>("[data-switch-confirm]") ?? menu?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)"))?.focus();
-  }, [asking]);
+    menuRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
+  }, []);
 
-  // With a turn running, a choice only goes once the question was answered: the switch may stop it.
-  const go = (target: SwitchTarget) => {
+  // Switching projects stops nothing: the other project's turns keep running in the background.
+  const go = (open: () => void) => {
     onClose();
-    const confirmed = runningChat !== null;
-    if (target.kind === "open") onOpenProject?.(confirmed);
-    else if (target.kind === "project") onSwitchProject?.(target.path, confirmed);
-    else onOpenPicked?.(target.path);
-  };
-  const choose = (target: SwitchTarget) => {
-    const step = switchStep(asking, target, runningChat !== null);
-    if ("go" in step) go(step.go);
-    else setAsking(step.ask);
+    open();
   };
   // Focus inside the row (its own button, or the × just clicked) moves to a neighbour before the row goes,
   // so the arrow keys keep working.
@@ -257,26 +243,6 @@ function WorkspaceMenu({
     }
     onForgetProject?.(path);
   };
-  const isAsking = (target: SwitchTarget) => asking !== null && runningChat !== null && sameTarget(asking, target);
-  // The project picked in the dialog sits under "Open project…". If its turn ended meanwhile, it just opens.
-  const picked = asking?.kind === "loaded" ? asking : null;
-  const openTarget: SwitchTarget = picked ?? { kind: "open" };
-  const question = (target: SwitchTarget) => isAsking(target) && runningChat !== null && (
-    <div data-switch-question>
-      <p className="px-2 pb-1 pt-1.5 text-[12px] leading-snug text-ink-3">{switchQuestion(runningChat)}</p>
-      <button
-        data-menu-row
-        data-switch-confirm
-        role="menuitem"
-        type="button"
-        onClick={() => go(target)}
-        className="relative z-10 flex h-8 w-full items-center gap-1.5 rounded-[8px] px-2 text-left text-red outline-none focus-visible:bg-hover-2"
-      >
-        <span className="flex size-5 shrink-0 items-center justify-center"><HugeIcon icon={StopCircleIcon} size={16} /></span>
-        <span className="min-w-0 flex-1 truncate text-[13.5px]">Stop and switch</span>
-      </button>
-    </div>
-  );
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
@@ -308,7 +274,7 @@ function WorkspaceMenu({
       aria-label={`${workspace.name} actions`}
       onKeyDown={moveFocus}
       data-workspace-menu
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-[14px] bg-surface p-1.5 shadow-overlay"
+      className="fixed z-50 flex max-h-[calc(100vh-16px)] w-64 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
       style={{
         top: position.top,
         left: position.left,
@@ -316,6 +282,7 @@ function WorkspaceMenu({
         transformOrigin: "top left",
       }}
     >
+      <ScrollArea className="p-1.5">
       <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
         {projectMenuActions(IS_MAC).map((item) => (
           <button
@@ -337,7 +304,6 @@ function WorkspaceMenu({
         ))}
         <div className="my-1 h-px bg-line" />
         {projects.map((row) => {
-          const target: SwitchTarget = { kind: "project", path: row.path };
           return (
             <div key={row.path} data-project-item className="group/project relative">
               <button
@@ -348,13 +314,13 @@ function WorkspaceMenu({
                 type="button"
                 title={row.current ? row.path : `${row.path}\nPress Delete to remove from the list`}
                 {...(row.current ? {} : { "aria-keyshortcuts": "Delete" })}
-                onClick={() => (row.current ? onClose() : choose(target))}
+                onClick={() => (row.current ? onClose() : go(() => onSwitchProject?.(row.path)))}
                 onKeyDown={(event) => {
                   if (row.current || (event.key !== "Delete" && event.key !== "Backspace")) return;
                   event.preventDefault();
                   forget(row.path, event.currentTarget.closest("[data-project-item]"));
                 }}
-                className={`relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking(target) ? "bg-hover-2" : ""}`}
+                className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
               >
                 <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
                   <WorkspaceIcon src={row.current ? workspace.image : imageOf(row.path)} fallback={row.initial} />
@@ -375,7 +341,6 @@ function WorkspaceMenu({
                   <IconCrossSmall size={14} />
                 </button>
               )}
-              {question(target)}
             </div>
           );
         })}
@@ -385,27 +350,14 @@ function WorkspaceMenu({
           data-open-project
           role="menuitem"
           type="button"
-          onClick={() => choose({ kind: "open" })}
-          className={`relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 ${isAsking(openTarget) ? "bg-hover-2" : ""}`}
+          onClick={() => go(() => onOpenProject?.())}
+          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
         >
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
-        {question(openTarget)}
-        {picked && runningChat === null && (
-          <button
-            data-menu-row
-            data-open-picked
-            role="menuitem"
-            type="button"
-            onClick={() => go(picked)}
-            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
-          >
-            <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><HugeIcon icon={FolderOpenIcon} size={16} /></span>
-            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open {picked.name}</span>
-          </button>
-        )}
       </GlideMenu>
+      </ScrollArea>
     </div>,
     document.body,
   );
@@ -427,9 +379,6 @@ export default function SidebarNav({
   projectPath,
   onOpenProjectSettings,
   onSwitchProject,
-  onOpenPicked,
-  runningChat = null,
-  askToSwitch = null,
   recents = DEFAULT_RECENTS,
   chatActions = {},
   usage,
@@ -437,12 +386,11 @@ export default function SidebarNav({
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
   const autoCollapsed = useRef(collapsed);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useScrollFade(scrollRef);
+  const [expandedWidth, setExpandedWidth] = useState(readSidebarWidth);
+  const [resizing, setResizing] = useState(false);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
-  const [workspaceAsk, setWorkspaceAsk] = useState<SwitchTarget | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
@@ -464,23 +412,14 @@ export default function SidebarNav({
     window.milagre?.forgetProject?.(path).then((list) => { if (Array.isArray(list)) setRecentProjects(list); }, () => {});
   };
 
-  const openWorkspaceMenu = (ask: SwitchTarget | null = null) => {
+  const openWorkspaceMenu = () => {
     const button = workspaceButtonRef.current;
     if (!button) return;
     const rect = button.getBoundingClientRect();
     // Collapsed, the menu opens beside the rail instead of covering it.
     setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
-    setWorkspaceAsk(ask);
     setWorkspaceOpen(true);
   };
-
-  // ⌘O while a turn runs, or a turn that started while the dialog was open: the menu opens asking first.
-  const seenAsk = useRef(askToSwitch?.seq ?? 0);
-  useEffect(() => {
-    if (!askToSwitch || askToSwitch.seq === seenAsk.current) return;
-    seenAsk.current = askToSwitch.seq;
-    openWorkspaceMenu(askToSwitch.target);
-  }, [askToSwitch]);
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -537,6 +476,49 @@ export default function SidebarNav({
     return () => window.removeEventListener("keydown", handleToggle);
   }, [collapsed]);
 
+  const saveWidth = (width: number) => {
+    const next = clampSidebarWidth(width);
+    setExpandedWidth(next);
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+  };
+
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = expandedWidth;
+    let latest = startWidth;
+    setResizing(true);
+    document.body.style.cursor = "col-resize";
+    const move = (moveEvent: PointerEvent) => {
+      latest = clampSidebarWidth(startWidth + moveEvent.clientX - startX);
+      setExpandedWidth(latest);
+    };
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      document.body.style.cursor = "";
+      setResizing(false);
+      saveWidth(latest);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  };
+
+  const resizeWithKeys = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowLeft") saveWidth(expandedWidth - step);
+    else if (event.key === "ArrowRight") saveWidth(expandedWidth + step);
+    else if (event.key === "Home") saveWidth(SIDEBAR_MIN_WIDTH);
+    else if (event.key === "End") saveWidth(SIDEBAR_MAX_WIDTH);
+    else return;
+    event.preventDefault();
+  };
+
   return (
     <div className={`relative flex min-h-0 shrink-0 flex-col ${fill ? "h-full" : "h-[600px]"} ${className}`}>
       <Tooltip
@@ -562,9 +544,10 @@ export default function SidebarNav({
         aria-label="Workspace navigation"
         className="relative flex min-h-0 shrink-0 overflow-hidden rounded-window bg-surface shadow-card transition-[width]"
         style={{
-          width: collapsed ? SIDEBAR_MOTION.collapsedWidth : SIDEBAR_MOTION.expandedWidth,
+          width: collapsed ? SIDEBAR_MOTION.collapsedWidth : expandedWidth,
           flex: "1 1 0%",
-          transitionDuration: `${SIDEBAR_MOTION.duration}ms`,
+          // Following the pointer while dragging; the eased width transition would make the edge lag behind it.
+          transitionDuration: resizing ? "0ms" : `${SIDEBAR_MOTION.duration}ms`,
           transitionTimingFunction: SIDEBAR_MOTION.easing,
           "--sidebar-copy-duration": `${SIDEBAR_MOTION.copyDuration}ms`,
           "--sidebar-copy-offset": `${SIDEBAR_MOTION.copyOffset}px`,
@@ -600,11 +583,8 @@ export default function SidebarNav({
               projectPath={projectPath}
               onOpenProjectSettings={onOpenProjectSettings}
               projects={projects}
-              runningChat={runningChat}
-              initialAsk={workspaceAsk}
               onSwitchProject={onSwitchProject}
               onOpenProject={onOpenProject}
-              onOpenPicked={onOpenPicked}
               onForgetProject={forgetProject}
               onClose={() => setWorkspaceOpen(false)}
             />
@@ -612,7 +592,7 @@ export default function SidebarNav({
 
         </div>
 
-        <div ref={scrollRef} className="sidebar-scroll scroll-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <ScrollArea className="sidebar-scroll flex-1 overflow-x-hidden">
           {onOpenCommands && (
             <Tooltip label="Search commands, chats, and projects" className="mx-2 mb-3 w-[calc(100%-16px)]" side="bottom" shortcut={`${shortcutModifier}K`}>
               <button type="button" aria-label="Command palette" aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} onClick={onOpenCommands}
@@ -650,7 +630,7 @@ export default function SidebarNav({
               />
             ))}
           </GlideGroup>
-        </div>
+        </ScrollArea>
 
         {usage && (
           <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>
@@ -660,7 +640,7 @@ export default function SidebarNav({
 
         <div className={`flex border-t border-line py-1.5 ${usage ? "mt-1.5" : "mt-3"} ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}>
           <Tooltip label="Add project" shortcut="⌘O">
-            <button type="button" aria-label="Add project" onClick={() => (runningChat ? openWorkspaceMenu({ kind: "open" }) : onOpenProject?.())} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
+            <button type="button" aria-label="Add project" onClick={() => onOpenProject?.()} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
               <IconFolderAdd size={17} />
             </button>
           </Tooltip>
@@ -672,6 +652,24 @@ export default function SidebarNav({
         </div>
       </div>
       </aside>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-valuenow={expandedWidth}
+          tabIndex={0}
+          title="Drag to resize, double-click to reset"
+          onPointerDown={startResize}
+          onDoubleClick={() => saveWidth(SIDEBAR_MIN_WIDTH)}
+          onKeyDown={resizeWithKeys}
+          className="group absolute bottom-0 right-[-6px] top-0 z-10 flex w-3 cursor-col-resize justify-center outline-none [-webkit-app-region:no-drag]"
+        >
+          <span className={`my-3 w-0.5 rounded-full transition-colors duration-150 group-hover:bg-line-strong group-focus-visible:bg-accent ${resizing ? "bg-line-strong" : "bg-transparent"}`} />
+        </div>
+      )}
     </div>
   );
 }

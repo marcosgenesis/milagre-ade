@@ -29,16 +29,30 @@ export type ActivityEntry = { type: "text"; text: string } | { type: "step"; ste
 /**
  * A reply as its activity and its answer. The answer is the reply's last text; the activity is
  * everything else (thinking, tool steps and the text between them) in the order it happened.
+ * The worktree's setup is neither: it comes back apart, to show as a row of its own before both.
+ * Generated images come back apart too, to show between the activity and the answer.
  */
-export function replyActivity(body: string, steps: ChatStep[] = []): { activity: ActivityEntry[]; answer: string } {
-  const parts = replyParts(body, steps);
+export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; answer: string } {
+  const setup = allSteps.filter((step) => step.kind === "setup");
+  const images = allSteps.filter((step) => step.kind === "image");
+  const parts = replyParts(body, allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image"));
   const answerIndex = parts.map((part) => part.type).lastIndexOf("text");
   const activity = parts.flatMap((part, index): ActivityEntry[] => {
     if (index === answerIndex) return [];
     return part.type === "text" ? [part] : part.steps.map((step) => ({ type: "step", step }));
   });
   const answer = answerIndex === -1 ? "" : (parts[answerIndex] as { text: string }).text;
-  return { activity, answer };
+  return { setup, activity, images, answer };
+}
+
+/**
+ * What a reply that never wrote an answer concluded: its last thinking, when the agent kept it all
+ * there. Shown under the fold so the answer isn't hidden in a step the user rarely opens.
+ */
+export function unspokenThought(activity: ActivityEntry[], answer: string): string {
+  if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
+  const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
+  return thought?.type === "step" ? thought.step.detail?.trim() ?? "" : "";
 }
 
 const count = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
@@ -53,7 +67,8 @@ export function formatDuration(ms: number): string {
  * What a reply's activity did, in one line: "Thought for 12s · read 2 files · ran 3 commands".
  * Files count once however often they were read or edited; failed is how many steps failed.
  */
-export function activitySummary(steps: ChatStep[]): { text: string; failed: number } {
+export function activitySummary(all: ChatStep[]): { text: string; failed: number } {
+  const steps = all.filter((step) => step.kind !== "setup");
   const of = (kind: ChatStep["kind"]) => steps.filter((step) => step.kind === kind);
   const files = (kind: ChatStep["kind"]) => new Set(of(kind).map((step) => step.title)).size;
   const thinking = of("thinking");

@@ -130,6 +130,10 @@ test("Codex: a started turn is announced", () => {
   assert.deepEqual(mapCodexNotification("turn/started", { threadId: "thread-9", turn: { id: "t-3" } }, state), []);
 });
 
+test("agents are told to put what the user needs in their reply, not only in thinking", () => {
+  assert.match(MILAGRE_INSTRUCTIONS, /Anything they need to read \(an answer, findings, the reason behind a question\) goes in your reply text/);
+});
+
 test("agents are told to ask with their question tool, and in a short list without one", () => {
   assert.match(MILAGRE_INSTRUCTIONS, /ask with your question tool if you have one \(AskUserQuestion or request_user_input\)/);
   assert.match(MILAGRE_INSTRUCTIONS, /otherwise ask in your reply as a short numbered list\.$/);
@@ -279,4 +283,54 @@ test("shared agent instructions include the bundled writing rules and checklist"
   assert.ok(MILAGRE_INSTRUCTIONS.includes(checklist));
   assert.match(MILAGRE_INSTRUCTIONS, /progress updates and final replies/);
   assert.match(MILAGRE_INSTRUCTIONS, /stop tldr/);
+});
+
+test("Claude: TodoWrite emits the whole list and keeps its step row", () => {
+  const state = claudeState();
+  const todos = [{ content: "Write tests", status: "completed", activeForm: "Writing tests" }, { content: "Fix bug", status: "in_progress", activeForm: "Fixing bug" }, { content: "Ship", status: "pending" }];
+  const events = mapClaudeMessage({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "t1", name: "TodoWrite", input: { todos } }] } }, state);
+  assert.deepEqual(events.map((event) => event.type), ["step-started", "tasks-updated"]);
+  assert.deepEqual(events[1].tasks, [
+    { id: "0", content: "Write tests", activeForm: "Writing tests", status: "completed" },
+    { id: "1", content: "Fix bug", activeForm: "Fixing bug", status: "in_progress" },
+    { id: "2", content: "Ship", status: "pending" },
+  ]);
+  const child = mapClaudeMessage({ type: "assistant", parent_tool_use_id: "agent-1", message: { content: [{ type: "tool_use", id: "t2", name: "TodoWrite", input: { todos } }] } }, claudeState());
+  assert.equal(child.some((event) => event.type === "tasks-updated"), false);
+});
+
+test("Claude: TaskCreate, TaskUpdate and TaskList keep a list across messages", () => {
+  const state = claudeState();
+  const use = (id, name, input) => mapClaudeMessage({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id, name, input }] } }, state);
+  const result = (id, structured, content = "ok") => mapClaudeMessage({ type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: id, content }] }, tool_use_result: structured }, state);
+  const tasksOf = (events) => events.find((event) => event.type === "tasks-updated")?.tasks;
+  assert.equal(tasksOf(use("c1", "TaskCreate", { subject: "Write tests", description: "d", activeForm: "Writing tests" })), undefined);
+  assert.deepEqual(tasksOf(result("c1", { task: { id: "1", subject: "Write tests" } })), [{ id: "1", content: "Write tests", activeForm: "Writing tests", status: "pending" }]);
+  use("c2", "TaskCreate", { subject: "Ship", description: "d" });
+  assert.equal(tasksOf(result("c2", undefined, "Task #2 created successfully: Ship")).length, 2);
+  assert.deepEqual(tasksOf(use("u1", "TaskUpdate", { taskId: "1", status: "in_progress" })).map((task) => [task.id, task.status, task.activeForm]), [["1", "in_progress", "Writing tests"], ["2", "pending", undefined]]);
+  assert.equal(tasksOf(use("u0", "TaskUpdate", { taskId: "99", status: "completed" })), undefined);
+  assert.deepEqual(tasksOf(use("u2", "TaskUpdate", { taskId: "2", status: "deleted" })).map((task) => task.id), ["1"]);
+  use("l1", "TaskList", {});
+  assert.deepEqual(tasksOf(result("l1", { tasks: [{ id: "1", subject: "Write tests", status: "completed", blockedBy: [] }, { id: "3", subject: "New", status: "pending", blockedBy: [] }] })).map((task) => [task.id, task.status]), [["1", "completed"], ["3", "pending"]]);
+});
+
+test("Claude: a TaskCreate whose id can't be read still shows, under a synthetic id", () => {
+  const state = claudeState();
+  mapClaudeMessage({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "c1", name: "TaskCreate", input: { subject: "Write tests", description: "d" } }] } }, state);
+  const events = mapClaudeMessage({ type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: "c1", content: "done" }] } }, state);
+  assert.deepEqual(events.find((event) => event.type === "tasks-updated").tasks, [{ id: "task-1", content: "Write tests", status: "pending" }]);
+});
+
+test("Codex: turn/plan/updated maps the plan to tasks and respects thread and turn guards", () => {
+  const plan = [{ step: "Read code", status: "completed" }, { step: "Edit code", status: "inProgress" }, { step: "Test", status: "pending" }];
+  const params = { threadId: "thread-1", turnId: "t-1", explanation: null, plan };
+  assert.deepEqual(mapCodexNotification("turn/plan/updated", params, codexState()), [{ type: "tasks-updated", tasks: [
+    { id: "0", content: "Read code", status: "completed" },
+    { id: "1", content: "Edit code", status: "in_progress" },
+    { id: "2", content: "Test", status: "pending" },
+  ] }]);
+  assert.deepEqual(mapCodexNotification("turn/plan/updated", { ...params, threadId: "other" }, codexState()), []);
+  assert.deepEqual(mapCodexNotification("turn/plan/updated", params, { ...codexState(), turnId: "t-2" }), []);
+  assert.deepEqual(mapCodexNotification("turn/plan/updated", { ...params, plan: [] }, codexState()), [{ type: "tasks-updated", tasks: [] }]);
 });

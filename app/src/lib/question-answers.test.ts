@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentQuestion } from "../model";
-import { arrowTab, draftAnswers, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "./question-answers.ts";
+import { advancesOnPick, answerSummary, arrowTab, draftAnswers, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "./question-answers.ts";
 import type { QuestionDrafts } from "./question-answers.ts";
 
 const color: AgentQuestion = { id: "color", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }], multiSelect: false, allowOther: true, secret: false };
@@ -42,6 +42,14 @@ test("only a lone single-choice question sends on the first pick", () => {
   assert.equal(sendsOnPick([fruits]), false);
   assert.equal(sendsOnPick([color, strict]), false);
   assert.equal(sendsOnPick([]), false);
+});
+
+test("with several questions, a single-choice pick moves on except on the last question", () => {
+  assert.equal(advancesOnPick([color, strict], 0), true);
+  assert.equal(advancesOnPick([color, strict], 1), false);
+  assert.equal(advancesOnPick([fruits, color], 0), false);
+  assert.equal(advancesOnPick([color, fruits, strict], 1), false);
+  assert.equal(advancesOnPick([color], 0), false);
 });
 
 test("a question is answered once it has a pick, or a typed answer where one is allowed", () => {
@@ -93,4 +101,12 @@ test("Next moves on by one and stays on the last question; arrows wrap around th
   assert.equal(arrowTab(3, 1, "Home"), 0);
   assert.equal(arrowTab(3, 1, "End"), 2);
   assert.equal(arrowTab(3, 1, "Enter"), null);
+});
+
+test("the chat shows the answers: one question's picks alone, several after their tab labels, a secret masked", () => {
+  assert.equal(answerSummary([fruits], { fruits: ["Apple", "Mango"] }), "Apple, Mango");
+  assert.equal(answerSummary([color, { ...fruits, header: "" }], { color: ["Red"], fruits: ["Banana"] }), "Color: Red\nQuestion 2: Banana");
+  const token: AgentQuestion = { ...color, id: "token", header: "Token", secret: true };
+  assert.equal(answerSummary([token], { token: ["hunter2"] }), "••••••");
+  assert.equal(answerSummary([token], { token: ["Green"] }), "Green");
 });

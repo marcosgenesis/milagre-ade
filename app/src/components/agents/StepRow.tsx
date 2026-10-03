@@ -1,19 +1,20 @@
 import { memo, useId, useState } from "react";
 import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AiBrain01Icon, Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
+import { AiBrain01Icon, Alert02Icon, ArrowDown01Icon, CommandLineIcon, File01Icon, Image01Icon, PencilEdit02Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep, StepKind } from "../../model";
 import { fileSpanIndex } from "../../lib/file-links";
 import { titleSpans } from "../../lib/reply-parts";
 import { useFileOpener } from "../editor-links";
 import { CodeBlock } from "../markdown/CodeBlock";
 import { Markdown } from "../markdown/Markdown";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
-const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon };
+const KIND_ICONS: Record<StepKind, IconData> = { shell: CommandLineIcon, edit: PencilEdit02Icon, read: File01Icon, search: Search01Icon, other: Wrench01Icon, thinking: AiBrain01Icon, setup: CommandLineIcon, image: Image01Icon };
 // Commands show as a terminal session ("$ command", then output), edits as diffs.
-const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", edit: "diff" };
+const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", setup: "console", edit: "diff" };
 
 function Icon({ icon, size = 14 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
@@ -58,6 +59,7 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
           : span.code
           ? <code key={index} className={`rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink ${shimmer ? "step-shimmer" : ""}`}>{span.text}</code>
           : <span key={index} className={shimmer ? "step-shimmer" : undefined}>{span.text}</span>))}
+        {step.note && <span className="ml-1.5 text-[11.5px] text-ink-3">· {step.note}</span>}
       </span>
       {state && <span className="sr-only">{state}</span>}
       {waiting ? (
@@ -82,11 +84,11 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
         <div className={rowClass}>{content}</div>
       )}
       {open && step.detail && (
-        <div id={detailId} className="max-h-96 overflow-y-auto pl-6">
+        <ScrollArea id={detailId} chainScroll className="max-h-96 pl-6">
           {step.kind === "thinking"
             ? <div className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2"><Markdown text={step.detail} /></div>
             : <CodeBlock code={step.detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />}
-        </div>
+        </ScrollArea>
       )}
     </div>
   );

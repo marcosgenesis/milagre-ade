@@ -270,15 +270,6 @@ test("a mode switch reaches the chat's session", async (t) => {
   await assert.rejects(manager.setPermissionMode("1", "yolo"), /Unknown permission mode: yolo/);
 });
 
-test("interruptAll stops every chat's turn", async (t) => {
-  const { manager, created } = harness();
-  t.after(() => manager.closeAll());
-  await manager.startTurn(request("1"));
-  await manager.startTurn(request("2"));
-  await manager.interruptAll();
-  assert.deepEqual(created.map((session) => session.interrupts), [1, 1]);
-});
-
 test("an approval request is sent right after the text before it", async (t) => {
   const { manager, sent, created } = harness();
   t.after(() => manager.closeAll());

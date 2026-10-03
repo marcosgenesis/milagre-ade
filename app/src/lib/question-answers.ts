@@ -42,9 +42,26 @@ export function draftAnswers(questions: AgentQuestion[], drafts: QuestionDrafts)
   return answers;
 }
 
+/**
+ * The answers as the chat shows them, in the user's message: one question's answers alone, several
+ * one per line under their tab labels. A typed answer to a secret question is masked.
+ */
+export function answerSummary(questions: AgentQuestion[], answers: QuestionAnswers): string {
+  const shown = (question: AgentQuestion) => (answers[question.id] ?? [])
+    .map((value) => (question.secret && !question.options.some((option) => option.label === value) ? "••••••" : value))
+    .join(", ");
+  if (questions.length === 1) return shown(questions[0]);
+  return questions.map((question, index) => `${tabLabel(question, index)}: ${shown(question)}`).join("\n");
+}
+
 /** A card with one single-choice question sends as soon as an option is picked. */
 export function sendsOnPick(questions: AgentQuestion[]): boolean {
   return questions.length === 1 && !questions[0].multiSelect;
+}
+
+/** On a card with several questions, a pick on a single-choice question moves on to the next one. The last question waits for Send, so the answers get a final look. */
+export function advancesOnPick(questions: AgentQuestion[], active: number): boolean {
+  return questions.length > 1 && !questions[active]?.multiSelect && primaryAction(questions, active) === "next";
 }
 
 /** Whether one question has an answer: a pick, or a typed answer where the agent allows one. */

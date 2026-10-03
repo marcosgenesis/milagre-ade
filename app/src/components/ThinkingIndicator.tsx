@@ -1,37 +1,15 @@
 import { useEffect, useState } from "react";
 
-const chevron = Array.from({ length: 9 }, (_, index) => {
-  const row = Math.floor(index / 3);
-  const column = index % 3;
-  return (column + Math.abs(row - 1)) * 90;
-});
-
-const orbitOrder = [0, 1, 2, 5, 8, 7, 6, 3];
-const orbit = Array.from({ length: 9 }, (_, index) => {
-  const position = orbitOrder.indexOf(index);
-  return position === -1 ? null : position * 110;
-});
-
-const patterns = {
-  Drive: { delays: chevron, dur: 650, round: false },
-  Dots: { delays: chevron, dur: 650, round: true },
-  Orbit: { delays: orbit, dur: 950, round: false },
-} satisfies Record<string, { delays: (number | null)[]; dur: number; round: boolean }>;
-
-function LoaderGrid({ delays, dur, round }: { delays: (number | null)[]; dur: number; round: boolean }) {
+/** The Milagre mark running: the legs take turns striding while the sparkle bobs and turns a quarter on each step. */
+function RunningLogo() {
   return (
-    <span aria-hidden className="grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]">
-      {delays.map((delay, index) => (
-        <span
-          key={index}
-          className={`thinking-pixel size-[4px] bg-ink ${round ? "rounded-full" : "rounded-[1px]"}`}
-          style={{
-            opacity: delay === null ? 0.07 : 0.15,
-            animation: delay === null ? "none" : `pixel-on ${dur}ms ease-in-out ${delay}ms infinite`,
-          }}
-        />
-      ))}
-    </span>
+    <svg aria-hidden viewBox="-4 -4 154 154" width="16" height="16" fill="none" className="running-logo shrink-0">
+      <g className="running-logo-mark">
+        <path className="running-logo-leg running-logo-leg-left" d="M49.6983 66.5562L21.6836 116.174C19.802 119.507 22.2098 123.632 26.0372 123.632H39.9727L54.9727 100.132L66.9727 119.632L51.9727 144.132H26.0372C6.24066 144.132 -6.29344 122.89 3.27837 105.561L30.9405 55.4819L49.6983 66.5562Z" />
+        <path className="running-logo-leg running-logo-leg-right" d="M142.666 105.561C152.238 122.89 139.704 144.132 119.907 144.132H93.9728L78.9728 119.632L90.9728 100.132L105.973 123.632H119.907C123.735 123.632 126.143 119.507 124.261 116.174L96.2462 66.5562L115.004 55.4819L142.666 105.561Z" />
+        <path className="running-logo-star" d="M69.528 1.96636C71.0759 -0.655453 74.869 -0.655453 76.4169 1.96636L91.0103 26.6837C91.3538 27.2656 91.8392 27.751 92.4211 28.0945L117.138 42.6879C119.76 44.2358 119.76 48.0289 117.138 49.5768L92.4211 64.1702C91.8392 64.5137 91.3538 64.9991 91.0103 65.581L76.4169 90.2983C74.869 92.9201 71.0759 92.9201 69.528 90.2983L54.9347 65.581C54.5911 64.9991 54.1057 64.5137 53.5238 64.1702L28.8065 49.5768C26.1847 48.0289 26.1847 44.2358 28.8065 42.6879L53.5238 28.0945C54.1057 27.751 54.5911 27.2656 54.9347 26.6837L69.528 1.96636Z" />
+      </g>
+    </svg>
   );
 }
 
@@ -47,24 +25,15 @@ function useElapsed() {
   return total < 60 ? `${total.toFixed(1)}s` : `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
 }
 
-export function ThinkingIndicator({ label, variant = "Drive" }: { label: string; variant?: keyof typeof patterns }) {
+/** The running mark and the elapsed time. The label is only announced to screen readers, unless `showLabel` writes it out beside the mark. */
+export function ThinkingIndicator({ label, showLabel = false }: { label: string; showLabel?: boolean }) {
   const elapsed = useElapsed();
-  const pattern = patterns[variant];
 
   return (
-    <div role="status" aria-live="polite" className="flex w-fit items-center gap-2.5 px-1 py-1">
-      <LoaderGrid {...pattern} />
-      <span
-        className="bg-clip-text text-[13px] font-medium text-transparent"
-        style={{
-          backgroundImage: "linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%)",
-          backgroundSize: "200% 100%",
-          animation: "shimmer-text 1.4s linear infinite",
-        }}
-      >
-        {label}
-      </span>
-      <span className="font-mono text-[12px] tabular-nums text-ink-3">{elapsed}</span>
+    <div role="status" aria-label={label} className="flex w-fit items-center gap-2.5 px-1 py-1">
+      <RunningLogo />
+      {showLabel && <span aria-hidden className="min-w-0 truncate text-[12px] text-ink-3">{label}</span>}
+      <span aria-hidden className="font-mono text-[12px] tabular-nums text-ink-3">{elapsed}</span>
     </div>
   );
 }

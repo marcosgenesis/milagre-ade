@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router } from 'expo-router';
-import { GitBranchIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon, GitBranchIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import type { AgentSession, Worktree } from '@milagre/shared/model';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
@@ -29,6 +29,8 @@ function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentS
           {pr && <PullRequestLabel pr={pr} />}
         </View>
       </View>
+      {/* iOS disclosure indicator: the row opens the Chat. */}
+      <Icon icon={ArrowRight01Icon} tone="ink3" size={15} />
     </Pressable>
   </PullDown>;
 }

@@ -7,7 +7,7 @@ import { savedHosts } from '../hosts-native';
 import { createClient } from '../client';
 import type { SavedHost } from '../hosts-store';
 import { Icon } from '../icons';
-import { HeaderButton, ErrorNotice, ListRow, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, ListRow, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
 type Reachability = 'online' | 'checking' | 'offline';
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
@@ -55,7 +55,8 @@ export default function ComputersScreen() {
   const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
   const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';
   return <>
-    <Stack.Screen options={{ title: 'Computers', headerRight: () => <HeaderButton label="Add computer" icon={Add01Icon} onPress={() => router.push('/add-computer')} /> }} />
+    <Stack.Screen options={{ title: 'Computers' }} />
+    <Stack.Toolbar placement="right"><Stack.Toolbar.Button icon="plus" accessibilityLabel="Add computer" onPress={() => router.push('/add-computer')} /></Stack.Toolbar>
     <PageScroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}>
       {session.hosts.length > 0 ? <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
         {session.hosts.map((host, index) => <View key={host.id}>

@@ -116,7 +116,7 @@ function chatHost() {
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values), push() {} }, useLocalSearchParams: () => params },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router: { setParams: values => Object.assign(params, values), push() {} }, useLocalSearchParams: () => params },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },

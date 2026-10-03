@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Alert, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, MoreHorizontalIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { useSession } from '../session';
@@ -15,7 +15,7 @@ import { AgentControls, PermissionChip } from '../agent-controls';
 import { chatRecency } from '../indicators';
 import { defaultPreferences, selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
-import { ErrorNotice, Field, HeaderButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string }>();
@@ -111,17 +111,21 @@ export default function ChatScreen() {
       {worktree && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree.name}</Text>{diff && (diff.added > 0 || diff.removed > 0) && <Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>+{diff.added}</Text> <Text style={{ color: colors.red }}>−{diff.removed}</Text></Text>}</View>}
     </View>
   </PullDown>;
-  const more = <PullDown label="Chat actions" sections={[
-    { items: [
-      { id: 'changes', title: 'View changes', subtitle: diff ? `+${diff.added} −${diff.removed}` : undefined, systemImage: 'doc.text.magnifyingglass' },
-      ...(pr ? [{ id: 'pr', title: `Pull request #${pr.number}`, subtitle: blockers.length ? blockers.join(', ').replace(/-/g, ' ') : pr.state === 'MERGED' ? 'Merged' : 'Open on GitHub', systemImage: 'arrow.triangle.pull' }] : []),
-      ...(agents.length ? [{ id: 'agents', title: 'Subagents', subtitle: `${agents.length}`, systemImage: 'person.2' }] : []),
-    ] },
-    ...(chat ? [{ items: [{ id: 'rename', title: 'Rename', systemImage: 'pencil' }, { id: 'archive', title: chat.archived ? 'Restore' : 'Archive', systemImage: chat.archived ? 'tray.and.arrow.up' : 'archivebox', disabled: !!run && !chat.archived }] }] : []),
-  ]} onSelect={headerAction}><HeaderButton label="Chat actions" icon={MoreHorizontalIcon} /></PullDown>;
+  const more = <Stack.Toolbar placement="right">
+    <Stack.Toolbar.Menu icon="ellipsis" accessibilityLabel="Chat actions">
+      <Stack.Toolbar.MenuAction icon="doc.text.magnifyingglass" subtitle={diff ? `+${diff.added} −${diff.removed}` : undefined} onPress={() => headerAction('changes')}>View changes</Stack.Toolbar.MenuAction>
+      {pr && <Stack.Toolbar.MenuAction icon="arrow.triangle.pull" subtitle={blockers.length ? blockers.join(', ').replace(/-/g, ' ') : pr.state === 'MERGED' ? 'Merged' : 'Open on GitHub'} onPress={() => headerAction('pr')}>{`Pull request #${pr.number}`}</Stack.Toolbar.MenuAction>}
+      {agents.length > 0 && <Stack.Toolbar.MenuAction icon="person.2" subtitle={String(agents.length)} onPress={() => headerAction('agents')}>Subagents</Stack.Toolbar.MenuAction>}
+      {chat && <Stack.Toolbar.Menu inline>
+        <Stack.Toolbar.MenuAction icon="pencil" onPress={() => headerAction('rename')}>Rename</Stack.Toolbar.MenuAction>
+        <Stack.Toolbar.MenuAction icon={chat.archived ? 'tray.and.arrow.up' : 'archivebox'} disabled={!!run && !chat.archived} onPress={() => headerAction('archive')}>{chat.archived ? 'Restore' : 'Archive'}</Stack.Toolbar.MenuAction>
+      </Stack.Toolbar.Menu>}
+    </Stack.Toolbar.Menu>
+  </Stack.Toolbar>;
   const question = run?.questions[0];
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
-    <Stack.Screen options={{ title, headerTitle: () => header, headerRight: () => more }} />
+    <Stack.Screen options={{ title, headerTitle: () => header }} />
+    {more}
     <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12, gap: 16 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}

@@ -106,11 +106,8 @@ function createRuntime(options) {
   const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
 
   async function discoverWorktrees(projectPath) {
-    try {
-      return await git.worktreeList(projectPath);
-    } catch {
-      return [];
-    }
+    // A failed read is not evidence that every Worktree was removed.
+    return git.worktreeList(projectPath);
   }
 
   async function readStoredState(projectPath) {

@@ -85,7 +85,8 @@ function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; liv
     <Icon icon={ArrowRight01Icon} tone="ink3" size={12} />
   </Pressable>;
 }
-export const ChatReply = memo(function ChatReply({ message, run, onActivity, media }: { message?: ChatMessage; run?: AgentRun; onActivity: () => void; media: MediaSource }) {
+export const ChatReply = memo(function ChatReply({ message, run, onActivity, media }: { message?: ChatMessage; run?: AgentRun; onActivity: (message: string) => void; media: MediaSource }) {
+  const openActivity = () => onActivity(message ? String(message.id) : 'run');
   const text = run?.text ?? message?.body ?? '';
   const steps = run?.steps ?? message?.steps ?? [];
   const reply = replyActivity(text, steps);
@@ -97,10 +98,10 @@ export const ChatReply = memo(function ChatReply({ message, run, onActivity, med
     {!!text && <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: 'continuous', paddingVertical: 10, paddingHorizontal: 14 }}><Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 22 }}>{text}</Text></View>}
   </View>;
   return <View style={{ gap: 14, paddingVertical: 8 }}>
-    {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={onActivity} />)}
-    {reply.activity.length === 1 && reply.activity[0].type === 'step' ? <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={onActivity} />
-      : reply.activity.length > 0 && <ActivityRow steps={reply.activity.flatMap(entry => entry.type === 'step' ? [entry.step] : [])} live={!!run} waiting={waiting} onPress={onActivity} />}
-    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onPress={onActivity} /><GeneratedImage step={step} media={media} /></View>)}
+    {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={openActivity} />)}
+    {reply.activity.length === 1 && reply.activity[0].type === 'step' ? <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={openActivity} />
+      : reply.activity.length > 0 && <ActivityRow steps={reply.activity.flatMap(entry => entry.type === 'step' ? [entry.step] : [])} live={!!run} waiting={waiting} onPress={openActivity} />}
+    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onPress={openActivity} /><GeneratedImage step={step} media={media} /></View>)}
     {!!answer && <Markdown text={answer} streaming={!!run} />}
     {run?.tasks?.length ? <View style={[styles.card, { gap: 8 }]}>{run.tasks.map(task => <View key={task.id} style={[styles.row, { flexWrap: 'nowrap' }]}><Icon icon={task.status === 'completed' ? CheckmarkCircle02Icon : CircleIcon} tone={task.status === 'completed' ? 'green' : 'ink3'} size={16} /><Text style={[styles.muted, { flex: 1 }]}>{task.status === 'in_progress' ? task.activeForm || task.content : task.content}</Text></View>)}</View> : null}
     {!run && message?.outcome === 'cancelled' && <Text style={styles.muted}>Turn stopped</Text>}

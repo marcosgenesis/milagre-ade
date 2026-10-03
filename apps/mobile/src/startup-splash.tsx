@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, useColorScheme } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import * as SplashScreen from 'expo-splash-screen';
@@ -24,14 +24,16 @@ export function StartupSplash({ ready, onDone }: { ready: boolean; onDone: () =>
   // splash-star-twinkle: 0%, 55% rest; 75% { scale(0.82) rotate(45deg) }; 100% { rotate(90deg) }, 2400ms.
   const twinkle = useKeyframes([hold(1320), { to: 1, duration: 480, easing: twinkleCurve }, { to: 2, duration: 600, easing: twinkleCurve }], 300);
   const [[fade, shrink]] = useState(() => [new Animated.Value(0), new Animated.Value(0)]);
+  const done = useRef(onDone);
+  useEffect(() => { done.current = onDone; }, [onDone]);
   useEffect(() => {
     if (!ready) return;
-    // splash-leave and splash-logo-leave run together with their own curves.
+    // splash-leave and splash-logo-leave run together with their own curves; runs once, so session updates cannot restart it.
     Animated.parallel([
       Animated.timing(fade, { toValue: 1, duration: 320, easing: Easing.bezier(0.4, 0, 0.2, 1), useNativeDriver: true }),
       Animated.timing(shrink, { toValue: 1, duration: 320, easing: Easing.bezier(0.4, 0, 1, 1), useNativeDriver: true }),
-    ]).start(() => onDone());
-  }, [ready, fade, shrink, onDone]);
+    ]).start(() => done.current());
+  }, [ready, fade, shrink]);
   const starStyle = {
     transform: [
       { scale: twinkle.interpolate({ inputRange: [0, 1, 2], outputRange: [1, 0.82, 1] }) },

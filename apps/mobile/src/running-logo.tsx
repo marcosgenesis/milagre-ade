@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View, useColorScheme, type EasingFunction, type TextStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import MaskedView from '@react-native-masked-view/masked-view';
@@ -41,22 +41,30 @@ const GLOW: Segment[] = [{ to: 1, duration: 288, easing: easeInOut }, hold(240),
 const TWINKLE: Segment[] = [hold(1200), { to: 1, duration: 480, easing: twinkleCurve }, { to: 2, duration: 360, easing: twinkleCurve }, { to: 3, duration: 360, easing: twinkleCurve }];
 
 /** Desktop's RunningLogo: the legs take turns lighting up while the sparkle swells and turns a quarter. */
-export function RunningLogo({ size = 16 }: { size?: number }) {
+export const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: number }) {
   const ink = hex(useColorScheme()).ink;
   const left = useKeyframes(GLOW);
   const right = useKeyframes(GLOW, 240);
   const star = useKeyframes(TWINKLE);
-  const glow = (value: Animated.Value) => ({ opacity: value.interpolate({ inputRange: [0, 1, 2], outputRange: [0.15, 0.55, 0.15] }) });
+  // Built once so re-renders do not detach and recreate the native animated nodes.
+  const motion = useMemo(() => {
+    const glow = (value: Animated.Value) => ({ opacity: value.interpolate({ inputRange: [0, 1, 2], outputRange: [0.15, 0.55, 0.15] }) });
+    const steps = [0, 1, 2, 3];
+    return {
+      left: glow(left), right: glow(right),
+      star: { opacity: star.interpolate({ inputRange: steps, outputRange: [0.45, 1, 1, 0.45] }), transform: [{ scale: star.interpolate({ inputRange: steps, outputRange: [1, 1.3, 1.12, 1] }) }, { rotate: star.interpolate({ inputRange: steps, outputRange: ['0deg', '45deg', '80deg', '90deg'] }) }] },
+    };
+  }, [left, right, star]);
   const scale = size / 154;
   const layer = (path: string) => <Svg width={size} height={size} viewBox="-4 -4 154 154"><Path d={path} fill={ink} /></Svg>;
   return <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: size, height: size }}>
-    <Animated.View style={[StyleSheet.absoluteFill, glow(left)]}>{layer(LEFT)}</Animated.View>
-    <Animated.View style={[StyleSheet.absoluteFill, glow(right)]}>{layer(RIGHT)}</Animated.View>
-    <Animated.View style={{ position: 'absolute', left: (STAR_BOX.x + 4) * scale, top: (STAR_BOX.y + 4) * scale, width: STAR_BOX.size * scale, height: STAR_BOX.size * scale, opacity: star.interpolate({ inputRange: [0, 1, 2, 3], outputRange: [0.45, 1, 1, 0.45] }), transform: [{ scale: star.interpolate({ inputRange: [0, 1, 2, 3], outputRange: [1, 1.3, 1.12, 1] }) }, { rotate: star.interpolate({ inputRange: [0, 1, 2, 3], outputRange: ['0deg', '45deg', '80deg', '90deg'] }) }] }}>
+    <Animated.View style={[StyleSheet.absoluteFill, motion.left]}>{layer(LEFT)}</Animated.View>
+    <Animated.View style={[StyleSheet.absoluteFill, motion.right]}>{layer(RIGHT)}</Animated.View>
+    <Animated.View style={[{ position: 'absolute', left: (STAR_BOX.x + 4) * scale, top: (STAR_BOX.y + 4) * scale, width: STAR_BOX.size * scale, height: STAR_BOX.size * scale }, motion.star]}>
       <Svg width="100%" height="100%" viewBox={`${STAR_BOX.x} ${STAR_BOX.y} ${STAR_BOX.size} ${STAR_BOX.size}`}><Path d={STAR} fill={ink} /></Svg>
     </Animated.View>
   </View>;
-}
+});
 
 function useElapsed() {
   const [tenths, setTenths] = useState(0);
@@ -70,17 +78,21 @@ function useElapsed() {
 
 /** Desktop's ThinkingIndicator: the running mark and the elapsed time; the label is for screen readers unless shown. */
 export function ThinkingIndicator({ label, showLabel = false }: { label: string; showLabel?: boolean }) {
-  const elapsed = useElapsed();
   return <View accessible accessibilityRole="progressbar" accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4, paddingVertical: 4 }}>
     <RunningLogo />
     {showLabel && <Text numberOfLines={1} style={{ color: colors.ink3, fontSize: 12, flexShrink: 1 }}>{label}</Text>}
-    <Text style={{ color: colors.ink3, fontSize: 12, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{elapsed}</Text>
+    <Elapsed />
   </View>;
+}
+
+/** Only this Text re-renders on each tick. */
+function Elapsed() {
+  return <Text style={{ color: colors.ink3, fontSize: 12, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{useElapsed()}</Text>;
 }
 
 // step-shimmer: a 320px tile (ink-3 to 110px, ink at 160px, ink-3 from 210px) slides one tile right every 1.2s.
 const TILE = 320;
-const TILES = 6;
+const TILES = 4;
 
 /** Desktop's step-shimmer: a light highlight sweeps across the text, left to right, until the step is done. */
 export function ShimmerText({ children, style, numberOfLines = 1 }: { children: ReactNode; style?: TextStyle; numberOfLines?: number }) {
@@ -89,10 +101,14 @@ export function ShimmerText({ children, style, numberOfLines = 1 }: { children: 
   const [shift] = useState(() => new Animated.Value(0));
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduced);
+    let cancelled = false;
     const loop = Animated.loop(Animated.timing(shift, { toValue: TILE, duration: 1200, easing: Easing.linear, useNativeDriver: true }));
-    loop.start();
-    return () => loop.stop();
+    void AccessibilityInfo.isReduceMotionEnabled().then(reduce => {
+      if (cancelled) return;
+      setReduced(reduce);
+      if (!reduce) loop.start();
+    });
+    return () => { cancelled = true; loop.stop(); };
   }, [shift]);
   const text = <Text numberOfLines={numberOfLines} style={style}>{children}</Text>;
   if (reduced) return <Text numberOfLines={numberOfLines} style={[style, { color: colors.ink3 }]}>{children}</Text>;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -49,11 +49,11 @@ export default function AddComputer() {
           {permission?.granted ? <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : ({ data }) => { setScanned(true); fromLink(data); }} /> : null}
           <View pointerEvents="none" style={{ width: 200, height: 200, borderRadius: 28, borderWidth: 3, borderColor: '#ffffffcc', alignItems: 'center', justifyContent: 'center' }}>{!permission?.granted && <Icon icon={QrCodeIcon} color="#ffffff55" size={64} />}</View>
           {permission?.granted ? <Text style={{ color: '#ffffffcc', fontSize: 14 }}>Point at the QR code on your Mac</Text>
-            : <Pressable accessibilityRole="button" onPress={() => void requestPermission()} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#ffffff26' }}><Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>{permission?.canAskAgain === false ? 'Allow camera access in Settings' : 'Allow camera to scan'}</Text></Pressable>}
+            : <Pressable accessibilityRole="button" onPress={() => void (permission?.canAskAgain === false ? Linking.openSettings() : requestPermission())} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#ffffff26' }}><Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>{permission?.canAskAgain === false ? 'Allow camera access in Settings' : 'Allow camera to scan'}</Text></Pressable>}
         </View>
         <View style={{ gap: 6 }}><Text style={styles.label}>On your Mac, run</Text><View style={{ backgroundColor: colors.field, borderRadius: 10, padding: 12 }}><Text selectable style={styles.code}>npm run mobile:host</Text></View></View>
         <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
-          {[{ icon: ClipboardPasteIcon, title: 'Paste pairing link', onPress: () => void Clipboard.getStringAsync().then(fromLink) }, { icon: KeyboardIcon, title: 'Enter address and token', onPress: () => { setManual(true); setError(''); } }].map((row, index) => <View key={row.title}>
+          {[{ icon: ClipboardPasteIcon, title: 'Paste pairing link', onPress: () => void Clipboard.getStringAsync().then(fromLink).catch(() => setError('Could not read the clipboard. Copy the pairing link again.')) }, { icon: KeyboardIcon, title: 'Enter address and token', onPress: () => { setManual(true); setError(''); } }].map((row, index) => <View key={row.title}>
             {index > 0 && <View style={styles.separator} />}
             <Pressable accessibilityRole="button" onPress={row.onPress} disabled={busy} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, opacity: pressed ? 0.5 : 1 })}><Icon icon={row.icon} tone="accent" size={20} /><Text style={[styles.text, { flex: 1 }]}>{row.title}</Text><Icon icon={ArrowRight01Icon} tone="ink3" size={16} /></Pressable>
           </View>)}

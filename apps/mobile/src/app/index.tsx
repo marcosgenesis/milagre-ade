@@ -43,7 +43,7 @@ export default function ComputersScreen() {
     if (autoOpened.current) return;
     const target = DEMO && process.env.EXPO_PUBLIC_DAEMON_URL && process.env.EXPO_PUBLIC_DAEMON_TOKEN ? { address: process.env.EXPO_PUBLIC_DAEMON_URL, token: process.env.EXPO_PUBLIC_DAEMON_TOKEN, name: 'Demo host' }
       : session.hosts.length === 1 && !session.client ? session.hosts[0] : null;
-    if (!target) return;
+    if (!target || !session.claimAutoOpen()) return;
     autoOpened.current = true;
     const timer = setTimeout(() => void open(target), 0);
     return () => clearTimeout(timer);

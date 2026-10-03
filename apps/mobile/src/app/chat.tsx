@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type Reanimated from 'react-native-reanimated';
 import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
@@ -37,6 +37,13 @@ export default function ChatScreen() {
   const viewport = useRef(0);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
   const pr = usePullRequest(worktreeOf);
+  // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
+  const connected = session.client;
+  const projectPath = session.snapshot?.project.path;
+  const allMessages = session.snapshot?.project.state.messages;
+  const media = useCallback((path: string) => connected!.media(projectPath!, path), [connected, projectPath]);
+  const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
+  const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
   const client = session.client;
   const { project, runs } = session.snapshot;
@@ -45,7 +52,6 @@ export default function ChatScreen() {
   const draft = session.drafts[chatId] || '';
   const attachments = session.attachments[chatId] || [];
   const run = chat ? runs.runs[chatId] : undefined;
-  const messages = chat ? project.state.messages.filter(m => m.session_id === chat.id) : [];
   const preferences = session.preferences[chatId] || defaultPreferences;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ''), session.models);
@@ -53,12 +59,11 @@ export default function ChatScreen() {
   const worktree = project.state.worktrees[worktreeId];
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== 'ready';
   const title = chat?.title || chat?.generatedTitle || 'New Chat';
-  const media = (path: string) => client.media(project.path, path);
   async function action(work: () => Promise<unknown>) {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true); setError('');
-    try { await work(); session.expectActivity(); await session.refresh(); }
-    catch (e) { setError((e as Error).message); }
+    try { await work(); session.expectActivity(); await session.refresh(); return true; }
+    catch (e) { setError((e as Error).message); return false; }
     finally { setBusy(false); }
   }
   async function pick(kind: 'photos' | 'camera' | 'files') {
@@ -108,7 +113,7 @@ export default function ChatScreen() {
     else if (id === 'pr' && pr && /^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {});
     else if (id === 'agents' && chat) router.push({ pathname: '/agents', params: { id: String(chat.id) } });
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
-    else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(() => { if (!chat.archived) router.back(); });
+    else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(done => { if (done && !chat.archived) router.back(); });
   }
   const recent = Object.values(project.state.sessions).filter(item => !item.archived).sort((a, b) => chatRecency(b.id, project.state.messages) - chatRecency(a.id, project.state.messages)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
@@ -143,14 +148,14 @@ export default function ChatScreen() {
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>Your agent runs in {worktree?.name || 'this Worktree'} on your computer.</Text></View>}
-      {messages.map(message => <ChatReply key={message.id} message={message} media={media} onActivity={() => router.push({ pathname: '/activity', params: { id: String(chat!.id), message: String(message.id) } })} />)}
-      {run && <ChatReply run={run} media={media} onActivity={() => router.push({ pathname: '/activity', params: { id: String(chat!.id), message: 'run' } })} />}
+      {chat && messages.map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
+      {run && <ChatReply run={run} media={media} onActivity={openActivity} />}
       {run && <ThinkingIndicator label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </KeyboardChatScrollView>
-    {/* iOS's soft edge only covers the status bar here, so text under the title fades out the same way. */}
-    <EdgeFade edge="top" height={insets.top + 72} />
+    {/* iOS's soft edge already blurs under the title; this only fades the text into the page. */}
+    <EdgeFade edge="top" height={insets.top + 72} blur={false} />
     <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />
@@ -169,7 +174,7 @@ export default function ChatScreen() {
           <PullDown label="Add photos or files" sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle' }, { id: 'camera', title: 'Take Photo', systemImage: 'camera' }, { id: 'files', title: 'Choose Files', systemImage: 'folder' }].map(item => ({ ...item, disabled: busy || picking || attachments.length >= 4 })) }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
             <View accessibilityRole="button" accessibilityLabel="Add photos or files" style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>
           </PullDown>
-          <AgentControls model={model} onToggle={() => { following.current = false; router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
+          <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
           <PermissionChip mode={preferences.permissionMode} onChange={permissionMode => session.setPreferences(current => ({ ...current, [chatId]: { ...preferences, permissionMode } }))} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}

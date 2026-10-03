@@ -35,8 +35,10 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
       if (legacy === null) return [];
       try { return [validate({ ...JSON.parse(legacy), lastUsed: 0 })]; } catch { return []; }
     }
-    try { return sorted((JSON.parse(value) as unknown[]).map(validate)); }
-    catch { throw new Error('Saved computers could not be read. Forget them and pair again.'); }
+    let entries: unknown[];
+    try { entries = JSON.parse(value); } catch { entries = []; }
+    // A damaged entry is dropped instead of locking every saved computer, and pairing, behind it.
+    return sorted((Array.isArray(entries) ? entries : []).flatMap(entry => { try { return [validate(entry)]; } catch { return []; } }));
   }
   async function write(hosts: SavedHost[]) {
     await storage.setItemAsync(hostsKey, JSON.stringify(sorted(hosts).slice(0, MAX_HOSTS)));

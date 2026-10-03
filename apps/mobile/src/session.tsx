@@ -27,6 +27,9 @@ function useSessionState() {
   const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
+  // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
+  const autoOpen = useRef(true);
+  const claimAutoOpen = () => { const first = autoOpen.current; autoOpen.current = false; return first; };
   useEffect(() => {
     let cancelled = false;
     if (!client || process.env.EXPO_PUBLIC_DEMO === '1') return;
@@ -60,6 +63,7 @@ function useSessionState() {
       }
       if (current !== generation.current) return false;
       setModels(null); setCliStatus(null); setProviderError('');
+      autoOpen.current = false;
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
       setHostName(name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url));
       return true;
@@ -119,8 +123,8 @@ function useSessionState() {
   }, [client, projectPath, refresh]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
-  const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
+  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

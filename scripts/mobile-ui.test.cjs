@@ -29,6 +29,12 @@ function hookHost() {
       const previous = slots[index];
       if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { fn, deps };
       return slots[index].fn;
+    },
+    useMemo(fn, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { value: fn(), deps };
+      return slots[index].value;
     }, useEffect() {}, createContext() { return {}; }, useContext() {},
   };
 }
@@ -164,7 +170,7 @@ test('a failed first send keeps the current draft and releases the composer', as
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
 });
 
-test('opening agent settings keeps them in view instead of following the transcript bottom', () => {
+test('the transcript follows new content, also after the agent settings sheet opens', () => {
   const screen = chatHost();
   const tree = screen.render();
   const page = find(tree, node => node.type === 'KeyboardChatScrollView');
@@ -177,7 +183,7 @@ test('opening agent settings keeps them in view instead of following the transcr
   assert.equal(scrolls, 1);
   find(tree, node => node.type === 'AgentControls').props.onToggle();
   page.props.onContentSizeChange(0, 1000);
-  assert.equal(scrolls, 1);
+  assert.equal(scrolls, 2);
 });
 
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
@@ -188,7 +194,7 @@ test('live tool activity opens in the activity sheet instead of expanding in the
   const tree = screen.render();
   const pushed = [];
   screen.router.push = route => pushed.push(route);
-  find(tree, node => node.type === 'ChatReply').props.onActivity();
+  find(tree, node => node.type === 'ChatReply').props.onActivity('run');
   assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/activity', params: { id: '42', message: 'run' } }]));
 });
 

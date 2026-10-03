@@ -14,7 +14,8 @@ export default function ActivitySheet() {
   const project = session.snapshot?.project;
   const chatId = `${project?.path}#${id}`;
   const run = message === 'run' ? session.snapshot?.runs.runs[chatId] : undefined;
-  const saved = message === 'run' ? undefined : project?.state.messages.find(entry => entry.id === Number(message));
+  // When the live turn ends while the sheet is open, its saved reply takes over.
+  const saved = message === 'run' ? (run ? undefined : project?.state.messages.filter(entry => entry.session_id === Number(id) && entry.role !== 'user').at(-1)) : project?.state.messages.find(entry => entry.id === Number(message));
   const steps = run?.steps ?? saved?.steps ?? [];
   const { setup, activity, images } = replyActivity(run?.text ?? saved?.body ?? '', steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);

@@ -16,7 +16,7 @@ export default function PairLink() {
     void (async () => {
       try {
         const pairing = parsePairing(`milagre://pair?address=${encodeURIComponent(params.address || '')}&token=${params.token || ''}&name=${encodeURIComponent(params.name || '')}`);
-        if (await session.connect(pairing.address, pairing.token, true, pairing.name) && !cancelled) { router.dismissAll(); router.push('/projects'); }
+        if (await session.connect(pairing.address, pairing.token, true, pairing.name) && !cancelled) { router.dismissTo('/'); router.push('/projects'); }
       } catch (e) { if (!cancelled) setError((e as Error).message); }
     })();
     return () => { cancelled = true; };

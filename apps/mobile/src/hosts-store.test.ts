@@ -56,3 +56,14 @@ test('pairing links from the host QR parse into a computer', () => {
   assert.throws(() => parsePairing('https://example.com/pair?token=x'), /not a Milagre pairing link/);
   assert.throws(() => parsePairing(`milagre://pair?address=x&token=short`), /valid token/);
 });
+
+test('a damaged saved entry is dropped instead of blocking the others and new pairings', async () => {
+  const driver = storage();
+  const store = createHostsStore(driver, () => 1);
+  await store.save({ name: 'Studio', address: 'https://studio.example.com', token });
+  const key = [...driver.values.keys()][0];
+  driver.values.set(key, JSON.stringify([...JSON.parse(driver.values.get(key)!), { address: 'ftp://bad', token: 'short' }]));
+  assert.deepEqual((await store.list()).map(host => host.name), ['Studio']);
+  await store.save({ name: 'MacBook Pro', address: 'https://mac.example.com', token });
+  assert.equal((await store.list()).length, 2);
+});

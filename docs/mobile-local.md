@@ -1,6 +1,6 @@
 # Run Milagre in a local simulator
 
-This preview connects an Expo mobile app to the Node daemon on your Mac. It lists Projects and Chats, shows transcripts and live text, sends text, stops or continues a turn, and answers approvals and questions. The daemon owns the state and keeps running when the app disconnects.
+This preview connects an Expo mobile app to the Node daemon on your Mac. It groups Chats by Worktree, creates Worktrees, shows transcripts and live text, sends text, stops or continues a turn, and answers approvals and questions. It also supports model, effort, fast-mode and permission settings, Chat rename/archive/restore, and read-only changes and file diffs. The daemon owns the state and keeps running when the app disconnects.
 
 ## Try the demo
 
@@ -50,7 +50,7 @@ npm run daemon -- bridge --data-dir /tmp/milagre-local-profile --connection-file
 npm run mobile
 ```
 
-Press Shift+i and choose your simulator. Enter `http://127.0.0.1:8787` and the token from `/tmp/milagre-local-connection.json`. Open an absolute Git Project folder on your Mac. Start a Chat with your installed, logged-in Codex or Claude provider; the model field accepts its model ID. Permissions default to **Ask approval**.
+Press Shift+i and choose your simulator. Enter `http://127.0.0.1:8787` and the token from `/tmp/milagre-local-connection.json`. Open an absolute Git Project folder on your Mac. Start a Chat with your installed, logged-in Codex or Claude provider; the model menu uses the provider's reported models and capabilities. Permissions default to **Ask approval**.
 
 Stop Metro and the bridge with Ctrl+C. Stop the daemon cleanly with:
 
@@ -72,12 +72,33 @@ Enter the HTTPS endpoint and the host's connection token in the app. `--public-u
 
 TLS terminates at the proxy or tunnel provider, which can see traffic. This is not Paseo's encrypted relay. Keep HTTP request inspection off so connection tokens and Chat content are not recorded there. No remote endpoint starts automatically. Stop a test tunnel with Ctrl+C. Physical devices also need an installed build or access to the development bundler; the standalone simulator build does not need Metro.
 
+### Temporary HTTPS test without an account
+
+A [Cloudflare Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) can test the same path using only a temporary Project:
+
+```sh
+cloudflared tunnel --url http://127.0.0.1:8787 --http-host-header 127.0.0.1:8787 --loglevel info --no-autoupdate
+```
+
+Use the printed HTTPS origin in the app. Keep logging at info or higher; debug logging can include request headers. The random URL lasts only while that process runs. Stop it with Ctrl+C. The same TLS-provider trust boundary applies. For regular remote use, configure a stable private endpoint; the test does not install a background tunnel service.
+
+## Standalone iOS simulator build
+
+With Xcode 26.4 or newer and its simulator runtime installed:
+
+```sh
+cd apps/mobile
+CI=1 npx expo run:ios --configuration Release --device generic --output /tmp/milagre-mobile-release --no-bundler
+```
+
+This generates the ignored native project and produces `/tmp/milagre-mobile-release/MilagreLocal.app`. Install that app on the chosen iOS simulator and launch **Milagre Local**. Metro and Expo Go are not needed. Run `mobile:host`, enter its connection, and keep that host running. A physical-device build needs signing and a reachable HTTPS host; this simulator artifact cannot be installed on a phone.
+
 ## Boundaries
 
 - The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. Request bodies are capped at 1 MiB and concurrent requests at 16.
 - Foreground snapshots poll once per second. Text and tool summaries are supported. Images, full desktop tools, rich markdown and large-history rendering remain desktop capabilities.
 - Local simulator and direct HTTPS host access are supported. An encrypted relay, QR device pairing, push notifications and production background services come later.
-- iOS uses Expo Go. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
+- iOS works in Expo Go and a standalone simulator Release build. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
 - Demo connection defaults are injected into a local development bundle. Never publish that bundle or use this mechanism for a real remote token. The real workflow enters the token in the app.
 
 ## Development checks
@@ -94,4 +115,12 @@ npm run export:ios --workspace @milagre/mobile
 
 ### Validation note
 
-Expo Doctor passes 20 of 21 checks. Its duplicate-React check sees desktop React 19.3.0 and mobile React 19.2.3. Both are intentionally retained to preserve the desktop and match Expo 57. The running iOS Metro source map contains only `apps/mobile/node_modules/react`; the simulator renders and handles hooks correctly. A native development/release build still needs its own validation. See [Expo's duplicate-package guidance](https://docs.expo.dev/guides/monorepos/#duplicate-native-packages-within-monorepos).
+Expo Doctor passes 20 of 21 checks. Its duplicate-React check sees desktop React 19.3.0 and mobile React 19.2.3. Both are intentionally retained to preserve the desktop and match Expo 57. The running iOS Metro source map contains only `apps/mobile/node_modules/react`; the simulator renders and handles hooks correctly. The standalone iOS simulator Release build also compiles and runs with these separate versions. See [Expo's duplicate-package guidance](https://docs.expo.dev/guides/monorepos/#duplicate-native-packages-within-monorepos).
+
+### Opt-in real-provider check
+
+```sh
+node scripts/check-mobile-providers.cjs --run
+```
+
+This uses the installed Codex and Claude accounts for one short no-tool prompt each in an isolated temporary Project. It checks the full mobile HTTP/socket/core path, restarts the host and verifies the token, saved Chats, provider session IDs and replies. It is excluded from normal tests and CI because it consumes provider quota. The saved temporary Project path is printed for inspection.

@@ -155,6 +155,19 @@ test('a failed first send keeps the current draft and releases the composer', as
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
 });
 
+test('opening agent settings keeps them in view instead of following the transcript bottom', () => {
+  const screen = chatHost();
+  const tree = screen.render();
+  const page = find(tree, node => node.type === 'PageScroll');
+  let scrolls = 0;
+  page.props.ref.current = { scrollToEnd() { scrolls++; } };
+  page.props.onContentSizeChange();
+  assert.equal(scrolls, 1);
+  find(tree, node => node.type === 'AgentControls').props.onToggle();
+  page.props.onContentSizeChange();
+  assert.equal(scrolls, 1);
+});
+
 test('switching the requested diff hides old content and ignores its late response', async () => {
   const react = hookHost();
   let currentDeps, cleanup, pendingEffect;

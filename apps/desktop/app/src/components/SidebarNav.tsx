@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -99,6 +99,8 @@ type SidebarNavProps = {
   usage?: ReactNode;
   variant?: string;
 };
+
+const NO_CHAT_ACTIONS: ChatRowActions = {};
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
@@ -363,7 +365,8 @@ function WorkspaceMenu({
   );
 }
 
-export default function SidebarNav({
+// memo: App rebuilds on every streamed batch and keystroke elsewhere; the sidebar only follows its own props.
+export default memo(function SidebarNav({
   workspaceName = WORKSPACE.name,
   workspaceImage,
   onOpenProject,
@@ -380,7 +383,7 @@ export default function SidebarNav({
   onOpenProjectSettings,
   onSwitchProject,
   recents = DEFAULT_RECENTS,
-  chatActions = {},
+  chatActions = NO_CHAT_ACTIONS,
   usage,
 }: SidebarNavProps) {
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
@@ -396,6 +399,11 @@ export default function SidebarNav({
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
+  // One identity for every row, so memo(ChatRow) skips when the sidebar re-renders.
+  const pickChat = useCallback((item: SidebarRecent) => {
+    if (activeTitle === undefined) setDemoActiveTitle(item.label);
+    onPick?.(item.id, item.label, item.prompt);
+  }, [activeTitle, onPick]);
   const workspace = { name: workspaceName, image: workspaceImage, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
   const projects = projectPath ? projectRows({ recent: recentProjects, currentPath: projectPath, currentName: workspaceName }) : [];
 
@@ -623,10 +631,7 @@ export default function SidebarNav({
                 collapsed={collapsed}
                 actions={chatActions}
                 shortcutHint={showHints && index < 9 ? `${shortcutModifier}${index + 1}` : undefined}
-                onPick={() => {
-                  if (activeTitle === undefined) setDemoActiveTitle(item.label);
-                  onPick?.(item.id, item.label, item.prompt);
-                }}
+                onPick={pickChat}
               />
             ))}
           </GlideGroup>
@@ -672,4 +677,4 @@ export default function SidebarNav({
       )}
     </div>
   );
-}
+});

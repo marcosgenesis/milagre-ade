@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process');
 const { startDaemon } = require('../apps/daemon/src/server.cjs');
 const { startMobileBridge } = require('../apps/daemon/src/mobile-bridge.cjs');
 const { connect } = require('../apps/daemon/src/client.cjs');
+const { ensureDaemon } = require('../apps/daemon/src/bootstrap.cjs');
 const { version } = require('../package.json');
 const { printPairing } = require('./mobile-pairing.cjs');
 const { startNamedTunnel, startQuickTunnel } = require('./mobile-tunnel.cjs');
@@ -27,7 +28,11 @@ async function readToken(file) {
 }
 
 /** `tunnel`: 'quick' opens a temporary trycloudflare.com URL; 'cloudflare' runs the named tunnel from mobile:cloudflare. */
-async function startMobileHost({ dataDir, project, port = 8787, publicUrl, tunnel: tunnelMode, runtimeOptions, tunnels = { startNamedTunnel, startQuickTunnel } } = {}) {
+/**
+ * `desktopDataDir` shares the Mac app's daemon (starting it the way the app does if it isn't running), so the phone sees
+ * the app's recent Projects and its running Chats. `dataDir` then only holds the phone's token and tunnel secrets.
+ */
+async function startMobileHost({ dataDir, desktopDataDir, project, port = 8787, publicUrl, tunnel: tunnelMode, runtimeOptions, tunnels = { startNamedTunnel, startQuickTunnel } } = {}) {
   if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('Use an absolute data directory.');
   if (project && !path.isAbsolute(project)) throw new Error('Use an absolute Project path.');
   if (publicUrl) {
@@ -39,17 +44,21 @@ async function startMobileHost({ dataDir, project, port = 8787, publicUrl, tunne
   const cloudflare = tunnelMode === 'cloudflare' ? await readCloudflare(dataDir) : null;
   // The named tunnel's remote config points at a fixed port.
   if (cloudflare) port = cloudflare.port;
-  const daemon = await startDaemon({ dataDir, version, runtimeOptions });
+  if (desktopDataDir && !path.isAbsolute(desktopDataDir)) throw new Error('Use an absolute desktop data directory.');
+  await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+  const runtimeDir = desktopDataDir || dataDir;
+  // A shared daemon belongs to the desktop as much as to this host, so closing the host leaves it running.
+  const daemon = desktopDataDir ? await ensureDaemon({ dataDir: desktopDataDir, version, cwd: os.homedir() }) : await startDaemon({ dataDir, version, runtimeOptions });
   const connectionFile = path.join(dataDir, 'mobile-connection.json');
   let bridge, socket, tunnel, closing;
   const close = () => closing ??= (async () => { await tunnel?.close(); await bridge?.close(); socket?.close(); await daemon.close(); })();
   try {
     const token = await readToken(connectionFile);
-    bridge = await startMobileBridge({ dataDir, port, token });
+    bridge = await startMobileBridge({ dataDir: runtimeDir, port, token });
     if (cloudflare) tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
     else if (tunnelMode === 'quick') tunnel = await tunnels.startQuickTunnel({ port: new URL(bridge.url).port });
     if (tunnel) publicUrl = tunnel.url;
-    if (project) { socket = await connect({ dataDir }); await socket.call('project:open', [project]); socket.close(); socket = null; }
+    if (project) { socket = await connect({ dataDir: runtimeDir }); await socket.call('project:open', [project]); socket.close(); socket = null; }
     const temporary = `${connectionFile}.${randomBytes(8).toString('hex')}.tmp`;
     try {
       await fs.writeFile(temporary, JSON.stringify({ url: publicUrl || bridge.url, token }, null, 2), { flag: 'wx', mode: 0o600 });
@@ -62,14 +71,15 @@ async function startMobileHost({ dataDir, project, port = 8787, publicUrl, tunne
 async function main() {
   const { values } = parseArgs({ options: {
     'data-dir': { type: 'string', default: path.join(os.homedir(), '.milagre-mobile') },
+    desktop: { type: 'boolean' }, 'desktop-data-dir': { type: 'string' },
     project: { type: 'string' }, port: { type: 'string', default: '8787' },
     'public-url': { type: 'string' }, tunnel: { type: 'boolean' }, cloudflare: { type: 'boolean' }, 'stay-awake': { type: 'boolean' }, 'no-qr': { type: 'boolean' }, help: { type: 'boolean' },
   } });
   if (values.help) {
-    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example | --tunnel | --cloudflare] [--stay-awake] [--no-qr]\n--tunnel opens a temporary Cloudflare Quick Tunnel; --cloudflare runs the tunnel set up by mobile:cloudflare, so the phone reaches this Mac from any network.\nPrints a QR code and link for the app to pair; --no-qr prints only the link. Separate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
+    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example | --tunnel | --cloudflare] [--desktop | --desktop-data-dir /absolute/userData] [--stay-awake] [--no-qr]\n--desktop shares the Milagre app\'s daemon and Projects (its data in ~/Library/Application Support/Milagre); --data-dir then only keeps the phone\'s token and tunnel secrets.\n--tunnel opens a temporary Cloudflare Quick Tunnel; --cloudflare runs the tunnel set up by mobile:cloudflare, so the phone reaches this Mac from any network.\nPrints a QR code and link for the app to pair; --no-qr prints only the link. Separate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
     return;
   }
-  const host = await startMobileHost({ dataDir: values['data-dir'], project: values.project, port: Number(values.port), publicUrl: values['public-url'], tunnel: values.cloudflare ? 'cloudflare' : values.tunnel ? 'quick' : undefined });
+  const host = await startMobileHost({ dataDir: values['data-dir'], project: values.project, port: Number(values.port), desktopDataDir: values['desktop-data-dir'] || (values.desktop ? path.join(os.homedir(), 'Library/Application Support/Milagre') : undefined), publicUrl: values['public-url'], tunnel: values.cloudflare ? 'cloudflare' : values.tunnel ? 'quick' : undefined });
   let awake;
   if (values['stay-awake'] && process.platform === 'darwin') {
     awake = spawn('/usr/bin/caffeinate', ['-i'], { stdio: 'ignore' });

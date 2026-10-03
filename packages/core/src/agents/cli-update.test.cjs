@@ -94,14 +94,14 @@ test("linkNewestClaudeVersion: symlinks highest compliant version", () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "claude-link-test-"));
   const versionsDir = path.join(tempHome, ".local/share/claude/versions");
   fs.mkdirSync(versionsDir, { recursive: true });
-  fs.writeFileSync(path.join(versionsDir, "2.1.285"), "bin285");
   fs.writeFileSync(path.join(versionsDir, "2.1.287"), "bin287");
-  fs.writeFileSync(path.join(versionsDir, "2.1.284"), "bin284");
+  fs.writeFileSync(path.join(versionsDir, "2.1.289"), "bin289");
+  fs.writeFileSync(path.join(versionsDir, "2.1.286"), "bin286");
 
   const success = linkNewestClaudeVersion(tempHome);
   assert.equal(success, true);
   const targetBin = path.join(tempHome, ".local/bin/claude");
-  assert.equal(fs.readlinkSync(targetBin), path.join(versionsDir, "2.1.287"));
+  assert.equal(fs.readlinkSync(targetBin), path.join(versionsDir, "2.1.289"));
 
   fs.rmSync(tempHome, { recursive: true, force: true });
 });

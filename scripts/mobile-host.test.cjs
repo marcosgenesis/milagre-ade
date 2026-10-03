@@ -59,3 +59,28 @@ test('--cloudflare runs the saved named tunnel on its port and pairs with the Ac
   assert.equal(closed, 1);
   await assert.rejects(startMobileHost({ dataDir, tunnel: 'quick', publicUrl: 'https://x.example' }), /either a tunnel or --public-url/);
 });
+
+test('--desktop shares the app daemon: the phone sees its Projects and the host leaves it running', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-host-')));
+  const project = path.join(root, 'Project');
+  await fs.mkdir(project);
+  execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
+  const desktopDir = path.join(root, 'desktop');
+  const { startDaemon } = require('../apps/daemon/src/server.cjs');
+  const desktop = await startDaemon({ dataDir: desktopDir, version: '0.1.0', runtimeOptions: { titleModels: {} } });
+  t.after(async () => { await desktop.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const app = await connect({ dataDir: desktopDir });
+  await app.call('project:open', [project]);
+  app.close();
+
+  const host = await startMobileHost({ dataDir: path.join(root, 'phone'), desktopDataDir: desktopDir, port: 0 });
+  const { url, token } = JSON.parse(await fs.readFile(host.connectionFile, 'utf8'));
+  const { createClient } = await import('../apps/mobile/src/client.ts');
+  const recent = await createClient(url, token).call('project:recent');
+  assert.deepEqual(recent.map(item => item.path), [project]);
+  await host.close();
+  const after = await connect({ dataDir: desktopDir });
+  assert.equal(typeof (await after.call('daemon:status')).pid, 'number', 'the desktop daemon keeps running');
+  after.close();
+  await assert.rejects(fs.stat(path.join(root, 'phone', 'runtime.lock')), { code: 'ENOENT' }, 'no second runtime was started');
+});

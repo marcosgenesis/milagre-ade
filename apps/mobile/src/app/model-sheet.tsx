@@ -7,7 +7,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { Cancel01Icon, FlashIcon, Tick02Icon, UserMultipleIcon } from '@hugeicons/core-free-icons';
 import type { ModelProvider } from '@milagre/shared/model';
-import { useSession } from '../session';
+import { useComposer, useSession } from '../session';
 import { defaultPreferences, modelsFor, selectedModel, type TurnPreferences } from '../turn-options';
 import { EffortMeter, Icon, ProviderLogo } from '../icons';
 import { CircleButton, colors, styles } from '../ui';
@@ -16,8 +16,9 @@ import { CircleButton, colors, styles } from '../ui';
 export default function ModelSheet() {
   const params = useLocalSearchParams<{ chatId: string; model?: string; locked?: string; busy?: string }>();
   const session = useSession();
+  const composer = useComposer();
   const navigation = useNavigation();
-  const saved = session.preferences[params.chatId] || defaultPreferences;
+  const saved = composer.preferences[params.chatId] || defaultPreferences;
   const locked = params.locked as ModelProvider | undefined;
   const initial: TurnPreferences = { ...saved, provider: locked || saved.provider, model: params.model || saved.model };
   const [draft, setDraft] = useState<TurnPreferences>(initial);
@@ -30,7 +31,7 @@ export default function ModelSheet() {
   const [closing, setClosing] = useState(false);
   usePreventRemove(dirty && !closing, ({ data }) => Alert.alert('Discard changes?', 'Your model and effort picks will not be applied.', [{ text: 'Keep editing', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(data.action) }]));
   const close = (apply: boolean) => {
-    if (apply) session.setPreferences(current => ({ ...current, [params.chatId]: { ...draft, model: model.id } }));
+    if (apply) composer.setPreferences(current => ({ ...current, [params.chatId]: { ...draft, model: model.id } }));
     setClosing(true);
     setTimeout(() => router.back(), 0);
   };

@@ -18,18 +18,71 @@ const execOptions = (cwd) => ({
 /** Resolve the latest PR for the checked-out branch, including PRs submitted from a fork. */
 async function readPullRequest(cwd, exec = execFileAsync) {
   try {
-    const options = execOptions(cwd);
     const git = createGit({ execFile: callbackExec(exec) }).read;
     const { stdout: branchOutput } = await git.checked(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     const branch = branchOutput.trim();
     if (!branch) return null;
-    // `pr view` can infer the wrong head repository for a fork or a branch tracking main.
-    const { stdout } = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", FIELDS], options);
-    return toPullRequest(JSON.parse(stdout)[0]);
+    return await readBranchPullRequest(cwd, branch, exec);
   } catch {
     // No PR, offline, or gh unavailable: this optional metadata never blocks a chat.
     return null;
   }
+}
+
+// `pr view` can infer the wrong head repository for a fork or a branch tracking main.
+async function readBranchPullRequest(cwd, branch, exec) {
+  const { stdout } = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", FIELDS], execOptions(cwd));
+  return toPullRequest(JSON.parse(stdout)[0]);
+}
+
+// One `gh pr list` per repository answers every worktree's branch, instead of one query per worktree
+// every refresh. Calls arriving together (the renderer asks for each worktree at once) share it; the
+// short TTL keeps a turn-end refresh, which exists to catch a just-created PR, from reading stale data.
+const BATCH_LIMIT = 100;
+const BATCH_TTL = 2000;
+const batchOptions = (cwd) => ({ ...execOptions(cwd), timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+
+/**
+ * A `readPullRequest(cwd)` that batches by repository. A branch absent from a full (truncated) batch, or
+ * a failed batch, falls back to the per-branch query, so the answer is the same as `readPullRequest`'s.
+ */
+function createPullRequestReader({ exec = execFileAsync, now = Date.now, ttlMs = BATCH_TTL } = {}) {
+  const batches = new Map();
+  function batchFor(cwd, repo) {
+    const hit = batches.get(repo);
+    if (hit && now() - hit.at < ttlMs) return hit.read;
+    const read = exec("gh", ["pr", "list", "--state", "all", "--limit", String(BATCH_LIMIT), "--json", `${FIELDS},headRefName`], batchOptions(cwd)).then(({ stdout }) => {
+      const list = JSON.parse(stdout);
+      if (!Array.isArray(list)) throw new Error("Unexpected gh output");
+      // Newest first, so the first PR seen for a branch is its latest, as `--head <branch> --limit 1` returns.
+      const byBranch = new Map();
+      for (const pr of list) if (typeof pr?.headRefName === "string" && !byBranch.has(pr.headRefName)) byBranch.set(pr.headRefName, pr);
+      return { byBranch, truncated: list.length >= BATCH_LIMIT };
+    });
+    batches.set(repo, { at: now(), read });
+    if (batches.size > 50) batches.delete(batches.keys().next().value);
+    // A failed read isn't kept: the next call retries rather than serving the failure.
+    read.catch(() => { if (batches.get(repo)?.read === read) batches.delete(repo); });
+    return read;
+  }
+  return async function readPullRequestBatched(cwd) {
+    try {
+      const client = createGit({ execFile: callbackExec(exec) }).read;
+      const { stdout: branchOutput } = await client.checked(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+      const branch = branchOutput.trim();
+      if (!branch) return null;
+      const repo = await client.commonDir(cwd).catch(() => null);
+      const batch = repo ? await batchFor(cwd, repo).catch(() => null) : null;
+      if (batch) {
+        const pr = batch.byBranch.get(branch);
+        if (pr) return toPullRequest(pr);
+        if (!batch.truncated) return null;
+      }
+      return await readBranchPullRequest(cwd, branch, exec);
+    } catch {
+      return null;
+    }
+  };
 }
 
 /** The PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */
@@ -85,4 +138,4 @@ function checksState(rollup) {
   return running ? "running" : undefined;
 }
 
-module.exports = { readPullRequest, readPullRequests };
+module.exports = { readPullRequest, readPullRequests, createPullRequestReader };

@@ -150,3 +150,77 @@ test("closing during a port poll does not publish or restart polling", async () 
  const poll=watcher.poll();watcher.close();release(PS);await poll;
  assert.equal(watcher.timer,null);assert.deepEqual(published,[]);
 });
+
+test("lsof runs when a chat's pids change or every 10 seconds, ps on every poll", async () => {
+  let clock = 0;
+  let ps = PS;
+  const calls = [];
+  const published = [];
+  const watcher = new PortWatcher({
+    roots: () => new Map([["/a#1", { pid: 100 }]]),
+    publish: (ports) => published.push(ports),
+    pollMs: 60_000,
+    now: () => clock,
+    exec: async (command) => { calls.push(command); return command === "ps" ? ps : LSOF; },
+  });
+  await watcher.poll();
+  assert.deepEqual(calls, ["ps", "lsof"]);
+  clock = 3000;
+  await watcher.poll();
+  clock = 6000;
+  await watcher.poll();
+  assert.deepEqual(calls, ["ps", "lsof", "ps", "ps"], "unchanged pids reuse the last listeners");
+  assert.equal(published.length, 1);
+  clock = 10_000;
+  await watcher.poll();
+  assert.deepEqual(calls.slice(4), ["ps", "lsof"], "the listeners are re-read once they are 10 seconds old");
+  // A new process in the command's group changes the pid set: read at once.
+  ps = PS + "  113   110   110 node\n";
+  clock = 11_000;
+  await watcher.poll();
+  assert.deepEqual(calls.slice(6), ["ps", "lsof"]);
+  assert.equal(published.length, 1, "same ports, nothing published");
+  watcher.close();
+});
+
+test("a chat with no processes needs no lsof, and stopping a port reads the listeners afresh", async () => {
+  let clock = 0;
+  let alive = true;
+  const calls = [];
+  const watcher = new PortWatcher({
+    roots: () => new Map([["/a#1", { pid: 100 }]]),
+    publish: () => {},
+    pollMs: 60_000,
+    graceMs: 100,
+    now: () => clock,
+    exec: async (command) => { calls.push(command); return command === "ps" ? PS : alive ? LSOF : ""; },
+    kill: (target, signal) => { if (signal === "SIGTERM") alive = false; },
+  });
+  await watcher.poll();
+  clock = 1000;
+  calls.length = 0;
+  await watcher.stopPort("/a#1", 111);
+  assert.ok(calls.includes("lsof"), "stopping a port re-reads the listeners even though the pids look the same");
+  assert.deepEqual(watcher.snapshot(), {});
+  watcher.close();
+  const none = [];
+  const idle = new PortWatcher({ roots: () => new Map([["/z#1", { pid: 100 }]]), publish: () => {}, exec: async (command) => { none.push(command); return command === "ps" ? "  100  50  100 claude\n" : ""; } });
+  await idle.poll();
+  assert.deepEqual(none, ["ps"]);
+  idle.close();
+});
+
+test("ports compare by value without serializing", async () => {
+  const published = [];
+  let reads = 0;
+  const watcher = new PortWatcher({
+    roots: () => new Map([["/a#1", { pid: 100 }]]), publish: (ports) => published.push(ports), pollMs: 60_000, lsofMaxAgeMs: 0,
+    exec: async (command) => (command === "ps" ? PS : ++reads < 3 ? LSOF : LSOF.replace("n*:5173", "n*:5174")),
+  });
+  await watcher.poll();
+  await watcher.poll();
+  assert.equal(published.length, 1);
+  await watcher.poll();
+  assert.equal(published.length, 2, "a port change is published");
+  watcher.close();
+});

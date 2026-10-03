@@ -5,11 +5,32 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
+// The packaged renderer shows agent output, so no script may run unless it ships with the app. Images also come from
+// the media protocol and GitHub avatars. Dev keeps Vite's inline client and HMR socket, so this applies to builds only.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: milagre-media: https:",
+  "media-src 'self' blob: milagre-media:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-src 'none'",
+].join("; ");
+const contentSecurityPolicy = {
+  name: "milagre-csp",
+  apply: "build" as const,
+  transformIndexHtml: () => [{ tag: "meta", attrs: { "http-equiv": "Content-Security-Policy", content: CSP }, injectTo: "head-prepend" as const }],
+};
+
 export default defineConfig({
   root: resolve(projectRoot, "app"),
   // Packaged builds load dist/index.html over file://, so asset URLs must be relative.
   base: "./",
-  plugins: [react()],
+  plugins: [react(), contentSecurityPolicy],
   resolve: {
     alias: {
       "@": resolve(projectRoot, "app/src"),

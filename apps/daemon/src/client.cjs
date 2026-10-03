@@ -3,6 +3,14 @@ const { once, EventEmitter } = require('node:events');
 const { socketPath } = require('./paths.cjs');
 const { VERSION, MAX_PENDING, wire } = require('./protocol.cjs');
 
+// Commands core lets run longer than the default deadline (git/client.cjs LIMITS, gh, the CLI installers), plus a
+// margin. A shorter client deadline reported a slow pre-commit hook or push as failed while it was still running.
+const SLOW_METHODS = Object.freeze({
+  'git:commit': 330000, 'git:push': 330000, 'git:open-pr': 120000, 'git:generate': 180000,
+  'worktree:create': 330000, 'worktree:remove': 330000, 'agent:update-cli': 150000,
+});
+const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
+
 async function connect({ dataDir, timeoutMs = 30000 }) {
   const socket = net.createConnection(socketPath(dataDir));
   const connecting = once(socket, 'connect');
@@ -37,7 +45,7 @@ async function connect({ dataDir, timeoutMs = 30000 }) {
     const timeout = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Timed out: ${method}. It may still be running; do not retry a mutation without checking state.`));
-    }, timeoutMs);
+    }, deadlineFor(method, timeoutMs));
     pending.set(id, { resolve, reject, timeout });
     try {
       if (!connection.send({ v: VERSION, id, method, args })) throw new Error('Daemon connection closed');
@@ -46,4 +54,4 @@ async function connect({ dataDir, timeoutMs = 30000 }) {
   client.close = () => socket.destroy();
   return client;
 }
-module.exports = { connect };
+module.exports = { connect, deadlineFor };

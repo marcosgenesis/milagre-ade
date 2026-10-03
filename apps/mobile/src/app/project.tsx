@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router } from 'expo-router';
 import { ArrowRight01Icon, GitBranchIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
-import type { AgentSession, Worktree } from '@milagre/shared/model';
+import type { AgentSession, ChatMessage, Worktree } from '@milagre/shared/model';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
 import { chatMark, chatRecency, type ChatMark } from '../indicators';
@@ -46,10 +46,16 @@ export default function ChatsScreen() {
   const rows = useMemo(() => {
     if (!snapshot) return [];
     const { project, runs } = snapshot;
-    const messages = project.state.messages;
+    // One pass over the messages instead of one per Chat.
+    const byChat = new Map<number, ChatMessage[]>();
+    for (const message of project.state.messages) {
+      const list = byChat.get(message.session_id);
+      if (list) list.push(message); else byChat.set(message.session_id, [message]);
+    }
     return Object.values(project.state.sessions).map(chat => {
       const run = runs.runs[`${project.path}#${chat.id}`];
-      return { chat, run, mark: chatMark(chat, run, messages.filter(message => message.session_id === chat.id)), recency: chatRecency(chat.id, messages) };
+      const messages = byChat.get(chat.id) ?? [];
+      return { chat, run, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
     }).filter(row => (show === 'archived') === !!row.chat.archived)
       .filter(row => show !== 'needs' || NEEDS.includes(row.mark))
       .filter(row => show !== 'running' || row.mark === 'running')

@@ -6,7 +6,9 @@ import remarkGfm from "remark-gfm";
 import { codeLanguageFromClassName } from "../../lib/code-languages";
 import { fileLinkTarget } from "../../lib/file-links";
 import { useFileOpener } from "../editor-links";
+import { closeOpenMarkdown } from "../../lib/streaming-markdown";
 import { CodeBlock } from "./CodeBlock";
+import { splitStreamingBlocks } from "./streaming-blocks";
 
 const CODE_CLASS = "rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink";
 
@@ -45,10 +47,33 @@ const components: Components = {
   },
 };
 
+// Parsed output of one block of text; memoized so a block that stopped changing never parses again.
+const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>;
+});
+
+const WRAPPER = "markdown break-words [overflow-wrap:anywhere]";
+
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="markdown break-words [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
+    <div className={WRAPPER}>
+      <MarkdownBody text={text} />
+    </div>
+  );
+});
+
+/**
+ * The answer of a running turn. Its finished blocks render from memo, and only the block being written is
+ * parsed (with its open bold or code span closed), so a long answer costs no more per batch than a short one.
+ * One wrapper keeps the spacing between blocks the same as when the whole text is a single `Markdown`.
+ */
+export const StreamingMarkdown = memo(function StreamingMarkdown({ text }: { text: string }) {
+  const blocks = splitStreamingBlocks(text);
+  return (
+    <div className={WRAPPER}>
+      {blocks.map((block, index) => index === blocks.length - 1
+        ? <MarkdownBody key={index} text={closeOpenMarkdown(block)} />
+        : <MarkdownBody key={index} text={block} />)}
     </div>
   );
 });

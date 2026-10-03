@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -9,6 +9,16 @@ import { highlight, isLanguageReady, loadLanguage } from "./highlighter";
 const ROW_TINT = { add: "bg-[var(--diff-add)]", remove: "bg-[var(--diff-remove)]", context: "" } as const;
 const ROW_MARKER = { add: "+", remove: "−", context: " " } as const;
 const MARKER_COLOR = { add: "text-green", remove: "text-red", context: "" } as const;
+
+// A block highlights once it is within this distance of the viewport; far ones stay plain text of the same size.
+const NEAR_MARGIN = 800;
+
+function scrollParent(node: HTMLElement): HTMLElement | null {
+  for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) return parent;
+  }
+  return null;
+}
 
 /**
  * A fenced block with its language's colours. With `diff`, a block whose lines all start with `+`, `-` or a space
@@ -23,16 +33,40 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
   const copiedTimer = useRef<number | undefined>(undefined);
   const languageReady = language !== undefined && isLanguageReady(language);
 
+  // Highlighting a whole long chat on open is the cost; only blocks that come near the viewport pay it, and
+  // they stay highlighted afterwards. The layout effect checks the first position so a visible block never flashes plain.
+  const frame = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+  useLayoutEffect(() => {
+    const node = frame.current;
+    if (!node || near) return;
+    // The chat scrolls inside its own viewport, whose edge clips what an observer on the window would see.
+    const root = scrollParent(node);
+    const area = root?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > area.top - NEAR_MARGIN && rect.top < area.bottom + NEAR_MARGIN) {
+      setNear(true);
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) setNear(true); }, { root, rootMargin: `${NEAR_MARGIN}px 0px` });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [near]);
+
   useEffect(() => {
-    if (!language || languageReady) return;
+    if (!near || !language || languageReady) return;
     let live = true;
     loadLanguage(language).then(() => { if (live) setLoadedCount((count) => count + 1); }, () => {});
     return () => { live = false; };
-  }, [language, languageReady]);
+  }, [near, language, languageReady]);
 
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
 
-  const lines = useMemo(() => (language && languageReady ? highlight(source, language) : undefined), [source, language, languageReady]);
+  const lines = useMemo(() => (near && language && languageReady ? highlight(source, language) : undefined), [near, source, language, languageReady]);
 
   const copy = () => {
     navigator.clipboard.writeText(code).then(() => {
@@ -43,7 +77,7 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
   };
 
   return (
-    <div className="markdown-code my-2 overflow-hidden rounded-control border border-line bg-inset">
+    <div ref={frame} className="markdown-code my-2 overflow-hidden rounded-control border border-line bg-inset">
       <div className="flex h-7 items-center justify-between border-b border-line pr-1 pl-2.5 text-[11px] text-ink-3">
         <span className="font-mono">{fence?.toLowerCase() || "text"}</span>
         <button type="button" aria-label={copied ? "Copied" : "Copy code"} onClick={copy} className="flex size-6 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink">

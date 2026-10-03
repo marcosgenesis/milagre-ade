@@ -92,3 +92,29 @@ test("concurrent refreshes share four Git slots and close cancels queued reads",
  diffs.close();releases.forEach(resolve=>resolve());await Promise.all(pending);
  assert.equal(reads.length,4);assert.equal(updates,0);
 });
+
+test("only steps that can change files schedule a read", async () => {
+  const { diffs, states, reads } = harness(); await states.get("/a");
+  const step = (id, kind) => { diffs.observe("/a#7", { type: "step-started", step: { id, kind } }); diffs.observe("/a#7", { type: "step-completed", id }); };
+  for (const kind of ["read", "search", "thinking", "setup", "image"]) step(`s-${kind}`, kind);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(reads, []);
+  const writers = ["edit", "shell", "other"];
+  for (const [index, kind] of writers.entries()) {
+    step(`f-${kind}`, kind);
+    await waitUntil(() => reads.length === index + 1);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  assert.equal(reads.length, 3);
+  diffs.close();
+});
+
+test("a step completed without a recorded start still refreshes, and a turn end drops the kinds", async () => {
+  const { diffs, states, reads } = harness(); await states.get("/a");
+  diffs.observe("/a#7", { type: "step-started", step: { id: "x", kind: "read" } });
+  diffs.observe("/a#7", { type: "turn-completed" });
+  assert.equal(diffs.stepKinds.has("/a#7"), false);
+  diffs.observe("/a#7", { type: "step-completed", id: "x" });
+  await waitUntil(() => reads.length >= 1);
+  diffs.close();
+});

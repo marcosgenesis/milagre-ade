@@ -28,6 +28,22 @@ export function pullRequestRefs(messages: Array<{ steps?: ChatStep[] }>): PullRe
   return refs.filter((ref) => !/^\d+$/.test(ref) || !refs.some((other) => other.endsWith(`/pull/${ref}`)));
 }
 
+/**
+ * pullRequestRefs per chat, recomputed only when one of its messages changed. The state keeps unchanged
+ * message objects as they were (reconcileState), so a chat's messages compare by identity; the sidebar
+ * asks for every chat on each rebuild and would otherwise rescan every shell step.
+ */
+export function pullRequestRefsCache() {
+  const cached = new Map<string, { messages: Array<{ steps?: ChatStep[] }>; refs: PullRequestRef[] }>();
+  return (key: string, messages: Array<{ steps?: ChatStep[] }>): PullRequestRef[] => {
+    const hit = cached.get(key);
+    if (hit && hit.messages.length === messages.length && hit.messages.every((message, index) => message === messages[index])) return hit.refs;
+    const refs = pullRequestRefs(messages);
+    cached.set(key, { messages, refs });
+    return refs;
+  };
+}
+
 // gh prints the new PR's URL alone on the last line; URLs in the body come before it.
 function createdUrl(detail: string) {
   const lines = detail.split("\n").map((line) => line.trim()).filter(Boolean);

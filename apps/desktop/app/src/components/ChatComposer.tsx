@@ -36,8 +36,7 @@ import { parseRecommendation } from "../lib/recommendation";
 import { StepRow } from "./agents/StepRow";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { GeneratedImage } from "./agents/GeneratedImage";
-import { Markdown } from "./markdown/Markdown";
-import { closeOpenMarkdown } from "../lib/streaming-markdown";
+import { Markdown, StreamingMarkdown } from "./markdown/Markdown";
 import { replyActivity, unspokenThought } from "../lib/reply-parts";
 import { extractOutdatedProvider } from "../lib/cli-status";
 import { splitFences } from "../lib/message-fences";
@@ -73,7 +72,7 @@ function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }
       {setup.map((step) => <StepRow key={step.id} step={step} />)}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
       {images.map((step) => <GeneratedImage key={step.id} step={step} />)}
-      {answer.trim() && <div data-slot="message-content"><Markdown text={streaming ? closeOpenMarkdown(answer) : answer} /></div>}
+      {answer.trim() && <div data-slot="message-content">{streaming ? <StreamingMarkdown text={answer} /> : <Markdown text={answer} />}</div>}
       {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
     </>
   );
@@ -89,6 +88,7 @@ const MessageSection = memo(function MessageSection({
   streaming = false,
   asking = false,
   waitingStepIds = [],
+  animate = false,
 }: {
   message: AppChatMessage;
   isUser: boolean;
@@ -101,6 +101,8 @@ const MessageSection = memo(function MessageSection({
   asking?: boolean;
   /** Steps whose approval card is open. */
   waitingStepIds?: string[];
+  /** Fade in on arrival; messages already there when the chat opened skip it, so a long chat doesn't animate all at once. */
+  animate?: boolean;
 }) {
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
@@ -116,8 +118,9 @@ const MessageSection = memo(function MessageSection({
       id={`message-${message.id}`}
       data-slot="message"
       data-from={isUser ? "user" : "assistant"}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,filter,transform] duration-300 ${isUser ? "items-end pl-12" : ""}`}
-      style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}
+      data-streaming={streaming || undefined}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${isUser ? "items-end pl-12" : ""}`}
+      style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
         <Attachments images={message.images} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
@@ -412,6 +415,11 @@ export function ChatComposer({
   const noteKey = handoverBrief?.chatId;
   const showHandoverNote = noteKey !== undefined && lockedProvider !== undefined && !dismissedNotes.includes(noteKey);
   const workingModelName = runModelName ?? selectedModel.name;
+  // The messages a chat opens with don't animate in; later ones do. A new chat's first message counts as later.
+  const openingMessages = useRef<{ chat: number | string; ids: Set<number> }>({ chat: chatId, ids: new Set(messages.map((message) => message.id)) });
+  if (openingMessages.current.chat !== chatId) {
+    openingMessages.current = { chat: chatId, ids: openingMessages.current.chat === "new" ? new Set() : new Set(messages.map((message) => message.id)) };
+  }
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     if (isNewChat) setScrolled(false);
@@ -435,7 +443,7 @@ export function ChatComposer({
       <SubagentCanvas key={`canvas-${chatId}`} opened={canvasOpened} agents={subagents} working={isSending} waiting={waitingForSubagents} onClose={closeCanvas} />
       <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
       {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
-      {!isNewChat && <div aria-hidden className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
+      {!isNewChat && <div aria-hidden data-busy={isSending || undefined} className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
       {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
       {!isNewChat && <div className="relative flex min-h-0 flex-1 flex-col">
       <MessageScroller
@@ -449,7 +457,8 @@ export function ChatComposer({
         // The chip row floats over the bottom blur, so the last message can scroll clear of it.
         viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-10`}
         contentClassName="min-h-full"
-        autoScrollKey={`${messages.length}-${isSending}-${streamingText?.length ?? 0}-${streamingSteps?.length ?? 0}`}
+        // Streamed text isn't in the key: the scroller follows the content's growth itself, once per layout.
+        autoScrollKey={`${messages.length}-${isSending}-${streamingSteps?.length ?? 0}`}
         viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
@@ -463,6 +472,7 @@ export function ChatComposer({
               onUpdateCli={onUpdateCli}
               updatingCli={updatingCli}
               cliStatus={cliStatus}
+              animate={!openingMessages.current.ids.has(message.id)}
             />
           ))}
 
@@ -474,6 +484,7 @@ export function ChatComposer({
               streaming
               asking={asking}
               waitingStepIds={waitingStepIds}
+              animate
             />
           ) : null}
           {isSending && (
@@ -496,7 +507,7 @@ export function ChatComposer({
         </div>
       </MessageScroller>
       {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
-      <div aria-hidden className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"><div /><div /></div>
+      <div aria-hidden data-busy={isSending || undefined} className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"><div /><div /></div>
       </div>}
       <div className={`mx-auto flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden ${isNewChat ? "mb-2" : "pointer-events-none relative z-20 -mt-[38px] mb-3.5 [&>*]:pointer-events-auto"}`}>
         {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right.

@@ -29,7 +29,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
+const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
 const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
@@ -37,7 +37,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
-const { saveProjectState, readProjectState } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -124,6 +124,16 @@ function createRuntime(options) {
     }
   }
 
+  /** The saved state as written, without hydrating subagent transcripts or taking ownership; null when there is none. */
+  async function readRawState(projectPath) {
+    try {
+      return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
   const projectName = (projectPath) => path.basename(projectPath) || "Untitled project";
 
   // Every project's state goes through here: this runtime is its only writer (see ADR-0001 and ADR-0003).
@@ -180,10 +190,19 @@ function createRuntime(options) {
     if (!states.worktreePaths().includes(root)) throw new Error("Choose an open project's worktree.");
     return searchFiles(root, query);
   });
-  commands.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
-  commands.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
+  // Path-taking commands only serve folders the user opened: an open project, one of its worktrees, or a recent
+  // project (the switcher shows their avatars). Any renderer or paired phone script otherwise reaches any folder.
+  async function knownFolder(folder) {
+    if (typeof folder !== "string" || !path.isAbsolute(folder)) throw new Error("An absolute Project path is required");
+    if (states.has(folder) || states.worktreePaths().includes(folder)) return;
+    if ((await recentProjects().list()).some(item => item.path === folder)) return;
+    throw new Error("Open this project in Milagre first.");
+  }
+  commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
+  commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
   commands.handle("project:image", async (_event, projectPath) => {
+    await knownFolder(projectPath);
     await environmentReady;
     return resolveProjectImage(projectPath);
   });
@@ -206,6 +225,7 @@ function createRuntime(options) {
   });
   // The git calls below wait for the login environment, so they run with the merged PATH.
   commands.handle("worktree:status", async (_event, worktreePath, base) => {
+    await knownFolder(worktreePath);
     await environmentReady;
     return worktreeStatus(worktreePath, base);
   });
@@ -233,15 +253,18 @@ function createRuntime(options) {
     return result;
   });
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
     await environmentReady;
     const { filesToCopy } = await projectSettings().get(projectPath);
     return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
   });
   commands.handle("files-to-copy:preview", async (_event, projectPath, patterns) => {
+    await knownFolder(projectPath);
     await environmentReady;
     return previewFilesToCopy(projectPath, patterns);
   });
   commands.handle("files-to-copy:save", async (_event, projectPath, patterns) => {
+    await knownFolder(projectPath);
     await environmentReady;
     const { filesToCopy } = await projectSettings().setFilesToCopy(projectPath, patterns);
     return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
@@ -251,8 +274,9 @@ function createRuntime(options) {
     const { setupCommand } = await projectSettings().get(projectPath);
     return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
   }
-  commands.handle("worktree-setup:read", (_event, projectPath) => readSetupCommand(projectPath));
+  commands.handle("worktree-setup:read", async (_event, projectPath) => { await knownFolder(projectPath); return readSetupCommand(projectPath); });
   commands.handle("worktree-setup:save", async (_event, projectPath, command) => {
+    await knownFolder(projectPath);
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
     return readSetupCommand(projectPath);
   });
@@ -298,6 +322,7 @@ function createRuntime(options) {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
     return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
   });
+  const readPullRequest = createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);
@@ -529,7 +554,8 @@ function createRuntime(options) {
   async function resumeRecentProjects() {
     for (const { path: projectPath } of await recentProjects().list()) {
       try {
-        const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+        // The raw JSON is enough to find a pending turn; only a project that has one is loaded (and hydrated) in full.
+        const stored = states.has(projectPath) ? null : await readRawState(projectPath);
         if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
         await readProject(projectPath);
       } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }

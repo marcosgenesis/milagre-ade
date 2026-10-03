@@ -3,7 +3,8 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import { File01Icon } from '@hugeicons/core-free-icons';
 import type { ImageAttachment } from '../model';
 import { mediaKind, mediaUrl } from '../lib/media';
-import { type LightboxItem, MediaLightbox } from './motion/MediaLightbox';
+import type { LightboxItem } from './motion/MediaLightbox';
+import { MediaLightbox } from './motion/LazyMediaLightbox';
 
 /** `leading` goes first in the row, such as the handover brief, which isn't a file the user attached. */
 export function Attachments({ images = [], files = [], removeImage, removeFile, leading }: { images?: ImageAttachment[]; files?: string[]; removeImage?: (id: string) => void; removeFile?: (path: string) => void; leading?: ReactNode }) {

@@ -44,7 +44,7 @@ test("runs --version and keeps the last line of a failure", async () => {
 test("a missing, outdated or broken CLI comes with the message the turn fails with", async () => {
   const resolve = async (name) => (name === "codex" ? null : "/Users/x/.local/bin/claude");
   assert.deepEqual(await inspectCli("codex", { resolve }), { command: null, version: null, problem: missingCliMessage("codex") });
-  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), { command: "/Users/x/.local/bin/claude", version: "2.1.200", problem: cliTooOldMessage("claude", "2.1.200", "2.1.286") });
+  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), { command: "/Users/x/.local/bin/claude", version: "2.1.200", problem: cliTooOldMessage("claude", "2.1.200", "2.1.288") });
   assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ error: "Killed: 9" }) }), { command: "/Users/x/.local/bin/claude", version: null, problem: cliBrokenMessage("claude", "/Users/x/.local/bin/claude", "Killed: 9") });
   // codex-cli 0.158.0 runs, but doesn't know GPT-6.1 Sol; the picker offers the update.
   const codex = async () => "/opt/homebrew/bin/codex";
@@ -92,14 +92,14 @@ test("a CLI whose installer creates a new folder is found on the next check", as
   };
   try {
     const cli = createCliCache({
-      inspect: (name) => inspectCli(name, { resolve, version: async () => ({ output: "2.1.287 (Claude Code)" }) }),
+      inspect: (name) => inspectCli(name, { resolve, version: async () => ({ output: "2.1.289 (Claude Code)" }) }),
       refresh: () => refreshInstallPath({ target, platform: "darwin", home, dirs }),
     });
     assert.equal((await cli("claude")).problem, missingCliMessage("claude"));
     // The installer runs: a folder that didn't exist at startup appears, with the CLI in it.
     fs.mkdirSync(bin, { recursive: true });
     fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n");
-    assert.deepEqual(await cli("claude"), { command: path.join(bin, "claude"), version: "2.1.287" });
+    assert.deepEqual(await cli("claude"), { command: path.join(bin, "claude"), version: "2.1.289" });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

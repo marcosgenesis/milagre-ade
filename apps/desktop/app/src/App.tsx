@@ -42,18 +42,15 @@ import { ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
 import { useDiffComments } from "./components/changes/useDiffComments";
 import { formatCommentsMessage } from "./lib/diff-comments";
-import { DiffToolbar, DiffView, useDiffPreferences, useDiffPresence } from "./components/changes/DiffView";
+import { DiffToolbar, useDiffPreferences, useDiffPresence } from "./components/changes/DiffPrefs";
 import { useChanges } from "./components/changes/useChanges";
-import { GitActionsDialog } from "./components/GitActionsDialog";
 import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
-import { chatPullRequests, pullRequestRefs } from "./lib/chat-pull-requests";
+import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
-import { ChatComposer } from "./components/ChatComposer";
 import { DotBackground } from "./components/DotBackground";
 import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
-import { SettingsNav, SettingsPanel } from "./components/Settings";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
@@ -62,18 +59,31 @@ import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
-import { PermissionCard } from "./components/agents/PermissionCard";
-import { QuestionCard } from "./components/agents/QuestionCard";
 import type { RuntimeConnection, UpdateState } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
-import { CommandPalette } from "./components/CommandPalette";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
 import { isModalOpen } from "./lib/modal";
+import { createDraftStore } from "./lib/draft-store";
+import { lazyView } from "./lib/lazy-view";
+import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
+import { reuseRows, useEvent, useStableSet } from "./lib/stable";
+import { DraftChatComposer } from "./components/DraftChatComposer";
+import type { ChatRowActions, SidebarRecent } from "./components/sidebar/ChatRow";
+
+// Not on screen at first paint, so each loads as its own chunk; the effect in App fetches them once the window is idle.
+const DiffView = lazyView(() => import("./components/changes/DiffView").then((module) => module.DiffView));
+const GitActionsDialog = lazyView(() => import("./components/GitActionsDialog").then((module) => module.GitActionsDialog));
+const SettingsNav = lazyView(() => import("./components/Settings").then((module) => module.SettingsNav));
+const SettingsPanel = lazyView(() => import("./components/Settings").then((module) => module.SettingsPanel));
+const CommandPalette = lazyView(() => import("./components/CommandPalette").then((module) => module.CommandPalette));
+const PermissionCard = lazyView(() => import("./components/agents/PermissionCard").then((module) => module.PermissionCard));
+const QuestionCard = lazyView(() => import("./components/agents/QuestionCard").then((module) => module.QuestionCard));
+const LAZY_VIEWS = [DiffView, GitActionsDialog, SettingsNav, CommandPalette, MediaLightbox, PermissionCard, QuestionCard];
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
@@ -81,6 +91,8 @@ function latestSessionId(state: CoordinatorState) {
     .filter((message) => !state.sessions[message.session_id]?.archived)
     .reduce<ChatMessage | null>((latest, message) => (!latest || message.id > latest.id ? message : latest), null)?.session_id ?? null;
 }
+
+const NO_MESSAGES: ChatMessage[] = [];
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
@@ -98,7 +110,9 @@ function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
-  const [draft, setDraft] = useState("");
+  // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
+  const draftStore = useMemo(createDraftStore, []);
+  const setDraft = draftStore.set;
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
   const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
@@ -195,6 +209,10 @@ function App() {
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
   useApplyTheme();
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 1000));
+    idle(() => { for (const view of LAZY_VIEWS) view.preload(); });
+  }, []);
 
   useEffect(() => {
     const projectPath = project?.path;
@@ -245,7 +263,7 @@ function App() {
   const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
-  const messages = state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : [];
+  const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
@@ -339,16 +357,28 @@ function App() {
   useEffect(() => window.milagre.onProjectState(({ path, state: next }) => receiveState(path, next)), []);
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
-  const waiting = useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
-  const asking = useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]);
-  const running = useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]);
+  // The sets are rebuilt on every streamed batch; keeping the old one while its members hold keeps the sidebar rows still.
+  const waiting = useStableSet(useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
+  const asking = useStableSet(useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
+  const running = useStableSet(useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]));
+  const messagesBySession = useMemo(() => {
+    const grouped = new Map<number, ChatMessage[]>();
+    for (const message of state?.messages ?? []) {
+      const list = grouped.get(message.session_id);
+      if (list) list.push(message);
+      else grouped.set(message.session_id, [message]);
+    }
+    return grouped;
+  }, [state?.messages]);
+  const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
+  const previousChats = useRef<SidebarRecent[]>([]);
   const chats = useMemo(() => {
     if (!state) return [];
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
-      .map((session) => ({ session, sessionMessages: state.messages.filter((message) => message.session_id === session.id) }))
+      .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
       .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || isHandoverChat(session));
-    return orderChats(withMessages, chatOrder)
+    const rows = orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
         // The commit dialog's notes aren't replies: they don't hide a failed turn.
@@ -362,13 +392,17 @@ function App() {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
-            pullRequests: worktree ? chatPullRequests(pullRequestRefs(sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
+            pullRequests: worktree ? chatPullRequests(readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
             failed: lastReply?.outcome === "failed",
             ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
           },
         };
       });
-  }, [state, chatOrder, asking, waiting, running, pullRequests, chatPrs, agentPorts, project]);
+    // Rows that came out the same stay the same objects, so only a changed chat's row renders.
+    return previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows);
+  }, [state, messagesBySession, chatOrder, asking, waiting, running, pullRequests, chatPrs, agentPorts, project]);
+  const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
+  latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -475,11 +509,14 @@ function App() {
   // The main process keeps the Mac awake while a turn runs, if the setting says so.
   useEffect(() => { void window.milagre.setKeepAwake(keepAwake).catch(() => {}); }, [keepAwake]);
 
-  const unreadChatIds = state && project ? Object.values(state.sessions).filter(session => session.unread && !session.archived).map(session => chatKey(project.path, session.id)) : [];
+  const unreadChatIds = useMemo(
+    () => (state && project ? Object.values(state.sessions).filter(session => session.unread && !session.archived).map(session => chatKey(project.path, session.id)) : []),
+    [state?.sessions, project?.path],
+  );
   useEffect(() => {
     if (!project) return;
     void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
-  }, [project?.path, view, selectedSessionId, JSON.stringify(unreadChatIds), notifyOnCompletion, showDockBadge]);
+  }, [project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
 
   // The main process notifies about a chat that waits on the user while Milagre is in the background.
   useEffect(() => {
@@ -659,7 +696,7 @@ function App() {
   }
 
   async function sendMessage() {
-    const body = draft.trim();
+    const body = draftStore.get().trim();
     if ((!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
   }
@@ -788,6 +825,30 @@ function App() {
     return () => window.removeEventListener("keydown", jumpToChat);
   }, [chats, view]);
 
+  // The sidebar is memo()'d: these keep one identity across renders (each runs the latest closure) so a streamed
+  // batch or another pane's state change doesn't re-render it.
+  const pickChat = useEvent((id: string) => openChat(Number(id)));
+  const chatActions = useMemo<ChatRowActions>(() => ({
+    onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
+    onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
+    onReveal: (id) => latest.current.revealChat(Number(id)),
+    onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
+    onCommit: (id) => latest.current.openGitDialog(Number(id)),
+    onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
+    onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+  }), []);
+  const startNewChatFromSidebar = useEvent(() => startNewChat());
+  const openProjectFromSidebar = useEvent(() => void openProject());
+  const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
+  const openSettings = useEvent(() => setView("settings"));
+  const openProjectSettings = useEvent(() => { setSettingsSection("project"); setView("settings"); });
+  const openCommandPalette = useEvent(() => setCommandPaletteOpen(true));
+  const sidebarUsage = useMemo(
+    () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
+    [showUsageInSidebar, usage.snapshot, usage.loading],
+  );
+  const composerWorktrees = useMemo(() => worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
+
   // Fast loads would cut the startup animation off at the bare legs, so the splash stays until the logo is whole,
   // then fades out over the app while the panes slide in. Same key in both trees keeps the logo from restarting.
   const [splash, setSplash] = useState<"intro" | "done" | "gone">("intro");
@@ -815,38 +876,42 @@ function App() {
     return <>{splashOverlay(false)}</>;
   }
 
-  const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
-  const commands: Command[] = [
-    { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
-    { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => openProject() },
-    { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
-    { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
-    { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
-    { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: project.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
-  ];
-  if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
-  commands.push(...settingsCommands(getSettings(), updateSettings));
-  if (selectedSession && view === "chat") {
-    const sessionId = selectedSession.id;
-    commands.unshift(
-      { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
-      { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
-      { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
-      ...(messages.length ? [{ id: "find", label: "Find in chat", group: "Current chat", icon: "search" as const, shortcut: `${modifier}F`, keywords: "search text messages", run: openFind }] : []),
-      { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
-    );
-    if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
+  // Only the open palette reads the list, so it is built then and not on every render.
+  function buildCommands(current: OpenProject): Command[] {
+    const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+    const commands: Command[] = [
+      { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
+      { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => openProject() },
+      { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
+      { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
+      { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
+      { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: current.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
+    ];
+    if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
+    commands.push(...settingsCommands(getSettings(), updateSettings));
+    if (selectedSession && view === "chat") {
+      const sessionId = selectedSession.id;
+      commands.unshift(
+        { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
+        { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
+        { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+        ...(messages.length ? [{ id: "find", label: "Find in chat", group: "Current chat", icon: "search" as const, shortcut: `${modifier}F`, keywords: "search text messages", run: openFind }] : []),
+        { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
+      );
+      if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
+    }
+    commands.push(...chats.map((chat): Command => ({
+      id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
+      detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details?.branch].filter(Boolean).join(" · "),
+      keywords: [chat.details?.path, ...(chat.details?.pullRequests ?? []).flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
+      run: () => openChat(Number(chat.id)),
+    })));
+    commands.push(...recentProjects.filter((recent) => recent.path !== current.path).map((recent): Command => ({
+      id: `project:${recent.path}`, label: recent.name, group: "Projects", icon: "folder", detail: recent.path,
+      run: () => switchProject(recent.path),
+    })));
+    return commands;
   }
-  commands.push(...chats.map((chat): Command => ({
-    id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
-    detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details.branch].filter(Boolean).join(" · "),
-    keywords: [chat.details.path, ...chat.details.pullRequests.flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
-    run: () => openChat(Number(chat.id)),
-  })));
-  commands.push(...recentProjects.filter((recent) => recent.path !== project.path).map((recent): Command => ({
-    id: `project:${recent.path}`, label: recent.name, group: "Projects", icon: "folder", detail: recent.path,
-    run: () => switchProject(recent.path),
-  })));
 
   return (
     <>
@@ -875,27 +940,19 @@ function App() {
         fill
         workspaceName={project.name}
         workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
-        onOpenProject={() => void openProject()}
+        onOpenProject={openProjectFromSidebar}
         recents={chats}
         activeId={selectedSession ? String(selectedSession.id) : null}
-        onPick={(id) => openChat(Number(id))}
-        chatActions={{
-          onRename: (id, title) => patchChat(Number(id), { title }),
-          onMarkUnread: (id, unread) => patchChat(Number(id), { unread }),
-          onReveal: (id) => revealChat(Number(id)),
-          onOpenInEditor: (id) => openChatInEditor(Number(id)),
-          onCommit: (id) => openGitDialog(Number(id)),
-          onArchiveCheck: (id) => checkArchive(Number(id)),
-          onArchive: (id, mode, plan) => void archiveChat(Number(id), mode, plan),
-        }}
-        onNewChat={startNewChat}
-        onOpenSettings={() => setView("settings")}
-        onOpenCommands={() => setCommandPaletteOpen(true)}
+        onPick={pickChat}
+        chatActions={chatActions}
+        onNewChat={startNewChatFromSidebar}
+        onOpenSettings={openSettings}
+        onOpenCommands={openCommandPalette}
         hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
         projectPath={project.path}
-        onSwitchProject={(path) => void switchProject(path)}
-        onOpenProjectSettings={() => { setSettingsSection("project"); setView("settings"); }}
-        usage={showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined}
+        onSwitchProject={switchProjectFromSidebar}
+        onOpenProjectSettings={openProjectSettings}
+        usage={sidebarUsage}
       />
       </div>
       {view === "settings" && (
@@ -918,13 +975,12 @@ function App() {
         {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
         <div data-chat-pane className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
-          <ChatComposer
+          <DraftChatComposer
             key={project.path}
+            store={draftStore}
             messages={messages}
             imageDraft={imageDraft}
             projectPath={selectedWorktree?.path ?? project.path}
-            draft={draft}
-            onDraftChange={setDraft}
             onSend={() => void sendMessage()}
             onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
             pullRequestAction={selectedSession && selectedPullRequest && pullRequestBlocker
@@ -978,7 +1034,7 @@ function App() {
             permissionMode={permissionMode}
             onPermissionModeChange={changePermissionMode}
             onRecommendationSelect={sendRecommendation}
-            worktrees={worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path }))}
+            worktrees={composerWorktrees}
             selectedWorktreeId={selectedWorktree?.id}
             onWorktreeChange={(id) => {
               setSelectedWorktreeId(id);
@@ -1020,7 +1076,7 @@ function App() {
         <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} commentCounts={diffComments.counts} />
       </ChangesPanelSlot>
       </div>
-      {commandPaletteOpen && <CommandPalette commands={commands} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
+      {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (
         <GitActionsDialog
           key={gitDialog.sessionId}

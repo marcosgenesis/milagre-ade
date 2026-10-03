@@ -7,7 +7,7 @@ const path = require("node:path");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
-const { CodexSession } = require("./agents/codex-provider.cjs");
+const { CodexSession, recoverCodexSubagents } = require("./agents/codex-provider.cjs");
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
@@ -374,6 +374,10 @@ function createRuntime(options) {
   const chats = new ChatHost({
     states,
     startTurn: request => track(() => startAgentTurn(request), starting),
+    readSubagents: async ({ cwd, agents }) => {
+      const cli = await agentCli("codex");
+      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, clientVersion: version });
+    },
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
     publish: publishAgentEvent,
     broadcast: broadcastProjectState,
@@ -436,7 +440,10 @@ function createRuntime(options) {
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
   async function readOpenChat() {
     const chatId = chats.openChat;
-    if (chatId && states.has(projectOfKey(chatId))) await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
+    if (chatId && states.has(projectOfKey(chatId))) {
+      await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
+      void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
+    }
   }
   commands.handle("chat:set-open", (_event, chatId) => {
     chats.setOpenChat(chatId);

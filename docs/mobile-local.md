@@ -1,6 +1,6 @@
 # Run Milagre in a local simulator
 
-This preview connects an Expo mobile app to the Node daemon on your Mac. It groups Chats by Worktree, creates Worktrees, shows transcripts and live text, sends text, stops or continues a turn, and answers approvals and questions. It also supports model, effort, fast-mode and permission settings, Chat rename/archive/restore, and read-only changes and file diffs. The daemon owns the state and keeps running when the app disconnects.
+This preview connects an Expo mobile app to the Node daemon on your Mac. It groups Chats by Worktree, creates Worktrees, shows transcripts and live text, sends text, photos and files, stops or continues a turn, and answers approvals and questions. It also supports model, effort, fast-mode and permission settings, Chat rename/archive/restore, and read-only changes and file diffs. The daemon owns the state and keeps running when the app disconnects.
 
 ## Try the demo
 
@@ -98,8 +98,9 @@ This generates the ignored native project and produces `/tmp/milagre-mobile-rele
 
 ## Boundaries
 
-- The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. Request bodies are capped at 1 MiB and concurrent requests at 16.
-- Foreground snapshots poll once per second. Text and tool summaries are supported. Images, full desktop tools, rich markdown and large-history rendering remain desktop capabilities.
+- The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. RPC bodies are capped at 1 MiB and concurrent requests at 16. File uploads use a separate authenticated 7 MiB envelope for at most 5 MiB of decoded content.
+- Foreground snapshots poll once per second. PR status refreshes every 30 seconds on the focused, foreground screen with at most two requests in flight. Chat renders Markdown, expandable tool output, live activity, agent counts and PR blockers. The composer opens native model/effort/permission controls and Photo Library/Files pickers. Up to four attachments fit per message; photos are resized to 1024 pixels and capped at 160 KiB each, files at 5 MiB each. Persisted images with only a host path show their filename and an Open on your computer hint until authorized image retrieval is added. Large-history virtualization is still pending.
+- Uploaded files stay in the host profile for Chat history. Failed sends preserve drafts; retrying may upload a file again. Abandoned-upload cleanup and upload reuse are pending.
 - Local simulator and direct HTTPS host access are supported. An encrypted relay, QR device pairing, push notifications and production background services come later.
 - iOS works in Expo Go and a standalone simulator Release build. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
 - Demo connection defaults are injected into a local development bundle. Never publish that bundle or use this mechanism for a real remote token. The real workflow enters the token in the app.

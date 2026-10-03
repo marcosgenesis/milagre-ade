@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, AppState, Linking, Pressable, Text, View } from 'react-native';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import type { AgentSession, ChatMessage, PullRequest, Subagent, Worktree } from '@milagre/shared/model';
 import { BLOCKERS, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { agentCounts, chatIndicator } from './indicators';
 import { useSession } from './session';
-import { useRpc } from './use-rpc';
+import { readPullRequest } from './pr-status';
 import { Icon, Sheet, colors, styles } from './ui';
 
 export function ChatStatus({ chat, run, messages }: { chat?: AgentSession; run?: AgentRun; messages?: ChatMessage[] }) {
@@ -22,8 +23,25 @@ export function AgentStatus({ agents }: { agents: Subagent[] }) {
 }
 export function WorktreeStatus({ worktree }: { worktree: Worktree }) {
   const session = useSession();
-  const { data: pr, error, loading, refresh } = useRpc<PullRequest | null>(session.client, 'worktree:pull-request', [worktree.path]);
-  // PR checks are much slower than local run snapshots. Keep them off the one-second polling path.
-  useEffect(() => { const timer = setInterval(refresh, 30000); return () => clearInterval(timer); }, [session.client, worktree.path]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [pr, setPr] = useState<PullRequest | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
+  useFocusEffect(useCallback(() => {
+    let focused = true;
+    const active = () => focused && AppState.currentState === 'active';
+    async function refresh() {
+      if (!session.client || !active()) return;
+      setLoading(true);
+      try {
+        const value = await readPullRequest(session.client, worktree.path, active);
+        if (active() && value !== undefined) { setPr(value); setError(false); }
+      } catch { if (active()) setError(true); }
+      finally { if (focused) setLoading(false); }
+    }
+    setPr(null); void refresh();
+    const timer = setInterval(() => void refresh(), 30000);
+    const subscription = AppState.addEventListener('change', () => void refresh());
+    return () => { focused = false; clearInterval(timer); subscription.remove(); };
+  }, [session.client, worktree.path]));
   return <View style={[styles.row, { gap: 10 }]}>{worktree.diff && <Text style={styles.label}>+{worktree.diff.added} / -{worktree.diff.removed}</Text>}{loading ? <Text style={styles.label}>Checking PR...</Text> : error ? <Text style={styles.label}>PR status unavailable</Text> : pr ? <Pressable accessibilityRole="link" accessibilityLabel={`Pull request ${pr.number}, ${pr.state}, ${pullRequestBlockers(pr).map(blocker => BLOCKERS[blocker].long).join(', ')}`} onPress={() => { if (/^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {}); }} style={[styles.row, { gap: 6, minHeight: 44 }]}><Icon name={{ ios: 'arrow.triangle.pull', android: 'merge_type' }} size={16} /><Text style={styles.label}>#{pr.number}{pr.state === 'MERGED' ? ' · Merged' : ''}</Text>{pullRequestBlockers(pr).map(blocker => <Text key={blocker} style={[styles.label, { color: colors.error }]}>{BLOCKERS[blocker].short}</Text>)}{pr.checks === 'running' && <Text style={styles.label}>CI running</Text>}{pr.conflictStatusKnown === false && !pr.hasConflicts && pr.state === 'OPEN' && <Text style={styles.label}>Conflicts unknown</Text>}</Pressable> : null}</View>;
 }

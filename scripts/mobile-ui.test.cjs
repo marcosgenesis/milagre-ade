@@ -306,5 +306,18 @@ test('attachment drafts survive a failed send and move only after a successful f
   next.sending.resolve({ sessionId: 42 });
   await settle();
   assert.equal(next.session.attachments['/p#new:1'], undefined);
-  assert.deepEqual(next.session.attachments['/p#42'].map(item => item.id), ['later']);
+  assert.deepEqual(Array.from(next.session.attachments['/p#42'], item => item.id), ['later']);
+});
+
+test('reusing an empty Chat preserves its existing text and attachment drafts', async () => {
+  const screen = chatHost();
+  const photo = { id: 'a', name: 'a.jpg', uri: 'file:///a', image: { id: 'a', name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,/9j/' } };
+  screen.session.attachments['/p#42'] = [photo];
+  screen.session.drafts['/p#42'] = 'unsent in existing Chat';
+  screen.send();
+  screen.sending.resolve({ sessionId: 42 });
+  await settle();
+  assert.equal(screen.session.attachments['/p#42'].length, 1);
+  assert.equal(screen.session.attachments['/p#42'][0], photo);
+  assert.equal(screen.field().value, 'unsent in existing Chat');
 });

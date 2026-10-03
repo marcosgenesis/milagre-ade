@@ -154,3 +154,14 @@ test('opening a linked checkout cannot bypass the repository runtime owner', asy
   await assert.rejects(other.openProject(linked), /already owned/);
   await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
 });
+
+test('a failed Worktree discovery preserves existing Chats and disk state',async t=>{
+ const {project,make}=await fixture(t);const runtime=make();const opened=await runtime.openProject(project);const session=Object.values(opened.state.sessions)[0];
+ await runtime.invoke('chat:patch',[project,session.id,{title:'Never erase this'}]);
+ const file=path.join(project,'.milagre/coordination.json');const before=await fs.readFile(file,'utf8');
+ await fs.rename(path.join(project,'.git'),path.join(project,'.git-unavailable'));
+ try {await assert.rejects(runtime.openProject(project));} finally {await fs.rename(path.join(project,'.git-unavailable'),path.join(project,'.git'));}
+ assert.equal((await runtime.invoke('project:snapshot',[project])).state.sessions[session.id].title,'Never erase this');
+ await runtime.close();assert.equal(JSON.parse(await fs.readFile(file,'utf8')).sessions[session.id].title,JSON.parse(before).sessions[session.id].title);
+});
+

@@ -102,26 +102,27 @@ function chatHost() {
   const params = { worktreeId: '1' };
   const session = {
     client: { call: () => sending.promise },
-    snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [] } }, runs: { runs: {} } },
+    snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: {} } }, runs: { runs: {} } },
     drafts: { '/p#new:1': 'first message' },
+    attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
     preferences: {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; },
   };
   const react = hookHost();
-  const ui = { ...Object.fromEntries(['Button', 'Choice', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {}, colors: {} };
+  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'Icon', 'Choice', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {}, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values) }, useLocalSearchParams: () => params },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../questions': {}, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../questions': {}, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
-  const send = () => find(render(), node => node.type === 'Button' && node.props.title === 'Send message').props.onPress();
+  const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
   return { session, sending, params, field, send, render };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -155,7 +156,7 @@ test('a failed first send keeps the current draft and releases the composer', as
   await settle();
   assert.equal(screen.params.id, undefined);
   assert.equal(screen.field().value, 'edited during failed send');
-  const button = find(screen.render(), node => node.type === 'Button' && node.props.title === 'Send message');
+  const button = find(screen.render(), node => node.type === 'IconButton' && node.props.label === 'Send message');
   assert.equal(button.props.disabled, false);
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
 });
@@ -169,6 +170,24 @@ test('opening agent settings keeps them in view instead of following the transcr
   page.props.onContentSizeChange();
   assert.equal(scrolls, 1);
   find(tree, node => node.type === 'AgentControls').props.onToggle();
+  page.props.onContentSizeChange();
+  assert.equal(scrolls, 1);
+});
+
+test('opening live tool activity keeps the reader in place', () => {
+  const screen = chatHost();
+  screen.session.snapshot.runs.runs['/p#new:1'] = { text: '', steps: [], approvals: [], questions: [] };
+  // Use a saved Chat so its run has the actual Chat identifier.
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  screen.session.snapshot.runs.runs['/p#42'] = { text: '', steps: [], approvals: [], questions: [] };
+  const tree = screen.render();
+  const page = find(tree, node => node.type === 'PageScroll');
+  let scrolls = 0;
+  page.props.ref.current = { scrollToEnd() { scrolls++; } };
+  page.props.onContentSizeChange();
+  assert.equal(scrolls, 1);
+  find(tree, node => node.type === 'ChatReply').props.onInteract();
   page.props.onContentSizeChange();
   assert.equal(scrolls, 1);
 });
@@ -216,7 +235,7 @@ function worktreeFormHost() {
   const { default: Form } = load('app/new-worktree.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
     'expo-router': { Redirect: 'Redirect', router: { replace: route => nav.push(route) }, useFocusEffect: fn => { if (fn !== focusEffect) { cleanup?.(); cleanup = fn(); focusEffect = fn; } } },
-    '../session': { useSession: () => session },
+    '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' },
     '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll', 'Select'].map(name => [name, name])), styles: {} },
   });
   const render = () => { react.begin(); return Form(); };
@@ -253,7 +272,7 @@ test('late Chat rename cannot pop another screen after its form loses focus', as
   const { default: Form } = load('app/chat-details.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
     'expo-router': { Redirect: 'Redirect', router: { back: () => backs++ }, useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => { cleanup = fn(); } },
-    '../session': { useSession: () => session }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
+    '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
   });
   react.begin(); const tree = Form();
   find(tree, n => n.type === 'Button' && n.props.title === 'Save name').props.onPress();
@@ -269,4 +288,23 @@ test('selection guards expire when Project or connection changes', async () => {
   await first.open('B'); assert.equal(first.isSelected(), false);
   const second = render(); assert.equal(second.isSelected(), true);
   await second.connect('another-address', 'token'); assert.equal(second.isSelected(), false);
+});
+
+test('attachment drafts survive a failed send and move only after a successful first send', async () => {
+  const screen = chatHost();
+  const photo = { id: 'photo', name: 'photo.jpg', uri: 'file:///photo', image: { id: 'photo', name: 'photo.jpg', dataUrl: 'data:image/jpeg;base64,/9j/' } };
+  screen.session.attachments['/p#new:1'] = [photo];
+  screen.send();
+  screen.sending.reject(new Error('Connection lost'));
+  await settle();
+  assert.equal(screen.session.attachments['/p#new:1'][0].id, 'photo');
+  assert.equal(screen.field().value, 'first message');
+  const next = chatHost();
+  next.session.attachments['/p#new:1'] = [photo];
+  next.send();
+  next.session.attachments['/p#new:1'] = [photo, { ...photo, id: 'later' }];
+  next.sending.resolve({ sessionId: 42 });
+  await settle();
+  assert.equal(next.session.attachments['/p#new:1'], undefined);
+  assert.deepEqual(next.session.attachments['/p#42'].map(item => item.id), ['later']);
 });

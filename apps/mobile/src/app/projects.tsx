@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 import { useSession } from '../session';
-import { Button, ErrorNotice, Field, PageScroll, colors, styles } from '../ui';
+import { Button, ErrorNotice, Field, ListRow, PageScroll, colors, styles } from '../ui';
 
 export default function ProjectsScreen() {
   const session = useSession();
@@ -16,8 +16,8 @@ export default function ProjectsScreen() {
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
-  return <PageScroll><View style={styles.row}><Text style={[styles.label, { color: colors.green }]}>CONNECTED</Text><Text style={styles.muted}>{session.client.url}</Text></View><Text style={styles.title}>Projects</Text><Text style={styles.muted}>Pick a Project to see its Chats.</Text>
-    {session.recent.map(project => <View key={project.path} style={styles.card}><Text style={styles.subtitle}>{project.name || project.path.split('/').at(-1)}</Text><Text style={styles.muted} numberOfLines={2}>{project.path}</Text><Button title={`Open ${project.name || project.path.split('/').at(-1)}`} onPress={() => void open(project.path)} disabled={busy} secondary /></View>)}
+  return <PageScroll><View style={styles.row}><Text style={[styles.label, { color: colors.green }]}>CONNECTED</Text><Text style={styles.muted}>{session.client.url}</Text></View><Text style={styles.muted}>Pick a Project to see its Chats.</Text>
+    {session.recent.length > 0 && <View style={styles.card}>{session.recent.map(project => <ListRow key={project.path} title={project.name || project.path.split('/').at(-1) || 'Project'} subtitle={project.path} onPress={() => void open(project.path)} disabled={busy} />)}</View>}
     <View style={styles.card}><Field label="Project folder on your Mac" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" /><Button title={busy ? 'Opening...' : 'Open folder'} onPress={() => void open(path)} disabled={busy || !path.startsWith('/')} secondary /></View>
     {error ? <ErrorNotice message={error} /> : null}
     <Button title="Disconnect" secondary onPress={() => { session.disconnect(); router.replace('/'); }} disabled={busy} />

@@ -8,7 +8,7 @@ const { cliBrokenMessage, cliTooOldMessage, lastLine, missingCliMessage } = requ
 //   codex   0.160.0, the first release whose model/list offers GPT-6.1 Sol (0.158.0 is where Milagre's use
 //           of the app-server protocol was verified; 0.160.0 adds no protocol change Milagre relies on).
 // `--version` prints "2.1.287 (Claude Code)" and "codex-cli 0.160.0".
-const MIN_VERSIONS = { claude: "2.1.286", codex: "0.160.0" };
+const MIN_VERSIONS = { claude: "2.1.288", codex: "0.160.0" };
 const VERSION_TIMEOUT_MS = 10_000;
 
 // [major, minor, patch] from the first x.y.z in the text, or null.

@@ -18,7 +18,7 @@
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "electron-updater": "^6.8.9",
-    "motion": "^13.4.6",
+    "motion": "^13.5.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
@@ -37,7 +37,7 @@
     "postcss": "^8.5.28",
     "shadow-plugin": "^2.1.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.2",
+    "typescript": "~6.0.3",
     "vite": "^7.1.7",
     "wait-on": "^8.0.4"
   }

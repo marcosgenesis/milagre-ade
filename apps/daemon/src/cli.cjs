@@ -4,6 +4,8 @@ const { parseArgs } = require('node:util');
 const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
 const { version } = require('../package.json');
+const { KeepAwake } = require('@milagre/core/keep-awake');
+const { createPowerBlocker } = require('./power.cjs');
 const fs = require('node:fs/promises');
 const { randomBytes } = require('node:crypto');
 const { startMobileBridge } = require('./mobile-bridge.cjs');
@@ -11,6 +13,7 @@ const { startMobileBridge } = require('./mobile-bridge.cjs');
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     'data-dir': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    'app-version': { type: 'string' }, cwd: { type: 'string' }, 'worktree-root': { type: 'string' },
     port: { type: 'string' }, 'connection-file': { type: 'string' },
   } });
   if (values.help) {
@@ -37,7 +40,10 @@ async function main() {
   }
   if (command === 'serve') {
     if (positionals.length !== 1) throw new Error('Unexpected serve arguments');
-    const daemon = await startDaemon({ dataDir, version });
+    const daemon = await startDaemon({ dataDir, version: values['app-version'] || version, runtimeOptions: {
+      cwd: values.cwd || process.cwd(), worktreeRoot: values['worktree-root'],
+      keepAwake: new KeepAwake({ powerSaveBlocker: createPowerBlocker() }),
+    } });
     console.log(JSON.stringify({ status: 'ready', pid: process.pid, dataDir, socketPath: daemon.socketPath }));
     const stop = () => { void daemon.close().catch(error => { console.error(error.message); process.exitCode = 1; }); };
     process.once('SIGINT', stop);

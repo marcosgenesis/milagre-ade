@@ -388,6 +388,7 @@ function createRuntime(options) {
     publish: publishAgentEvent,
     broadcast: broadcastProjectState,
     isFocused: () => isFocused(),
+    isChatFocused: options.isChatFocused,
     handoverTools: {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
       brief: ({ cwd, ...input }) => generateBrief({
@@ -444,8 +445,7 @@ function createRuntime(options) {
     return chats.addNote(chatId, { body, context: { kind: "git-action" } });
   });
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
-  async function readOpenChat() {
-    const chatId = chats.openChat;
+  async function readOpenChat(chatId = chats.openChat) {
     if (chatId && states.has(projectOfKey(chatId))) {
       await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
       void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
@@ -573,7 +573,11 @@ function createRuntime(options) {
     openProject: projectPath => accept(() => openProject(projectPath)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
-    focused: () => accept(() => { diffs.focused(); return readOpenChat(); }),
+    // Synchronous capture: the socket serializes this before another event can
+    // mutate state, so its event watermark and run sequence describe one instant.
+    snapshot: () => ({ projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
+    focused: (view) => accept(() => { diffs.focused(view?.projectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
+    flush: async () => { await Promise.allSettled([...active]); await states.flush(); await usageStore.idle(); },
     close,
   };
 }

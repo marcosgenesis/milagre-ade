@@ -7,7 +7,7 @@ export const providerLabel = (provider: ModelProvider) => (provider === "codex" 
 
 /** Why the handover row is disabled, or null. A running turn would leave work out of the brief. */
 export function handoverBlocker({ running, cli }: { running: boolean; cli: string | null }): string | null {
-  if (running) return "Stop the turn or wait for it to finish to hand over.";
+  if (running) return "The agent is still running. Stop the turn or wait for it to finish to hand over.";
   return cli;
 }
 

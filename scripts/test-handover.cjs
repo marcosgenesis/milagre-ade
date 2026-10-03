@@ -17,7 +17,7 @@ function Fixture() {
   window.brief = () => brief;
   window.opened = () => opened;
   window.block = setBlocked;
-  return <div style={{ width: 360, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+  return <div style={{ width: 360, padding: "64px 12px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
     <section data-shot="row"><HandoverRow provider="codex" blocked={blocked} onClick={() => setOpened("handover")} /></section>
     <section data-shot="to"><HandoverLinkBar to={{ id: 7, title: "Fix login redirect", provider: "codex" }} onOpen={setOpened} /></section>
     <section data-shot="note">{noteOpen && <HandoverNote from="codex" to="claude" permissionMode="auto" onDismiss={() => setNoteOpen(false)} />}</section>
@@ -57,10 +57,17 @@ async function browserChecks() {
     await shot("picker-row");
     await evaluate('document.querySelector("[data-handover-row]").click()');
     assert.equal(await evaluate("window.opened()"), "handover");
-    await evaluate('window.block("Stop the turn or wait for it to finish to hand over.")');
+    const reason = "The agent is still running. Stop the turn or wait for it to finish to hand over.";
+    await evaluate(`window.block(${JSON.stringify(reason)})`);
     await waitFor('document.querySelector("[data-handover-row]").disabled');
-    assert.equal(await evaluate('document.querySelector("[data-handover-row]").title'), "Stop the turn or wait for it to finish to hand over.");
+    // A disabled button gets no hover, so the reason shows as a tooltip from its wrapper rather than a native title.
+    const box = await evaluate('JSON.stringify(document.querySelector("[data-handover-row]").getBoundingClientRect())').then(JSON.parse);
+    win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) });
+    await waitFor('document.querySelector("[role=tooltip]")');
+    assert.equal(await evaluate('document.querySelector("[role=tooltip]").textContent'), reason);
     await shot("picker-row-blocked");
+    win.webContents.sendInputEvent({ type: "mouseMove", x: 390, y: 630 });
+    await waitFor('!document.querySelector("[role=tooltip]")');
     assert.match(await evaluate('document.querySelector("[data-handover-to]").textContent'), /Handed over to Codex.*Fix login redirect/);
     await evaluate('document.querySelector("[data-handover-to]").click()');
     assert.equal(await evaluate("window.opened()"), 7);

@@ -9,7 +9,7 @@ test("the other provider", () => {
 });
 
 test("a running turn blocks handover before a CLI problem does", () => {
-  assert.equal(handoverBlocker({ running: true, cli: "Codex isn't installed." }), "Stop the turn or wait for it to finish to hand over.");
+  assert.equal(handoverBlocker({ running: true, cli: "Codex isn't installed." }), "The agent is still running. Stop the turn or wait for it to finish to hand over.");
   assert.equal(handoverBlocker({ running: false, cli: "Codex isn't installed." }), "Codex isn't installed.");
   assert.equal(handoverBlocker({ running: false, cli: null }), null);
 });

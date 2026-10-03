@@ -62,7 +62,8 @@ export default function ChatScreen() {
       session.setDrafts(current => {
         const remaining = current[chatId] === sent ? '' : current[chatId] || '';
         const destination = `${project.path}#${result.sessionId}`;
-        const next = { ...current, [destination]: remaining };
+        const preserved = destination !== chatId ? current[destination] || '' : '';
+        const next = { ...current, [destination]: [preserved, remaining].filter(Boolean).join('\n') };
         if (destination !== chatId) delete next[chatId];
         return next;
       });
@@ -70,7 +71,8 @@ export default function ChatScreen() {
         const sentIds = new Set(attachments.map(item => item.id));
         const remaining = (current[chatId] || []).filter(item => !sentIds.has(item.id));
         const destination = `${project.path}#${result.sessionId}`;
-        const next = { ...current, [destination]: remaining };
+        const preserved = destination !== chatId ? current[destination] || [] : [];
+        const next = { ...current, [destination]: [...preserved, ...remaining] };
         if (destination !== chatId) delete next[chatId];
         return next;
       });

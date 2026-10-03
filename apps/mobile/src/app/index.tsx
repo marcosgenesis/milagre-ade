@@ -1,48 +1,77 @@
-import { useEffect, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, RefreshControl, Text, View } from 'react-native';
+import { Stack, router, useFocusEffect } from 'expo-router';
+import { Add01Icon, ComputerIcon, LaptopIcon } from '@hugeicons/core-free-icons';
 import { useSession } from '../session';
-import { savedConnection } from '../connection-native';
-import { Button, Toggle, ErrorNotice, Field, PageScroll, styles } from '../ui';
+import { savedHosts } from '../hosts-native';
+import { createClient } from '../client';
+import type { SavedHost } from '../hosts-store';
+import { Icon } from '../icons';
+import { HeaderButton, ErrorNotice, ListRow, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
-export default function ConnectScreen() {
+type Reachability = 'online' | 'checking' | 'offline';
+const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
+
+export default function ComputersScreen() {
   const session = useSession();
-  const [address, setAddress] = useState(process.env.EXPO_PUBLIC_DAEMON_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:8787' : 'http://127.0.0.1:8787'));
-  const [token, setToken] = useState(process.env.EXPO_PUBLIC_DAEMON_TOKEN || '');
+  const [status, setStatus] = useState<Record<string, Reachability>>({});
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [remember, setRemember] = useState(true);
-  const [hasSaved, setHasSaved] = useState(false);
-  const edited = useRef(false);
-  const demo = process.env.EXPO_PUBLIC_DEMO === '1';
-  useEffect(() => {
-    if (demo) return;
-    let cancelled = false;
-    savedConnection.load().then(connection => {
-      if (cancelled || edited.current || !connection) return;
-      setAddress(connection.address); setToken(connection.token); setHasSaved(true);
-    }).catch(e => { if (!cancelled) { setError(e.message); setHasSaved(true); } });
-    return () => { cancelled = true; };
-  }, [demo]);
-  async function connect() {
-    edited.current = true;
-    setBusy(true); setError('');
-    try { if (await session.connect(address, token, remember)) { setHasSaved(remember && !demo); router.push('/projects'); } }
+  const [busy, setBusy] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const autoOpened = useRef(false);
+  const check = useCallback(async (hosts: SavedHost[]) => {
+    setStatus(Object.fromEntries(hosts.map(host => [host.id, 'checking'])));
+    await Promise.all(hosts.map(async host => {
+      let next: Reachability = 'offline';
+      try { await createClient(host.address, host.token, fetch, 5000).call('daemon:status'); next = 'online'; } catch { /* unreachable */ }
+      setStatus(current => ({ ...current, [host.id]: next }));
+    }));
+  }, []);
+  const load = useCallback(async () => {
+    try { const hosts = await session.loadHosts(); setError(''); void check(hosts); return hosts; }
+    catch (e) { setError((e as Error).message); return []; }
+  }, [session.loadHosts, check]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function open(host: { address: string; token: string; name: string }) {
+    setBusy(host.address); setError('');
+    try { if (await session.connect(host.address, host.token, !DEMO, host.name)) router.push('/projects'); }
     catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(''); }
   }
-  async function forget() {
-    edited.current = true;
-    session.disconnect(); setBusy(true); setError('');
-    try { await savedConnection.forget(); setToken(''); setHasSaved(false); }
-    catch { setError('Could not forget this computer. Try again before leaving the app.'); }
-    finally { setBusy(false); }
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useEffect(() => {
+    // One saved computer, or the demo host, goes straight to its Projects.
+    if (autoOpened.current) return;
+    const target = DEMO && process.env.EXPO_PUBLIC_DAEMON_URL && process.env.EXPO_PUBLIC_DAEMON_TOKEN ? { address: process.env.EXPO_PUBLIC_DAEMON_URL, token: process.env.EXPO_PUBLIC_DAEMON_TOKEN, name: 'Demo host' }
+      : session.hosts.length === 1 && !session.client ? session.hosts[0] : null;
+    if (!target) return;
+    autoOpened.current = true;
+    const timer = setTimeout(() => void open(target), 0);
+    return () => clearTimeout(timer);
+  }, [session.hosts]); // eslint-disable-line react-hooks/exhaustive-deps
+  function manage(host: SavedHost, action: string) {
+    if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
+    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { if (session.client?.url === host.address) session.disconnect(); void savedHosts.forget(host.id).then(load).catch(e => setError(e.message)); } }]);
   }
-  return <SafeAreaView style={styles.screen}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><PageScroll contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 28 }}>
-    <View style={{ gap: 16 }}><Image source={require('../../assets/milagre.png')} style={{ width: 54, height: 54, borderRadius: 14 }} /><Text style={styles.label}>MILAGRE / YOUR COMPUTER</Text><Text style={[styles.title, { fontSize: 40 }]}>Your Chats.{"\n"}In your hand.</Text><Text style={styles.muted}>Connect to your computer. Your agents keep working when you leave the app.</Text></View>
-    <View style={styles.card}><Field label="Computer address" value={address} onChangeText={value => { edited.current = true; setAddress(value); }} keyboardType="url" /><Field label="Connection token" value={token} onChangeText={value => { edited.current = true; setToken(value); }} autoComplete="off" textContentType="none" importantForAutofill="no" secureTextEntry />{!demo && <Toggle title="Remember this computer" selected={remember} onPress={() => setRemember(!remember)} />}<Button title={busy ? 'Connecting...' : 'Connect to computer'} onPress={() => void connect()} disabled={busy || !token.trim()} />{hasSaved && <Button title="Forget this computer" secondary disabled={busy} onPress={() => void forget()} />}</View>
-    {error ? <ErrorNotice message={error} /> : null}
-    <Text style={styles.muted}>{demo ? 'Demo mode uses a temporary Project and a demo agent. No provider account is used.' : 'Use the address and connection token from your Milagre host. Remote connections need HTTPS.'}</Text>
-  </PageScroll></KeyboardAvoidingView></SafeAreaView>;
+  const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
+  const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';
+  return <>
+    <Stack.Screen options={{ title: 'Computers', headerRight: () => <HeaderButton label="Add computer" icon={Add01Icon} onPress={() => router.push('/add-computer')} /> }} />
+    <PageScroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}>
+      {session.hosts.length > 0 ? <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
+        {session.hosts.map((host, index) => <View key={host.id}>
+          {index > 0 && <View style={styles.separator} />}
+          <PullDown label={`Manage ${host.name}`} longPress sections={[{ items: [{ id: 'rename', title: 'Rename', systemImage: 'pencil' }, { id: 'forget', title: 'Forget', systemImage: 'trash', destructive: true }] }]} onSelect={action => manage(host, action)}>
+            <ListRow title={host.name} subtitle={`${label(status[host.id])} · ${host.address.replace(/^https?:\/\//, '')}`} disabled={!!busy} onPress={() => void open(host)}
+              leading={<View style={{ width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={/studio|mini|imac/i.test(host.name) ? ComputerIcon : LaptopIcon} tone="ink" size={20} /><View style={{ position: 'absolute', right: -2, bottom: -2, width: 11, height: 11, borderRadius: 6, backgroundColor: dot(status[host.id]), borderWidth: 2, borderColor: colors.surface }} /></View>} />
+          </PullDown>
+        </View>)}
+      </View> : <View style={{ gap: 16, paddingTop: 48, alignItems: 'center' }}>
+        <Icon icon={LaptopIcon} tone="ink3" size={44} />
+        <Text style={[styles.subtitle, { textAlign: 'center' }]}>Pair your computer</Text>
+        <Text style={[styles.muted, { textAlign: 'center' }]}>Run <Text style={styles.code}>npm run mobile:host</Text> on your Mac, then scan the code it shows. Your agents keep working when you leave the app.</Text>
+        <PillButton title="Add computer" icon={Add01Icon} onPress={() => router.push('/add-computer')} />
+      </View>}
+      {error ? <ErrorNotice message={error} /> : null}
+    </PageScroll>
+  </>;
 }

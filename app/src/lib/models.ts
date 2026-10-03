@@ -18,7 +18,7 @@ export function mergeModels(reported: AgentModels | null, fallback: ModelOption[
 /** What each reported model accepts, by provider and model id (see capabilityFor). */
 export function capabilitiesFrom(reported: AgentModels | null): ModelCapabilities | null {
   if (!reported) return null;
-  const byId = (provider: ModelProvider) => Object.fromEntries((reported[provider] ?? []).map(({ id, efforts, defaultEffort, ultracode }) => [id, { efforts, ...(defaultEffort ? { defaultEffort } : {}), ultracode }]));
+  const byId = (provider: ModelProvider) => Object.fromEntries((reported[provider] ?? []).map(({ id, efforts, defaultEffort, ultracode, fastMode }) => [id, { efforts, ...(defaultEffort ? { defaultEffort } : {}), ultracode, fastMode }]));
   return { codex: byId("codex"), claude: byId("claude") };
 }
 

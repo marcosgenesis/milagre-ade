@@ -8,6 +8,36 @@ import { type PullRequestBlocker, updateBlockerDismissals } from "../lib/pr-bloc
 // Conflict entries are bare PR URLs, so this key keeps its name from when conflicts were the only blocker.
 const DISMISSED_BLOCKERS = "milagre.dismissed-conflict-actions";
 
+const POLL_MS = 30_000;
+const FOCUS_GAP_MS = 5000;
+
+/**
+ * Runs `refresh` every `POLL_MS` only while the window is visible and focused. A hidden or blurred window
+ * stops its timer (no wake-ups, no gh calls); coming back refreshes once, unless it just did, and resumes.
+ */
+function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
+  const active = () => document.visibilityState === "visible" && document.hasFocus();
+  let interval: number | undefined;
+  const stop = () => { window.clearInterval(interval); interval = undefined; };
+  const resume = () => {
+    if (!active()) return;
+    if (Date.now() - lastRefresh() >= FOCUS_GAP_MS) refresh();
+    interval ??= window.setInterval(refresh, POLL_MS);
+  };
+  const pause = () => { if (!active()) stop(); };
+  const onVisibility = () => (active() ? resume() : stop());
+  if (active()) interval = window.setInterval(refresh, POLL_MS);
+  window.addEventListener("focus", resume);
+  window.addEventListener("blur", pause);
+  document.addEventListener("visibilitychange", onVisibility);
+  return () => {
+    stop();
+    window.removeEventListener("focus", resume);
+    window.removeEventListener("blur", pause);
+    document.removeEventListener("visibilitychange", onVisibility);
+  };
+}
+
 /** PRs stay transient: refresh on opening a project, focus, turn completion, and while visible. */
 export function useWorktreePullRequests(projectPath: string, state: CoordinatorState | null) {
   const [dismissedBlockers, setDismissedBlockers] = useState<string[]>(() => {
@@ -55,11 +85,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       }));
     };
     void refresh();
-    const onFocus = () => { if (Date.now() - lastRefresh >= 5000) void refresh(); };
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 30_000);
-    window.addEventListener("focus", onFocus);
+    const stopPolling = pollWhileActive(() => void refresh(), () => lastRefresh);
     const unsubscribe = window.milagre.onAgentEvent(({ chatId, event }) => {
       if (!chatInProject(projectPath, chatId) || !isTurnEnd(event)) return;
       const current = stateRef.current;
@@ -69,8 +95,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     });
     return () => {
       disposed = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
+      stopPolling();
       unsubscribe();
     };
   }, [projectPath, pathsKey]);
@@ -114,15 +139,10 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       }));
     };
     void refresh();
-    const onFocus = () => { if (Date.now() - lastRefresh >= 5000) void refresh(); };
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 30_000);
-    window.addEventListener("focus", onFocus);
+    const stopPolling = pollWhileActive(() => void refresh(), () => lastRefresh);
     return () => {
       disposed = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
+      stopPolling();
     };
   }, [projectPath, chatRefsKey]);
 

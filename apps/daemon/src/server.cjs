@@ -32,6 +32,14 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();
+    let snapshotCapture;
+    let snapshotTimer;
+    let nextSnapshotId = 0;
+    function releaseSnapshot() {
+      clearTimeout(snapshotTimer);
+      snapshotCapture = null;
+    }
+    socket.once('close', releaseSnapshot);
     const view = { focused: false, projectPath: null, chatId: null };
     views.set(socket, view);
     const connection = wire(socket, {
@@ -60,8 +68,33 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       inflight.add(id);
       try {
         let result;
-        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1'], methods: runtime.methods };
-        else if (request.method === 'daemon:snapshot') result = { ...runtime.snapshot(), eventSeq };
+        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: runtime.methods };
+        else if (request.method === 'daemon:snapshot') {
+          const snapshot = { ...runtime.snapshot(), eventSeq };
+          if (request.args[0]?.paged === true) {
+            releaseSnapshot();
+            // Serialize once: all pages describe the same instant and watermark.
+            // JSON-encoding a fragment can expand each UTF-16 unit to six bytes.
+            const text = JSON.stringify(snapshot);
+            const pageSize = Math.max(1, Math.min(1024 * 1024, Math.floor((maxFrameBytes - 512) / 6)));
+            const snapshotId = ++nextSnapshotId;
+            const pageCount = Math.ceil(text.length / pageSize);
+            snapshotCapture = { snapshotId, text, pageSize, pageCount, nextPage: 0 };
+            snapshotTimer = setTimeout(releaseSnapshot, 30000);
+            snapshotTimer.unref();
+            result = { snapshotId, pageCount, eventSeq: snapshot.eventSeq };
+          } else result = snapshot;
+        }
+        else if (request.method === 'daemon:snapshot-page') {
+          const [snapshotId, index] = request.args;
+          const capture = snapshotCapture;
+          if (!capture || capture.snapshotId !== snapshotId || !Number.isInteger(index) || index !== capture.nextPage || index >= capture.pageCount) {
+            throw new Error('Snapshot expired or page is out of order. Capture a new snapshot.');
+          }
+          result = capture.text.slice(index * capture.pageSize, (index + 1) * capture.pageSize);
+          capture.nextPage++;
+          if (capture.nextPage === capture.pageCount) releaseSnapshot();
+        }
         else if (request.method === 'daemon:flush') result = await runtime.flush();
         else if (request.method === 'daemon:focus') {
           const next = request.args[0];

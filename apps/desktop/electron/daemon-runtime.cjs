@@ -10,6 +10,7 @@ async function connectDesktopRuntime(options) {
   let currentChat = null;
   let focused = false;
   let recovering = false;
+  let capturingSnapshot = false;
   let buffered = [];
   let bufferedBytes = 0;
   const projects = new Set();
@@ -19,6 +20,7 @@ async function connectDesktopRuntime(options) {
     connection.on('event', event => {
       if (client !== connection || closed) return;
       if (!recovering) { forward(event); return; }
+      if (!capturingSnapshot) return; // The later snapshot covers restoration events.
       bufferedBytes += Buffer.byteLength(JSON.stringify(event));
       // Recovery re-reads state instead of retaining an unbounded event stream.
       if (buffered.length >= 1024 || bufferedBytes > 16 * 1024 * 1024) {
@@ -47,7 +49,7 @@ async function connectDesktopRuntime(options) {
       connection = await compatibleClient(dataDir);
       if (closed) { connection.close(); return; }
       client = connection;
-      recovering = true; buffered = []; bufferedBytes = 0;
+      recovering = true; capturingSnapshot = false; buffered = []; bufferedBytes = 0;
       attach(connection);
       for (const projectPath of projects) {
         try { await connection.call('project:open', [projectPath]); }
@@ -62,7 +64,13 @@ async function connectDesktopRuntime(options) {
       if (currentProject) await connection.call('project:open', [currentProject]);
       await connection.call('chat:set-open', [currentChat]);
       await connection.call('daemon:focus', [{ focused }]);
-      const snapshot = await connection.call('daemon:snapshot');
+      capturingSnapshot = true;
+      const manifest = await connection.call('daemon:snapshot', [{ paged: true }]);
+      const pages = [];
+      for (let index = 0; index < manifest.pageCount; index++) {
+        pages.push(await connection.call('daemon:snapshot-page', [manifest.snapshotId, index]));
+      }
+      const snapshot = JSON.parse(pages.join(''));
       emit('runtime:snapshot', snapshot);
       for (const event of buffered) if (event.seq > snapshot.eventSeq) forward(event);
       buffered = []; recovering = false;

@@ -84,3 +84,11 @@ Validation on 2026-10-03, with temporary profiles and Projects only:
 - Screenshots were captured outside the repository in `/tmp/milagre-shared-desktop-shots` and `/tmp/milagre-shared-desktop-packaged-shots`; publication belongs to the screenshots branch. No screenshot is committed here.
 
 Release signing/notarization and an actual downloaded update installation were not exercised. Update shutdown was tested against a real socket daemon. The live development desktop and its host were not restarted. The managed login service, stable remote endpoint, native mobile validation of this desktop facade, and migration of the live profile remain follow-up work.
+
+### Canvas integration and snapshot paging
+
+Merged main `63ea8d3` while preserving per-client focus and the canvas's tracked subagent recovery, which shutdown drains. Typecheck/build and 47 focused tests passed after resolving the two core conflicts.
+
+Review reproduced a reconnect failure when two valid Projects exceeded the aggregate 16 MiB frame limit. Desktop now reads bounded pages from one immutable, per-socket snapshot capture. The capture retains its event watermark, expires after 30 seconds, and releases after its final page or socket closure. Desktop requires the `snapshot-pages-v1` capability. Restoration events before capture are covered by the snapshot rather than retained in the recovery buffer.
+
+After that fix, 55 focused daemon, desktop adapter, core runtime and ChatHost tests passed, including an actual reconnect with two 9 MiB Projects, immutable capture ordering, socket isolation and final-page release. The source Electron saved-state/reconnect smoke passed again, with screenshots in `/tmp/milagre-shared-desktop-paged-shots`. The packaged smoke above preceded the canvas/paging changes. `docs/mobile-local.md` is not present in this branch; any embedded-runtime wording in the mobile stack still needs updating when those branches combine.

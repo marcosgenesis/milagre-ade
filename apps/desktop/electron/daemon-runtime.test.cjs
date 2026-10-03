@@ -9,8 +9,8 @@ const { startDaemon } = require('@milagre/daemon/server');
 const { connect } = require('@milagre/daemon/client');
 const { connectDesktopRuntime } = require('./daemon-runtime.cjs');
 
-async function waitFor(read) {
-  for (let i = 0; i < 200; i++) { const result = read(); if (result) return result; await delay(10); }
+async function waitFor(read, attempts = 200) {
+  for (let i = 0; i < attempts; i++) { const result = read(); if (result) return result; await delay(10); }
   throw new Error('Timed out waiting for desktop reconnect');
 }
 async function fixture(t) {
@@ -93,7 +93,7 @@ test('recovery disconnects an overflowing event stream before publishing a snaps
           // Recovery must reject the stream even when the snapshot never arrives.
           return;
         }
-        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1'], methods: [] } : null;
+        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: [] } : null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
@@ -116,4 +116,23 @@ test('explicit desktop update waits for the shared host to save and stop', async
   await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' });
   const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
   assert.equal(saved.sessions[session.id].title, 'Before update');
+});
+
+test('desktop reconnect restores two large Projects without an oversized aggregate frame', async t => {
+  const { project, daemon, desktop, events, start } = await fixture(t);
+  const other = path.join(path.dirname(project), 'other');
+  await fs.mkdir(other); execFileSync('git', ['init', '-b', 'main', other], { stdio: 'ignore' });
+  for (const folder of [project, other]) {
+    const opened = await desktop.openProject(folder);
+    const session = Object.values(opened.state.sessions)[0];
+    await desktop.invoke('chat:git-note', [`${folder}#${session.id}`, 'x'.repeat(9 * 1024 * 1024)]);
+  }
+  events.length = 0;
+  await daemon.close();
+  await waitFor(() => events.some(event => event.channel === 'runtime:connection' && !event.payload.connected));
+  await start();
+  const restored = await waitFor(() => events.find(event => event.channel === 'runtime:snapshot'), 1000).catch(error => { console.error(events.filter(event => event.channel === 'runtime:connection')); throw error; });
+  assert.equal(restored.payload.projects.length, 2);
+  for (const opened of restored.payload.projects) assert.equal(opened.state.messages[0].body.length, 9 * 1024 * 1024);
+  assert.equal((await desktop.invoke('project:current')).path, other);
 });

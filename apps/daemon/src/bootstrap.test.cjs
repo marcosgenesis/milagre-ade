@@ -43,7 +43,7 @@ test('a reachable older daemon is rejected without starting a competing runtime'
   const server = net.createServer(connection => {
     connection.on('data', data => {
       const request = JSON.parse(String(data));
-      connection.write(JSON.stringify({ v: 1, id: request.id, result: { version: 'old' } }) + '\n');
+      connection.write(JSON.stringify({ v: 1, id: request.id, result: { version: 'old', capabilities: ['desktop-v1'], methods: [] } }) + '\n');
     });
   });
   server.listen(socket); await once(server, 'listening');

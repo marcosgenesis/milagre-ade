@@ -125,19 +125,24 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
     const { reduce, thumbFor, items } = latest.current;
     // A cached image is ready before the dialog's ref and effect run, and a closed dialog has no size to morph from.
     openDialog(figure.el.closest("dialog"));
-    const thumb = thumbFor(items[start].id), source = thumbRect(thumb);
-    if (reduce || !source) {
-      figure.scale.set(reduce ? 1 : 0.96);
-      pose(figure, { opacity: 1, scale: 1 }, { duration: 0.2, ease: EASE_OUT });
-      return;
-    }
-    const from = flip(figure, source);
-    figure.x.set(from.x);
-    figure.y.set(from.y);
-    figure.scale.set(from.scale);
-    figure.corner.set(thumbCorner(thumb));
-    figure.opacity.set(1);
-    pose(figure, { x: 0, y: 0, scale: 1, corner: CORNER }, SPRING_LAYOUT);
+    // Decoding a large image at its full size takes a few frames; done first, the morph doesn't stall on it.
+    const media = elements.media.get(items[start].id);
+    void (media instanceof HTMLImageElement ? media.decode().catch(() => {}) : Promise.resolve()).then(() => {
+      const thumb = thumbFor(items[start].id), source = thumbRect(thumb);
+      if (reduce || !source) {
+        figure.scale.jump(reduce ? 1 : 0.96);
+        pose(figure, { opacity: 1, scale: 1 }, { duration: 0.2, ease: EASE_OUT });
+        return;
+      }
+      // jump(), not set(): set() reads the leap to the thumbnail as velocity, and the spring would fling the image past it.
+      const from = flip(figure, source);
+      figure.x.jump(from.x);
+      figure.y.jump(from.y);
+      figure.scale.jump(from.scale);
+      figure.corner.jump(thumbCorner(thumb));
+      figure.opacity.jump(1);
+      pose(figure, { x: 0, y: 0, scale: 1, corner: CORNER }, SPRING_LAYOUT);
+    });
   };
 
   useEffect(() => {

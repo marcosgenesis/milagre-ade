@@ -190,10 +190,19 @@ function createRuntime(options) {
     if (!states.worktreePaths().includes(root)) throw new Error("Choose an open project's worktree.");
     return searchFiles(root, query);
   });
-  commands.handle("skills:list", (_event, projectPath) => discoverSkills(projectPath));
-  commands.handle("project:branches", (_event, projectPath) => listBranches(projectPath));
+  // Path-taking commands only serve folders the user opened: an open project, one of its worktrees, or a recent
+  // project (the switcher shows their avatars). Any renderer or paired phone script otherwise reaches any folder.
+  async function knownFolder(folder) {
+    if (typeof folder !== "string" || !path.isAbsolute(folder)) throw new Error("An absolute Project path is required");
+    if (states.has(folder) || states.worktreePaths().includes(folder)) return;
+    if ((await recentProjects().list()).some(item => item.path === folder)) return;
+    throw new Error("Open this project in Milagre first.");
+  }
+  commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
+  commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
   commands.handle("project:image", async (_event, projectPath) => {
+    await knownFolder(projectPath);
     await environmentReady;
     return resolveProjectImage(projectPath);
   });
@@ -216,6 +225,7 @@ function createRuntime(options) {
   });
   // The git calls below wait for the login environment, so they run with the merged PATH.
   commands.handle("worktree:status", async (_event, worktreePath, base) => {
+    await knownFolder(worktreePath);
     await environmentReady;
     return worktreeStatus(worktreePath, base);
   });
@@ -243,15 +253,18 @@ function createRuntime(options) {
     return result;
   });
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
     await environmentReady;
     const { filesToCopy } = await projectSettings().get(projectPath);
     return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
   });
   commands.handle("files-to-copy:preview", async (_event, projectPath, patterns) => {
+    await knownFolder(projectPath);
     await environmentReady;
     return previewFilesToCopy(projectPath, patterns);
   });
   commands.handle("files-to-copy:save", async (_event, projectPath, patterns) => {
+    await knownFolder(projectPath);
     await environmentReady;
     const { filesToCopy } = await projectSettings().setFilesToCopy(projectPath, patterns);
     return { filesToCopy, ...(await previewFilesToCopy(projectPath, filesToCopy)) };
@@ -261,8 +274,9 @@ function createRuntime(options) {
     const { setupCommand } = await projectSettings().get(projectPath);
     return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
   }
-  commands.handle("worktree-setup:read", (_event, projectPath) => readSetupCommand(projectPath));
+  commands.handle("worktree-setup:read", async (_event, projectPath) => { await knownFolder(projectPath); return readSetupCommand(projectPath); });
   commands.handle("worktree-setup:save", async (_event, projectPath, command) => {
+    await knownFolder(projectPath);
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
     return readSetupCommand(projectPath);
   });

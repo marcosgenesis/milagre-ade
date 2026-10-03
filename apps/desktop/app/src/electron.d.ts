@@ -41,9 +41,15 @@ export type DiffFilesResult = { isRepo: false; message: string } | { isRepo: tru
 /** `patch` is empty when the file is binary or `tooLarge` (over 1 MB). */
 export type DiffFileResult = { patch: string; binary: boolean; tooLarge: boolean };
 
+export type RuntimeConnection = { connected: boolean; message?: string };
+export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+
 declare global {
   interface Window {
     milagre: {
+      getRuntimeConnection: () => Promise<RuntimeConnection>;
+      onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
+      onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;

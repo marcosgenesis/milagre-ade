@@ -8,6 +8,7 @@ const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, wire } = require('./protocol.cjs'
 async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
   const clients = new Map();
   const views = new Map();
+  let eventSeq = 0;
   let stopping;
   let listening = false;
   const runtime = createRuntime({ ...runtimeOptions, dataDir, version,
@@ -22,8 +23,9 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     },
   });
   function broadcast(channel, payload) {
+    const seq = ++eventSeq;
     for (const [socket, connection] of clients) {
-      try { connection.send({ v: VERSION, event: { channel, payload } }); }
+      try { connection.send({ v: VERSION, event: { channel, payload, seq } }); }
       catch { socket.destroy(); }
     }
   }
@@ -59,6 +61,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       try {
         let result;
         if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1'], methods: runtime.methods };
+        else if (request.method === 'daemon:snapshot') result = { ...runtime.snapshot(), eventSeq };
         else if (request.method === 'daemon:flush') result = await runtime.flush();
         else if (request.method === 'daemon:focus') {
           const next = request.args[0];

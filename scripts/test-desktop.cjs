@@ -105,15 +105,48 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     const skills = await evaluate(`window.milagre.listSkills(${JSON.stringify(project)})`);
     assert.ok(JSON.stringify(skills).includes("tldr"), "Bundled skills resolve after relocation");
     assert.equal(typeof await evaluate("window.milagre.getAppVersion()"), "string");
+    await waitFor(() => evaluate('!document.querySelector(".startup-splash-screen")'), 'desktop ready for shared controls');
+    const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    try {
+      assert.notEqual((await shared.call('daemon:status')).pid, child.pid, 'Desktop uses a separate persistent host');
+      await shared.call('chat:patch', [project, 2, { title: 'Updated from another device' }]);
+      await waitFor(() => evaluate('document.body?.textContent.includes("Updated from another device") && !document.body?.textContent.includes("Saved chat")'), 'shared client update in desktop');
+      if (process.env.MILAGRE_SCREENSHOT_DIR) {
+        await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+        const shot = await connection.call('Page.captureScreenshot');
+        await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'shared-desktop.png'), Buffer.from(shot.data, 'base64'));
+      }
+      await shared.call('chat:patch', [project, 2, { title: 'Saved chat' }]);
+    } finally { shared.close(); }
     if (expectTheme) assert.equal(await evaluate('document.documentElement.classList.contains("dark")'), true, "Existing UI settings survive a restart/package change");
     await evaluate('localStorage.setItem("milagre-settings", JSON.stringify({theme:"dark",defaultPermissionMode:"ask",notifyWhenWaiting:false,notifyOnCompletion:false,showDockBadge:false}));');
     await connection.call("Page.reload");
     await waitFor(() => evaluate('document.documentElement?.classList.contains("dark")'), "saved theme after reload");
+    await waitFor(() => evaluate('document.body?.textContent.includes("Saved chat") && !document.querySelector(".startup-splash-screen")'), "saved Chat visible after reload");
     if (process.env.MILAGRE_SCREENSHOT_DIR) {
       await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
       const shot = await connection.call("Page.captureScreenshot");
       await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, expectTheme ? "packaged-desktop.png" : "desktop.png"), Buffer.from(shot.data, "base64"));
     }
+    await evaluate(`(() => {
+      const input = document.querySelector('textarea[aria-label="Prompt"]');
+      if (!input) throw new Error('Prompt missing');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'Keep this unsent draft');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    const hostControl = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    try { await hostControl.call('daemon:stop'); } finally { hostControl.close(); }
+    await waitFor(() => evaluate('!!document.querySelector("[data-host-disconnected]")'), 'disconnected host notice');
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      const shot = await connection.call('Page.captureScreenshot');
+      await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'host-disconnected.png'), Buffer.from(shot.data, 'base64'));
+    }
+    await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { return error.code === 'ENOENT'; } }, 'old host shutdown');
+    const restarted = await require('@milagre/daemon/bootstrap').ensureDaemon({ dataDir: profile, version: '0.1.0', cwd: project });
+    restarted.close();
+    await waitFor(() => evaluate('!document.querySelector("[data-host-disconnected]")'), 'desktop reconnect without reload');
+    assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="Prompt"]\').value'), 'Keep this unsent draft');
+    console.log('PASS: a shared client updates desktop and host restart restores state without losing its draft');
     console.log(`PASS: ${expectTheme ? "packaged" : "source"} desktop opens existing Chats, provider IDs, Project settings, bundled skills and saved UI preferences`);
   } catch (error) {
     console.error(output);
@@ -124,6 +157,14 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
     await exited;
     clearTimeout(timeout);
+    // Desktop quit leaves the shared host available. This fixture alone owns
+    // the temporary profile, so explicitly stop it before deleting test data.
+    const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    try {
+      assert.ok((await shared.call('daemon:status')).capabilities.includes('desktop-v1'));
+      await shared.call('daemon:stop');
+    } finally { shared.close(); }
+    await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
   }
 }
 

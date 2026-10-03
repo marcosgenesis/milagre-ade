@@ -570,6 +570,9 @@ function createRuntime(options) {
     openProject: projectPath => accept(() => openProject(projectPath)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
+    // Synchronous capture: the socket serializes this before another event can
+    // mutate state, so its event watermark and run sequence describe one instant.
+    snapshot: () => ({ projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
     focused: (view) => accept(() => { diffs.focused(view?.projectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
     flush: async () => { await Promise.allSettled([...active]); await states.flush(); await usageStore.idle(); },
     close,

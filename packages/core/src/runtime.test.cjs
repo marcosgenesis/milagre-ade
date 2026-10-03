@@ -243,3 +243,34 @@ test('opening a saved Codex Chat starts outcome recovery and shutdown drains its
   assert.equal(reopened.state.sessions[session.id].subagents[0].status, 'unknown');
   assert.deepEqual(await next.invoke('chat:runs'), { runs: {}, seq: 0 });
 });
+
+test('resuming recent projects reads raw JSON and loads only the projects with a pending turn', async t => {
+  const { project, make } = await fixture(t);
+  const first = make();
+  const opened = await first.invoke('project:current');
+  const session = Object.values(opened.state.sessions)[0];
+  await first.invoke('chat:patch', [project, session.id, { title: 'Saved Chat' }]);
+  const file = path.join(project, '.milagre/coordination.json');
+  const sidecar = `${'a'.repeat(64)}.json`;
+  await first.close();
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  saved.sessions[session.id].subagents = [{ id: 'child', title: 'Review', status: 'completed', startedAt: 1, updatedAt: 2, transcriptFile: sidecar, transcript: [{ id: 'm', kind: 'message', text: 'x', compact: true }] }];
+  await fs.writeFile(file, JSON.stringify(saved));
+
+  const reads = [];
+  const readFile = fs.readFile;
+  t.mock.method(fs, 'readFile', (...args) => { reads.push(String(args[0])); return readFile(...args); });
+  const second = make();
+  await second.resumeRecentProjects();
+  assert.deepEqual(reads.filter(name => name.includes('subagents')), [], 'no transcript sidecar is hydrated');
+  // Hydration resolves (and creates) the content folder; the raw read must not.
+  await assert.rejects(fs.stat(path.join(project, '.milagre/subagents')), { code: 'ENOENT' });
+  await assert.rejects(second.invoke('project:snapshot', [project]), /Open the project/);
+  await second.close();
+
+  saved.sessions[session.id].resumeTurn = { stoppedAt: 0 };
+  await fs.writeFile(file, JSON.stringify(saved));
+  const third = make();
+  await third.resumeRecentProjects();
+  assert.equal((await third.invoke('project:snapshot', [project])).path, project);
+});

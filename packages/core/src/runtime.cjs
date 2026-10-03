@@ -37,7 +37,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
-const { saveProjectState, readProjectState } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -118,6 +118,16 @@ function createRuntime(options) {
     await ownProject(projectPath);
     try {
       return await readProjectState(projectPath);
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  /** The saved state as written, without hydrating subagent transcripts or taking ownership; null when there is none. */
+  async function readRawState(projectPath) {
+    try {
+      return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
     } catch (error) {
       if (error.code === "ENOENT") return null;
       throw error;
@@ -529,7 +539,8 @@ function createRuntime(options) {
   async function resumeRecentProjects() {
     for (const { path: projectPath } of await recentProjects().list()) {
       try {
-        const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+        // The raw JSON is enough to find a pending turn; only a project that has one is loaded (and hydrated) in full.
+        const stored = states.has(projectPath) ? null : await readRawState(projectPath);
         if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
         await readProject(projectPath);
       } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }

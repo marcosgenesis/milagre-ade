@@ -36,7 +36,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
-const { saveProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
@@ -117,7 +117,7 @@ function createRuntime(options) {
   async function readStoredState(projectPath) {
     await ownProject(projectPath);
     try {
-      return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
+      return await readProjectState(projectPath);
     } catch (error) {
       if (error.code === "ENOENT") return null;
       throw error;
@@ -141,6 +141,14 @@ function createRuntime(options) {
     const result = await states.update(projectPath, change);
     if (result.changed) broadcastProjectState(projectPath, result.state);
     return result.state;
+  }
+
+  // Explicit user edits keep their existing error contract. The flush waits outside
+  // the mutation queue, so other Chats continue receiving streaming events.
+  async function editProject(projectPath, change) {
+    const result = await states.update(projectPath, change);
+    await states.flush(projectPath);
+    if (result.changed) broadcastProjectState(projectPath, result.state);
   }
 
   const diffs = new DiffRefresher({ states, readDiffStat, update: updateProject });
@@ -335,6 +343,7 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
+    isRunning: () => [...agents.sessions.values()].some(entry => entry.session.turnActive),
     roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
     publish: (next) => {
       emit("agent:ports", next);
@@ -426,10 +435,10 @@ function createRuntime(options) {
     if (!states.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
     return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
   });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? updateProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
+  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
-  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? updateProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
-  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (states.has(projectPath) ? updateProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
+  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
+  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
   // What the "Commit and open PR" dialog did, as a line in its chat.
   commands.handle("chat:git-note", (_event, chatId, body) => {
     if (typeof chatId !== "string" || typeof body !== "string" || !states.has(projectOfKey(chatId))) return undefined;
@@ -492,12 +501,14 @@ function createRuntime(options) {
     if (notice) options.notifyWaiting({ chatId, requestId: event.requestId, ...notice });
   }
 
+  let shownProjectPath = null;
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
   async function openProject(projectPath) {
     const project = await readProject(projectPath);
     await rememberProject(recentProjects(), projectPath);
+    shownProjectPath = projectPath;
     return project;
   }
 
@@ -556,7 +567,7 @@ function createRuntime(options) {
     openProject: projectPath => accept(() => openProject(projectPath)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
-    focused: () => accept(() => { diffs.focused(); return readOpenChat(); }),
+    focused: () => accept(() => { diffs.focused(shownProjectPath); return readOpenChat(); }),
     close,
   };
 }

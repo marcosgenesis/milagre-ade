@@ -48,7 +48,7 @@ const snapshot = projectPath => ({ project: { path: projectPath, state: { sessio
 function sessionHost(client) {
   const react = hookHost();
   const { useSessionState } = load('session.tsx', {
-    react, 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
+    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
     './connection-native': { savedConnection: { save: async () => {}, forget: async () => {} } },
   }, '\nexport { useSessionState };');
   return () => { react.begin(); return useSessionState(); };

@@ -1,3 +1,4 @@
+const { storeImages } = require("../project-content.cjs");
 const { ipcErrorMessage } = require("@milagre/shared/result");
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { patchSession } = require("@milagre/shared/project-edits");
@@ -65,8 +66,8 @@ class ChatHost {
       const unread = isTurnEnd(event) && (chatId !== this.openChat || !this.isFocused()) && !result.state.sessions[sessionId]?.archived;
       const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
       return isTurnEnd(event) ? this.withNotes(next, chatId) : next;
-    }).then(
-      ({ state, changed }) => this.publish(chatId, event, changed ? state : undefined, seq),
+    }, { persist: event.type !== "subagent-update" }).then(
+      ({ state, changed }) => this.publish(chatId, event.type === "subagent-update" && changed ? { ...event, agent: state.sessions[sessionId].subagents.find(agent => agent.id === event.agent.id) } : event, changed && event.type !== "subagent-update" ? state : undefined, seq),
       (error) => {
         console.warn(`Milagre couldn't record an agent event for ${chatId}:`, error.message);
         this.publish(chatId, event);
@@ -90,7 +91,10 @@ class ChatHost {
       messageId = result.messageId;
       return result.state;
     });
-    if (changed) this.publish(chatId, { type: "answers-sent" }, state, seq);
+    if (changed) {
+      await this.states.flush(projectPath);
+      this.publish(chatId, { type: "answers-sent" }, state, seq);
+    }
     return messageId;
   }
 
@@ -126,6 +130,7 @@ class ChatHost {
    */
   async send(request) {
     const { projectPath, body, images = [], files = [], provider, model } = request;
+    const storedImages = await storeImages(projectPath, images);
     let target = null;
     let seq;
     let brief;
@@ -149,7 +154,7 @@ class ChatHost {
       this.runs = sent.runs;
       seq = ++this.seq;
       const next = sent.state;
-      const message = { id: next.next_id, session_id: session.id, body, images, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
+      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {
         ...next,
@@ -158,6 +163,7 @@ class ChatHost {
         messages: [...next.messages, message],
       };
     });
+    await this.states.flush(projectPath);
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
     const turn = {

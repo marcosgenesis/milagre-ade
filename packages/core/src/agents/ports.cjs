@@ -146,8 +146,8 @@ const run = (command, args) => new Promise((resolve) => {
  * whenever they change.
  */
 class PortWatcher {
-  constructor({ roots, publish, pollMs = POLL_MS, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000 }) {
-    Object.assign(this, { roots, publish, pollMs, exec, kill, graceMs });
+  constructor({ roots, publish, pollMs = POLL_MS, idlePollMs = 15_000, isRunning = () => true, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000 }) {
+    Object.assign(this, { roots, publish, pollMs, idlePollMs, isRunning, exec, kill, graceMs });
     this.groups = new Map();
     this.processes = new Map();
     this.ports = {};
@@ -162,12 +162,14 @@ class PortWatcher {
 
   /** Starts polling, if it isn't already; call when an agent's turn starts. */
   wake() {
-    if (this.timer || this.polling) return;
+    if (this.closed || this.polling) return;
+    clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.poll(), 0);
     this.timer.unref?.();
   }
 
   close() {
+    this.closed = true;
     clearTimeout(this.timer);
     this.timer = null;
   }
@@ -199,6 +201,7 @@ class PortWatcher {
   }
 
   async poll() {
+    if (this.closed || this.polling) return;
     clearTimeout(this.timer);
     this.timer = null;
     this.polling = true;
@@ -215,8 +218,8 @@ class PortWatcher {
         const listeners = pids.length ? parseLsof(await this.exec("lsof", ["-nP", "-a", "-p", pids.join(","), "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])) : [];
         this.set(chatPorts(listeners, byChat));
       } else this.set({});
-      if (this.roots().size || this.groups.size) {
-        this.timer = setTimeout(() => void this.poll(), this.pollMs);
+      if (!this.closed && (this.roots().size || this.groups.size)) {
+        this.timer = setTimeout(() => void this.poll(), this.isRunning() ? this.pollMs : this.idlePollMs);
         this.timer.unref?.();
       }
     } finally {
@@ -225,6 +228,7 @@ class PortWatcher {
   }
 
   set(ports) {
+    if (this.closed) return;
     if (JSON.stringify(ports) === JSON.stringify(this.ports)) return;
     this.ports = ports;
     this.publish(ports);

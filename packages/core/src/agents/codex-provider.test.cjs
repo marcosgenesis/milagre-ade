@@ -611,38 +611,40 @@ test("TLDR can be disabled when starting or resuming Codex", async (t) => {
   }
 });
 
-test('reads child history without resuming it and keeps child completion separate from parent', async () => {
- const events=[];
- const session=new CodexSession({emit:e=>events.push(e)});
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
- session.rpc={request:async(method,params)=>{
-  assert.equal(method,'thread/read');
-  assert.deepEqual(params,{threadId:'child',includeTurns:true});
-  return {thread:{id:'child',turns:[{id:'child-turn',status:'completed',items:[{type:'agentMessage',id:'answer',text:'Review finished'}]}]}};
- }};
- await session.refreshSubagents();
- assert.equal(events.some(e=>e.type==='turn-completed'),false);
+function childPoller(request) {
+ const events=[];const session=new CodexSession({emit:e=>events.push(e)});
+ session.state.threadId='parent';session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
+ session.rpc={request};return {session,events};
+}
+
+test('reads paginated child history without resuming and keeps completion separate from parent',async()=>{
+ const {session,events}=childPoller(async(method,params)=>{
+  if(method==='thread/read'){assert.deepEqual(params,{threadId:'child'});return {thread:{id:'child',status:{type:'idle'}}};}
+  assert.equal(method,'thread/turns/list');assert.equal(params.itemsView,'full');assert.equal(params.sortDirection,'desc');
+  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null,backwardsCursor:'anchor-t'};
+ });
+ await session.refreshSubagents();assert.equal(events.some(e=>e.type==='turn-completed'),false);
  const child=events.filter(e=>e.type==='subagent-update').at(-1).agent;
- assert.equal(child.status,'completed');
- assert.equal(child.transcript[0].text,'Review finished');
+ assert.equal(child.status,'completed');assert.equal(child.transcript[0].text,'Paged result');
 });
 
-test('child history falls back to paginated threads when full reads are rejected', async () => {
- const events=[];
- const session=new CodexSession({emit:e=>events.push(e)});
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
- session.rpc={request:async(method,params)=>{
-  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('paginated history'),{rpcError:true});
-  if(method==='thread/read') return {thread:{id:'child',status:{type:'idle'}}};
-  assert.equal(method,'thread/turns/list');
-  assert.equal(params.itemsView,'full');
-  assert.equal(params.sortDirection,'desc');
-  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null};
- }};
- await session.refreshSubagents();
- assert.equal(events.filter(e=>e.type==='subagent-update').at(-1)?.agent.transcript[0].text,'Paged result');
+test('child polling starts at the last turn, follows pages and updates active items with the same id',async()=>{
+ let round=0;const calls=[];
+ const turn=(id,text,status='completed')=>({id,status,items:[{id:'message-'+id,type:'agentMessage',text}]});
+ const {session,events}=childPoller(async(method,params)=>{
+  assert.ok(!params.includeTurns);if(method==='thread/read')return {thread:{id:'child',status:{type:'active'}}};
+  assert.equal(method,'thread/turns/list');calls.push(params);
+  if(params.sortDirection==='desc')return {data:[turn(round===2?'t3':'t1',round===0?'Partial':'Complete',round===0?'inProgress':'completed')],backwardsCursor:round===2?'anchor-3':'anchor-1',nextCursor:null};
+  assert.equal(params.sortDirection,'asc');assert.equal(params.cursor,round===3?'anchor-3':params.cursor);
+  if(params.cursor==='page-2')return {data:[turn('t3','Third')],nextCursor:null};
+  assert.equal(params.cursor,round===3?'anchor-3':'anchor-1');
+  return {data:round===1?[turn('t1','Complete')]:round===2?[turn('t1','Complete'),turn('t2','Second')]:[turn('t3','Third')],nextCursor:round===2?'page-2':null};
+ });
+ await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Partial');
+ round=1;await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Complete');
+ round=2;await session.refreshSubagents();assert.deepEqual(events.at(-1).agent.transcript.map(x=>x.text),['Complete','Second','Third']);
+ const count=events.length;round=3;await session.refreshSubagents();assert.equal(events.length,count,'unchanged completed ids emit nothing');
+ assert.ok(calls.some(p=>p.cursor==='page-2'));
 });
 
 test("a generated image Codex didn't save is written out from its base64", () => {

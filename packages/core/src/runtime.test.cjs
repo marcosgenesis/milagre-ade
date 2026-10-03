@@ -154,3 +154,14 @@ test('opening a linked checkout cannot bypass the repository runtime owner', asy
   await assert.rejects(other.openProject(linked), /already owned/);
   await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
 });
+
+test('Chat edits still report a disk failure while streaming writes are deferred',async t=>{
+ const {project,make}=await fixture(t);const runtime=make();const opened=await runtime.openProject(project);
+ const session=Object.values(opened.state.sessions)[0];const rename=fs.rename;let fail=true;
+ t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
+ for(const [method,args] of [['chat:patch',[project,session.id,{title:'Keep my title'}]],['chat:archive-subagent',[project,session.id,'none',true]],['chat:archive-finished-subagents',[project,session.id]]]) {
+  await assert.rejects(runtime.invoke(method,args),/disk full/);
+ }
+ fail=false;await runtime.close();
+ assert.equal(JSON.parse(await fs.readFile(path.join(project,'.milagre/coordination.json'),'utf8')).sessions[session.id].title,'Keep my title');
+});

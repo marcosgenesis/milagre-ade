@@ -163,7 +163,10 @@ export interface ImageAttachment {
   path?: string;
   id: string;
   name: string;
-  dataUrl: string;
+  /** Draft and legacy images use dataUrl; persisted images use path. */
+  dataUrl?: string;
+  /** Original file attachment when path points at the durable image copy. */
+  sourcePath?: string;
 }
 
 /** What an agent asks to do, as shown on the approval card. */

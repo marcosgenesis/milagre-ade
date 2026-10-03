@@ -39,7 +39,11 @@
       "default": "./src/git-codes.mjs"
     },
     "./model-options": "./src/model-options.ts",
-    "./model-copy": "./src/model-copy.ts"
+    "./model-copy": "./src/model-copy.ts",
+    "./reconcile": {
+      "types": "./src/reconcile.d.mts",
+      "default": "./src/reconcile.mjs"
+    }
   },
   "files": [
     "src/*.mjs",

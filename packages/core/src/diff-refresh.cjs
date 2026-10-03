@@ -16,12 +16,21 @@ class DiffRefresher {
   constructor({ states, readDiffStat, update, debounceMs = EDIT_DEBOUNCE, throttleMs = FOCUS_THROTTLE, now = Date.now }) {
     Object.assign(this, { states, readDiffStat, update, debounceMs, throttleMs, now });
     this.timers = new Map();
-    this.lastFocus = -Infinity;
+    this.lastFocus = new Map();
+    this.thinking = new Map();
+    this.pending = [];
+    this.active = 0;
   }
 
   /** Re-reads a chat's worktree shortly after one of its agent's tool steps or turns ends. */
   observe(chatId, event) {
     if (this.closed) return;
+    if (event.type === "step-started" && event.step?.kind === "thinking") {
+      if (!this.thinking.has(chatId)) this.thinking.set(chatId, new Set());
+      this.thinking.get(chatId).add(event.step.id);
+    }
+    if (event.type === "step-completed" && this.thinking.get(chatId)?.delete(event.id)) return;
+    if (isTurnEnd(event)) this.thinking.delete(chatId);
     if (event.type !== "step-completed" && !isTurnEnd(event)) return;
     clearTimeout(this.timers.get(chatId));
     const timer = setTimeout(() => {
@@ -32,18 +41,38 @@ class DiffRefresher {
     this.timers.set(chatId, timer);
   }
 
-  /** Re-reads every project read this run, at most once per throttle period. */
+  /** Cancels queued reads; an already running Git process is allowed to finish. */
   close() {
     this.closed = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.thinking.clear();
+    for (const job of this.pending.splice(0)) job.resolve(null);
   }
 
-  focused() {
-    if (this.closed) return;
-    if (this.now() - this.lastFocus < this.throttleMs) return;
-    this.lastFocus = this.now();
-    for (const projectPath of this.states.projects()) void this.refresh(projectPath).catch(() => {});
+  /** Refresh only the Project currently on screen. Switching Projects has its own throttle. */
+  focused(projectPath) {
+    if (this.closed || !projectPath || !this.states.has(projectPath)) return;
+    if (this.now() - (this.lastFocus.get(projectPath) ?? -Infinity) < this.throttleMs) return;
+    this.lastFocus.set(projectPath, this.now());
+    void this.refresh(projectPath).catch(() => {});
+  }
+
+  read(worktree) {
+    if (this.closed || !worktree) return Promise.resolve(null);
+    return new Promise(resolve => {
+      this.pending.push({worktree, resolve});
+      this.drain();
+    });
+  }
+
+  drain() {
+    while (!this.closed && this.active < 4 && this.pending.length) {
+      const {worktree, resolve} = this.pending.shift();
+      this.active++;
+      Promise.resolve().then(() => this.readDiffStat(worktree.path, worktree.base))
+        .catch(() => null).then(resolve).finally(() => { this.active--; this.drain(); });
+    }
   }
 
   async refreshChat(chatId) {
@@ -55,11 +84,12 @@ class DiffRefresher {
 
   /** Re-reads the given worktrees, or every worktree that has a chat, and saves their stats. */
   async refresh(projectPath, worktreeIds) {
+    if (this.closed) return;
     const state = await this.states.get(projectPath);
     const ids = worktreeIds ?? [...new Set(state.messages.map((message) => state.sessions[message.session_id]?.worktree_id).filter((id) => id !== undefined))];
     const stats = await Promise.all(ids.map(async (id) => {
       const worktree = state.worktrees[id];
-      return [id, worktree ? await this.readDiffStat(worktree.path, worktree.base).catch(() => null) : null];
+      return [id, await this.read(worktree)];
     }));
     if (this.closed) return;
     // Applied to the latest state: turns may have finished while git ran.

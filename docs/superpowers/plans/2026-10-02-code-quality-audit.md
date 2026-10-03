@@ -124,13 +124,13 @@ When the tasks you took are merged, or you stop:
 - Related, lower: `diff-refresh.cjs:35-39` refreshes every Worktree of every read Project on window focus with no concurrency cap and 4 to 7 git spawns each; `ports.cjs:201-221` runs `ps -axo` every 3 s for ten minutes after the last turn.
 
 **Steps:**
-- [ ] Failing test: a `subagent-update` must not call `save`; the agent's transcript is still visible to a window that connects later (served from memory like `runs`).
-- [ ] Keep subagent transcripts in memory; persist a compact summary at turn end only. Publish just the changed agent to windows.
-- [ ] Failing test: an image attached to a message is stored under `<project>/.milagre/images/<id>.<ext>` and the message carries a path; old messages with `dataUrl` still render.
-- [ ] Write-behind saves: update memory synchronously, save on a trailing debounce (about 250 ms), keep `flush()` for quit. Drop the `null, 2` indent. Delete `project-store`'s queue and `savesSettled`.
-- [ ] Renderer: reconcile incoming state against the previous one by message id so unchanged messages keep their identity (or send deltas).
-- [ ] Codex polling: page with `thread/turns/list` from the last seen turn; compare item ids, not JSON.
-- [ ] Diff refresh: cap concurrency at 4, refresh only the Project on screen on focus, ignore `kind: "thinking"` steps. Ports: back off to 15 s when no turn runs.
+- [x] Failing test: a `subagent-update` must not call `save`; the agent's transcript is still visible to a window that connects later (served from memory like `runs`).
+- [x] Keep subagent transcripts in memory; persist a compact summary at turn end only. Publish just the changed agent to windows.
+- [x] Failing test: an image attached to a message is stored under `<project>/.milagre/images/<id>.<ext>` and the message carries a path; old messages with `dataUrl` still render.
+- [x] Write-behind saves: update memory synchronously, save on a trailing debounce (about 250 ms), keep `flush()` for quit. Drop the `null, 2` indent. Delete `project-store`'s queue and `savesSettled`.
+- [x] Renderer: reconcile incoming state against the previous one by message id so unchanged messages keep their identity (or send deltas).
+- [x] Codex polling: page with `thread/turns/list` from the last seen turn; compare item ids, not JSON.
+- [x] Diff refresh: cap concurrency at 4, refresh only the Project on screen on focus, ignore `kind: "thinking"` steps. Ports: back off to 15 s when no turn runs.
 
 **Acceptance:** a streaming turn with an active subagent writes the state file at most once per 250 ms; a 4.9 MB Project file shrinks to its text; a token batch in Chat A is not delayed by a save in Chat B (test with an injected slow `save`).
 

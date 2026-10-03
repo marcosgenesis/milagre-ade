@@ -132,3 +132,21 @@ test("a port that ignores SIGTERM gets SIGKILL", async () => {
   assert.deepEqual(signals.at(-1), [-110, "SIGKILL"]);
   watcher.close();
 });
+
+
+test("idle agent ports poll every 15 seconds and wake immediately for a new turn", async t => {
+ t.mock.timers.enable({apis:['setTimeout']});let running=false,calls=0;
+ const watcher=new PortWatcher({roots:()=>new Map([['/a#1',{pid:100}]]),isRunning:()=>running,publish:()=>{},exec:async command=>{if(command==='ps'){calls++;return PS;}return LSOF;}});
+ t.after(()=>watcher.close());await watcher.poll();assert.equal(calls,1);
+ t.mock.timers.tick(14999);await Promise.resolve();assert.equal(calls,1);
+ t.mock.timers.tick(1);for(let i=0;i<10;i++)await Promise.resolve();assert.equal(calls,2);
+ running=true;watcher.wake();t.mock.timers.tick(1);for(let i=0;i<10;i++)await Promise.resolve();assert.equal(calls,3);
+ t.mock.timers.tick(3000);for(let i=0;i<10;i++)await Promise.resolve();assert.equal(calls,4);
+});
+
+test("closing during a port poll does not publish or restart polling", async () => {
+ let release;const result=new Promise(resolve=>release=resolve);const published=[];
+ const watcher=new PortWatcher({roots:()=>new Map([['/a#1',{pid:100}]]),publish:p=>published.push(p),exec:async command=>command==='ps'?result:LSOF});
+ const poll=watcher.poll();watcher.close();release(PS);await poll;
+ assert.equal(watcher.timer,null);assert.deepEqual(published,[]);
+});

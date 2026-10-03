@@ -1,3 +1,5 @@
+import { reconcileState } from "@milagre/shared/reconcile";
+import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
@@ -316,7 +318,7 @@ function App() {
   }, [selectedSession?.id, selectedSession?.provider]);
 
   function receiveState(projectPath: string, next: CoordinatorState) {
-    statesRef.current = { ...statesRef.current, [projectPath]: next };
+    statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
   }
 
@@ -472,6 +474,11 @@ function App() {
 
   // A turn that ends in the open project while Milagre is in the background gets a completion alert.
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
+    if (event.type === "subagent-update") {
+      const path = projectOfKey(chatId);
+      const cached = statesRef.current[path];
+      if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
+    }
     const current = projectRef.current;
     const latest = openState();
     if (!current || !latest || !chatInProject(current.path, chatId)) return;

@@ -19,9 +19,9 @@ test("compares versions part by part", () => {
   assert.equal(isAtLeast([2, 1, 285], "2.1.286"), false);
   assert.equal(isAtLeast([2, 2, 0], "2.1.286"), true);
   assert.equal(isAtLeast([2, 0, 77], "2.1.286"), false);
-  assert.equal(isAtLeast([0, 157, 9], "0.158.0"), false);
-  assert.equal(isAtLeast([0, 160, 0], "0.158.0"), true);
-  assert.equal(isAtLeast([1, 0, 0], "0.158.0"), true);
+  assert.equal(isAtLeast([0, 159, 9], "0.160.0"), false);
+  assert.equal(isAtLeast([0, 160, 0], "0.160.0"), true);
+  assert.equal(isAtLeast([1, 0, 0], "0.160.0"), true);
 });
 
 test("the Claude minimum is the Claude Code release the pinned SDK is built against", () => {
@@ -46,11 +46,14 @@ test("a missing, outdated or broken CLI comes with the message the turn fails wi
   assert.deepEqual(await inspectCli("codex", { resolve }), { command: null, version: null, problem: missingCliMessage("codex") });
   assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), { command: "/Users/x/.local/bin/claude", version: "2.1.200", problem: cliTooOldMessage("claude", "2.1.200", "2.1.286") });
   assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ error: "Killed: 9" }) }), { command: "/Users/x/.local/bin/claude", version: null, problem: cliBrokenMessage("claude", "/Users/x/.local/bin/claude", "Killed: 9") });
+  // codex-cli 0.158.0 runs, but doesn't know GPT-6.1 Sol; the picker offers the update.
+  const codex = async () => "/opt/homebrew/bin/codex";
+  assert.deepEqual(await inspectCli("codex", { resolve: codex, version: async () => ({ output: "codex-cli 0.158.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.158.0", problem: cliTooOldMessage("codex", "0.158.0", "0.160.0") });
 });
 
 test("a current CLI, or one whose version can't be read, is used as is", async () => {
   const resolve = async () => "/opt/homebrew/bin/codex";
-  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli 0.158.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.158.0" });
+  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli 0.160.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.160.0" });
   assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli dev build" }) }), { command: "/opt/homebrew/bin/codex", version: null });
 });
 

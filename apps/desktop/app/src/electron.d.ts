@@ -107,6 +107,9 @@ declare global {
       openProject: () => Promise<OpenProject | null>;
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
+      /** Every opened Project, seeded once from existing coordination files. */
+      listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
+      setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       /** Opens a project from the recent list. Rejects for a path that isn't listed or isn't a checkout's top folder. */
       switchProject: (projectPath: string) => Promise<OpenProject>;
       /** Takes a project off the recent list (its folder is untouched) and resolves to the list. */

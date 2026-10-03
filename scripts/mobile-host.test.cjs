@@ -41,3 +41,21 @@ test('host refuses an unsafe token file and releases ownership on failed startup
   await assert.rejects(startMobileHost({ dataDir, port: 0 }), /private|permissions/);
   await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' });
 });
+
+test('--cloudflare runs the saved named tunnel on its port and pairs with the Access token', async t => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-host-')));
+  const access = { id: `${'c'.repeat(32)}.access`, secret: 'Secret_with-mixed'.padEnd(43, 'z') };
+  await fs.writeFile(path.join(dataDir, 'cloudflare.json'), JSON.stringify({ hostname: 'mac.example.cloud', port: 0, tunnelId: 't', connectorToken: 'connector', access }), { mode: 0o600 });
+  const started = [];
+  let closed = 0;
+  const tunnels = { startNamedTunnel: async options => { started.push(options); return { url: 'https://mac.example.cloud', close: async () => { closed++; } }; } };
+  const host = await startMobileHost({ dataDir, tunnel: 'cloudflare', tunnels, runtimeOptions: { titleModels: {} } });
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  assert.deepEqual(started, [{ hostname: 'mac.example.cloud', connectorToken: 'connector' }]);
+  assert.equal(host.url, 'https://mac.example.cloud');
+  assert.deepEqual(host.access, access);
+  assert.equal(JSON.parse(await fs.readFile(host.connectionFile, 'utf8')).url, 'https://mac.example.cloud');
+  await host.close();
+  assert.equal(closed, 1);
+  await assert.rejects(startMobileHost({ dataDir, tunnel: 'quick', publicUrl: 'https://x.example' }), /either a tunnel or --public-url/);
+});

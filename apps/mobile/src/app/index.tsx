@@ -23,7 +23,7 @@ export default function ComputersScreen() {
     setStatus(Object.fromEntries(hosts.map(host => [host.id, 'checking'])));
     await Promise.all(hosts.map(async host => {
       let next: Reachability = 'offline';
-      try { await createClient(host.address, host.token, fetch, 5000).call('daemon:status'); next = 'online'; } catch { /* unreachable */ }
+      try { await createClient(host.address, host.token, fetch, 5000, host.access).call('daemon:status'); next = 'online'; } catch { /* unreachable */ }
       setStatus(current => ({ ...current, [host.id]: next }));
     }));
   }, []);
@@ -31,9 +31,9 @@ export default function ComputersScreen() {
     try { const hosts = await session.loadHosts(); setError(''); void check(hosts); return hosts; }
     catch (e) { setError((e as Error).message); return []; }
   }, [session.loadHosts, check]); // eslint-disable-line react-hooks/exhaustive-deps
-  async function open(host: { address: string; token: string; name: string }) {
+  async function open(host: { address: string; token: string; name: string; access?: SavedHost['access'] }) {
     setBusy(host.address); setError('');
-    try { if (await session.connect(host.address, host.token, !DEMO, host.name)) router.push('/projects'); }
+    try { if (await session.connect(host.address, host.token, !DEMO, host.name, host.access)) router.push('/projects'); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }

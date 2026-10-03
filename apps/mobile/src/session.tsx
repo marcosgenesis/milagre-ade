@@ -1,7 +1,7 @@
 import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
 import { savedHosts } from './hosts-native';
 import type { SavedHost } from './hosts-store';
 import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
@@ -45,8 +45,8 @@ function useSessionState() {
   }, []);
   // Saved computers are read once at launch; the startup splash waits for them.
   useEffect(() => { void savedHosts.list().then(setHosts).catch(() => {}).finally(() => setBooted(true)); }, []);
-  const connect = async (address: string, token: string, remember = true, name = '') => {
-    const next = createClient(address, token);
+  const connect = async (address: string, token: string, remember = true, name = '', access?: Access) => {
+    const next = createClient(address, token, undefined, undefined, access);
     const current = ++generation.current;
     const previous = selection.current;
     selection.current = null;
@@ -56,7 +56,7 @@ function useSessionState() {
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== '1') {
         if (remember) {
-          try { await savedHosts.save({ name: name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url), address: next.url, token: token.trim() }); }
+          try { await savedHosts.save({ name: name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url), address: next.url, token: token.trim(), ...(access ? { access } : {}) }); }
           catch { throw new Error('Could not save this computer on your device. Try pairing again.'); }
           void loadHosts().catch(() => {});
         }

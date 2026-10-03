@@ -41,3 +41,12 @@ test('printing shows the QR unless disabled, always the link and the warning', (
     assert.equal(out.includes(`QR(${link})`), qr);
   }
 });
+
+test('a Cloudflare Access token rides in the link only with an HTTPS address', () => {
+  const access = { id: `${'c'.repeat(32)}.access`, secret: 'Secret_with-mixed'.padEnd(43, 'z') };
+  const parsed = new URL(pairingLink({ address: 'https://mac.example.cloud', token, name: 'Mac', access }));
+  assert.equal(parsed.searchParams.get('cfId'), access.id);
+  assert.equal(parsed.searchParams.get('cfSecret'), access.secret);
+  assert.throws(() => pairingLink({ address: 'http://127.0.0.1:8797', token, name: 'Mac', access }), /HTTPS/);
+  assert.throws(() => pairingLink({ address: 'https://mac.example.cloud', token, name: 'Mac', access: { id: 'nope', secret: access.secret } }), /\.access/);
+});

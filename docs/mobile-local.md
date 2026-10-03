@@ -77,7 +77,22 @@ npm run daemon -- stop --data-dir /tmp/milagre-local-profile
 
 The connection token is regenerated on each bridge launch. Use a new connection-file path or remove the old file after its bridge has stopped. With Remember this computer selected, the mobile app keeps the token in platform secure storage. Turn it off for a connection held only in memory. Failed sends retain the draft and are never automatically retried; check the Chat after reconnecting before sending again.
 
-## Connect through HTTPS
+## Connect from any network (Cloudflare)
+
+A named Cloudflare tunnel gives the Mac a fixed HTTPS address, and Cloudflare Access drops every request that lacks the phone's service token before it reaches the Mac. The bridge still checks its own token on top.
+
+One-time setup, with a domain whose DNS is on Cloudflare and Zero Trust enabled on the account (the Free plan is enough):
+
+1. Create an API token (My Profile → API Tokens → Custom token) with Account → Cloudflare Tunnel: Edit, Access: Apps and Policies: Edit, Access: Service Tokens: Edit, and Zone → DNS: Edit for that domain.
+2. Run `CLOUDFLARE_API_TOKEN=... npm run mobile:cloudflare -- --domain example.com`. It creates `mac.example.com`, the tunnel pointing at `127.0.0.1:8797`, the Access app and its service token, and saves them to `~/.milagre-mobile/cloudflare.json` (0600). Running it again reuses everything; `--name` picks another subdomain for a second Mac.
+
+Then start the host with `npm run mobile:host -- --cloudflare` and scan the QR code. The pairing link carries the Access service token, which the app keeps in secure storage with the bridge token. Anyone holding the QR code can reach the Mac, so treat it like a password. To revoke every paired phone, delete the service token in Zero Trust → Access → Service credentials and run `mobile:cloudflare` again.
+
+`npm run mobile:host -- --tunnel` opens a temporary Cloudflare Quick Tunnel instead: no account, a random `trycloudflare.com` address that changes on every start, and no Access in front.
+
+TLS ends at Cloudflare's edge, so Cloudflare can see the traffic. This is not an end-to-end encrypted relay.
+
+## Connect through your own HTTPS endpoint
 
 Use an HTTPS endpoint from your own reverse proxy, VPN or configured tunnel. It must forward to the loopback bridge and rewrite the Host header to that bridge's address. For an already configured ngrok account:
 

@@ -5,6 +5,15 @@ export type OpenProject = { path: string; name: string; state: CoordinatorState 
 export type Snapshot = { project: OpenProject; runs: { runs: AgentRuns } };
 export type RecentProject = { path: string; name?: string };
 
+/** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
+export type Access = { id: string; secret: string };
+export function validAccess(value: unknown): Access | undefined {
+  const access = value as Partial<Access> | undefined;
+  if (!access?.id && !access?.secret) return undefined;
+  if (!/^[a-f0-9]{32}\.access$/.test(String(access.id)) || !/^[A-Za-z0-9_-]{32,128}$/.test(String(access.secret))) throw new Error('This computer\'s Cloudflare access token is not valid. Scan its code again.');
+  return { id: String(access.id), secret: String(access.secret) };
+}
+
 export function localEndpoint(input: string): string {
   let url: URL;
   try { url = new URL(input.trim()); } catch { throw new Error('Enter your computer\'s HTTPS address or a local simulator address.'); }
@@ -15,8 +24,10 @@ export function localEndpoint(input: string): string {
   return url.origin;
 }
 
-export function createClient(address: string, token: string, fetcher: typeof fetch = fetch, timeoutMs = 30000) {
+export function createClient(address: string, token: string, fetcher: typeof fetch = fetch, timeoutMs = 30000, access?: Access) {
   const url = localEndpoint(address);
+  if (access && !url.startsWith('https:')) throw new Error('A Cloudflare access token needs an HTTPS address.');
+  const auth = { Authorization: `Bearer ${token.trim()}`, ...(access ? { 'CF-Access-Client-Id': access.id, 'CF-Access-Client-Secret': access.secret } : {}) };
   async function request<T>(route: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -24,7 +35,7 @@ export function createClient(address: string, token: string, fetcher: typeof fet
       let response: Response;
       try {
         response = await fetcher(url + route, { method: body === undefined ? 'GET' : 'POST',
-          headers: { Authorization: `Bearer ${token.trim()}`, 'Content-Type': 'application/json' },
+          headers: { ...auth, 'Content-Type': 'application/json' },
           body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, redirect: 'error' });
       } catch {
         throw new Error('Connection lost. Reconnect to your computer. Check the Chat before sending again.');
@@ -41,7 +52,7 @@ export function createClient(address: string, token: string, fetcher: typeof fet
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
     call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }),
     /** An image file on the computer, served by the bridge only from the Project's Worktrees and Milagre's image folders. */
-    media: (projectPath: string, path: string) => ({ uri: `${url}/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`, headers: { Authorization: `Bearer ${token.trim()}` } }),
+    media: (projectPath: string, path: string) => ({ uri: `${url}/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`, headers: auth }),
     snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
   };
 }

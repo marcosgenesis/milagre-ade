@@ -17,7 +17,6 @@ import {
   AgentModels,
   capabilityFor,
   effortFor,
-  supportsFastMode,
   sessionForWorktree,
   sortedWorktrees,
 } from "./model";
@@ -606,7 +605,7 @@ function App() {
         permissionMode: mode,
         effort: effortFor(capabilityFor(model, capabilities), effort),
         ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
-        fastMode: supportsFastMode(model) && fastMode,
+        fastMode: capabilityFor(model, capabilities).fastMode && fastMode,
         replies: getSettings().claudeReplies,
         tldrEnabled: getSettings().tldrEnabled,
       });
@@ -657,7 +656,7 @@ function App() {
         permissionMode,
         effort: effortFor(capability, effort),
         ultracode: capability.ultracode && ultracode,
-        fastMode: supportsFastMode(target) && fastMode,
+        fastMode: capability.fastMode && fastMode,
         replies: getSettings().claudeReplies,
         tldrEnabled: getSettings().tldrEnabled,
       });

@@ -1,15 +1,14 @@
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FilterHorizontalIcon, GitBranchIcon, PencilEdit02Icon, Search01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { GitBranchIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import type { AgentSession, Worktree } from '@milagre/shared/model';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
 import { chatMark, chatRecency, type ChatMark } from '../indicators';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
 import { Icon, ProviderLogo } from '../icons';
-import { ErrorNotice, HeaderButton, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, PullDown, colors, styles } from '../ui';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -36,7 +35,6 @@ function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentS
 
 export default function ChatsScreen() {
   const session = useSession();
-  const insets = useSafeAreaInsets();
   const [show, setShow] = useState<Show>('all');
   const [worktreeFilter, setWorktreeFilter] = useState<number | null>(null);
   const [query, setQuery] = useState('');
@@ -87,34 +85,40 @@ export default function ChatsScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: session.error ? colors.red : colors.green }} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, maxWidth: 200 }}>{session.hostName}</Text></View>
     </View>
   </PullDown>;
-  const filter = <PullDown label="Filter Chats" sections={[
-    { items: [{ id: 'new-worktree', title: 'New Worktree', systemImage: 'arrow.triangle.branch' }] },
-    { title: 'Show', items: ([['all', 'All Chats'], ['needs', 'Needs me'], ['running', 'Running'], ['archived', 'Archived']] as const).map(([id, title]) => ({ id: `show:${id}`, title, checked: show === id })) },
-    { title: 'Worktree', items: [{ id: 'worktree:all', title: 'All Worktrees', checked: worktreeFilter === null }, ...worktrees.map(item => ({ id: `worktree:${item.id}`, title: item.name, checked: worktreeFilter === item.id }))] },
-  ]} onSelect={id => {
-    if (id === 'new-worktree') router.push('/new-worktree');
-    else if (id.startsWith('show:')) setShow(id.slice(5) as Show);
-    else if (id === 'worktree:all') setWorktreeFilter(null);
-    else if (id.startsWith('worktree:')) setWorktreeFilter(Number(id.slice(9)));
-  }}><HeaderButton label="Filter Chats" icon={FilterHorizontalIcon} /></PullDown>;
+  const startChat = (id: number) => router.push({ pathname: '/chat', params: { worktreeId: String(id) } });
+  // Native bar items: iOS draws the glass toolbar, the bottom search field and their menus.
+  const toolbars = <>
+    <Stack.SearchBar placeholder="Search Chats" onChangeText={event => setQuery(event.nativeEvent.text)} onCancelButtonPress={() => setQuery('')} hideWhenScrolling={false} />
+    <Stack.Toolbar placement="right">
+      <Stack.Toolbar.Menu icon="line.3.horizontal.decrease" accessibilityLabel="Filter Chats">
+        <Stack.Toolbar.MenuAction icon="arrow.triangle.branch" onPress={() => router.push('/new-worktree')}>New Worktree</Stack.Toolbar.MenuAction>
+        <Stack.Toolbar.Menu inline title="Show">
+          {([['all', 'All Chats'], ['needs', 'Needs me'], ['running', 'Running'], ['archived', 'Archived']] as const).map(([id, title]) => <Stack.Toolbar.MenuAction key={id} isOn={show === id} onPress={() => setShow(id)}>{title}</Stack.Toolbar.MenuAction>)}
+        </Stack.Toolbar.Menu>
+        <Stack.Toolbar.Menu inline title="Worktree">
+          <Stack.Toolbar.MenuAction isOn={worktreeFilter === null} onPress={() => setWorktreeFilter(null)}>All Worktrees</Stack.Toolbar.MenuAction>
+          {worktrees.map(item => <Stack.Toolbar.MenuAction key={item.id} isOn={worktreeFilter === item.id} onPress={() => setWorktreeFilter(item.id)}>{item.name}</Stack.Toolbar.MenuAction>)}
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar.Menu>
+    </Stack.Toolbar>
+    <Stack.Toolbar placement="bottom">
+      <Stack.Toolbar.SearchBarSlot />
+      <Stack.Toolbar.Spacer />
+      {show !== 'archived' && newChatWorktree !== undefined && (worktrees.length > 1
+        ? <Stack.Toolbar.Menu icon="square.and.pencil" title="New Chat in" accessibilityLabel="New Chat">{worktrees.map(item => <Stack.Toolbar.MenuAction key={item.id} icon="arrow.triangle.branch" isOn={item.id === newChatWorktree} onPress={() => startChat(item.id)}>{item.name}</Stack.Toolbar.MenuAction>)}</Stack.Toolbar.Menu>
+        : <Stack.Toolbar.Button icon="square.and.pencil" accessibilityLabel="New Chat" onPress={() => startChat(newChatWorktree)} />)}
+    </Stack.Toolbar>
+  </>;
   const empty = show === 'archived' ? 'No archived Chats.' : show !== 'all' || query || worktreeFilter !== null ? 'No Chats match this filter.' : worktrees.length ? 'No Chats yet. Start one below.' : 'Open a Git repository to start a Chat.';
   return <View style={styles.screen}>
-    <Stack.Screen options={{ headerTitle: () => switcher, headerRight: () => filter }} />
+    <Stack.Screen options={{ headerTitle: () => switcher }} />
+    {toolbars}
     <FlatList data={rows} keyExtractor={row => String(row.chat.id)} contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void session.refresh().catch(e => setError(e.message)).finally(() => setRefreshing(false)); }} />}
       ItemSeparatorComponent={() => <View style={[styles.separator, { marginLeft: 52 }]} />}
       ListHeaderComponent={error || session.error ? <View style={{ padding: 16 }}><ErrorNotice message={error || session.error} retry={session.error ? () => router.dismissTo('/') : undefined} /></View> : null}
       ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingTop: 64, paddingHorizontal: 32 }]}>{empty}</Text>}
-      contentContainerStyle={{ paddingBottom: 110 }}
+      contentContainerStyle={{ paddingBottom: 24 }}
       renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id) } })} onAction={action => void act(item.chat, action)} />} />
-    <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: 10, alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: Math.max(insets.bottom, 16) }}>
-      <View style={{ flex: 1, height: 48, borderRadius: 24, borderCurve: 'continuous', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, boxShadow: '0 4px 16px #0000000f' }}>
-        <Icon icon={Search01Icon} tone="ink3" size={18} />
-        <TextInput accessibilityLabel="Search Chats" placeholder="Search Chats" placeholderTextColor={colors.ink3} value={query} onChangeText={setQuery} returnKeyType="search" style={{ flex: 1, color: colors.ink, fontSize: 16 }} />
-      </View>
-      {newChatWorktree !== undefined && show !== 'archived' && <PullDown label="New Chat in another Worktree" longPress sections={[{ title: 'New Chat in', items: worktrees.map(item => ({ id: String(item.id), title: item.name, checked: item.id === newChatWorktree, systemImage: 'arrow.triangle.branch' })) }]} onSelect={id => router.push({ pathname: '/chat', params: { worktreeId: id } })}>
-        <PillButton title="Chat" icon={PencilEdit02Icon} onPress={() => router.push({ pathname: '/chat', params: { worktreeId: String(newChatWorktree) } })} style={{ height: 48, borderRadius: 24, boxShadow: '0 4px 16px #00000026' }} />
-      </PullDown>}
-    </View>
   </View>;
 }

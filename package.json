@@ -10,7 +10,7 @@
     "build": "npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
     "start": "npm run start --workspace milagre",
     "typecheck": "npm run typecheck --workspace @milagre/shared && npm run typecheck --workspace milagre",
-    "test:agent": "npm run test --workspace @milagre/shared && npm run test:agent --workspace milagre",
+    "test:agent": "npm run test --workspace @milagre/shared && npm run test --workspace @milagre/core && npm run test:agent --workspace milagre",
     "test:chat-titles": "node scripts/test-chat-titles.cjs",
     "test:handover": "node scripts/test-handover.cjs",
     "test:question-card": "node scripts/test-question-card.cjs",
@@ -39,7 +39,8 @@
     "package:mac:local": "npm run package:mac -- --config.mac.identity=- --config.mac.notarize=false",
     "test:worktree-setup": "node scripts/test-worktree-setup.cjs",
     "test:monorepo": "node --test scripts/monorepo.test.cjs",
-    "test:desktop": "node scripts/test-desktop.cjs"
+    "test:desktop": "node scripts/test-desktop.cjs",
+    "test:core": "npm run test --workspace @milagre/core"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -55,7 +56,7 @@
     "productName": "Milagre",
     "asar": true,
     "asarUnpack": [
-      "electron/bundled-skills/**/*"
+      "node_modules/@milagre/core/src/bundled-skills/**/*"
     ],
     "files": [
       "dist/**/*",

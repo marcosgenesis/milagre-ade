@@ -1,4 +1,4 @@
-const { isTerminal } = require("./agents/events.cjs");
+const { isTerminal } = require("@milagre/core/agents/events");
 
 const MAX_TITLE = 120;
 const MAX_BODY = 240;

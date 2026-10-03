@@ -115,6 +115,8 @@ declare global {
       onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
+      /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
+      resumeChat: (projectPath: string, sessionId: number) => Promise<boolean>;
       /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
       handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
       /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */

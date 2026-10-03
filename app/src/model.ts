@@ -180,6 +180,8 @@ export interface AgentSession {
   handoverPending?: boolean;
   /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
   handoverDraft?: string;
+  /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
+  resumeTurn?: { stoppedAt?: number };
 }
 
 export interface Connection {

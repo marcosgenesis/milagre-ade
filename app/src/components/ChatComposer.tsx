@@ -198,6 +198,8 @@ interface ChatComposerProps {
   /** A handed-over chat's brief while it waits for the first message; `chatId` is the chat's key. */
   handoverBrief?: { chatId: string; brief: string; onSave: (text: string) => Promise<void> };
   handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
+  /** A chat a quit stopped longer ago than Milagre resumes by itself: Continue starts its turn again. */
+  resume?: { onContinue: () => void };
   /** The models the picker offers (see mergeModels). */
   models: ModelOption[];
   /** How each agent's CLI stands, flagged in the model picker; null until it's known. */
@@ -354,6 +356,7 @@ export function ChatComposer({
   canHandover = false,
   handoverBrief,
   handover,
+  resume,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -467,6 +470,12 @@ export function ChatComposer({
             </div>
           )}
           {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
+          {resume && !isSending && (
+            <div data-resume-bar className="flex w-full items-center gap-3 rounded-control border border-line px-3 py-2 text-[12px] text-ink-2">
+              <span className="min-w-0 flex-1">Milagre closed while this chat was working.</span>
+              <button type="button" onClick={resume.onContinue} disabled={sendBlocked} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">Continue</button>
+            </div>
+          )}
         </div>
       </MessageScroller>}
       <div className="mx-auto mb-2 flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden">

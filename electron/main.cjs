@@ -486,6 +486,10 @@ ipcMain.handle("chat:send", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
   return chats.send(request);
 });
+ipcMain.handle("chat:resume", (_event, projectPath, sessionId) => {
+  if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
+  return chats.resumeChat(projectPath, Number(sessionId));
+});
 ipcMain.handle("chat:handover", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
   return chats.handover(request);
@@ -654,7 +658,8 @@ app.whenReady().then(async () => {
 
 // Only a quit closes the last window on macOS; elsewhere closing it quits.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // A quit Electron started for a termination signal can end here, windows closed and the app still running.
+  if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
 // Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they

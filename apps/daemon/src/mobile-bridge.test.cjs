@@ -11,7 +11,7 @@ const { startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-')));
   const dataDir = path.join(root, 'profile');
   const project = path.join(root, 'project');
   await fs.mkdir(project);

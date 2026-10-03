@@ -25,6 +25,7 @@ window.emitAgent = event => {
   window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event, ...(ended ? { state: { ...state } } : {}) }));
 };
 window.milagre = new Proxy({
+  getRuntimeConnection: async () => ({ connected: true }),
  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
  getAgentPorts: async () => ({}),
  onQuitFailed: fn => {window.quitFailed=fn;return ()=>{};},

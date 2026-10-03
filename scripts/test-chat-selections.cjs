@@ -14,6 +14,7 @@ state.messages = [{ id: 4, session_id: 3, role: "user", body: "Previous chat", c
 state.sessions[5] = { id: 5, worktree_id: 2, agent_name: "develop", status: "Idle" };
 state.next_id = 6;
 window.milagre = new Proxy({
+  getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),

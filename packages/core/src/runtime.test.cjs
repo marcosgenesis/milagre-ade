@@ -177,3 +177,40 @@ test('linked Worktrees resolve to one registered Project without losing saved Ch
   assert.equal(registered.path, project);
   assert.deepEqual(registered.position, { x: 30, y: 40 });
 });
+
+test('opening a saved Codex Chat starts outcome recovery and shutdown drains its provider read', async t => {
+  const { project, make } = await fixture(t);
+  const first = make();
+  const opened = await first.invoke('project:current');
+  const session = Object.values(opened.state.sessions)[0];
+  await first.invoke('chat:patch', [project, session.id, { title: 'Saved recovery Chat' }]);
+  await first.close();
+  const file = path.join(project, '.milagre/coordination.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  Object.assign(saved.sessions[session.id], {
+    provider: 'codex', native_session_id: 'saved-parent',
+    subagents: [{ id: 'saved-child', title: 'Saved task', status: 'unknown', startedAt: 10, updatedAt: 20, transcript: [] }],
+  });
+  await fs.writeFile(file, JSON.stringify(saved));
+  const reading = Promise.withResolvers();
+  const discovery = Promise.withResolvers();
+  const runtime = make({ agentCli: async provider => {
+    assert.equal(provider, 'codex');
+    reading.resolve();
+    return discovery.promise;
+  } });
+  await runtime.invoke('project:current');
+  await runtime.invoke('chat:set-open', [`${project}#${session.id}`]);
+  await reading.promise;
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  const completedEarly = closed;
+  discovery.resolve({ problem: 'Provider unavailable in this fixture' });
+  await closing;
+  assert.equal(completedEarly, false, 'shutdown must retain ownership until outcome recovery finishes');
+  const next = make();
+  const reopened = await next.invoke('project:current');
+  assert.equal(reopened.state.sessions[session.id].subagents[0].status, 'unknown');
+  assert.deepEqual(await next.invoke('chat:runs'), { runs: {}, seq: 0 });
+});

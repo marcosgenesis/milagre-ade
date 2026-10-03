@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Archive02Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, Cancel01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 import type { ModelProvider, Subagent } from "../../model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
@@ -17,7 +17,7 @@ function elapsed(agent: Subagent, now: number) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export function SubagentTranscript({ agent }: { agent: Subagent }) {
+export const SubagentTranscript = memo(function SubagentTranscript({ agent }: { agent: Subagent }) {
   const [now, setNow] = useState(Date.now());
   const running = subagentActive(agent);
   useEffect(() => {
@@ -32,12 +32,13 @@ export function SubagentTranscript({ agent }: { agent: Subagent }) {
     {agent.transcript.map(entry => <div key={entry.id} className="min-w-0 break-words text-[13px]">{entry.kind === "tool" ? <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-line p-3 font-mono text-[12px]">{entry.text}</pre> : <Markdown text={entry.text} />}</div>)}
     {!agent.transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
   </div>;
-}
+});
 
 /** A nonmodal list anchored above the composer. Archiving affects views, not provider execution. */
-export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, onArchive }: {
+export function SubagentTrack({ agents, provider = "codex", onOpenCanvas, onArchiveFinished, onArchive }: {
   agents: Subagent[];
   provider?: ModelProvider;
+  onOpenCanvas: () => void;
   onArchiveFinished?: () => void;
   onArchive?: (id: string, archived: boolean) => void;
 }) {
@@ -80,10 +81,11 @@ export function SubagentTrack({ agents, provider = "codex", onArchiveFinished, o
         </header>
         <ScrollArea><SubagentTranscript agent={child} /></ScrollArea>
       </> : <>
-        {!archived && <div className="mb-1 shrink-0 border-b border-line pb-1">
-          <button type="button" data-subagent-archive-finished disabled={!onArchiveFinished || !visible.some(subagentFinished)} onClick={onArchiveFinished} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-ink-2 hover:bg-hover focus-visible:outline-2 disabled:opacity-40 disabled:hover:bg-transparent">
+        {!archived && <div className="mb-1 flex shrink-0 items-center gap-1 border-b border-line pb-1">
+          <button type="button" data-subagent-archive-finished disabled={!onArchiveFinished || !visible.some(subagentFinished)} onClick={onArchiveFinished} className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-ink-2 hover:bg-hover focus-visible:outline-2 disabled:opacity-40 disabled:hover:bg-transparent">
             <HugeiconsIcon icon={Archive02Icon} size={14} />Archive finished subagents
           </button>
+          <Tooltip label="Watch subagents"><button type="button" aria-label="Open subagent canvas" onClick={() => { setOpened(false); onOpenCanvas(); }} className={`${actionClass} mr-1 shrink-0`}><HugeiconsIcon icon={ViewIcon} size={17} /></button></Tooltip>
         </div>}
         <ScrollArea as="ul">
           {rows.map(agent => <li key={agent.id} data-subagent-row className="group flex items-center gap-1 rounded-md px-1 hover:bg-hover focus-within:bg-hover">

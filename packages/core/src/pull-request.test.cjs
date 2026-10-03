@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
+const { readPullRequest, readPullRequests, createPullRequestReader } = require("./pull-request.cjs");
 
 const title = "Show pull requests in the chat sidebar";
 const url = "https://github.com/example/project/pull/10213";
@@ -155,4 +155,96 @@ test("a merged PR reports no checks state even if its last run failed", async ()
   const pr = { number: 10213, url, title, state: "MERGED", statusCheckRollup: [checkRun("COMPLETED", "FAILURE")] };
   const result = await readPullRequest("/project", async (command) => ({ stdout: command === "git" ? "feature/sidebar\n" : JSON.stringify([pr]) }));
   assert.equal("checks" in result, false);
+});
+
+// A gh/git stub: `branches` maps a worktree to its checked-out branch, `prs` is what `gh pr list` returns for the repository.
+function batchStub({ branches, prs, repo = require("node:os").tmpdir() }) {
+  const calls = [];
+  const exec = async (command, args, options) => {
+    calls.push([command, args, options]);
+    if (command === "git") {
+      if (args.includes("symbolic-ref")) return { stdout: `${branches[args[1]]}\n` };
+      if (args.includes("--git-common-dir")) return { stdout: `${repo}\n` };
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    }
+    assert.equal(command, "gh");
+    if (args.includes("--head")) return { stdout: JSON.stringify(prs.filter((pr) => pr.headRefName === args[args.indexOf("--head") + 1]).slice(0, 1)) };
+    return { stdout: JSON.stringify(prs) };
+  };
+  return { exec, ghCalls: () => calls.filter(([command]) => command === "gh") };
+}
+const listed = (number, headRefName, state = "OPEN") => ({ number, headRefName, url: `https://github.com/example/project/pull/${number}`, state, title: `PR ${number}` });
+const shape = (number, state = "OPEN") => ({ number, url: `https://github.com/example/project/pull/${number}`, state, title: `PR ${number}`, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
+
+test("worktrees of one repository share a single batched gh pr list", async () => {
+  const { exec, ghCalls } = batchStub({ branches: { "/a": "feature/a", "/b": "feature/b", "/c": "no-pr" }, prs: [listed(2, "feature/b", "MERGED"), listed(1, "feature/a")] });
+  const read = createPullRequestReader({ exec });
+  assert.deepEqual(await Promise.all(["/a", "/b", "/c"].map((path) => read(path))), [shape(1), shape(2, "MERGED"), null]);
+  assert.equal(ghCalls().length, 1);
+  assert.deepEqual(ghCalls()[0][1], ["pr", "list", "--state", "all", "--limit", "100", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,headRefName"]);
+  assert.ok(["/a", "/b", "/c"].includes(ghCalls()[0][2].cwd), "gh runs from one of the repository's worktrees");
+});
+
+test("the batch is reused within the TTL and read again after it", async () => {
+  let clock = 0;
+  const { exec, ghCalls } = batchStub({ branches: { "/a": "feature/a" }, prs: [listed(1, "feature/a")] });
+  const read = createPullRequestReader({ exec, now: () => clock, ttlMs: 2000 });
+  await read("/a");
+  clock = 1999;
+  await read("/a");
+  assert.equal(ghCalls().length, 1);
+  clock = 2000;
+  await read("/a");
+  assert.equal(ghCalls().length, 2);
+});
+
+test("separate repositories are batched separately", async () => {
+  const stub = batchStub({ branches: { "/a": "x" }, prs: [listed(1, "x")] });
+  const other = batchStub({ branches: { "/b": "x" }, prs: [listed(7, "x")], repo: __dirname });
+  const exec = (command, args, options) => (options.cwd === "/b" ? other.exec : stub.exec)(command, args, options);
+  const read = createPullRequestReader({ exec });
+  assert.deepEqual([await read("/a"), await read("/b")], [shape(1), shape(7)]);
+  assert.equal(stub.ghCalls().length + other.ghCalls().length, 2);
+});
+
+test("the newest PR for a branch wins, and a closed latest PR hides older ones like the per-branch query", async () => {
+  const { exec } = batchStub({ branches: { "/a": "feature/a", "/b": "feature/b" }, prs: [listed(9, "feature/a"), listed(3, "feature/a", "MERGED"), listed(8, "feature/b", "CLOSED"), listed(4, "feature/b", "MERGED")] });
+  const read = createPullRequestReader({ exec });
+  assert.deepEqual(await read("/a"), shape(9));
+  assert.equal(await read("/b"), null);
+});
+
+test("a branch missing from a full batch falls back to its own query", async () => {
+  const prs = Array.from({ length: 100 }, (_, index) => listed(index + 1, `branch-${index}`));
+  const old = listed(500, "old-branch", "MERGED");
+  const { exec, ghCalls } = batchStub({ branches: { "/a": "branch-3", "/b": "old-branch" }, prs });
+  const stub = async (command, args, options) => command === "gh" && args.includes("--head") ? { stdout: JSON.stringify([old]) } : exec(command, args, options);
+  const read = createPullRequestReader({ exec: stub });
+  assert.deepEqual(await read("/a"), shape(4));
+  assert.deepEqual(await read("/b"), shape(500, "MERGED"));
+  assert.equal(ghCalls().length, 1, "only the counted batch call; the fallback went through the stub");
+});
+
+test("a failed batch falls back to the per-branch query and is retried next time", async () => {
+  let failing = true;
+  const { exec } = batchStub({ branches: { "/a": "feature/a" }, prs: [listed(1, "feature/a")] });
+  const calls = [];
+  const flaky = async (command, args, options) => {
+    if (command === "gh") calls.push(args.includes("--head") ? "branch" : "batch");
+    if (command === "gh" && !args.includes("--head") && failing) throw new Error("timeout");
+    return exec(command, args, options);
+  };
+  const read = createPullRequestReader({ exec: flaky });
+  assert.deepEqual(await read("/a"), shape(1));
+  failing = false;
+  assert.deepEqual(await read("/a"), shape(1));
+  assert.deepEqual(calls, ["batch", "branch", "batch"]);
+});
+
+test("no branch, no gh and bad output are null", async () => {
+  assert.equal(await createPullRequestReader({ exec: async (command) => ({ stdout: command === "git" ? "\n" : "[]" }) })("/a"), null);
+  assert.equal(await createPullRequestReader({ exec: async () => { throw new Error("ENOENT"); } })("/a"), null);
+  const { exec } = batchStub({ branches: { "/a": "x" }, prs: [] });
+  const garbled = async (command, args, options) => command === "gh" ? { stdout: "not json" } : exec(command, args, options);
+  assert.equal(await createPullRequestReader({ exec: garbled })("/a"), null);
 });

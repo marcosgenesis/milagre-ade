@@ -29,7 +29,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { readPullRequest, readPullRequests } = require("./pull-request.cjs");
+const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
 const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
@@ -308,6 +308,7 @@ function createRuntime(options) {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
     return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
   });
+  const readPullRequest = createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);

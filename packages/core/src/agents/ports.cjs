@@ -136,6 +136,20 @@ function chatPorts(listeners, processesByChat) {
   return result;
 }
 
+// ps runs every poll; lsof (the costly one) only when a chat's pids changed, or this often, to notice a
+// listener that a long-lived process opened later.
+const LSOF_MAX_AGE_MS = 10_000;
+
+function samePorts(a, b) {
+  const chats = Object.keys(a);
+  if (chats.length !== Object.keys(b).length) return false;
+  return chats.every((chatId) => {
+    const left = a[chatId];
+    const right = b[chatId];
+    return right && left.length === right.length && left.every((port, index) => port.port === right[index].port && port.pid === right[index].pid && port.command === right[index].command && port.address === right[index].address);
+  });
+}
+
 const run = (command, args) => new Promise((resolve) => {
   execFile(command, args, { maxBuffer: 8 * 1024 * 1024, timeout: 10_000 }, (_error, stdout) => resolve(stdout ?? ""));
 });
@@ -146,8 +160,9 @@ const run = (command, args) => new Promise((resolve) => {
  * whenever they change.
  */
 class PortWatcher {
-  constructor({ roots, publish, pollMs = POLL_MS, idlePollMs = 15_000, isRunning = () => true, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000 }) {
-    Object.assign(this, { roots, publish, pollMs, idlePollMs, isRunning, exec, kill, graceMs });
+  constructor({ roots, publish, pollMs = POLL_MS, idlePollMs = 15_000, isRunning = () => true, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000, now = Date.now, lsofMaxAgeMs = LSOF_MAX_AGE_MS }) {
+    Object.assign(this, { roots, publish, pollMs, idlePollMs, isRunning, exec, kill, graceMs, now, lsofMaxAgeMs });
+    this.listeners = { key: null, at: -Infinity, rows: [] };
     this.groups = new Map();
     this.processes = new Map();
     this.ports = {};
@@ -196,11 +211,12 @@ class PortWatcher {
     const deadline = Date.now() + this.graceMs;
     while (Date.now() < deadline && signal(0)) await new Promise((resolve) => setTimeout(resolve, 50));
     if (signal(0)) signal("SIGKILL");
-    await this.poll();
+    await this.poll({ fresh: true });
     return true;
   }
 
-  async poll() {
+  /** `fresh` re-reads listeners even if the chats' pids are unchanged, e.g. after stopping one. */
+  async poll({ fresh = false } = {}) {
     if (this.closed || this.polling) return;
     clearTimeout(this.timer);
     this.timer = null;
@@ -215,8 +231,7 @@ class PortWatcher {
         if (strays.length) adoptOrphans(processes, parseCwds(await this.exec("lsof", ["-a", "-d", "cwd", "-p", strays.map((row) => row.pid).join(","), "-F", "pn"])), roots, this.groups);
         const byChat = chatProcesses(processes, roots, this.groups);
         const pids = [...new Set([...byChat.values()].flatMap((set) => [...set]))];
-        const listeners = pids.length ? parseLsof(await this.exec("lsof", ["-nP", "-a", "-p", pids.join(","), "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])) : [];
-        this.set(chatPorts(listeners, byChat));
+        this.set(chatPorts(await this.listenersOf(pids, fresh), byChat));
       } else this.set({});
       if (!this.closed && (this.roots().size || this.groups.size)) {
         this.timer = setTimeout(() => void this.poll(), this.isRunning() ? this.pollMs : this.idlePollMs);
@@ -227,9 +242,21 @@ class PortWatcher {
     }
   }
 
+  async listenersOf(pids, fresh) {
+    if (!pids.length) {
+      this.listeners = { key: null, at: -Infinity, rows: [] };
+      return [];
+    }
+    const key = pids.sort((a, b) => a - b).join(",");
+    if (!fresh && key === this.listeners.key && this.now() - this.listeners.at < this.lsofMaxAgeMs) return this.listeners.rows;
+    const rows = parseLsof(await this.exec("lsof", ["-nP", "-a", "-p", key, "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]));
+    this.listeners = { key, at: this.now(), rows };
+    return rows;
+  }
+
   set(ports) {
     if (this.closed) return;
-    if (JSON.stringify(ports) === JSON.stringify(this.ports)) return;
+    if (samePorts(ports, this.ports)) return;
     this.ports = ports;
     this.publish(ports);
   }

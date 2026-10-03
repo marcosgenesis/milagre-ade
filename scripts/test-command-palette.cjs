@@ -15,9 +15,13 @@ state.next_id = 5;
 window.calls = [];
 window.escapes = 0;
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && !event.defaultPrevented) window.escapes++; });
+window.agentEvent = payload => window.agentHandlers.forEach(handler => handler(payload));
 window.milagre = new Proxy({
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // The check raises a question in the open chat by sending the events the main process would.
+  getRuns: async () => ({ seq: 0, runs: {} }),
+  onAgentEvent: handler => { (window.agentHandlers ??= []).push(handler); return () => {}; },
   getCurrentProject: async () => ({ path: '/fixture', name: 'Milagre', state }),
   listRecentProjects: async () => [{ path: '/fixture', name: 'Milagre' }, { path: '/other', name: 'Website' }],
   listBranches: async () => ['main'],
@@ -183,7 +187,24 @@ async function browserChecks() {
     await key('Escape');
     await waitFor('!document.querySelector("dialog")');
     window.webContents.debugger.detach();
-    console.log('PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation');
+    // A chat waiting on a question is not a modal: the shortcuts keep working over the card.
+    await key('1', { metaKey: true });
+    await waitFor('!!document.querySelector("[aria-current=page]")');
+    await evaluate("window.agentEvent({ chatId: '/fixture#3', event: { type: 'turn-started' }, seq: 1 })");
+    await evaluate("window.agentEvent({ chatId: '/fixture#3', seq: 2, event: { type: 'question-request', requestId: 'q-1', questions: [{ id: 'review', header: 'Review', question: 'How should the review step work?', options: [{ label: 'Brief in composer' }, { label: 'Review card' }], multiSelect: false, allowOther: true, secret: false }] } })");
+    await waitFor('!!document.querySelector("[aria-label=\\"Agent question\\"]")');
+    await open();
+    assert.ok(await evaluate('!!document.querySelector("[aria-label=\\"Agent question\\"]")'), 'The question card stays while the palette is open');
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      await delay(250);
+      require('node:fs').mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+      require('node:fs').writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'palette-over-question.png'), (await window.webContents.capturePage()).toPNG());
+    }
+    await key('Escape');
+    await waitFor('!document.querySelector("dialog")');
+    await key('n', { metaKey: true });
+    await waitFor('!!document.querySelector("[data-new-chat-pickers]")');
+    console.log('PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation, shortcuts over a waiting question card');
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 }

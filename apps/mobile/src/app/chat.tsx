@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
-import { useSession } from '../session';
+import { useComposer, useSession } from '../session';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
@@ -17,14 +17,16 @@ import { BottomFade, EdgeFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
-import { chatRecency } from '../indicators';
 import { defaultPreferences, selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
+const PAGE = 40;
+
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string }>();
   const session = useSession();
+  const composer = useComposer();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -43,16 +45,25 @@ export default function ChatScreen() {
   const allMessages = session.snapshot?.project.state.messages;
   const media = useCallback((path: string) => connected!.media(projectPath!, path), [connected, projectPath]);
   const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
+  // Each Chat's newest message id, for the switcher's order; one pass instead of a scan per comparison.
+  const lastMessage = useMemo(() => {
+    const last = new Map<number, number>();
+    for (const message of allMessages ?? []) if (message.id > (last.get(message.session_id) ?? 0)) last.set(message.session_id, message.id);
+    return last;
+  }, [allMessages]);
+  // Long Chats mount their newest messages first; earlier ones load on request.
+  const [shown, setShown] = useState({ id: params.id, count: PAGE });
+  const visible = shown.id === params.id ? shown.count : PAGE;
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
   const client = session.client;
   const { project, runs } = session.snapshot;
   const chat = params.id ? project.state.sessions[Number(params.id)] : null;
   const chatId = `${project.path}#${params.id ?? `new:${params.worktreeId}`}`;
-  const draft = session.drafts[chatId] || '';
-  const attachments = session.attachments[chatId] || [];
+  const draft = composer.drafts[chatId] || '';
+  const attachments = composer.attachments[chatId] || [];
   const run = chat ? runs.runs[chatId] : undefined;
-  const preferences = session.preferences[chatId] || defaultPreferences;
+  const preferences = composer.preferences[chatId] || defaultPreferences;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ''), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
@@ -72,7 +83,7 @@ export default function ChatScreen() {
     try {
       const added = await pickAttachments(kind);
       const next = appendAttachments(attachments, added);
-      session.setAttachments(current => ({ ...current, [chatId]: next }));
+      composer.setAttachments(current => ({ ...current, [chatId]: next }));
     } catch (e) { setError((e as Error).message); }
     finally { setPicking(false); }
   }
@@ -83,14 +94,14 @@ export default function ChatScreen() {
       const media = await prepareAttachments(client, project.path, sending);
       const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, sessionId: params.id ? Number(params.id) : null, worktreeId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...sendOptions(model, preferences) }]);
       const destination = `${project.path}#${result.sessionId}`;
-      if (sent === draft) session.setDrafts(current => {
+      if (sent === draft) composer.setDrafts(current => {
         const remaining = current[chatId] === sent ? '' : current[chatId] || '';
         const preserved = destination !== chatId ? current[destination] || '' : '';
         const next = { ...current, [destination]: [preserved, remaining].filter(Boolean).join('\n') };
         if (destination !== chatId) delete next[chatId];
         return next;
       });
-      session.setAttachments(current => {
+      composer.setAttachments(current => {
         const sentIds = new Set(sending.map(item => item.id));
         const remaining = (current[chatId] || []).filter(item => !sentIds.has(item.id));
         const preserved = destination !== chatId ? current[destination] || [] : [];
@@ -98,7 +109,7 @@ export default function ChatScreen() {
         if (destination !== chatId) delete next[chatId];
         return next;
       });
-      session.setPreferences(current => {
+      composer.setPreferences(current => {
         const next = { ...current, [destination]: { ...(current[chatId] || preferences), provider: actualProvider, model: model.id } };
         if (destination !== chatId) delete next[chatId];
         return next;
@@ -115,7 +126,7 @@ export default function ChatScreen() {
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
     else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(done => { if (done && !chat.archived) router.back(); });
   }
-  const recent = Object.values(project.state.sessions).filter(item => !item.archived).sort((a, b) => chatRecency(b.id, project.state.messages) - chatRecency(a.id, project.state.messages)).slice(0, 8);
+  const recent = Object.values(project.state.sessions).filter(item => !item.archived).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
@@ -148,7 +159,8 @@ export default function ChatScreen() {
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>Your agent runs in {worktree?.name || 'this Worktree'} on your computer.</Text></View>}
-      {chat && messages.map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
+      {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
+      {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
       {run && <ChatReply run={run} media={media} onActivity={openActivity} />}
       {run && <ThinkingIndicator label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
@@ -168,14 +180,14 @@ export default function ChatScreen() {
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}
       {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
-        {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => session.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
-        <Field label="Message" hideLabel placeholder="Message the agent" multiline value={draft} onChangeText={value => session.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
+        {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
+        <Field label="Message" hideLabel placeholder="Message the agent" multiline value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
           <PullDown label="Add photos or files" sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle' }, { id: 'camera', title: 'Take Photo', systemImage: 'camera' }, { id: 'files', title: 'Choose Files', systemImage: 'folder' }].map(item => ({ ...item, disabled: busy || picking || attachments.length >= 4 })) }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
             <View accessibilityRole="button" accessibilityLabel="Add photos or files" style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>
           </PullDown>
           <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
-          <PermissionChip mode={preferences.permissionMode} onChange={permissionMode => session.setPreferences(current => ({ ...current, [chatId]: { ...preferences, permissionMode } }))} />
+          <PermissionChip mode={preferences.permissionMode} onChange={permissionMode => composer.setPreferences(current => ({ ...current, [chatId]: { ...preferences, permissionMode } }))} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
           {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}

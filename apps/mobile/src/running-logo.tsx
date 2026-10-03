@@ -3,6 +3,7 @@ import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View, useColorSc
 import Svg, { Path } from 'react-native-svg';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useIsFocused } from 'expo-router';
 import { LEFT, RIGHT, STAR, STAR_BOX } from './logo';
 import { colors, fonts, hex } from './theme';
 
@@ -15,7 +16,10 @@ type Segment = { to: number; duration: number; easing?: EasingFunction };
  */
 export function useKeyframes(segments: Segment[], delay = 0) {
   const [value] = useState(() => new Animated.Value(0));
+  // Loops stop while another screen covers this one; Animated.delay segments wake JS even on the native driver.
+  const active = useIsFocused();
   useEffect(() => {
+    if (!active) return;
     let loop: Animated.CompositeAnimation | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
@@ -28,7 +32,7 @@ export function useKeyframes(segments: Segment[], delay = 0) {
       timer = setTimeout(() => loop?.start(), delay);
     });
     return () => { cancelled = true; clearTimeout(timer); loop?.stop(); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- the keyframes are static
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps -- the keyframes are static
   return value;
 }
 
@@ -67,12 +71,16 @@ export const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: num
 });
 
 function useElapsed() {
-  const [tenths, setTenths] = useState(0);
+  // Measured from the clock, so the time is still right after the ticks pause under another screen.
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  const active = useIsFocused();
   useEffect(() => {
-    const timer = setInterval(() => setTenths(current => current + 1), 100);
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(timer);
-  }, []);
-  const total = tenths / 10;
+  }, [active]);
+  const total = Math.floor((now - start) / 100) / 10;
   return total < 60 ? `${total.toFixed(1)}s` : `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
 }
 
@@ -100,7 +108,9 @@ export function ShimmerText({ children, style, numberOfLines = 1 }: { children: 
   const palette = hex(scheme);
   const [shift] = useState(() => new Animated.Value(0));
   const [reduced, setReduced] = useState(false);
+  const active = useIsFocused();
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     const loop = Animated.loop(Animated.timing(shift, { toValue: TILE, duration: 1200, easing: Easing.linear, useNativeDriver: true }));
     void AccessibilityInfo.isReduceMotionEnabled().then(reduce => {
@@ -109,7 +119,7 @@ export function ShimmerText({ children, style, numberOfLines = 1 }: { children: 
       if (!reduce) loop.start();
     });
     return () => { cancelled = true; loop.stop(); };
-  }, [shift]);
+  }, [shift, active]);
   const text = <Text numberOfLines={numberOfLines} style={style}>{children}</Text>;
   if (reduced) return <Text numberOfLines={numberOfLines} style={[style, { color: colors.ink3 }]}>{children}</Text>;
   return <MaskedView maskElement={text}>

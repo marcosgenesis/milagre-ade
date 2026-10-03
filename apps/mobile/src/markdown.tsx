@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { Alert, Linking, Text, View, type TextStyle } from 'react-native';
 import type { Token } from 'markdown-it';
-import { markdownTokens, safeLink } from './chat-presentation';
+import { markdownChunks, markdownTokens, safeLink } from './chat-presentation';
 import { PageScroll, colors, styles } from './ui';
 
 // Chat reading size: desktop uses 13px at 1.55; a phone reads best a little larger.
@@ -44,7 +44,12 @@ function blocks(nodes: Node[]): React.ReactNode {
     return <View key={key} style={{ gap: 8 }}>{children.length ? blocks(children) : <Text selectable style={body}>{token.content}</Text>}</View>;
   });
 }
-export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+/** One top-level block; unchanged blocks skip parsing and rendering while the reply streams. */
+const Chunk = memo(function Chunk({ text, streaming }: { text: string; streaming: boolean }) {
   const nodes = useMemo(() => tree(markdownTokens(text, streaming)), [text, streaming]);
-  return <View style={{ gap: 12 }}>{blocks(nodes)}</View>;
+  return <>{blocks(nodes)}</>;
+});
+export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  const chunks = useMemo(() => markdownChunks(text), [text]);
+  return <View style={{ gap: 12 }}>{chunks.map((chunk, index) => <Chunk key={index} text={chunk} streaming={streaming && index === chunks.length - 1} />)}</View>;
 });

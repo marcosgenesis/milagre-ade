@@ -1,5 +1,5 @@
 import { reconcileState } from "@milagre/shared/reconcile";
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
 import { savedHosts } from './hosts-native';
@@ -15,9 +15,6 @@ function useSessionState() {
   const [recent, setRecent] = useState<RecentProject[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
-  const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
   const [models, setModels] = useState<AgentModels | null>(null);
   const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
   const [providerError, setProviderError] = useState('');
@@ -124,12 +121,30 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+}
+/**
+ * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders
+ * only the composer's screens, not every screen that reads the connection and snapshot.
+ */
+function ComposerProvider({ children }: { children: React.ReactNode }) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
+  const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
+  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences }), [drafts, attachments, preferences]);
+  return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
+}
+type Composer = { drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
+const ComposerContext = createContext<Composer | null>(null);
+export function useComposer() {
+  const composer = useContext(ComposerContext);
+  if (!composer) throw new Error('SessionProvider is required');
+  return composer;
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const session = useSessionState();
-  return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={session}><ComposerProvider>{children}</ComposerProvider></SessionContext.Provider>;
 }
 export function useSession() {
   const session = useContext(SessionContext);

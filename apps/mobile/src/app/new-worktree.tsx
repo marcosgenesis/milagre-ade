@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Text } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useSession } from '../session';
+import { useComposer, useSession } from '../session';
 import { Button, ErrorNotice, Field, PageScroll, Select, styles } from '../ui';
 
 export default function NewWorktree() {
   const session = useSession();
+  const composer = useComposer();
   const projectPath = session.snapshot?.project.path;
   const [branches, setBranches] = useState<string[]>([]);
   const [base, setBase] = useState('');
@@ -30,7 +31,7 @@ export default function NewWorktree() {
       if (!current()) return;
       await session.refresh();
       if (!current()) return;
-      session.setDrafts(current => ({ ...current, [`${projectPath}#new:${result.worktreeId}`]: latestPrompt.current.trim() }));
+      composer.setDrafts(current => ({ ...current, [`${projectPath}#new:${result.worktreeId}`]: latestPrompt.current.trim() }));
       router.replace({ pathname: '/chat', params: { worktreeId: String(result.worktreeId) } });
     } catch (error) { if (current()) setError((error as Error).message); }
     finally { setBusy(false); }

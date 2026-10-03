@@ -14,3 +14,11 @@ test('streaming markdown closes open bold while code fences and HTML stay inert'
   assert.equal(code[0].type, 'fence'); assert.equal(code[0].content, 'npm test');
   assert.ok(!markdownTokens('<script>alert(1)</script>').some(token => token.type === 'html_block'));
 });
+
+test('markdown splits into top-level blocks, never inside a code fence or an indented continuation', async () => {
+  const { markdownChunks } = await import('./chat-presentation.ts');
+  assert.deepEqual(markdownChunks('# Title\n\nFirst paragraph\nstill first\n\n- a\n- b'), ['# Title\n', 'First paragraph\nstill first\n', '- a\n- b']);
+  assert.deepEqual(markdownChunks('```sh\nnpm test\n\nnpm run lint\n```\n\nAfter'), ['```sh\nnpm test\n\nnpm run lint\n```\n', 'After']);
+  assert.deepEqual(markdownChunks('1. step\n\n    indented code in the item\n\n2. next'), ['1. step\n\n    indented code in the item\n', '2. next']);
+  assert.equal(markdownChunks('a\n\nb\n\n```\nopen fence').join('\n'), 'a\n\nb\n\n```\nopen fence');
+});

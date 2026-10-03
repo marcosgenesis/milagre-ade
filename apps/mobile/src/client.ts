@@ -38,6 +38,7 @@ export function createClient(address: string, token: string, fetcher: typeof fet
   }
   return {
     url,
+    upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
     call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }),
     snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
   };

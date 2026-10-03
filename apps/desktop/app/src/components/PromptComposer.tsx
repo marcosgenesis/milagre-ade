@@ -54,6 +54,7 @@ interface PromptComposerProps {
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
+  onStop?: () => void;
   sendBlocked: boolean;
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
@@ -111,7 +112,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
   );
 }
 
-export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, sendBlocked, running = false, lockedProvider, onHandover, canHandover = false, handoverBrief, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
+export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, onSend, onStop, sendBlocked, running = false, lockedProvider, onHandover, canHandover = false, handoverBrief, models, cliStatus, onModelPickerOpen, onUpdateCli, updatingCli, selectedModel, onModelChange, capability, effort, onEffortChange, ultracode, onUltracodeChange, fastMode, onFastModeChange, permissionMode, onPermissionModeChange, alwaysExpanded = false }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -162,6 +163,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
       : [];
   const providerNotice = cliNotice(cliStatus?.[provider]);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
+  const canStop = running && Boolean(onStop);
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0 || handoverBrief !== undefined;
 
   useEffect(() => {
@@ -460,7 +462,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             {canUseFastMode && <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster replies at higher usage rates`}><button type="button" aria-label="Fast mode" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button></Tooltip>}
             </div>
             <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
-            <button type="button" aria-label="Send" disabled={!canSend || sendBlocked || imageDraft.loading} onClick={send} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canSend && !sendBlocked ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>
+            <button type="button" aria-label={canStop ? "Stop agent" : "Send"} disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)} onClick={canStop ? onStop : send} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}>{canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}</button>
           </div>
         </div>
       </div>

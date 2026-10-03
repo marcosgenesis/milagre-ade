@@ -62,7 +62,7 @@ test('exclusive ownership rejects another profile owner and aliases of an open P
   await first.close();
   await assert.rejects(first.invoke('project:current'), /closing/);
   await assert.rejects(first.openProject(project), /closing/);
-  assert.equal((await other.openProject(alias)).path, alias);
+  assert.equal((await other.openProject(alias)).path, project);
 });
 
 test('close waits for a command already changing saved settings before releasing ownership', async t => {
@@ -165,3 +165,25 @@ test('a failed Worktree discovery preserves existing Chats and disk state',async
  await runtime.close();assert.equal(JSON.parse(await fs.readFile(file,'utf8')).sessions[session.id].title,JSON.parse(before).sessions[session.id].title);
 });
 
+
+test('linked Worktrees resolve to one registered Project without losing saved Chats', async t => {
+  const { project, make } = await fixture(t);
+  execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const linked = path.join(path.dirname(project), 'linked');
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'linked', linked], { stdio: 'ignore' });
+  const runtime = make();
+  const first = await runtime.openProject(project);
+  const chat = Object.values(first.state.sessions)[0];
+  await runtime.invoke('chat:patch', [project, chat.id, { title: 'Keep this Chat' }]);
+  const reopened = await runtime.openProject(linked);
+  assert.equal(reopened.path, project);
+  assert.equal(reopened.state.sessions[chat.id].title, 'Keep this Chat');
+  const recent = await runtime.invoke('project:recent');
+  assert.equal(recent.filter(item => item.path === project).length, 1);
+  assert.ok(!recent.some(item => item.path === linked));
+  const id = path.join(project, '.git');
+  await runtime.invoke('project:position', [id, { x: 30, y: 40 }]);
+  const registered = (await runtime.invoke('project:registry')).find(item => item.id === id);
+  assert.equal(registered.path, project);
+  assert.deepEqual(registered.position, { x: 30, y: 40 });
+});

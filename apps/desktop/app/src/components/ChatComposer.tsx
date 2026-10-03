@@ -167,6 +167,7 @@ interface ChatComposerProps {
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
+  onStop?: () => void;
   /** One-click fix for whatever blocks the chat's PR from merging (conflicts, an outdated branch, requested changes). */
   pullRequestAction?: { label: string; tone: "red" | "orange"; onRun: () => void };
   isSending: boolean;
@@ -337,6 +338,7 @@ export function ChatComposer({
   draft,
   onDraftChange,
   onSend,
+  onStop,
   pullRequestAction,
   isSending,
   sendBlocked,
@@ -518,6 +520,7 @@ export function ChatComposer({
           draft={draft}
           onDraftChange={onDraftChange}
           onSend={onSend}
+          onStop={onStop}
           sendBlocked={sendBlocked}
           running={isSending}
           lockedProvider={lockedProvider}

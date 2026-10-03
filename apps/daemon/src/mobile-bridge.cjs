@@ -1,12 +1,15 @@
 const http = require('node:http');
 const { once } = require('node:events');
 const { timingSafeEqual } = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { connect } = require('./client.cjs');
 
 const METHODS = new Set(['daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'agent:answer-question', 'agent:models', 'agent:cli-status', 'chat:patch',
-  'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
+  'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
@@ -41,16 +44,17 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
           const projectPath = target.searchParams.get('projectPath');
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
           result = { project, runs };
-        } else if (req.method === 'POST' && target.pathname === '/rpc') {
+        } else if (req.method === 'POST' && ['/rpc', '/attachments'].includes(target.pathname)) {
           if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw failure(415, 'Use application/json');
-          if (Number(req.headers['content-length']) > MAX_BODY) throw failure(413, 'Request exceeds 1 MiB');
+          const limit = target.pathname === '/attachments' ? 7 * MAX_BODY : MAX_BODY;
+          if (Number(req.headers['content-length']) > limit) throw failure(413, 'Request exceeds the upload limit');
           let size = 0;
           const chunks = [];
           // Reading through data events lets us return 413 without destroying the socket.
           const body = await new Promise((resolve, reject) => {
             req.on('data', chunk => {
               size += chunk.length;
-              if (size > MAX_BODY) { reject(failure(413, 'Request exceeds 1 MiB')); return; }
+              if (size > limit) { reject(failure(413, 'Request exceeds the upload limit')); return; }
               chunks.push(chunk);
             });
             req.once('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -59,9 +63,26 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
           });
           let request;
           try { request = JSON.parse(body); } catch { throw failure(400, 'Invalid JSON'); }
+          if (target.pathname === '/attachments') {
+            const { projectPath, name, base64 } = request || {};
+            if (typeof projectPath !== 'string' || typeof name !== 'string' || typeof base64 !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) throw failure(400, 'Invalid attachment');
+            const bytes = Buffer.from(base64, 'base64');
+            if (bytes.length > 5 * MAX_BODY) throw failure(413, 'Each file must be 5 MiB or smaller');
+            if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
+            await client.call('project:snapshot', [projectPath]);
+            const folder = path.join(dataDir, 'mobile-attachments', randomUUID());
+            const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
+            if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
+            await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+            const destination = path.join(folder, filename);
+            try { await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); }
+            catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
+            result = { path: destination, name: filename };
+          } else {
           if (request?.v !== 1 || typeof request.method !== 'string' || !Array.isArray(request.args)) throw failure(400, 'Expected version 1, method and args array');
           if (!METHODS.has(request.method)) throw failure(403, 'Command is not available from mobile');
           result = await client.call(request.method, request.args);
+          }
         } else throw failure(404, 'Unknown endpoint');
         reply(200, { result: result ?? null });
       } finally { active--; }

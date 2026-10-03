@@ -39,7 +39,10 @@
       "default": "./src/git-codes.mjs"
     },
     "./model-options": "./src/model-options.ts",
-    "./model-copy": "./src/model-copy.ts"
+    "./model-copy": "./src/model-copy.ts",
+    "./reply-parts": "./src/reply-parts.ts",
+    "./streaming-markdown": "./src/streaming-markdown.ts",
+    "./pr-blockers": "./src/pr-blockers.ts"
   },
   "files": [
     "src/*.mjs",
@@ -47,7 +50,10 @@
     "src/model.ts",
     "src/git-diff.ts",
     "src/model-options.ts",
-    "src/model-copy.ts"
+    "src/model-copy.ts",
+    "src/reply-parts.ts",
+    "src/streaming-markdown.ts",
+    "src/pr-blockers.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts",

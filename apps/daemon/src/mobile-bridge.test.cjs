@@ -11,7 +11,7 @@ const { startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-')));
   const dataDir = path.join(root, 'profile');
   const project = path.join(root, 'project');
   await fs.mkdir(project);
@@ -88,4 +88,23 @@ test('mobile can manage Chat metadata and create Worktrees, and read changes onl
   assert.equal((await rpc('git:diff-files', [{ cwd: os.homedir(), mode: 'uncommitted' }])).status, 409);
   assert.equal((await rpc('git:diff-file', [{ cwd: project, mode: 'uncommitted', path: '../outside' }])).status, 409);
   for (const method of ['git:commit', 'git:push', 'git:open-pr', 'worktree:remove', 'daemon:stop']) assert.equal((await rpc(method)).status, 403);
+});
+
+test('mobile uploads are private, bounded and scoped to an open Project', async t => {
+  const { project, dataDir, request, rpc } = await fixture(t);
+  const upload = value => request('/attachments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
+  const payload = { projectPath: project, name: '../../notes.txt', base64: Buffer.from('Review this document').toString('base64') };
+  assert.equal((await upload(payload)).status, 409);
+  await rpc('project:open', [project]);
+  const response = await upload(payload);
+  assert.equal(response.status, 200);
+  const file = (await response.json()).result;
+  assert.ok(file.path.startsWith(path.join(dataDir, 'mobile-attachments') + path.sep));
+  assert.equal(path.basename(file.path), 'notes.txt');
+  assert.equal(await fs.readFile(file.path, 'utf8'), 'Review this document');
+  assert.equal((await fs.stat(file.path)).mode & 0o777, 0o600);
+  assert.equal((await upload({ ...payload, base64: 'invalid!' })).status, 400);
+  assert.equal((await upload({ ...payload, base64: Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64') })).status, 413);
+  const next = (await (await upload(payload)).json()).result;
+  assert.notEqual(next.path, file.path);
 });

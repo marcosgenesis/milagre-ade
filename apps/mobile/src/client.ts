@@ -41,7 +41,14 @@ export function createClient(address: string, token: string, fetcher: typeof fet
         throw new Error('Connection lost. Reconnect to your computer. Check the Chat before sending again.');
       }
       if (response.redirected || (response.url && new URL(response.url).origin !== url)) throw new Error('The computer address redirected. Enter its direct HTTPS address.');
-      const value = await response.json();
+      let value;
+      // Cloudflare and proxies answer with an HTML page when the request never reaches the host.
+      try { value = JSON.parse(await response.text()); }
+      catch {
+        throw new Error([401, 403].includes(response.status) ? 'Your computer\'s Cloudflare access was refused. Scan its pairing code again.'
+          : response.status >= 500 ? 'Your computer isn\'t answering. Check that Milagre and its mobile host are running on your Mac.'
+          : `Unexpected response from your computer (${response.status}).`);
+      }
       if (value?.v !== 1) throw new Error('Incompatible daemon response. Update the app and daemon together.');
       if (!response.ok || value.error) throw new Error(value.error?.message || `Request failed (${response.status})`);
       return value.result as T;

@@ -64,7 +64,7 @@ async function startMobileHost({ dataDir, desktopDataDir, project, port = 8787, 
       await fs.writeFile(temporary, JSON.stringify({ url: publicUrl || bridge.url, token }, null, 2), { flag: 'wx', mode: 0o600 });
       await fs.rename(temporary, connectionFile);
     } finally { await fs.rm(temporary, { force: true }); }
-    return { url: publicUrl || bridge.url, localUrl: bridge.url, token, ...(cloudflare ? { access: cloudflare.access } : {}), connectionFile, close };
+    return { url: publicUrl || bridge.url, localUrl: bridge.url, token, lost: bridge.lost, ...(cloudflare ? { access: cloudflare.access } : {}), connectionFile, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -85,7 +85,16 @@ async function main() {
     awake = spawn('/usr/bin/caffeinate', ['-i'], { stdio: 'ignore' });
     awake.on('error', error => console.error(`Keep awake unavailable: ${error.message}`));
   }
-  const stop = async () => { awake?.kill('SIGTERM'); await host.close(); };
+  let stopping = false;
+  const stop = async () => { stopping = true; awake?.kill('SIGTERM'); await host.close(); };
+  // A bridge that lost its daemon would leave the tunnel answering 502. Exit instead, so launchd (or the user) starts
+  // a fresh host that reconnects, or starts the daemon again.
+  void host.lost.then(async () => {
+    if (stopping) return;
+    console.error('The host lost its connection to the Milagre daemon. Exiting so it can restart.');
+    await stop().catch(() => {});
+    process.exit(1);
+  });
   process.once('SIGINT', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   process.once('SIGTERM', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   console.log(`Milagre host: ${host.url}\nConnection details: ${host.connectionFile}\nUses installed Codex and Claude. Close a Project in other Milagre hosts before opening it here. Ctrl+C stops this host.`);

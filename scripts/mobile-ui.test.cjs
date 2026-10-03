@@ -49,7 +49,7 @@ function sessionHost(client) {
   const react = hookHost();
   const { useSessionState } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
-    './connection-native': { savedConnection: { save: async () => {}, forget: async () => {} } },
+    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] } },
   }, '\nexport { useSessionState };');
   return () => { react.begin(); return useSessionState(); };
 }
@@ -108,17 +108,19 @@ function chatHost() {
     preferences: {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
-    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; },
+    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {},
   };
   const react = hookHost();
-  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'Icon', 'Choice', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {}, colors: {} };
-  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} } };
+  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
+  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: {}, Linking: {} };
+  const icons = new Proxy({}, { get: (_, name) => String(name) });
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values) }, useLocalSearchParams: () => params },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values), push() {} }, useLocalSearchParams: () => params },
+    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../questions': {}, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;

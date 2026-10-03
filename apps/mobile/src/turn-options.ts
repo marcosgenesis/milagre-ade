@@ -2,7 +2,7 @@ import { MODEL_CATALOG, capabilityFor, effortFor } from "@milagre/shared/model-o
 import { type AgentModels, type ModelCapability, type ModelOption, type ModelProvider, type PermissionMode } from '@milagre/shared/model';
 
 export type MobileModel = ModelOption & ModelCapability;
-export type TurnPreferences = { provider: ModelProvider; model: string; effort: string; fastMode: boolean; permissionMode: PermissionMode };
+export type TurnPreferences = { provider: ModelProvider; model: string; effort: string; fastMode: boolean; ultracode?: boolean; permissionMode: PermissionMode };
 export const defaultPreferences: TurnPreferences = { provider: 'codex', model: '', effort: 'high', fastMode: false, permissionMode: 'ask' };
 
 export function modelsFor(provider: ModelProvider, reported?: AgentModels | null): MobileModel[] {
@@ -18,7 +18,7 @@ export function selectedModel(provider: ModelProvider, wanted: string, reported?
   const saved = { provider, id: wanted, name: wanted, description: 'Previously used in this Chat' };
   return { ...saved, ...capabilityFor(saved, null) };
 }
-export function sendOptions(model: MobileModel, preferences: Pick<TurnPreferences, 'effort' | 'fastMode' | 'permissionMode'>) {
+export function sendOptions(model: MobileModel, preferences: Pick<TurnPreferences, 'effort' | 'fastMode' | 'ultracode' | 'permissionMode'>) {
   const effort = effortFor(model, preferences.effort);
-  return { provider: model.provider, model: model.id, ...(effort ? { effort } : {}), fastMode: model.fastMode && preferences.fastMode, permissionMode: preferences.permissionMode };
+  return { provider: model.provider, model: model.id, ...(effort ? { effort } : {}), fastMode: model.fastMode && preferences.fastMode, ...(model.ultracode && preferences.ultracode ? { ultracode: true } : {}), permissionMode: preferences.permissionMode };
 }

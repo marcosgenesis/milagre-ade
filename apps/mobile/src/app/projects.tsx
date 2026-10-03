@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
-import { Redirect, router } from 'expo-router';
+import { Redirect, Stack, router } from 'expo-router';
+import { Folder01Icon, FolderAddIcon, Logout01Icon } from '@hugeicons/core-free-icons';
 import { useSession } from '../session';
-import { Button, ErrorNotice, Field, ListRow, PageScroll, colors, styles } from '../ui';
+import { Icon } from '../icons';
+import { ErrorNotice, Field, HeaderButton, ListRow, PageScroll, PillButton, colors, styles } from '../ui';
 
 export default function ProjectsScreen() {
   const session = useSession();
   const [path, setPath] = useState('');
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!session.client) return <Redirect href="/" />;
@@ -16,10 +19,16 @@ export default function ProjectsScreen() {
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
-  return <PageScroll><View style={styles.row}><Text style={[styles.label, { color: colors.green }]}>CONNECTED</Text><Text style={styles.muted}>{session.client.url}</Text></View><Text style={styles.muted}>Pick a Project to see its Chats.</Text>
-    {session.recent.length > 0 && <View style={styles.card}>{session.recent.map(project => <ListRow key={project.path} title={project.name || project.path.split('/').at(-1) || 'Project'} subtitle={project.path} onPress={() => void open(project.path)} disabled={busy} />)}</View>}
-    <View style={styles.card}><Field label="Project folder on your Mac" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" /><Button title={busy ? 'Opening...' : 'Open folder'} onPress={() => void open(path)} disabled={busy || !path.startsWith('/')} secondary /></View>
+  const folder = (icon: typeof Folder01Icon) => <View style={{ width: 36, height: 36, borderRadius: 9, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={icon} tone="ink" size={18} /></View>;
+  return <PageScroll>
+    <Stack.Screen options={{ title: session.hostName || 'Projects', headerRight: () => <HeaderButton label="Disconnect" icon={Logout01Icon} onPress={() => { session.disconnect(); router.replace('/'); }} /> }} />
+    <Text style={styles.section}>Projects</Text>
+    <View style={[styles.card, { paddingVertical: 0, gap: 0, marginTop: -12 }]}>
+      {session.recent.map((project, index) => <View key={project.path}>{index > 0 && <View style={styles.separator} />}<ListRow title={project.name || project.path.split('/').at(-1) || 'Project'} subtitle={project.path.replace(/^\/Users\/[^/]+/, '~')} onPress={() => void open(project.path)} disabled={busy} leading={folder(Folder01Icon)} /></View>)}
+      {session.recent.length > 0 && <View style={styles.separator} />}
+      <ListRow title="Open another folder…" onPress={() => setAdding(!adding)} leading={folder(FolderAddIcon)} trailing={<View />} />
+      {adding && <View style={{ paddingBottom: 14, gap: 10 }}><Field label="Project folder on your Mac" hideLabel value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoFocus onSubmitEditing={() => void open(path)} /><PillButton title={busy ? 'Opening…' : 'Open folder'} onPress={() => void open(path)} disabled={busy || !path.startsWith('/')} /></View>}
+    </View>
     {error ? <ErrorNotice message={error} /> : null}
-    <Button title="Disconnect" secondary onPress={() => { session.disconnect(); router.replace('/'); }} disabled={busy} />
   </PageScroll>;
 }

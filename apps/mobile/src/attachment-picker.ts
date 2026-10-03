@@ -4,9 +4,10 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { File } from 'expo-file-system';
 import { MAX_FILE_BYTES, MAX_PHOTO_BYTES, type Attachment } from './attachments';
 
-export async function pickAttachments(kind: 'photos' | 'files'): Promise<Attachment[]> {
-  if (kind === 'photos') {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 4 });
+export async function pickAttachments(kind: 'photos' | 'camera' | 'files'): Promise<Attachment[]> {
+  if (kind === 'photos' || kind === 'camera') {
+    if (kind === 'camera' && !(await ImagePicker.requestCameraPermissionsAsync()).granted) throw new Error('Allow camera access in Settings to take a photo.');
+    const result = kind === 'camera' ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'] }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 4 });
     if (result.canceled) return [];
     return Promise.all(result.assets.map(async (asset, index) => {
       const context = ImageManipulator.manipulate(asset.uri);
@@ -16,7 +17,7 @@ export async function pickAttachments(kind: 'photos' | 'files'): Promise<Attachm
       if ((photo.base64?.length || 0) * 3 / 4 > MAX_PHOTO_BYTES) photo = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.35, base64: true });
       context.release(); rendered.release();
       if (!photo.base64 || photo.base64.length * 3 / 4 > MAX_PHOTO_BYTES) throw new Error('This photo is too detailed to send here. Use Files to attach the original.');
-      const id = `${Date.now()}-${index}`, name = asset.fileName || `Photo ${index + 1}.jpg`;
+      const id = `${Date.now()}-${index}`, name = (asset.fileName || `Photo ${index + 1}`).replace(/\.[^.]+$/, '') + '.jpg';
       return { id, name, uri: photo.uri, image: { id, name, dataUrl: `data:image/jpeg;base64,${photo.base64}` } };
     }));
   }

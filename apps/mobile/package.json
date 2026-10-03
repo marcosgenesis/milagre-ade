@@ -4,9 +4,13 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~57.0.21",
+    "@hugeicons/core-free-icons": "^4.3.5",
+    "@hugeicons/react-native": "^1.0.16",
     "@milagre/shared": "0.1.0",
     "expo": "~57.0.26",
     "expo-build-properties": "~57.0.22",
+    "expo-camera": "~57.0.6",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.20",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",
@@ -22,7 +26,8 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "~4.26.0"
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

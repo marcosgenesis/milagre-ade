@@ -188,10 +188,10 @@
   --radius-window: 14px;
 
   /* backdrop blur — overlay 3 behind a dialog or viewer, chip 8 for a small control over media,
-   * edge 10 for content scrolling under a window edge (see docs/agents/ui.md) */
+   * edge 4 for content scrolling under a window edge (see docs/agents/ui.md) */
   --blur-overlay: 3px;
   --blur-chip: 8px;
-  --blur-edge: 10px;
+  --blur-edge: 4px;
 
   /* easing — strong curves; built-ins are too weak */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
@@ -558,8 +558,8 @@ a:focus-visible .animated-underline::after {
   inset: 0;
 }
 .chat-bottom-blur > :nth-child(1) {
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--blur-edge));
+  -webkit-backdrop-filter: blur(var(--blur-edge));
   mask-image: linear-gradient(to top, black 20%, transparent 60%);
 }
 .chat-bottom-blur > :nth-child(2) {

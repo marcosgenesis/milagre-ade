@@ -26,6 +26,14 @@ export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@
 
 export type RuntimeConnection = { connected: boolean; message?: string };
 export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+export type LinkEndpoint = { project_id: string; worktree_path?: string };
+export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
+export type CanvasSnapshot = {
+  projects: { id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[];
+  links: ProjectLink[];
+  worktreePositions: Record<string, Record<string, { x: number; y: number }>>;
+  states: { path: string; state: CoordinatorState }[];
+};
 
 declare global {
   interface Window {
@@ -99,6 +107,11 @@ declare global {
       /** Every opened Project, seeded once from existing coordination files. */
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
+      getCanvas: () => Promise<CanvasSnapshot>;
+      addLink: (a: LinkEndpoint, b: LinkEndpoint) => Promise<ProjectLink[]>;
+      removeLink: (id: string) => Promise<ProjectLink[]>;
+      setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;
+      openCanvasProject: (projectPath: string) => Promise<OpenProject>;
       /** Opens a project from the recent list. Rejects for a path that isn't listed or isn't a checkout's top folder. */
       switchProject: (projectPath: string) => Promise<OpenProject>;
       /** Takes a project off the recent list (its folder is untouched) and resolves to the list. */

@@ -10,7 +10,7 @@
     "build": "npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
     "start": "npm run start --workspace milagre",
     "typecheck": "npm run typecheck --workspace @milagre/shared && npm run typecheck --workspace milagre",
-    "test:agent": "npm run test --workspace @milagre/shared && npm run test --workspace @milagre/core && npm run test:agent --workspace milagre",
+    "test:agent": "npm run test --workspace @milagre/shared && npm run test --workspace @milagre/core && npm run test:agent --workspace milagre && npm run test:daemon",
     "test:chat-titles": "node scripts/test-chat-titles.cjs",
     "test:handover": "node scripts/test-handover.cjs",
     "test:question-card": "node scripts/test-question-card.cjs",
@@ -40,7 +40,9 @@
     "test:worktree-setup": "node scripts/test-worktree-setup.cjs",
     "test:monorepo": "node --test scripts/monorepo.test.cjs",
     "test:desktop": "node scripts/test-desktop.cjs",
-    "test:core": "npm run test --workspace @milagre/core"
+    "test:core": "npm run test --workspace @milagre/core",
+    "daemon": "node apps/daemon/src/cli.cjs",
+    "test:daemon": "npm run test --workspace @milagre/daemon"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",

@@ -47,7 +47,7 @@ async function connect(url) {
   };
 }
 
-async function checkApp({ executable, args, profile, project, expectTheme }) {
+async function checkApp({ executable, args, profile, project, expectTheme, expectStartupError = false, recoverOwnership }) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   env.MILAGRE_DEV_SERVER_URL = pathToFileURL(path.join(root, "apps/desktop/dist/index.html")).href;
@@ -78,6 +78,20 @@ async function checkApp({ executable, args, profile, project, expectTheme }) {
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
+    if (expectStartupError) {
+      await waitFor(() => evaluate('document.body?.textContent.includes("already owned") && !!document.querySelector("[data-startup-error]")'), "actionable ownership error");
+      assert.ok(await evaluate('[...document.querySelectorAll("button")].some(button => button.textContent.includes("Open another project"))'));
+      if (process.env.MILAGRE_SCREENSHOT_DIR) {
+        await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+        const shot = await connection.call("Page.captureScreenshot");
+        await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "project-owned.png"), Buffer.from(shot.data, "base64"));
+      }
+      await recoverOwnership();
+      await evaluate('[...document.querySelectorAll("button")].find(button => button.textContent === "Retry").click()');
+      await waitFor(() => evaluate('document.body?.textContent.includes("Saved chat") && !document.querySelector("[data-startup-error]")'), "retry after releasing ownership");
+      console.log("PASS: a Project owned by another runtime shows an error and Retry opens its saved Chat after ownership is released");
+      return;
+    }
     await waitFor(() => evaluate('Boolean(window.milagre && document.body?.textContent.includes("Saved chat"))'), "saved Chat in the real UI");
     const current = await evaluate("window.milagre.getCurrentProject()");
     assert.equal(current.path, project);
@@ -142,6 +156,11 @@ async function main() {
       const bundle = path.resolve(process.argv[packagedIndex + 1]);
       await checkApp({ executable: path.join(bundle, "Contents/MacOS/Milagre"), args: [], profile, project, expectTheme: true });
     }
+    const { acquireOwnership } = require("@milagre/core/ownership");
+    const owner = acquireOwnership(path.join(project, ".milagre/runtime.lock"));
+    try {
+      await checkApp({ executable: require("electron"), args: [path.join(root, "apps/desktop")], profile, project, expectStartupError: true, recoverOwnership: () => owner.release() });
+    } finally { owner.release(); }
     const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
     assert.deepEqual(saved.messages, state.messages, "Launching and quitting must preserve the transcript");
   } finally {

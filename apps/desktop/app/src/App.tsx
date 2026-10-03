@@ -178,6 +178,7 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
   useApplyTheme();
@@ -194,12 +195,15 @@ function App() {
     return () => { cancelled = true; };
   }, [project?.path]);
 
-  useEffect(() => {
-    window.milagre.getCurrentProject().then((current) => {
-      adoptProject(current);
-      setLoading(false);
-    });
-  }, []);
+  async function loadInitialProject() {
+    setLoading(true);
+    setStartupError(null);
+    try { adoptProject(await window.milagre.getCurrentProject()); }
+    catch (error) { setStartupError(ipcError(error)); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { void loadInitialProject(); }, []);
 
   useEffect(() => {
     let unsubscribe = () => {};
@@ -510,6 +514,8 @@ function App() {
 
   // Switching projects leaves the other project's turns running; their marks come back with it.
   function adoptProject(nextProject: OpenProject) {
+    setStartupError(null);
+    setLoading(false);
     receiveState(nextProject.path, nextProject.state);
     projectRef.current = nextProject;
     // The project's remembered worktree and base branch come back with it; nothing about the old project's chats
@@ -530,6 +536,7 @@ function App() {
       if (next && next.path !== projectRef.current?.path) adoptProject(next);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (!projectRef.current) setStartupError(ipcError(error));
       setNotice(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
     }
   }
@@ -761,6 +768,21 @@ function App() {
   const splashOverlay = (leaving: boolean) => splash === "gone" ? null : (
     <StartupSplash key="startup-splash" leaving={leaving} onIntroEnd={() => setSplash((current) => (current === "intro" ? "done" : current))} onLeft={() => setSplash("gone")} />
   );
+
+  if (startupError) {
+    return (
+      <main data-startup-error className="flex min-h-screen items-center justify-center p-8 text-ink">
+        <section className="w-full max-w-xl rounded-2xl border border-line bg-surface p-6 shadow-overlay" aria-labelledby="startup-error-title">
+          <h1 id="startup-error-title" className="text-lg font-semibold">Project could not open</h1>
+          <p role="alert" className="mt-3 break-words text-sm leading-relaxed text-ink-2">{startupError}</p>
+          <div className="mt-6 flex gap-3">
+            <button type="button" className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-surface focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => void loadInitialProject()}>Retry</button>
+            <button type="button" className="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => void openProject()}>Open another project</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (loading || !project || !state || splash === "intro") {
     return <>{splashOverlay(false)}</>;

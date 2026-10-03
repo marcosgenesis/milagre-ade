@@ -43,10 +43,10 @@
 
 **Interfaces:** an exclusive lock retains an owner record until clean close. Daemon `serve --data-dir <absolute>` owns the runtime; `status`, `request <method> [JSON args]` and `stop` use its private socket. Protocol version 1 requests carry id/method/args; responses carry id/result or error; events carry channel/payload. No client disconnect invokes runtime close.
 
-- [ ] Write failing tests for duplicate ownership, path aliases, lock retention after crashes, independent clients, errors, version mismatch, frame limits, disconnect/reconnect with a pending permission and graceful stop. Expected: missing ownership/daemon APIs.
-- [ ] Implement locks, closing guards and command draining; private socket server/client and CLI with bounded buffering. Preserve existing recovery semantics and fail closed on stale ownership.
-- [ ] Run focused tests and full agent suite. Expected: all pass without provider credentials or Electron.
-- [ ] Document the refined ADR-0001 ownership, opt-in commands, platform/sleep limitations and crash recovery. Commit.
+- [x] Write failing tests for duplicate ownership, path aliases, lock retention after crashes, independent clients, errors, version mismatch, frame limits, disconnect/reconnect with a pending permission and graceful stop. Expected: missing ownership/daemon APIs.
+- [x] Implement locks, closing guards and command draining; private socket server/client and CLI with bounded buffering. Preserve existing recovery semantics and fail closed on stale ownership.
+- [x] Run focused tests and full agent suite. Expected: all pass without provider credentials or Electron.
+- [x] Document the refined ADR-0001 ownership, opt-in commands, platform/sleep limitations and crash recovery. Commit.
 
 ## Task 3: Verify packaging and publish the stacked draft
 

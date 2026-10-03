@@ -105,7 +105,9 @@ ipcMain.handle("notification:state", (_event, state) => notifier.sync(state));
 ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupported() ? notifier.notifyCompletion(notice) : false);
 
 
-const runtime = createRuntime({
+let runtime;
+try {
+runtime = createRuntime({
   dataDir: app.getPath("userData"),
   version: app.getVersion(),
   cwd: process.cwd(),
@@ -120,6 +122,10 @@ const runtime = createRuntime({
     }
   },
 });
+} catch (error) {
+  void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error.message); app.quit(); });
+  return;
+}
 const environmentReady = runtime.environmentReady;
 for (const method of runtime.methods) ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
 ipcMain.handle("project:open", async () => {
@@ -177,7 +183,7 @@ app.whenReady().then(async () => {
     if (!appIcon.isEmpty()) app.dock.setIcon(appIcon);
   }
   createWindow();
-  void runtime.resumeRecentProjects();
+  void runtime.resumeRecentProjects().catch(error => console.warn(error.message));
   app.on("browser-window-focus", () => {
     void runtime.focused().catch(() => {});
   });
@@ -200,7 +206,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
-// Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they
+// Stops everything a quit has to stop, once. Running chats are saved first so they
 // continue on the next launch; agents run in their own process groups, so they are stopped before the app exits.
 let quitting = false;
 let quitPrepared = null;
@@ -210,7 +216,7 @@ function prepareQuit() {
     notifier.closeAll();
     await runtime.close();
   })();
-  return Promise.race([quitPrepared, new Promise((resolve) => setTimeout(resolve, 5000))]);
+  return quitPrepared;
 }
 
 let quitReady = false;

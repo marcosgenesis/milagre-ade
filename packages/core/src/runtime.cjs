@@ -1,7 +1,8 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
-const { realpathSync } = require("node:fs");
+const { acquireOwnership } = require("./ownership.cjs");
+const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
@@ -48,6 +49,30 @@ const execFileAsync = promisify(execFile);
 function createRuntime(options) {
   const { dataDir, version, cwd = process.cwd(), emit = () => {}, isFocused = () => false } = options;
   if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) throw new Error("An absolute data directory is required");
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const dataOwner = acquireOwnership(path.join(realpathSync(dataDir), "runtime.lock"));
+  const projectOwners = new Map();
+  const active = new Set();
+  const starting = new Set();
+  const background = new Set();
+  let closing = false;
+  let closed;
+  function track(work, set = active) {
+    const task = Promise.resolve().then(work);
+    set.add(task);
+    task.then(() => set.delete(task), () => set.delete(task));
+    return task;
+  }
+  function accept(work) {
+    if (closing) return Promise.reject(new Error("Milagre runtime is closing"));
+    return track(work);
+  }
+  function ownProject(projectPath) {
+    const real = realpathSync(projectPath);
+    const existing = projectOwners.get(real);
+    if (existing && existing.openedAs !== projectPath) throw new Error(`Project is already open as ${existing.openedAs}`);
+    if (!existing) projectOwners.set(real, { openedAs: projectPath, owner: acquireOwnership(path.join(real, ".milagre", "runtime.lock")) });
+  }
   const handlers = new Map();
   const commands = { handle(name, handler) {
     if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
@@ -81,10 +106,12 @@ function createRuntime(options) {
   }
 
   async function readStoredState(projectPath) {
+    ownProject(projectPath);
     try {
       return JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
-    } catch {
-      return null;
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
     }
   }
 
@@ -113,6 +140,7 @@ function createRuntime(options) {
   // state this run has built, so a chat's turn that's still running isn't lost.
   // A subagent saved as running without a live agent session behind it (after a restart) is marked disconnected.
   async function readProject(projectPath) {
+    ownProject(projectPath);
     const discovered = await discoverWorktrees(projectPath);
     const live = (sessionId) => {
       const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
@@ -219,6 +247,7 @@ function createRuntime(options) {
     // missing or broken Claude has no command, and the name stays the prompt's first words.
     const cli = await agentCli("claude");
     const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, timeoutMs: 15_000 });
+    if (closing) return;
     const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
     if (!name) return;
     await updateProject(projectPath, (state) => renameWorktree(state, { path: created.path, from: created.branch, name }));
@@ -243,7 +272,7 @@ function createRuntime(options) {
       const worktree = latest.worktrees[listed.id];
       return worktree ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base } } } : latest;
     });
-    void nameWorktree(request.projectPath, created, request.prompt ?? "").catch(() => {});
+    void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
   });
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
@@ -306,6 +335,7 @@ function createRuntime(options) {
   commands.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
   async function startAgentTurn(request) {
+    if (closing) return { turnId: null, steered: false };
     const images = decodeImages(request.images);
     const prompt = await expandSkillPrompt(request.cwd, request.prompt);
     const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
@@ -315,8 +345,9 @@ function createRuntime(options) {
       return { turnId: null, steered: false };
     }
     // A new worktree's first turn waits for its setup command; one that failed tells the agent, one that was stopped stops the turn.
+    if (closing) return { turnId: null, steered: false };
     const setup = await worktreeSetups.beforeTurn(request.chatId, request.cwd);
-    if (setup.cancelled) {
+    if (closing || setup.cancelled) {
       await chats.receive(request.chatId, { type: "turn-cancelled" });
       return { turnId: null, steered: false };
     }
@@ -334,13 +365,13 @@ function createRuntime(options) {
 
   const chats = new ChatHost({
     states,
-    startTurn: startAgentTurn,
+    startTurn: request => track(() => startAgentTurn(request), starting),
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
     publish: publishAgentEvent,
     broadcast: broadcastProjectState,
     isFocused: () => isFocused(),
     handoverTools: {
-      writeTranscript: (input) => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }),
+      writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
       brief: ({ cwd, ...input }) => generateBrief({
         ...input,
         changedFiles: async () => (await execFileAsync("git", ["-C", cwd, "status", "--porcelain"], { encoding: "utf8" })).stdout.split("\n").filter(Boolean).map((line) => line.slice(3)),
@@ -465,9 +496,11 @@ function createRuntime(options) {
   // Chats a quit stopped continue on launch in every recent project, not only the one on screen.
   async function resumeRecentProjects() {
     for (const { path: projectPath } of await recentProjects().list()) {
-      const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
-      if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
-      await readProject(projectPath).catch((error) => console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message));
+      try {
+        const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+        if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
+        await readProject(projectPath);
+      } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }
     }
   }
   commands.handle("project:recent", () => recentProjects().list());
@@ -475,27 +508,40 @@ function createRuntime(options) {
   commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
 
 
-  let closing;
   function close() {
-    closing ??= (async () => {
+    closing = true;
+    closed ??= (async () => {
+      // Accepted commands may still be creating a Chat or changing settings.
+      await Promise.allSettled([...active]);
       keepAwake.quit();
       ports.close();
+      diffs.close();
       await chats.suspendRunning();
       await states.flush();
       await Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]);
-      await states.flush();
+      await Promise.allSettled([...starting]);
+      await agents.closeAll();
+      await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+      await states.close();
+      await usageStore.idle();
+      for (const { owner } of projectOwners.values()) owner.release();
+      dataOwner.release();
     })();
-    return closing;
+    return closed;
   }
   return {
     methods: Object.freeze([...handlers.keys()]),
-    async invoke(method, args = []) {
-      if (!handlers.has(method)) throw new Error(`Unknown command: ${method}`);
-      if (!Array.isArray(args)) throw new Error("Command arguments must be an array");
-      return handlers.get(method)(null, ...args);
+    invoke(method, args = []) {
+      return accept(() => {
+        if (!handlers.has(method)) throw new Error(`Unknown command: ${method}`);
+        if (!Array.isArray(args)) throw new Error("Command arguments must be an array");
+        return handlers.get(method)(null, ...args);
+      });
     },
-    openProject, resumeRecentProjects, environmentReady,
-    focused() { diffs.focused(); return readOpenChat(); },
+    openProject: projectPath => accept(() => openProject(projectPath)),
+    resumeRecentProjects: () => accept(resumeRecentProjects),
+    environmentReady,
+    focused: () => accept(() => { diffs.focused(); return readOpenChat(); }),
     close,
   };
 }

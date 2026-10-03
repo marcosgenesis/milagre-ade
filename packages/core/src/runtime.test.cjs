@@ -8,20 +8,24 @@ const { createRuntime } = require('./runtime.cjs');
 
 async function fixture(t) {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-core-')));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const runtimes = [];
+  t.after(async () => {
+    try { for (const runtime of runtimes) await runtime.close(); }
+    finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
   const project = path.join(dir, 'project');
   await fs.mkdir(project);
   execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
   const dataDir = path.join(dir, 'profile');
   const events = [];
   const options = { dataDir, cwd: project, version: '9.8.7', environmentReady: Promise.resolve(), emit: (channel, payload) => events.push({ channel, payload }) };
-  return { project, dataDir, events, options };
+  const make = (overrides = {}) => { const runtime = createRuntime({ ...options, ...overrides }); runtimes.push(runtime); return runtime; };
+  return { project, dataDir, events, options, make };
 }
 
 test('Node runtime preserves stored Chats and provider IDs across a restart', async t => {
-  const { project, options, events } = await fixture(t);
-  const first = createRuntime(options);
-  t.after(() => first.close());
+  const { project, options, events, make } = await fixture(t);
+  const first = make();
   const opened = await first.invoke('project:current');
   const session = Object.values(opened.state.sessions)[0];
   assert.ok(session);
@@ -33,8 +37,7 @@ test('Node runtime preserves stored Chats and provider IDs across a restart', as
   saved.sessions[session.id].handoverDraft = '# Existing handover';
   saved.messages = [{ id: saved.next_id++, session_id: session.id, role: 'user', body: 'Existing transcript', context: null }];
   await fs.writeFile(file, JSON.stringify(saved));
-  const second = createRuntime(options);
-  t.after(() => second.close());
+  const second = make();
   const reopened = await second.invoke('project:current');
   assert.equal(reopened.state.sessions[session.id].native_session_id, 'existing-provider-id');
   assert.equal(reopened.state.sessions[session.id].title, 'Saved Chat');
@@ -45,4 +48,76 @@ test('Node runtime preserves stored Chats and provider IDs across a restart', as
   assert.equal(await second.invoke('app:version'), '9.8.7');
   assert.ok((await second.invoke('skills:list', [project])).skills.some(skill => skill.name === 'tldr'));
   await assert.rejects(second.invoke('not:a-command'), /Unknown command/);
+});
+
+test('exclusive ownership rejects another profile owner and aliases of an open Project', async t => {
+  const { project, dataDir, options, make } = await fixture(t);
+  const first = make();
+  assert.throws(() => make(), /already owned/);
+  await first.openProject(project);
+  const alias = path.join(path.dirname(project), 'alias');
+  await fs.symlink(project, alias);
+  const other = make({ dataDir: dataDir + '-other' });
+  await assert.rejects(other.openProject(alias), /already owned/);
+  await first.close();
+  await assert.rejects(first.invoke('project:current'), /closing/);
+  await assert.rejects(first.openProject(project), /closing/);
+  assert.equal((await other.openProject(alias)).path, alias);
+});
+
+test('close waits for a command already changing saved settings before releasing ownership', async t => {
+  const { project, options, make } = await fixture(t);
+  const runtime = make();
+  const { promise: writing, resolve: started } = Promise.withResolvers();
+  const { promise: proceed, resolve: release } = Promise.withResolvers();
+  const original = fs.writeFile;
+  t.mock.method(fs, 'writeFile', async (...args) => {
+    if (String(args[0]).includes('project-settings')) { started(); await proceed; }
+    return original(...args);
+  });
+  const save = runtime.invoke('worktree-setup:save', [project, 'npm ci']);
+  await writing;
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  const completedEarly = closed;
+  release();
+  await Promise.all([save, closing]);
+  assert.equal(completedEarly, false, 'close must retain ownership until the write completes');
+  const next = make();
+  assert.equal((await next.invoke('worktree-setup:read', [project])).setupCommand, 'npm ci');
+});
+
+test('a damaged existing transcript fails closed instead of being replaced by an empty Project', async t => {
+  const { project, make } = await fixture(t);
+  await fs.mkdir(path.join(project, '.milagre'));
+  const file = path.join(project, '.milagre/coordination.json');
+  const damaged = '{"messages": ["saved conversation"';
+  await fs.writeFile(file, damaged);
+  const runtime = make();
+  await assert.rejects(runtime.openProject(project), /JSON/);
+  assert.equal(await fs.readFile(file, 'utf8'), damaged);
+});
+
+test('a turn waiting for CLI discovery cannot create an agent after shutdown begins', async t => {
+  const { project, make } = await fixture(t);
+  const started = Promise.withResolvers();
+  const discovery = Promise.withResolvers();
+  let created = 0;
+  const runtime = make({
+    titleModels: {},
+    agentCli: async () => { started.resolve(); return discovery.promise; },
+    createSession() { created++; throw new Error('Should not start while closing'); },
+  });
+  const opened = await runtime.openProject(project);
+  const session = Object.values(opened.state.sessions)[0];
+  await runtime.invoke('chat:send', [{ projectPath: project, sessionId: session.id, body: 'Pending start', provider: 'codex', model: 'test', permissionMode: 'ask' }]);
+  await started.promise;
+  const closing = runtime.close();
+  discovery.resolve({ command: '/fake/codex' });
+  await closing;
+  assert.equal(created, 0);
+  const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
+  assert.equal(saved.messages[0].body, 'Pending start');
+  assert.ok(saved.sessions[session.id].resumeTurn);
 });

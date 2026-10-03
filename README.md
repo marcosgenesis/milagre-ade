@@ -114,16 +114,20 @@ Escape denies an open approval card and dismisses an open question card. "Always
 
 Question cards appear in every mode, Full included. A message you send while a question is open dismisses it and reaches the agent as your reply. Codex asks with a card through a Codex feature that is still under development; without it, Codex asks in its reply.
 
-The approval boundary is enforced in the Electron main process. The renderer can request work, but it should not receive arbitrary filesystem or process privileges.
+The approval boundary is enforced by the shared core runtime, hosted in Electron for desktop. The renderer can request work, but it should not receive arbitrary filesystem or process privileges.
 
 ## Repository layout
 
 ```text
-apps/desktop/     Desktop package (milagre): React renderer and Electron runtime
+apps/desktop/     Desktop package (milagre): React renderer and Electron host
+apps/daemon/      Opt-in local Node daemon (@milagre/daemon)
+packages/core/    Chat runtime, providers, persistence and Worktrees (@milagre/core)
 packages/shared/  Shared model, Chat operations and state reducers (@milagre/shared)
 scripts/          Root development, integration-test and release helpers
 docs/             Product and domain documentation
 ```
+
+See [Local daemon](docs/local-daemon.md) for commands, ownership rules and recovery. Desktop currently embeds core; remote clients and the desktop transport switch follow separately.
 
 ## Contributing
 

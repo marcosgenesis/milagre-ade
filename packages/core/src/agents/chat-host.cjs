@@ -29,9 +29,10 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, handoverTools, now = Date.now }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, handoverTools, now });
+  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, readSubagents = async () => [], handoverTools, now = Date.now }) {
+    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, readSubagents, handoverTools, now });
     this.pendingHandovers = new Map();
+    this.subagentRecoveries = new Map();
     this.runs = {};
     this.seq = 0;
     this.openChat = null;
@@ -49,6 +50,40 @@ class ChatHost {
   /** The chat on screen, by chat key, or null. A turn that ends in any other chat leaves it unread. */
   setOpenChat(chatId) {
     this.openChat = typeof chatId === "string" ? chatId : null;
+  }
+
+  /** Recover saved unknown outcomes from provider history without starting a conversation turn. */
+  recoverSubagents(chatId) {
+    if (this.subagentRecoveries.has(chatId)) return this.subagentRecoveries.get(chatId);
+    const pending = (async () => {
+      const projectPath = projectOfKey(chatId);
+      const sessionId = sessionIdFromKey(chatId);
+      if (!this.states.has(projectPath) || this.runs[chatId] || this.quitting) return;
+      const saved = await this.states.get(projectPath);
+      const session = saved.sessions[sessionId];
+      const cwd = saved.worktrees[session?.worktree_id]?.path;
+      if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
+      const unknown = (session.subagents ?? []).filter(agent => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
+      if (!unknown.length) return;
+      const events = await this.readSubagents({ cwd, agents: unknown });
+      if (!events.length) return;
+      const { state, changed } = await this.states.update(projectPath, (latest) => {
+        const current = latest.sessions[sessionId];
+        if (this.quitting || this.runs[chatId] || !current || current.archived || current.provider !== session.provider || current.native_session_id !== session.native_session_id || current.worktree_id !== session.worktree_id || latest.worktrees[current.worktree_id]?.path !== cwd) return latest;
+        let next = latest;
+        for (const event of events) {
+          if (event.type !== "subagent-update" || !["completed", "failed", "cancelled"].includes(event.agent?.status)) continue;
+          const previous = unknown.find(agent => agent.id === event.agent.id);
+          // A new live event or an archive while history loads takes precedence over this snapshot.
+          if (!previous || current.subagents?.find(agent => agent.id === previous.id) !== previous) continue;
+          next = applyAgentEvent(next, this.runs, projectPath, chatId, event).state;
+        }
+        return next;
+      });
+      if (changed) this.broadcast(projectPath, state);
+    })().finally(() => this.subagentRecoveries.delete(chatId));
+    this.subagentRecoveries.set(chatId, pending);
+    return pending;
   }
 
   /** Folds one agent event into its chat's project, then publishes it. Events are published in the order they arrive. */

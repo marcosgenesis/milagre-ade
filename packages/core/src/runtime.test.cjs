@@ -62,7 +62,7 @@ test('exclusive ownership rejects another profile owner and aliases of an open P
   await first.close();
   await assert.rejects(first.invoke('project:current'), /closing/);
   await assert.rejects(first.openProject(project), /closing/);
-  assert.equal((await other.openProject(alias)).path, alias);
+  assert.equal((await other.openProject(alias)).path, project);
 });
 
 test('close waits for a command already changing saved settings before releasing ownership', async t => {
@@ -183,4 +183,63 @@ test('quit stops agents after a disk failure and can retry before releasing owne
  const rename=fs.rename;let fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
  await assert.rejects(runtime.close(),/disk full/);assert.ok(closed>0,'providers must stop even when persistence fails');assert.throws(()=>make(),/already owned/);
  fail=false;await runtime.close();const next=make();const restored=await next.openProject(project);assert.ok(restored.state.messages.some(m=>m.body==='Keep me'));
+});
+
+test('linked Worktrees resolve to one registered Project without losing saved Chats', async t => {
+  const { project, make } = await fixture(t);
+  execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  const linked = path.join(path.dirname(project), 'linked');
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'linked', linked], { stdio: 'ignore' });
+  const runtime = make();
+  const first = await runtime.openProject(project);
+  const chat = Object.values(first.state.sessions)[0];
+  await runtime.invoke('chat:patch', [project, chat.id, { title: 'Keep this Chat' }]);
+  const reopened = await runtime.openProject(linked);
+  assert.equal(reopened.path, project);
+  assert.equal(reopened.state.sessions[chat.id].title, 'Keep this Chat');
+  const recent = await runtime.invoke('project:recent');
+  assert.equal(recent.filter(item => item.path === project).length, 1);
+  assert.ok(!recent.some(item => item.path === linked));
+  const id = path.join(project, '.git');
+  await runtime.invoke('project:position', [id, { x: 30, y: 40 }]);
+  const registered = (await runtime.invoke('project:registry')).find(item => item.id === id);
+  assert.equal(registered.path, project);
+  assert.deepEqual(registered.position, { x: 30, y: 40 });
+});
+
+test('opening a saved Codex Chat starts outcome recovery and shutdown drains its provider read', async t => {
+  const { project, make } = await fixture(t);
+  const first = make();
+  const opened = await first.invoke('project:current');
+  const session = Object.values(opened.state.sessions)[0];
+  await first.invoke('chat:patch', [project, session.id, { title: 'Saved recovery Chat' }]);
+  await first.close();
+  const file = path.join(project, '.milagre/coordination.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  Object.assign(saved.sessions[session.id], {
+    provider: 'codex', native_session_id: 'saved-parent',
+    subagents: [{ id: 'saved-child', title: 'Saved task', status: 'unknown', startedAt: 10, updatedAt: 20, transcript: [] }],
+  });
+  await fs.writeFile(file, JSON.stringify(saved));
+  const reading = Promise.withResolvers();
+  const discovery = Promise.withResolvers();
+  const runtime = make({ agentCli: async provider => {
+    assert.equal(provider, 'codex');
+    reading.resolve();
+    return discovery.promise;
+  } });
+  await runtime.invoke('project:current');
+  await runtime.invoke('chat:set-open', [`${project}#${session.id}`]);
+  await reading.promise;
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  const completedEarly = closed;
+  discovery.resolve({ problem: 'Provider unavailable in this fixture' });
+  await closing;
+  assert.equal(completedEarly, false, 'shutdown must retain ownership until outcome recovery finishes');
+  const next = make();
+  const reopened = await next.invoke('project:current');
+  assert.equal(reopened.state.sessions[session.id].subagents[0].status, 'unknown');
+  assert.deepEqual(await next.invoke('chat:runs'), { runs: {}, seq: 0 });
 });

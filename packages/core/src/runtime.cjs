@@ -9,7 +9,7 @@ const { migrateImages } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
-const { CodexSession } = require("./agents/codex-provider.cjs");
+const { CodexSession, recoverCodexSubagents } = require("./agents/codex-provider.cjs");
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
@@ -39,6 +39,8 @@ const { attentionContext, attentionNotice } = require("@milagre/shared/attention
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, readProjectState } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
+const { createProjectRegistry } = require("./project-registry.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -109,7 +111,7 @@ function createRuntime(options) {
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
-    return git.worktreeList(projectPath);
+    return activeWorktrees(projectPath);
   }
 
   async function readStoredState(projectPath) {
@@ -383,6 +385,10 @@ function createRuntime(options) {
   const chats = new ChatHost({
     states,
     startTurn: request => track(() => startAgentTurn(request), starting),
+    readSubagents: async ({ cwd, agents }) => {
+      const cli = await agentCli("codex");
+      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, clientVersion: version });
+    },
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
     publish: publishAgentEvent,
     broadcast: broadcastProjectState,
@@ -445,7 +451,10 @@ function createRuntime(options) {
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
   async function readOpenChat() {
     const chatId = chats.openChat;
-    if (chatId && states.has(projectOfKey(chatId))) await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
+    if (chatId && states.has(projectOfKey(chatId))) {
+      await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
+      void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
+    }
   }
   commands.handle("chat:set-open", (_event, chatId) => {
     chats.setOpenChat(chatId);
@@ -502,11 +511,15 @@ function createRuntime(options) {
   let shownProjectPath = null;
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
+  let registryStore = null;
+  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json")));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
   async function openProject(projectPath) {
-    const project = await readProject(projectPath);
-    await rememberProject(recentProjects(), projectPath);
-    shownProjectPath = projectPath;
+    const identity = await resolveProject(projectPath);
+    const project = await readProject(identity.path);
+    await projectRegistry().add(identity);
+    await rememberProject(recentProjects(), identity.path);
+    shownProjectPath = identity.path;
     return project;
   }
 
@@ -522,6 +535,8 @@ function createRuntime(options) {
       } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }
     }
   }
+  commands.handle("project:registry", () => projectRegistry().list());
+  commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("project:recent", () => recentProjects().list());
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");

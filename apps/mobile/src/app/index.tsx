@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useSession } from '../session';
 import { savedConnection } from '../connection-native';
-import { Button, Choice, ErrorNotice, Field, PageScroll, styles } from '../ui';
+import { Button, Toggle, ErrorNotice, Field, PageScroll, styles } from '../ui';
 
 export default function ConnectScreen() {
   const session = useSession();
@@ -41,7 +41,7 @@ export default function ConnectScreen() {
   }
   return <SafeAreaView style={styles.screen}><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><PageScroll contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 28 }}>
     <View style={{ gap: 16 }}><Image source={require('../../assets/milagre.png')} style={{ width: 54, height: 54, borderRadius: 14 }} /><Text style={styles.label}>MILAGRE / YOUR COMPUTER</Text><Text style={[styles.title, { fontSize: 40 }]}>Your Chats.{"\n"}In your hand.</Text><Text style={styles.muted}>Connect to your computer. Your agents keep working when you leave the app.</Text></View>
-    <View style={styles.card}><Field label="Computer address" value={address} onChangeText={value => { edited.current = true; setAddress(value); }} keyboardType="url" /><Field label="Connection token" value={token} onChangeText={value => { edited.current = true; setToken(value); }} autoComplete="off" textContentType="none" importantForAutofill="no" secureTextEntry />{!demo && <Choice title="Remember this computer" selected={remember} onPress={() => setRemember(!remember)} />}<Button title={busy ? 'Connecting...' : 'Connect to computer'} onPress={() => void connect()} disabled={busy || !token.trim()} />{hasSaved && <Button title="Forget this computer" secondary disabled={busy} onPress={() => void forget()} />}</View>
+    <View style={styles.card}><Field label="Computer address" value={address} onChangeText={value => { edited.current = true; setAddress(value); }} keyboardType="url" /><Field label="Connection token" value={token} onChangeText={value => { edited.current = true; setToken(value); }} autoComplete="off" textContentType="none" importantForAutofill="no" secureTextEntry />{!demo && <Toggle title="Remember this computer" selected={remember} onPress={() => setRemember(!remember)} />}<Button title={busy ? 'Connecting...' : 'Connect to computer'} onPress={() => void connect()} disabled={busy || !token.trim()} />{hasSaved && <Button title="Forget this computer" secondary disabled={busy} onPress={() => void forget()} />}</View>
     {error ? <ErrorNotice message={error} /> : null}
     <Text style={styles.muted}>{demo ? 'Demo mode uses a temporary Project and a demo agent. No provider account is used.' : 'Use the address and connection token from your Milagre host. Remote connections need HTTPS.'}</Text>
   </PageScroll></KeyboardAvoidingView></SafeAreaView>;

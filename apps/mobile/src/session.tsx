@@ -4,6 +4,7 @@ import { AppState } from 'react-native';
 import { createClient, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
 import { savedConnection } from './connection-native';
 import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
+import type { Attachment } from './attachments';
 import type { TurnPreferences } from './turn-options';
 
 function useSessionState() {
@@ -12,6 +13,7 @@ function useSessionState() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
   const [models, setModels] = useState<AgentModels | null>(null);
   const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
@@ -96,7 +98,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { client, recent, snapshot, error, setError, drafts, setDrafts, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

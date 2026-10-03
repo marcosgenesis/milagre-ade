@@ -27,6 +27,18 @@ function demoSession(_provider, { emit }) {
       } else if (/question/i.test(prompt)) {
         pending = { kind: 'question', id: turnId };
         emit({ type: 'question-request', requestId: turnId, questions: [{ id: 'next', header: 'Next step', question: 'What should we try next?', options: [{ label: 'Read a Chat' }, { label: 'Send a message' }], multiSelect: false, allowOther: true, secret: false }] });
+      } else if (/tools/i.test(prompt)) {
+        emit({ type: 'text-delta', text: 'I will inspect the app and check the tests.\n\n' });
+        emit({ type: 'step-started', step: { id: 'demo-read', kind: 'read', title: 'Read `chat.tsx`', detail: 'Demo file inspection. No files were read or changed.' } });
+        timer = setTimeout(() => {
+          emit({ type: 'step-completed', id: 'demo-read', status: 'done', note: '1 file' });
+          emit({ type: 'step-started', step: { id: 'demo-test', kind: 'shell', title: 'Run `npm test`', detail: '$ npm test\nChecking the Chat controls…' } });
+          timer = setTimeout(() => {
+            const failed = /failure/i.test(prompt);
+            emit({ type: 'step-completed', id: 'demo-test', status: failed ? 'failed' : 'done', detail: failed ? '$ npm test\nFAIL: demo assertion\nThis is a simulated failure; no command ran.' : '$ npm test\nPASS: send, stop, reconnect\n3 checks passed (simulated).', note: failed ? 'Demo failure' : '3 checks passed' });
+            finish('## Preview ready\n\nThe **Chat controls** are ready to try.\n\n- Expand activity to inspect tool output.\n- Send `approval` to try a permission request.\n\n```sh\nnpm run test:mobile\n```\n\nThis is a **demo response**. No command was run.');
+          }, /slow/i.test(prompt) ? 20000 : 800);
+        }, 500);
       } else {
         emit({ type: 'text-delta', text: 'Demo agent: your message reached the daemon on your Mac. ' });
         timer = setTimeout(() => finish('The reply made it back to your simulator. Your Chat is saved locally.'), /slow/i.test(prompt) ? 20000 : 1200);

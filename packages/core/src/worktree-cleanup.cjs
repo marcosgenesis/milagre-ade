@@ -11,7 +11,7 @@ const GIT_TIMEOUT_MS = LIMITS.READ.timeout;
 const REMOVE_TIMEOUT_MS = LIMITS.REMOVE.timeout;
 
 // The message a removal refused because the worktree changed after the user looked; the renderer words the notice.
-const CHANGED_AFTER_CHECK = "WORKTREE_CHANGED";
+const { WORKTREE_CHANGED: CHANGED_AFTER_CHECK } = require("@milagre/shared/git-codes").GIT_CODES;
 
 /**
  * What archiving a chat would lose from its worktree. `uncommitted` counts `git status` entries (untracked

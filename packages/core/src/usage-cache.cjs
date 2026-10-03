@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const PROVIDERS = ["claude", "codex"];
+const PROVIDERS = require("@milagre/shared/providers").PROVIDERS.toReversed();
 
 const emptyState = () => Object.fromEntries(PROVIDERS.map((provider) => [provider, { last: null, blocked: null }]));
 

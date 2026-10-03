@@ -294,7 +294,7 @@ test("nothing is committed on a detached HEAD", async (t) => {
   await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.branch, null);
-  assert.deepEqual(await actions.commit({ cwd: worktree, message: "feat: checkout" }), { ok: false, kind: "blocked", message: DETACHED_COMMIT });
+  assert.deepEqual(await actions.commit({ cwd: worktree, message: "feat: checkout" }), { ok: false, kind: "blocked", message: DETACHED_COMMIT, code: "DETACHED_COMMIT" });
   assert.equal(run(worktree, "status", "--porcelain"), "?? checkout.js");
 });
 
@@ -408,8 +408,8 @@ test("a repo without origin can commit but not push or open a PR", async (t) => 
   assert.equal(changes.hasOrigin, false);
   assert.equal(changes.base, "main");
   assert.equal((await actions.commit({ cwd: worktree, message: "feat: checkout" })).ok, true);
-  assert.deepEqual(await actions.push({ cwd: worktree }), { ok: false, kind: "no-origin", message: NO_ORIGIN });
-  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "no-origin", message: NO_ORIGIN });
+  assert.deepEqual(await actions.push({ cwd: worktree }), { ok: false, kind: "no-origin", message: NO_ORIGIN, code: "NO_ORIGIN" });
+  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "no-origin", message: NO_ORIGIN, code: "NO_ORIGIN" });
   assert.deepEqual(await ghCalls(), []);
 });
 
@@ -418,7 +418,7 @@ test("without gh, opening a PR says how to install it", async (t) => {
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.ghReady, false);
   assert.equal(changes.ghMessage, GH_MISSING);
-  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-missing", message: GH_MISSING });
+  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-missing", message: GH_MISSING, code: "GH_MISSING" });
 });
 
 test("when gh is signed out, opening a PR says to log in", async (t) => {

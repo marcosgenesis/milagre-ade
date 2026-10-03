@@ -1,3 +1,4 @@
+import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSyncExternalStore } from "react";
 import type { EditorInfo } from "../model";
 import { showNotice } from "./notice";
@@ -34,6 +35,8 @@ export function useEditors(): { editors: EditorInfo[] | null; editor: EditorInfo
 
 /** Opens a file (or, with no path, the folder) in the chosen editor; a failure shows as a small notice. */
 export async function openInEditor(root: string, target: { path?: string; line?: number } = {}) {
-  const error = await window.milagre.openInEditor({ root, ...target, editor: getSettings().editorId || undefined }).catch(() => "Couldn't open the editor");
-  if (error) showNotice(error);
+  try {
+    const result = await window.milagre.openInEditor({ root, ...target, editor: getSettings().editorId || undefined });
+    if (!result.ok) showNotice(result.error.message);
+  } catch (error) { showNotice(ipcErrorMessage(error)); }
 }

@@ -5,8 +5,19 @@
   "type": "commonjs",
   "main": "src/runtime.cjs",
   "exports": {
-    ".": "./src/runtime.cjs",
-    "./*": "./src/*.cjs"
+    ".": {
+      "types": "./src/runtime.d.cts",
+      "default": "./src/runtime.cjs"
+    },
+    "./*": "./src/*.cjs",
+    "./editors": {
+      "types": "./src/editors.d.cts",
+      "default": "./src/editors.cjs"
+    },
+    "./keep-awake": {
+      "types": "./src/keep-awake.d.cts",
+      "default": "./src/keep-awake.cjs"
+    }
   },
   "scripts": {
     "test": "node --test src/*.test.cjs src/agents/*.test.cjs"

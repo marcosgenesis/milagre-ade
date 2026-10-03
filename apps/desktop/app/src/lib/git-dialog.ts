@@ -1,3 +1,4 @@
+import { GIT_CODES, gitMessage, type GitCode } from "@milagre/shared/git-codes";
 import type { ChatMessage, ModelProvider } from "../model";
 
 // What the "Commit and open PR" dialog shows and which steps its buttons run, from what git and gh
@@ -69,22 +70,22 @@ export type GitTextResult =
 
 export type GitCommitResult =
   | { ok: true; sha: string; shortSha: string }
-  | { ok: false; kind: "hook" | "signing" | "secrets" | "blocked" | "nothing" | "error"; message: string; output?: string };
+  | { ok: false; code?: GitCode; kind: "hook" | "signing" | "secrets" | "blocked" | "nothing" | "error"; message: string; output?: string };
 
 export type GitPushResult =
   | { ok: true; branch: string; remote: string }
-  | { ok: false; kind: "rejected" | "no-origin" | "error"; message: string; hint?: string };
+  | { ok: false; code?: GitCode; kind: "rejected" | "no-origin" | "error"; message: string; hint?: string };
 
 export type GitPrResult =
   | { ok: true; url: string; number: number | null }
-  | { ok: false; kind: "no-origin" | "on-base" | "gh-missing" | "gh-auth" | "error"; message: string };
+  | { ok: false; code?: GitCode; kind: "no-origin" | "on-base" | "gh-missing" | "gh-auth" | "error"; message: string };
 
 export type GitStep = "commit" | "push" | "pr";
 
-export const NO_ORIGIN = "This repo has no origin remote.";
-export const DETACHED = "Check out a branch to push.";
-export const DETACHED_COMMIT = "Check out a branch to commit.";
-export const GH_MISSING = "Install the GitHub CLI (`brew install gh`) to open PRs.";
+export const NO_ORIGIN = gitMessage(GIT_CODES.NO_ORIGIN);
+export const DETACHED = gitMessage(GIT_CODES.DETACHED);
+export const DETACHED_COMMIT = gitMessage(GIT_CODES.DETACHED_COMMIT);
+export const GH_MISSING = gitMessage(GIT_CODES.GH_MISSING);
 export const TURN_RUNNING = "The agent is still working. Wait for the turn to end or stop it.";
 
 export interface DialogModeInput {

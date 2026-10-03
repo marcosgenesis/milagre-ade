@@ -1,6 +1,6 @@
+import { PROVIDERS } from "@milagre/shared/providers";
 import type { AgentModels, ModelCapabilities, ModelOption, ModelProvider } from "../model";
 
-const PROVIDERS: ModelProvider[] = ["codex", "claude"];
 
 /**
  * The models the picker offers: each agent's own list, its recommended model first, or the maintained

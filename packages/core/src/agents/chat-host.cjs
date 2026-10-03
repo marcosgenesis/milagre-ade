@@ -1,3 +1,4 @@
+const { ipcErrorMessage } = require("@milagre/shared/result");
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { patchSession } = require("@milagre/shared/project-edits");
 const { chatTitle } = require("@milagre/shared/chats");
@@ -7,12 +8,6 @@ const { renderTranscript, providerName } = require("./handover.cjs");
 const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RESUME_BODY = "Milagre restarted. Continue where you left off.";
 const RESUME_PROMPT = "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
-
-/** The part of an IPC error the user should read. */
-function errorMessage(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
-}
 
 // Saves every chat's turns, in whatever project, whether or not the window shows it. Agent events
 // are folded into the chat's project state (see ProjectStates), and each one is published to the
@@ -177,7 +172,7 @@ class ChatHost {
       prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
     };
     this.turns.set(target.chatId, turn);
-    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
+    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) }));
     return { sessionId: target.sessionId };
   }
 
@@ -231,7 +226,7 @@ class ChatHost {
       await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);
-      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${errorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
+      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${ipcErrorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
     }
   }
 

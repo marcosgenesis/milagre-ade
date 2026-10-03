@@ -1,3 +1,4 @@
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import type { ModelProvider, ProviderUsage, UsageSnapshot } from "../../model";
 import type { UsageDisplay } from "../../lib/settings";
 
@@ -5,7 +6,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export const PROVIDER_NAMES: Record<ModelProvider, string> = { claude: "Claude", codex: "Codex" };
+export const PROVIDER_NAMES = Object.fromEntries(PROVIDERS.map(provider => [provider, providerName(provider)])) as Record<ModelProvider, string>;
 
 export type UsageTone = "normal" | "warning" | "critical";
 

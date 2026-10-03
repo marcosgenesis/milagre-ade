@@ -19,6 +19,7 @@ window.agentEvent = payload => window.agentHandlers.forEach(handler => handler(p
 window.milagre = new Proxy({
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  patchChat: async () => { throw new Error("Chat could not be saved: disk full"); },
   // The check raises a question in the open chat by sending the events the main process would.
   getRuns: async () => ({ seq: 0, runs: {} }),
   onAgentEvent: handler => { (window.agentHandlers ??= []).push(handler); return () => {}; },
@@ -40,7 +41,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require('electron');
   await app.whenReady();
   const window = new BrowserWindow({ width: 1280, height: 760, show: false, webPreferences: { partition: 'command-palette-test', backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = source => window.webContents.executeJavaScript(source).catch(error => { throw new Error(`${error.message}\nExpression: ${source}`); });
   async function waitFor(source) {
     for (let n = 0; n < 200; n++) { if (await evaluate(source)) return; await delay(25); }
     throw Error(`Timed out: ${source}`);
@@ -204,6 +205,21 @@ async function browserChecks() {
     await waitFor('!document.querySelector("dialog")');
     await key('n', { metaKey: true });
     await waitFor('!!document.querySelector("[data-new-chat-pickers]")');
+    // A failed row action reports the cause in the actual App, with the Chat still present.
+    await key('1', { metaKey: true });
+    await evaluate("window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true }))");
+    await evaluate(`document.querySelector('[aria-label="Expand sidebar"]')?.click()`);
+    await waitFor(`!!document.querySelector('[aria-label="Chat actions"]')`);
+    await evaluate(`document.querySelector('[aria-label="Chat actions"]').click()`);
+    await waitFor('!!document.querySelector("[data-chat-menu]")');
+    await evaluate(`[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.includes('Mark as unread')).click()`);
+    await waitFor(`document.body.textContent.includes('Could not update Chat: Chat could not be saved: disk full')`);
+    assert.ok(await evaluate('document.body.textContent.includes("Add a command palette")'));
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      await delay(250);
+      require('node:fs').mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+      require('node:fs').writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'chat-action-failure.png'), (await window.webContents.capturePage()).toPNG());
+    }
     console.log('PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation, shortcuts over a waiting question card');
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }

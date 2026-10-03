@@ -116,7 +116,7 @@ function chatHost() {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { setParams: values => Object.assign(params, values) }, useLocalSearchParams: () => params },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
-    '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
+    '@milagre/shared/providers': require('@milagre/shared/providers'),
     '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '../session': { useSession: () => session }, '../questions': {}, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };

@@ -1,30 +1,8 @@
+const { cliName } = require("@milagre/shared/providers");
 const { claudeSubagents, codexSubagents } = require("./subagents.cjs");
-// Normalised events every agent session emits. The main process forwards them to the
-// renderer as { chatId, event }, where chatId is the chat key `${projectPath}#${sessionId}`:
-//   { type: "session-started", nativeId }   provider session or thread id; the chat saves it
-//   { type: "session-reset" }               the saved id can't be resumed; the chat forgets it
-//   { type: "turn-started", turnId }        first event of every turn that starts, including turns the renderer
-//                                           didn't start (a steering message that arrived as the last turn ended);
-//                                           a turn that fails before starting ends with a terminal event and no turn-started
-//   { type: "text-delta", messageId, text } reply text as it streams; messageId is the turn id
-//   { type: "step-started", step }          a tool call began: step = { id, kind, title, detail? } (see steps.cjs)
-//   { type: "step-output", id, text }       command output as it streams (Codex only), appended to the step
-//   { type: "step-completed", id, status, title?, detail?, durationMs? }
-//                                           the tool call ended; detail replaces anything streamed. A step still
-//                                           running when its turn ends gets no step-completed
-//                                           Thinking is a step too (kind "thinking"): its summary streams as
-//                                           step-output, and it ends with how long it took
-//   { type: "permission-request", ...request } and { type: "permission-resolved", requestId, decision }
-//                                           an approval the turn waits on (see permissions.cjs)
-//   { type: "question-request", ...request } and { type: "question-resolved", requestId, outcome }
-//                                           questions the turn waits on (see questions.cjs)
-//   { type: "turn-completed" } | { type: "turn-cancelled" } | { type: "turn-failed", message, notice?, login? }
-//                                           notice: the message is one Milagre wrote (a full sentence that names the CLI
-//                                           and the fix), shown as it is; other messages are the agent's own error text.
-//                                           login: the agent isn't logged in; its session is closed so the next message starts a fresh one
-//   { type: "tasks-updated", tasks }        the agent's to-do list, whole: tasks = [{ id, content, activeForm?, status }]
-//                                           with status "pending" | "in_progress" | "completed" (see tasks.cjs); [] clears it
-// Exactly one of the last three ends every turn.
+/** @typedef {import("@milagre/shared/model").AgentEvent} AgentEvent */
+// The wire event contract lives in @milagre/shared/model. Exactly one terminal event ends each turn.
+const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
 
 const { applyToolResult, applyToolUse, codexPlanTasks } = require("./tasks.cjs");
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
@@ -41,10 +19,8 @@ function milagreInstructions(tldrEnabled = true) {
 }
 const MILAGRE_INSTRUCTIONS = milagreInstructions();
 const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
-const TERMINAL_TYPES = new Set(["turn-completed", "turn-failed", "turn-cancelled"]);
 
 // What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
-const CLI_NAMES = { claude: "Claude Code", codex: "Codex" };
 const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
 const UPDATE_COMMANDS = { claude: "claude update", codex: "codex update" };
 const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
@@ -68,28 +44,28 @@ const lastLine = (text) => readLastLine(text).line;
 const withoutPeriod = (text) => text.replace(/\.$/, "");
 
 function missingCliMessage(name) {
-  return `Milagre couldn't find ${CLI_NAMES[name]}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
+  return `Milagre couldn't find ${cliName(name)}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
 }
 
 function cliTooOldMessage(name, version, minimum) {
-  return `Milagre needs ${CLI_NAMES[name]} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
+  return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
 function cliBrokenMessage(name, command, detail) {
   const reason = lastLine(detail);
-  return `${CLI_NAMES[name]} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
+  return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
 }
 
 function loginMessage(name) {
-  return `${CLI_NAMES[name]} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
+  return `${cliName(name)} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
 // The reason is the last line, with a log line's prefix dropped. A process the OS killed with nothing left to
 // say gets its signal instead.
 function crashMessage(name, detail, { signal } = {}) {
   const { line } = readLastLine(detail);
-  const reason = signal && !line ? `${CLI_NAMES[name]} exited with signal ${signal}` : line;
-  return `${CLI_NAMES[name]} stopped unexpectedly${reason ? `: ${withoutPeriod(reason)}` : ""}. Send your message again to continue this chat.`;
+  const reason = signal && !line ? `${cliName(name)} exited with signal ${signal}` : line;
+  return `${cliName(name)} stopped unexpectedly${reason ? `: ${withoutPeriod(reason)}` : ""}. Send your message again to continue this chat.`;
 }
 
 // Codex passes some API errors on as raw JSON: {"type":"error","status":400,"error":{"message":"…"}}.
@@ -111,9 +87,6 @@ function codexUnauthorized(error) {
   return info === "unauthorized" || (Boolean(info) && typeof info === "object" && Object.values(info).some((detail) => detail?.httpStatusCode === 401));
 }
 
-function isTerminal(event) {
-  return TERMINAL_TYPES.has(event.type);
-}
 
 // The mapper's clock; tests set state.now.
 const now = (state) => (state.now ?? Date.now)();

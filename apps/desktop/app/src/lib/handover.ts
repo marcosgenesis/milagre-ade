@@ -1,9 +1,10 @@
+import { providerName } from "@milagre/shared/providers";
 import type { AgentSession, ChatMessage, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { modelForChat } from "./agent-runs.ts";
 import { chatTitle } from "./chat-list.ts";
 
 export const otherProvider = (provider: ModelProvider): ModelProvider => (provider === "codex" ? "claude" : "codex");
-export const providerLabel = (provider: ModelProvider) => (provider === "codex" ? "Codex" : "Claude");
+export const providerLabel = providerName;
 
 /** Why the handover row is disabled, or null. A running turn would leave work out of the brief. */
 export function handoverBlocker({ running, cli }: { running: boolean; cli: string | null }): string | null {

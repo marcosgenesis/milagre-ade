@@ -1,3 +1,6 @@
+import { reportChatAction } from "./lib/chat-action";
+import { ipcErrorMessage } from "@milagre/shared/result";
+import { cliName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -159,12 +162,12 @@ function App() {
       }
       refreshCliStatus();
       if (result.ok) {
-        setNotice(`${provider === "codex" ? "Codex" : "Claude Code"} updated to version ${result.version ?? "latest"} successfully!`);
+        setNotice(`${cliName(provider)} updated to version ${result.version ?? "latest"} successfully!`);
       } else {
-        setNotice(result.error ?? `Failed to update ${provider === "codex" ? "Codex" : "Claude Code"}.`);
+        setNotice(result.error ?? `Failed to update ${cliName(provider)}.`);
       }
     } catch (error) {
-      setNotice(`Error updating ${provider === "codex" ? "Codex" : "Claude Code"}: ${error instanceof Error ? error.message : String(error)}`);
+      setNotice(`Error updating ${cliName(provider)}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setUpdatingCli(null);
     }
@@ -204,7 +207,7 @@ function App() {
     setLoading(true);
     setStartupError(null);
     try { adoptProject(await window.milagre.getCurrentProject()); }
-    catch (error) { setStartupError(ipcError(error)); }
+    catch (error) { setStartupError(ipcErrorMessage(error)); }
     finally { setLoading(false); }
   }
 
@@ -353,19 +356,19 @@ function App() {
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
-    if (current) void window.milagre.patchChat(current.path, sessionId, patch).catch(() => {});
+    if (current) void reportChatAction(window.milagre.patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
   }
 
   function archiveChild(id: string, archived: boolean) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (current && parentId !== null) void window.milagre.archiveSubagent(current.path, parentId, id, archived).catch(() => {});
+    if (current && parentId !== null) void reportChatAction(window.milagre.archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
   }
 
   function archiveFinishedChildren() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (current && parentId !== null) void window.milagre.archiveFinishedSubagents(current.path, parentId).catch(() => {});
+    if (current && parentId !== null) void reportChatAction(window.milagre.archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
   }
 
   function openChat(sessionId: number) {
@@ -540,9 +543,8 @@ function App() {
       const next = await load();
       if (next && next.path !== projectRef.current?.path) adoptProject(next);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!projectRef.current) setStartupError(ipcError(error));
-      setNotice(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+      if (!projectRef.current) setStartupError(ipcErrorMessage(error));
+      setNotice(ipcErrorMessage(error));
     }
   }
 
@@ -565,7 +567,6 @@ function App() {
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
   }
 
-  const ipcError = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
     // The brief is sent with the main process's copy of the draft, so the message may be empty.
@@ -578,7 +579,7 @@ function App() {
     try {
       target = await resolveSendTarget(body);
     } catch (error) {
-      setNewChatError(`Could not create the worktree: ${ipcError(error)}`);
+      setNewChatError(`Could not create the worktree: ${ipcErrorMessage(error)}`);
       setPreparing(false);
       return false;
     }
@@ -619,7 +620,7 @@ function App() {
       }
       return true;
     } catch (error) {
-      setNewChatError(`Could not send the message: ${ipcError(error)}`);
+      setNewChatError(`Could not send the message: ${ipcErrorMessage(error)}`);
       return false;
     } finally {
       setPreparing(false);
@@ -664,7 +665,7 @@ function App() {
       setSelectedSessionId(sessionId);
       setSelectedModel(target);
     } catch (error) {
-      setNotice(`Could not hand over: ${ipcError(error)}`);
+      setNotice(`Could not hand over: ${ipcErrorMessage(error)}`);
     }
   }
 

@@ -1,4 +1,4 @@
-const { isTerminal } = require("@milagre/core/agents/events");
+const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
 
 const MAX_TITLE = 120;
 const MAX_BODY = 240;
@@ -14,12 +14,17 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
 class AttentionNotifier {
+  /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; setBadge?: (badge: string) => void }} options */
   constructor({ createNotification, isAppFocused, openChat, setBadge = () => {} }) {
-    Object.assign(this, { createNotification, isAppFocused, openChat, setBadge });
+    this.createNotification = createNotification;
+    this.isAppFocused = isAppFocused;
+    this.openChat = openChat;
+    this.setBadge = setBadge;
     this.previews = new Map();
     this.completed = new Map();
     this.completionNotifications = new Map();
     this.unread = new Set();
+    /** @type {string | null} */
     this.activeChatId = null;
     this.notifyOnCompletion = true;
     this.showDockBadge = true;
@@ -27,6 +32,7 @@ class AttentionNotifier {
     this.open = new Map();
   }
 
+  /** @param {{ projectPath?: string; activeChatId?: string | null; unread?: string[]; notifyOnCompletion?: boolean; showDockBadge?: boolean }} [state] */
   sync({ projectPath, activeChatId = null, unread = [], notifyOnCompletion = true, showDockBadge = true } = {}) {
     this.activeChatId = typeof activeChatId === 'string' ? activeChatId : null;
     this.notifyOnCompletion = notifyOnCompletion === true;
@@ -76,6 +82,7 @@ class AttentionNotifier {
   }
 
   // Only a request an agent still waits on is notified about.
+  /** @param {{ chatId?: string; requestId?: string; title?: string; subtitle?: string; body?: string }} [notice] */
   notify({ chatId, requestId, title, subtitle, body } = {}) {
     const key = keyOf(String(chatId), String(requestId));
     if (!this.open.has(key) || this.open.get(key) || this.isAppFocused()) return false;
@@ -86,7 +93,9 @@ class AttentionNotifier {
     return true;
   }
 
+  /** @param {{ chatId?: string; title?: string; subtitle?: string }} [notice] */
   notifyCompletion({ chatId, title, subtitle } = {}) {
+    if (typeof chatId !== "string") return false;
     const result = this.completed.get(chatId);
     this.completed.delete(chatId);
     if (!result || !this.notifyOnCompletion || (this.isAppFocused() && this.activeChatId === chatId)) return false;

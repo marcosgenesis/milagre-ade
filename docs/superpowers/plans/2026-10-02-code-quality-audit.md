@@ -95,14 +95,14 @@ When the tasks you took are merged, or you stop:
 - The `AgentEvent` union is typed in `model.ts:342` and documented as a comment in `events.cjs:1-40` that already misses four event types; the `quit` flag `chat-host.cjs:61` adds is not in the type.
 
 **Steps:**
-- [ ] `packages/shared/src/providers.mjs` (+ `.d.mts`): `PROVIDERS`, `providerName(p)` ("Claude"), `cliName(p)` ("Claude Code"). Replace the 5 tables and 13 ternaries. Keep the unit tests that assert "Claude Code" messages passing.
-- [ ] `packages/shared/src/limits.mjs`: image limits and messages; both `usePastedImages` and `image-input` read them.
-- [ ] `packages/shared/src/git-codes.mjs`: blocker codes; `git-actions` returns codes, the dialog maps codes to copy.
-- [ ] Export `isTurnEnd` once; `events.cjs` re-exports it; delete the two inline copies.
-- [ ] One `Result<T, { code, message }>` type and one `ipcErrorMessage()`; migrate handlers one per PR if needed, starting with `editor:open` (its null-means-success is the most surprising).
-- [ ] Move UI copy and `MODEL_CATALOG` out of `model.ts` into `apps/desktop/app/src/lib/`; delete the dead spec-001 fields from the type and from `emptyState` (keep tolerating them on read).
-- [ ] Add `// @ts-check` to `apps/desktop/electron/main.cjs` and `preload.cjs` with a `tsconfig.electron.json` (`checkJs`); fix what it finds.
-- [ ] Guard test: no `=== "codex" ? "` ternary outside `providers.mjs`; no `Error invoking remote method` regex outside the helper.
+- [x] `packages/shared/src/providers.mjs` (+ `.d.mts`): `PROVIDERS`, `providerName(p)` ("Claude"), `cliName(p)` ("Claude Code"). Replace the 5 tables and 13 ternaries. Keep the unit tests that assert "Claude Code" messages passing.
+- [x] `packages/shared/src/limits.mjs`: image limits and messages; both `usePastedImages` and `image-input` read them.
+- [x] `packages/shared/src/git-codes.mjs`: blocker codes; `git-actions` returns codes, the dialog maps codes to copy.
+- [x] Export `isTurnEnd` once; `events.cjs` re-exports it; delete the two inline copies.
+- [x] One `Result<T, { code, message }>` type and one `ipcErrorMessage()`; migrate handlers one per PR if needed, starting with `editor:open` (its null-means-success is the most surprising).
+- [x] Move UI copy and `MODEL_CATALOG` out of `model.ts` into `apps/desktop/app/src/lib/`; delete the dead spec-001 fields from the type and from `emptyState` (keep tolerating them on read).
+- [x] Add `// @ts-check` to `apps/desktop/electron/main.cjs` and `preload.cjs` with a `tsconfig.electron.json` (`checkJs`); fix what it finds.
+- [x] Guard test: no `=== "codex" ? "` ternary outside `providers.mjs`; no `Error invoking remote method` regex outside the helper.
 
 **Acceptance:** a limit, a code or a name changes in one file; `tsc` covers main and preload; the swallowed-error count drops and the three silent chat actions surface a notice on failure.
 

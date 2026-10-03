@@ -1,3 +1,4 @@
+const { GIT_CODES, gitMessage } = require("@milagre/shared/git-codes");
 const childProcess = require("node:child_process");
 const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
@@ -8,12 +9,12 @@ const { PATHSPEC, fileLineCount } = require("./diffstat.cjs");
 // git and gh itself, never through a shell: every program gets its arguments as an array, and text
 // (the commit message, the PR body) goes in on stdin.
 
-const NO_ORIGIN = "This repo has no origin remote.";
-const GH_MISSING = "Install the GitHub CLI (`brew install gh`) to open PRs.";
+const NO_ORIGIN = gitMessage(GIT_CODES.NO_ORIGIN);
+const GH_MISSING = gitMessage(GIT_CODES.GH_MISSING);
 const GH_LOGIN = "Run `gh auth login` in a terminal.";
 const PUSH_REJECTED_HINT = "The remote branch has commits you don't have. Pull or rebase, then push again.";
-const DETACHED = "Check out a branch to push.";
-const DETACHED_COMMIT = "Check out a branch to commit.";
+const DETACHED = gitMessage(GIT_CODES.DETACHED);
+const DETACHED_COMMIT = gitMessage(GIT_CODES.DETACHED_COMMIT);
 const NOT_REPO = "This chat's folder isn't a git repository.";
 const NOT_TOP = "This folder isn't the top of a git checkout.";
 const CONFLICTS = "Some files have unresolved conflicts. Resolve them, then commit.";
@@ -200,7 +201,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
    */
   async function findPr(cwd) {
     const result = await run(gh, ["pr", "view", "--json", "url,state"], { cwd, timeout: GH_TIMEOUT });
-    if (result.missing) return { ghReady: false, ghMessage: GH_MISSING, pr: null };
+    if (result.missing) return { ghReady: false, ghMessage: GH_MISSING, ghCode: GIT_CODES.GH_MISSING, pr: null };
     if (!result.ok && isAuthFailure(result)) return { ghReady: false, ghMessage: GH_LOGIN, pr: null };
     if (!result.ok && /no (open )?pull requests? found/i.test(result.stderr)) return { ghReady: true, ghMessage: null, pr: null };
     if (!result.ok) return { ghReady: false, ghMessage: capOutput(result.stderr || result.stdout, 600) || "gh couldn't look up this branch's PR.", pr: null };
@@ -275,7 +276,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     // A rebase also detaches HEAD; its own reason says more.
     const blocked = await operationInProgress(cwd);
     if (blocked) return { ok: false, kind: "blocked", message: blocked };
-    if (!(await currentBranch(cwd))) return { ok: false, kind: "blocked", message: DETACHED_COMMIT };
+    if (!(await currentBranch(cwd))) return { ok: false, kind: "blocked", message: DETACHED_COMMIT, code: GIT_CODES.DETACHED_COMMIT };
     const hasHead = await refExists(cwd, "HEAD");
     // The index as the user left it, to go back to if the commit is refused.
     const before = (await write(cwd, ["write-tree"])).stdout.trim() || null;
@@ -312,9 +313,9 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   async function push({ cwd }) {
     const top = await checkTop(cwd);
     if (!top.ok) return { ok: false, kind: "error", message: top.message };
-    if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN };
+    if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN, code: GIT_CODES.NO_ORIGIN };
     const branch = await currentBranch(cwd);
-    if (!branch) return { ok: false, kind: "error", message: DETACHED };
+    if (!branch) return { ok: false, kind: "error", message: DETACHED, code: GIT_CODES.DETACHED };
     const result = await write(cwd, ["push", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { profile: "PUSH" });
     if (result.ok) return { ok: true, branch, remote: "origin" };
     const output = capOutput(result.stderr || result.stdout);
@@ -326,15 +327,15 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   async function openPr({ cwd, base, title, body }) {
     const top = await checkTop(cwd);
     if (!top.ok) return { ok: false, kind: "error", message: top.message };
-    if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN };
+    if (!(await hasOrigin(cwd))) return { ok: false, kind: "no-origin", message: NO_ORIGIN, code: GIT_CODES.NO_ORIGIN };
     const branch = await currentBranch(cwd);
-    if (!branch) return { ok: false, kind: "error", message: DETACHED };
+    if (!branch) return { ok: false, kind: "error", message: DETACHED, code: GIT_CODES.DETACHED };
     const resolved = await resolveBase(cwd, base);
     if (branch === resolved.name) return { ok: false, kind: "on-base", message: `You're on ${resolved.name}. Open a PR from a worktree branch.` };
     const prTitle = String(title ?? "").trim();
     if (!prTitle) return { ok: false, kind: "error", message: "Add a PR title first." };
     const result = await run(gh, ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
-    if (result.missing) return { ok: false, kind: "gh-missing", message: GH_MISSING };
+    if (result.missing) return { ok: false, kind: "gh-missing", message: GH_MISSING, code: GIT_CODES.GH_MISSING };
     if (!result.ok && isAuthFailure(result)) return { ok: false, kind: "gh-auth", message: GH_LOGIN };
     if (!result.ok) return { ok: false, kind: "error", message: capOutput(result.stderr || result.stdout) || "gh couldn't open the PR." };
     const url = result.stdout.match(/https?:\/\/\S+\/pull\/\d+/g)?.at(-1);

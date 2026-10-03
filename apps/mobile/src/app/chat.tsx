@@ -1,3 +1,4 @@
+import { providerName } from "@milagre/shared/providers";
 import { useRef, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
@@ -63,7 +64,7 @@ export default function ChatScreen() {
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
     <Stack.Screen options={{ title }} />
     <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>
-      <View style={styles.row}><Text style={[styles.label, { color: run ? colors.green : colors.muted }]}>{run ? 'WORKING' : 'READY'}</Text><Text style={styles.muted}>{actualProvider === 'codex' ? 'Codex' : 'Claude'} / {project.name}</Text></View>
+      <View style={styles.row}><Text style={[styles.label, { color: run ? colors.green : colors.muted }]}>{run ? 'WORKING' : 'READY'}</Text><Text style={styles.muted}>{providerName(actualProvider)} / {project.name}</Text></View>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.muted}>Demo agent. Try a message, or send approval, question, or slow to test controls.</Text>}
       <View style={styles.row}>{chat && <Button title="Manage Chat" secondary onPress={() => router.push({ pathname: '/chat-details', params: { id: String(chat.id) } })} />}<Button title="View changes" secondary onPress={() => router.push({ pathname: '/changes', params: { worktreeId: String(worktreeId) } })} /></View>
       <AgentControls model={model} preferences={preferences} reported={session.models} status={session.cliStatus} lockedProvider={!!chat?.provider} disabled={busy || !!run} onToggle={() => { following.current = false; }} onChange={patch => session.setPreferences(current => ({ ...current, [chatId]: { ...preferences, ...patch } }))} />

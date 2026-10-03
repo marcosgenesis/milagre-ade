@@ -1,6 +1,9 @@
+// @ts-check
+/** @typedef {import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
-contextBridge.exposeInMainWorld("milagre", {
+/** @type {Window["milagre"]} */
+const bridge = {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
@@ -98,4 +101,5 @@ contextBridge.exposeInMainWorld("milagre", {
     ipcRenderer.on("notification:open-chat", listener);
     return () => ipcRenderer.removeListener("notification:open-chat", listener);
   },
-});
+};
+contextBridge.exposeInMainWorld("milagre", bridge);

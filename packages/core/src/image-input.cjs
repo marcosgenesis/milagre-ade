@@ -1,12 +1,11 @@
-const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const { MAX_IMAGES, MAX_IMAGE_BYTES, IMAGE_TYPES, IMAGE_ERRORS } = require("@milagre/shared/limits");
 
 function decodeImages(images = []) {
-  if (!Array.isArray(images) || images.length > MAX_IMAGES) throw new Error("Attach up to 4 images per message.");
+  if (!Array.isArray(images) || images.length > MAX_IMAGES) throw new Error(IMAGE_ERRORS.count);
   return images.map((image) => {
-    if (typeof image?.dataUrl !== "string" || image.dataUrl.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 100) throw new Error("Each image must be 5 MB or smaller.");
-    const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(image.dataUrl);
-    if (!match) throw new Error("Use PNG, JPEG, WebP, or GIF images.");
+    if (typeof image?.dataUrl !== "string" || image.dataUrl.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 100) throw new Error(IMAGE_ERRORS.size);
+    const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image.dataUrl);
+    if (!match || !IMAGE_TYPES.includes(match[1])) throw new Error(IMAGE_ERRORS.type);
     const bytes = Buffer.from(match[2], "base64");
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || bytes.toString("base64") !== match[2]) throw new Error("Invalid image data.");
     const mime = match[1];

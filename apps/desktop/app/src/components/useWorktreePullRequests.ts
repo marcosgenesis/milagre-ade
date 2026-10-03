@@ -1,3 +1,4 @@
+import { isTurnEnd } from "@milagre/shared/agent-runs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CoordinatorState, PullRequest } from "../model";
 import { chatInProject, sessionIdFromKey } from "../lib/agent-runs";
@@ -60,7 +61,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     }, 30_000);
     window.addEventListener("focus", onFocus);
     const unsubscribe = window.milagre.onAgentEvent(({ chatId, event }) => {
-      if (!chatInProject(projectPath, chatId) || !["turn-completed", "turn-cancelled", "turn-failed"].includes(event.type)) return;
+      if (!chatInProject(projectPath, chatId) || !isTurnEnd(event)) return;
       const current = stateRef.current;
       const session = current?.sessions[sessionIdFromKey(chatId)];
       const path = session && current?.worktrees[session.worktree_id]?.path;

@@ -1,3 +1,4 @@
+import { isTurnEnd } from "@milagre/shared/agent-runs";
 import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../../electron";
 import { useDiffFiles } from "./useDiffFiles";
@@ -28,8 +29,7 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
     if (!shown || !chatId) return;
     return window.milagre.onAgentEvent((message) => {
       if (message.chatId !== chatId) return;
-      const type = message.event.type;
-      if (type === "turn-completed" || type === "turn-cancelled" || type === "turn-failed") void refresh();
+      if (isTurnEnd(message.event)) void refresh();
     });
   }, [shown, chatId, refresh]);
 

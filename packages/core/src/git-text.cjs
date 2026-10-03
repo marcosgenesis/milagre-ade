@@ -1,3 +1,4 @@
+const { PROVIDERS } = require("@milagre/shared/providers");
 const os = require("node:os");
 const { CodexRpc } = require("./agents/codex-rpc.cjs");
 
@@ -145,7 +146,7 @@ async function withTimeout(task, timeoutMs) {
  */
 async function generateGitText(input, { provider = "claude", models = {}, timeoutMs = TIMEOUT_MS } = {}) {
   const prompt = buildGitTextPrompt(input);
-  const order = provider === "codex" ? ["codex", "claude"] : ["claude", "codex"];
+  const order = provider === "codex" ? PROVIDERS : PROVIDERS.toReversed();
   const ask = (call, text) => withTimeout((signal) => call({ system: SYSTEM, prompt: text, signal }), timeoutMs);
   for (const name of order) {
     const call = models[name];

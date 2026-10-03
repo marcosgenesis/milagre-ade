@@ -1,4 +1,5 @@
-import { MODEL_CATALOG, capabilityFor, effortFor, type AgentModels, type ModelCapability, type ModelOption, type ModelProvider, type PermissionMode } from '@milagre/shared/model';
+import { MODEL_CATALOG, capabilityFor, effortFor } from "@milagre/shared/model-options";
+import { type AgentModels, type ModelCapability, type ModelOption, type ModelProvider, type PermissionMode } from '@milagre/shared/model';
 
 export type MobileModel = ModelOption & ModelCapability;
 export type TurnPreferences = { provider: ModelProvider; model: string; effort: string; fastMode: boolean; permissionMode: PermissionMode };

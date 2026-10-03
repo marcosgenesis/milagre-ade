@@ -24,14 +24,14 @@ async function copyImage(file, { createFromPath, createFromBuffer, writeImage })
   const data = imageData(file);
   const image = data ? createFromBuffer(data.bytes) : createFromPath(await requireImage(file));
   if (image.isEmpty()) throw new Error("Couldn't read the image.");
-  writeImage(image);
+  await writeImage(image);
 }
 
 // Asks where to save a copy, starting in Downloads with the image's own name (`name` for a data URL).
 // Returns the saved path, or null when cancelled.
 async function saveImage(file, { showSaveDialog, downloads }, name = "Pasted image") {
   const data = imageData(file);
-  const source = data ? null : await requireImage(file);
+  const source = data ? "" : await requireImage(file);
   const extension = data ? data.extension : path.extname(source).slice(1).toLowerCase();
   const base = data ? `${path.basename(String(name)).replace(/\.[^.]*$/, "") || "Pasted image"}.${extension}` : path.basename(file);
   const { canceled, filePath } = await showSaveDialog({ defaultPath: path.join(downloads, base), filters: [{ name: "Image", extensions: [extension] }] });

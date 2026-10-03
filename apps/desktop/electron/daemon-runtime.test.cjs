@@ -55,3 +55,65 @@ test('desktop reconnect restores snapshots and does not replay an unsuccessful m
   assert.equal((await observer.call('project:snapshot', [project])).state.sessions[session.id].title, 'Before disconnect');
   assert.equal((await desktop.invoke('project:current')).path, project);
 });
+
+test('desktop reconnect skips a deleted Project and can open another Project', async t => {
+  const { project, daemon, desktop, events, start } = await fixture(t);
+  await desktop.openProject(project);
+  await daemon.close();
+  await waitFor(() => events.some(e => e.channel === 'runtime:connection' && !e.payload.connected));
+  await fs.rm(project, { recursive: true, force: true });
+  await start();
+  await waitFor(() => events.some(e => e.channel === 'runtime:connection' && e.payload.connected));
+  const replacement = path.join(path.dirname(project), 'replacement');
+  await fs.mkdir(replacement);
+  execFileSync('git', ['init', '-b', 'main', replacement], { stdio: 'ignore' });
+  assert.equal((await desktop.openProject(replacement)).path, replacement);
+});
+
+test('recovery disconnects an overflowing event stream before publishing a snapshot', async t => {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  const { socketPath, prepareSocketDirectory } = require('../../daemon/src/paths.cjs');
+  const { wire } = require('../../daemon/src/protocol.cjs');
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-recovery-bound-')));
+  const socket = socketPath(dataDir); prepareSocketDirectory(socket);
+  const sockets = new Set();
+  let generation = 0;
+  let overflowClosed = false;
+  const server = net.createServer(connection => {
+    const attempt = ++generation;
+    sockets.add(connection);
+    connection.on('error', () => {});
+    connection.on('close', () => { sockets.delete(connection); if (attempt > 1) overflowClosed = true; });
+    const protocol = wire(connection, {
+      onInvalid() { connection.destroy(); },
+      onMessage(request) {
+        if (request.method === 'daemon:snapshot' && attempt > 1) {
+          for (let seq = 1; seq <= 1100; seq++) protocol.send({ v: 1, event: { seq, channel: 'agent:event', payload: { seq } } });
+          // Recovery must reject the stream even when the snapshot never arrives.
+          return;
+        }
+        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1'], methods: [] } : null;
+        protocol.send({ v: 1, id: request.id, result });
+      },
+    });
+  });
+  server.listen(socket); await once(server, 'listening');
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(async () => { await desktop.close(); for (const client of sockets) client.destroy(); await new Promise(resolve => server.close(resolve)); await fs.rm(dataDir, { recursive: true, force: true }); });
+  for (const client of sockets) client.destroy();
+  await waitFor(() => overflowClosed);
+  assert.equal(events.some(event => event.channel === 'runtime:snapshot' || event.channel === 'agent:event'), false);
+});
+
+test('explicit desktop update waits for the shared host to save and stop', async t => {
+  const { dataDir, project, desktop } = await fixture(t);
+  const opened = await desktop.openProject(project);
+  const session = Object.values(opened.state.sessions)[0];
+  await desktop.invoke('chat:patch', [project, session.id, { title: 'Before update' }]);
+  await desktop.close({ stopHost: true });
+  await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' });
+  const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
+  assert.equal(saved.sessions[session.id].title, 'Before update');
+});

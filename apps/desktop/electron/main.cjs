@@ -29,7 +29,7 @@ function checkForUpdates() {
   if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
   if (updateCheck) return updateCheck;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   publishUpdateState({ status: "checking", version: null, progress: 0 });
   updateCheck = autoUpdater.checkForUpdates().then(
     () => updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState,
@@ -43,8 +43,9 @@ function checkForUpdates() {
 
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
-// Desktop updates disconnect the UI; the shared host keeps running Chats.
+// Installing replaces the host bundle too. Save and stop it before the updater runs.
 ipcMain.handle("update:install", async () => {
+  await runtime.close({ stopHost: true });
   await prepareQuit();
   autoUpdater.quitAndInstall();
 });

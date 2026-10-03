@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-03-shared-desktop-remote-design.md`.
 
+## Landing status (2026-10-03)
+
+The later user request to merge the implemented work into main supersedes the original draft-only delivery instructions below. Tasks 1 and 2 are implemented in this increment. Task 3 (managed remote host/service/tunnel) and the full mobile integration in Task 4 remain pending. This does not migrate or restart the user's live desktop.
+
+Recovery now bounds queued events, skips deleted Projects, and never replays failed mutations. Explicit desktop updates stop and save the daemon before replacing its bundle; normal quit retains the host and does not install an update. The canonical Project resolver and registry from merged core #131 are preserved.
+
 ## Global constraints
 
 - Preserve existing data paths, Chat/provider IDs, desktop IPC and audit fixes. Never edit live coordination state or steal locks.
@@ -42,8 +48,8 @@
 
 **Interfaces:** `connectDesktopRuntime(options)` returns the runtime facade plus `setFocused(boolean)`; its `close()` flushes/disconnects. It forwards `runtime:connection` and `runtime:snapshot` events. Snapshot includes current Projects, runs and ports; renderer restores them without clearing draft/selection. Main's OS callbacks remain local.
 
-- [ ] Write failing adapter tests for real socket events, disconnect/reconnect, no mutation replay, per-client Project selection and quit retaining the daemon. Run focused tests; expect missing adapter failures.
-- [ ] Replace desktop embedded runtime with the facade; add connection notice and snapshot subscriptions. Advertise the existing profile in host documentation. Update ADR-0003 for the authorized transport switch.
+- [x] Write failing adapter tests for real socket events, disconnect/reconnect, no mutation replay, per-client Project selection and quit retaining the daemon. Run focused tests; expect missing adapter failures.
+- [x] Replace desktop embedded runtime with the facade; add connection notice and snapshot subscriptions. Advertise the existing profile in host documentation. Update ADR-0003 for the authorized transport switch.
 - [ ] Run types/build, agent/UI/release/monorepo tests and real desktop saved-state smoke. Test packaged spawn/attach. Expect all pass and saved Chat/provider ID unchanged. Commit and update #131, then merge it into #137.
 
 ## Task 3: Persistent shared host and macOS service (#137)

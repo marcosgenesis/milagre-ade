@@ -1,6 +1,6 @@
 # Local daemon
 
-Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. The mobile bridge can use this same profile and owner.
+Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. A bridge that attaches through this socket can use the same profile and owner; managed remote hosting is separate work.
 
 For the first upgrade from an embedded-runtime desktop, close that older app before launching the new build. Never open the same Projects through an older desktop while the new host owns them. The running app is not automatically replaced by development checks.
 
@@ -24,6 +24,12 @@ npm run daemon -- stop --data-dir /absolute/path/to/daemon-profile
 `request` accepts an existing core command name and a JSON array of arguments. `project:open` accepts a Project path directly; OS dialogs, clipboard, notifications, media serving and updates remain desktop features. The daemon has the same local user's privileges and can run provider commands. There is no TCP listener or remote authentication in this phase.
 
 A daemon stays alive when clients disconnect. On macOS, running agent turns and Worktree setup hold the existing keep-awake preference through `caffeinate`; closing the laptop lid can still suspend access. Desktop startup alone does not install a login service. `stop`, SIGINT and SIGTERM save resumable turns and drain pending writes before closing. A desktop whose host stops shows a reconnect notice and retains its unsent draft; start the host again to restore snapshots. It never retries a send automatically.
+
+Updates install only through the explicit restart action. It saves and stops the shared host before replacing the application bundle; connected clients briefly disconnect and resumable turns return when the updated desktop starts its host. Ordinary desktop quit does not install a pending update. Stop the host before manually replacing or moving its source checkout or packaged application too.
+
+Reconnect retains at most 1,024 events or 16 MiB while obtaining its snapshot. If that limit is exceeded, it disconnects and retries the snapshot without replaying commands. A deleted Project is skipped so another Project can still be opened. Other Project errors remain visible as a failed reconnect rather than being silently ignored.
+
+The desktop transport is implemented here. Login/background service installation, a managed tunnel, stable public HTTPS, and migration of an already running embedded desktop remain outside this increment. The current running desktop must be closed by its owner before its profile can move to the daemon.
 
 ## Ownership and recovery
 

@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld("milagre", {
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
   setNotifyWhenWaiting: (on) => ipcRenderer.invoke("settings:notify-when-waiting", on),
+  setWindowTranslucent: (on, theme) => ipcRenderer.invoke("settings:window-translucent", { on, theme }),
   syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),
   notifyCompletion: (notice) => ipcRenderer.invoke("notification:completed", notice),
   onOpenChat: (callback) => {

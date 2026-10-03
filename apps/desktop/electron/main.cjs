@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -7,6 +7,7 @@ const { KeepAwake } = require("@milagre/core/keep-awake");
 const { detectEditors, openInEditor } = require("@milagre/core/editors");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { revealFolder } = require("./reveal.cjs");
+const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
 const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { createMediaHandler } = require("./media.cjs");
@@ -105,6 +106,12 @@ ipcMain.handle("notification:state", (_event, state) => notifier.sync(state));
 ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupported() ? notifier.notifyCompletion(notice) : false);
 
 
+// The "Translucent window" appearance setting, pushed by the renderer with the theme it resolved.
+ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
+});
+
 let runtime;
 try {
 runtime = createRuntime({
@@ -140,7 +147,7 @@ function createWindow() {
     minHeight: 680,
     title: "Milagre",
     icon: appIconPath,
-    backgroundColor: "#f7faf8",
+    backgroundColor: OPAQUE_BACKGROUND,
     ...(process.platform === "darwin" ? { titleBarStyle: "hidden", trafficLightPosition: { x: 24, y: 22 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

@@ -29,6 +29,14 @@ export interface AppSettings {
   tldrEnabled: boolean;
   /** Sidebar chats by start date, or with the latest message first. */
   chatOrder: ChatOrder;
+  /** Let the blurred desktop show through the window (macOS). */
+  windowTranslucent: boolean;
+  /** How much of the desktop shows through the window's own background, 10 to 100. */
+  windowTranslucency: number;
+  /** How much shows through the sidebar and panels, 10 to 90. */
+  panelTranslucency: number;
+  /** Keep the dot grid while translucent. */
+  translucentDots: boolean;
 }
 
 const STORAGE_KEY = "milagre-settings";
@@ -37,7 +45,10 @@ const THEMES: ThemePreference[] = ["system", "light", "dark"];
 const USAGE_DISPLAYS: UsageDisplay[] = ["used", "remaining"];
 const CLAUDE_REPLIES: ClaudeReplies[] = ["concise", "normal"];
 const CHAT_ORDERS: ChatOrder[] = ["created", "recent"];
-const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, notifyOnCompletion: true, showDockBadge: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true, chatOrder: "created" };
+export const WINDOW_TRANSLUCENCY_RANGE = { min: 10, max: 100, step: 5 };
+export const PANEL_TRANSLUCENCY_RANGE = { min: 10, max: 90, step: 5 };
+const clampTo = (value: unknown, range: { min: number; max: number }, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, value)) : fallback);
+const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, notifyOnCompletion: true, showDockBadge: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true, chatOrder: "created", windowTranslucent: false, windowTranslucency: 80, panelTranslucency: 40, translucentDots: true };
 
 function load(): AppSettings {
   try {
@@ -60,6 +71,10 @@ function load(): AppSettings {
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
+      windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
+      windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
+      panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),
+      translucentDots: typeof saved.translucentDots === "boolean" ? saved.translucentDots : DEFAULTS.translucentDots,
     };
   } catch {
     return DEFAULTS;
@@ -114,6 +129,7 @@ export function toggleTheme() {
 
 export function useApplyTheme() {
   const theme = useResolvedTheme();
+  const { windowTranslucent, windowTranslucency, panelTranslucency } = useSettings();
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("theme-switching");
@@ -121,4 +137,13 @@ export function useApplyTheme() {
     const frame = window.requestAnimationFrame(() => root.classList.remove("theme-switching"));
     return () => window.cancelAnimationFrame(frame);
   }, [theme]);
+  // The window itself goes see-through in the main process; the renderer's backgrounds follow.
+  useEffect(() => {
+    document.documentElement.classList.toggle("translucent", windowTranslucent);
+    void window.milagre?.setWindowTranslucent(windowTranslucent, theme).catch(() => {});
+  }, [windowTranslucent, theme]);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--window-translucency", String(windowTranslucency / 100));
+    document.documentElement.style.setProperty("--panel-translucency", String(panelTranslucency / 100));
+  }, [windowTranslucency, panelTranslucency]);
 }

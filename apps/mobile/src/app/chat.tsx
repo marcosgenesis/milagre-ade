@@ -11,6 +11,7 @@ import { appendAttachments, attachmentPrompt, prepareAttachments } from '../atta
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
 import { ChatReply } from '../chat-reply';
 import { BottomFade } from '../bottom-fade';
+import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
 import { chatRecency } from '../indicators';
@@ -27,6 +28,7 @@ export default function ChatScreen() {
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState('');
   const scroll = useRef<ScrollView>(null);
+  const dots = useDotBackground();
   const following = useRef(true);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
   const pr = usePullRequest(worktreeOf);
@@ -125,7 +127,7 @@ export default function ChatScreen() {
     </Stack.Toolbar.Menu>
   </Stack.Toolbar>;
   const question = run?.questions[0];
-  return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
+  return <KeyboardAvoidingView style={[styles.screen, dots]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={insets.top + 44}>
     <Stack.Screen options={{ title, headerTitle: () => header }} />
     {more}
     <PageScroll ref={scroll} contentContainerStyle={{ paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onContentSizeChange={() => { if (following.current) scroll.current?.scrollToEnd({ animated: true }); }}>

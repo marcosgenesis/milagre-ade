@@ -17,6 +17,19 @@
             "enableSceneSupport": true
           }
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-mark.png",
+          "imageWidth": 64,
+          "resizeMode": "contain",
+          "backgroundColor": "#fafafb",
+          "dark": {
+            "image": "./assets/splash-mark-dark.png",
+            "backgroundColor": "#17181a"
+          }
+        }
       ]
     ],
     "ios": {

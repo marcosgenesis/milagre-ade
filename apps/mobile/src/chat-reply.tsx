@@ -69,7 +69,7 @@ export const ChatReply = memo(function ChatReply({ message, run, onInteract, med
   if (message?.role === 'user') return <View style={{ alignSelf: 'flex-end', alignItems: 'flex-end', gap: 6, maxWidth: '88%' }}>
     <Photos message={message} media={media} />
     {message.files?.filter(file => !message.images?.some(image => image.path === file || image.sourcePath === file)).map(file => <FileChip key={file} path={file} />)}
-    {!!text && <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: 'continuous', paddingVertical: 10, paddingHorizontal: 14 }}><Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 21 }}>{text}</Text></View>}
+    {!!text && <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: 'continuous', paddingVertical: 10, paddingHorizontal: 14 }}><Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 22 }}>{text}</Text></View>}
   </View>;
   return <View style={{ gap: 14, paddingVertical: 8 }}>
     {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onInteract={onInteract} />)}

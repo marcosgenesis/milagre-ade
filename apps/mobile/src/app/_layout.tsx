@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { Stack } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { ThemeProvider, DarkTheme, DefaultTheme } from 'expo-router/react-navigation';
 import { StatusBar } from 'expo-status-bar';
-import { SessionProvider } from '../session';
+import { SessionProvider, useSession } from '../session';
+import { StartupSplash } from '../startup-splash';
 import { hex } from '../theme';
 
 export default function Layout() {
@@ -10,9 +12,9 @@ export default function Layout() {
   const palette = hex(scheme);
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const theme = { ...base, colors: { ...base.colors, primary: palette.accent, background: palette.page, card: palette.page, text: palette.ink, border: palette.line } };
-  // Titles sit inline in the top bar; the system draws iOS's round glass bar buttons around header items.
+  // Titles sit inline in a transparent top bar; content blurs softly as it scrolls under it (iOS 26 scroll edge effect).
   const sheet = { presentation: 'formSheet', sheetGrabberVisible: true, sheetCornerRadius: 28, headerShown: false, contentStyle: { backgroundColor: palette.page } } as const;
-  return <SessionProvider><ThemeProvider value={theme}><StatusBar style="auto" /><Stack screenOptions={{ headerStyle: { backgroundColor: palette.page }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
+  return <SessionProvider><ThemeProvider value={theme}><StatusBar style="auto" /><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
     <Stack.Screen name="pair" options={{ title: 'Pairing' }} />
@@ -26,5 +28,11 @@ export default function Layout() {
     <Stack.Screen name="new-worktree" options={{ title: 'New Worktree' }} />
     <Stack.Screen name="changes" options={{ title: 'Changes' }} />
     <Stack.Screen name="diff" options={{ title: 'Diff' }} />
-  </Stack></ThemeProvider></SessionProvider>;
+  </Stack><Splash /></ThemeProvider></SessionProvider>;
+}
+
+function Splash() {
+  const session = useSession();
+  const [shown, setShown] = useState(true);
+  return shown ? <StartupSplash ready={session.booted} onDone={() => setShown(false)} /> : null;
 }

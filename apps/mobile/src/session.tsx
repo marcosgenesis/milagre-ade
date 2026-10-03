@@ -23,6 +23,7 @@ function useSessionState() {
   const [providerError, setProviderError] = useState('');
   const [hosts, setHosts] = useState<SavedHost[]>([]);
   const [hostName, setHostName] = useState('');
+  const [booted, setBooted] = useState(false);
   const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
@@ -39,6 +40,8 @@ function useSessionState() {
     setHosts(list);
     return list;
   }, []);
+  // Saved computers are read once at launch; the startup splash waits for them.
+  useEffect(() => { void savedHosts.list().then(setHosts).catch(() => {}).finally(() => setBooted(true)); }, []);
   const connect = async (address: string, token: string, remember = true, name = '') => {
     const next = createClient(address, token);
     const current = ++generation.current;
@@ -117,7 +120,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { booted, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {

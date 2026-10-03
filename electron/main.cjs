@@ -1,5 +1,5 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
 const { execFile } = require("node:child_process");
@@ -12,6 +12,7 @@ const { decodeImages } = require("./image-input.cjs");
 const { detectEditors, openInEditor } = require("./editors.cjs");
 const { revealFolder } = require("./reveal.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
+const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
 const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -303,15 +304,15 @@ ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
-// A generated image in a chat: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
-const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), writeImage: (image) => clipboard.writeImage(image) });
-const saveImageFile = (event, file) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) });
+// An image in a chat, generated or attached: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.writeImage(image) });
+const saveImageFile = (event, file, name) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) }, name);
 ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
-ipcMain.handle("image:save", (event, file) => saveImageFile(event, file));
-ipcMain.handle("image:menu", (event, file) => {
+ipcMain.handle("image:save", (event, file, name) => saveImageFile(event, file, name));
+ipcMain.handle("image:menu", (event, file, name) => {
   Menu.buildFromTemplate([
     { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
-    { label: "Save Image…", click: () => void saveImageFile(event, file).catch(() => {}) },
+    { label: "Save Image…", click: () => void saveImageFile(event, file, name).catch(() => {}) },
   ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
 });
 
@@ -369,6 +370,12 @@ ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupp
 // On until the renderer pushes the saved setting.
 const keepAwake = new KeepAwake({ powerSaveBlocker });
 ipcMain.handle("app:set-keep-awake", (_event, enabled) => keepAwake.setEnabled(enabled === true));
+
+// The "Translucent window" appearance setting, pushed by the renderer with the theme it resolved.
+ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
+});
 
 function publishAgentEvent(chatId, event, state, seq) {
   notifier.observe(chatId, event);
@@ -571,7 +578,7 @@ function createWindow() {
     minHeight: 680,
     title: "Milagre",
     icon: appIconPath,
-    backgroundColor: "#f7faf8",
+    backgroundColor: OPAQUE_BACKGROUND,
     ...(process.platform === "darwin" ? { titleBarStyle: "hidden", trafficLightPosition: { x: 24, y: 22 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

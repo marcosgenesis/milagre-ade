@@ -4,6 +4,7 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
+const { CODEX_FAST_TIER } = require("./models.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
@@ -133,7 +134,7 @@ class CodexSession {
     }
   }
 
-  async beginTurn({ prompt, images = [], model, permissionMode, effort }) {
+  async beginTurn({ prompt, images = [], model, permissionMode, effort, fastMode = false }) {
     const policy = codexPolicy(permissionMode, this.cwd);
     this.permissions.setMode(permissionMode);
     try {
@@ -152,6 +153,9 @@ class CodexSession {
         ...(effort ? { effort } : {}),
         // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
         summary: "auto",
+        // The composer's fast mode toggle decides each turn's speed tier, as it does for Claude; off means
+        // standard speed even where ~/.codex/config.toml sets service_tier. Per turn, so the thread keeps none.
+        serviceTierForTurn: fastMode ? CODEX_FAST_TIER : "default",
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       }, { timeoutMs: 90_000 });

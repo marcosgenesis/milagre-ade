@@ -80,12 +80,12 @@ declare global {
       readPullRequests: (worktreePath: string, refs: string[]) => Promise<Array<PullRequest | null>>;
       /** Opens a project or worktree folder in the file manager; rejects for any other folder. */
       revealInFolder: (folder: string) => Promise<void>;
-      /** Puts a generated image on the clipboard. */
+      /** Puts a chat image on the clipboard; `file` is its absolute path, or a pasted image's data URL. */
       copyImage: (file: string) => Promise<void>;
-      /** Saves a copy of a generated image where the user picks; the saved path, or null when cancelled. */
-      saveImage: (file: string) => Promise<string | null>;
+      /** Saves a copy of a chat image where the user picks, named after `name` when it is a data URL; the saved path, or null when cancelled. */
+      saveImage: (file: string, name?: string) => Promise<string | null>;
       /** The image's right-click menu: Copy Image and Save Image…. */
-      showImageMenu: (file: string) => Promise<void>;
+      showImageMenu: (file: string, name?: string) => Promise<void>;
       /** The "Commit and open PR" dialog: git and gh run in the chat's folder (`cwd`). */
       git: {
         changes: (request: { cwd: string; base?: string }) => Promise<GitChanges>;
@@ -160,6 +160,8 @@ declare global {
       getCachedUsage: () => Promise<UsageSnapshot>;
       /** Whether a chat that waits on the user while Milagre is in the background gets a system notification. */
       setNotifyWhenWaiting: (on: boolean) => Promise<void>;
+      /** Whether the window lets the blurred desktop show through (macOS). `theme` picks the blur material. */
+      setWindowTranslucent: (on: boolean, theme: "light" | "dark") => Promise<void>;
       /** The open project's unread chats and the notification settings, for completion alerts and the Dock badge. */
       syncNotifications: (state: { projectPath: string; activeChatId: string | null; unread: string[]; notifyOnCompletion: boolean; showDockBadge: boolean }) => Promise<void>;
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;

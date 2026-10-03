@@ -25,8 +25,10 @@ test("PR dismissal is independent of other repositories and PRs", () => {
   assert.deepEqual(updateBlockerDismissals(dismissed, { ...pr, state: "MERGED" }), [other.url]);
 });
 
-test("blockers are ordered conflicts, requested changes, then an outdated branch", () => {
-  assert.deepEqual(pullRequestBlockers({ ...pr, isBehind: true, changesRequested: true }), ["conflicts", "changes-requested", "behind"]);
+test("blockers are ordered conflicts, requested changes, failed CI, then an outdated branch", () => {
+  assert.deepEqual(pullRequestBlockers({ ...pr, isBehind: true, changesRequested: true, checks: "failed" }), ["conflicts", "changes-requested", "checks-failed", "behind"]);
+  assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, isBehind: true, checks: "failed" }), ["checks-failed", "behind"]);
+  assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, checks: "running" }), [], "Running checks block nothing yet");
   assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, isBehind: true }), ["behind"]);
   assert.deepEqual(pullRequestBlockers({ ...pr, state: "MERGED", changesRequested: true }), []);
   assert.deepEqual(pullRequestBlockers(null), []);
@@ -59,4 +61,14 @@ test("clicking an action for a blocker the PR no longer has dismisses nothing", 
 test("the review prompt names the PR so the agent can read its comments", () => {
   assert.match(blockerPrompt("changes-requested", pr), /#77/);
   assert.match(blockerPrompt("changes-requested", pr), /pulls\/77\/comments/);
+});
+
+test("a failed CI action clears as soon as the checks are no longer failing", () => {
+  const failing = { ...pr, hasConflicts: false, checks: "failed" as const };
+  const dismissed = updateBlockerDismissals([], failing, "checks-failed");
+  assert.ok(isBlockerDismissed(dismissed, "checks-failed", failing));
+  assert.deepEqual(updateBlockerDismissals(dismissed, failing), dismissed);
+  // A push reruns CI: the checks are running, so the fix is being verified and a later failure can offer the action again.
+  assert.deepEqual(updateBlockerDismissals(dismissed, { ...failing, checks: "running" }), []);
+  assert.match(blockerPrompt("checks-failed", failing), /gh pr checks 77/);
 });

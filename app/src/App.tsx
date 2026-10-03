@@ -17,7 +17,6 @@ import {
   AgentModels,
   capabilityFor,
   effortFor,
-  supportsFastMode,
   sessionForWorktree,
   sortedWorktrees,
 } from "./model";
@@ -69,6 +68,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
+import { isModalOpen } from "./lib/modal";
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
@@ -150,7 +150,7 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
 
-  const handleUpdateCli = async (provider: ModelProvider) => {
+  const updateCli = async (provider: ModelProvider) => {
     setUpdatingCli(provider);
     try {
       const result = await window.milagre.updateCli(provider);
@@ -169,6 +169,11 @@ function App() {
       setUpdatingCli(null);
     }
   };
+  // Every finished message card gets this (an outdated CLI's reply shows an Update button), so it keeps one identity
+  // across renders: a new function per keystroke or streamed batch would re-render the whole transcript (see sendRecommendation).
+  const updateCliRef = useRef(updateCli);
+  updateCliRef.current = updateCli;
+  const handleUpdateCli = useCallback((provider: ModelProvider) => updateCliRef.current(provider), []);
 
   useEffect(() => {
     if (!notice) return;
@@ -594,7 +599,7 @@ function App() {
         permissionMode: mode,
         effort: effortFor(capabilityFor(model, capabilities), effort),
         ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
-        fastMode: supportsFastMode(model) && fastMode,
+        fastMode: capabilityFor(model, capabilities).fastMode && fastMode,
         replies: getSettings().claudeReplies,
         tldrEnabled: getSettings().tldrEnabled,
       });
@@ -645,7 +650,7 @@ function App() {
         permissionMode,
         effort: effortFor(capability, effort),
         ultracode: capability.ultracode && ultracode,
-        fastMode: supportsFastMode(target) && fastMode,
+        fastMode: capability.fastMode && fastMode,
         replies: getSettings().claudeReplies,
         tldrEnabled: getSettings().tldrEnabled,
       });
@@ -677,7 +682,7 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"], dialog[open]')) return;
+      if (event.defaultPrevented || event.isComposing || isModalOpen()) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.shiftKey) {
         if (event.key.toLowerCase() === "t") {
@@ -745,7 +750,7 @@ function App() {
     function jumpToChat(event: KeyboardEvent) {
       if (view !== "chat" || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return;
       if (!(event.metaKey || event.ctrlKey) || !/^[1-9]$/.test(event.key)) return;
-      if (document.querySelector('dialog[open], [role="dialog"], [role="menu"], [aria-label="Chat name"]')) return;
+      if (isModalOpen() || document.querySelector('[role="menu"], [aria-label="Chat name"]')) return;
       const chat = chats[Number(event.key) - 1];
       if (!chat) return;
       event.preventDefault();

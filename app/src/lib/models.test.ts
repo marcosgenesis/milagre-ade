@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentModels, ModelOption, ReportedModel } from "../model";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./models.ts";
-import { supportsFastMode } from "../model.ts";
+import { capabilityFor } from "../model.ts";
 
-test("fast mode is offered only on supported Claude Opus models", () => {
-  for (const id of ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]) assert.equal(supportsFastMode({ id, provider: "claude", name: id }), true);
-  for (const id of ["claude-opus-4-7", "claude-sonnet-5-5", "gpt-6-astra"]) assert.equal(supportsFastMode({ id, provider: id.startsWith("gpt") ? "codex" : "claude", name: id }), false);
+test("until the agents answer, fast mode is guessed for Codex and the Opus models Claude Code offers it on", () => {
+  const option = (id: string): ModelOption => ({ id, name: id, provider: id.startsWith("gpt") ? "codex" : "claude", description: "" });
+  for (const id of ["gpt-6.1-sol", "gpt-5.5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]) assert.equal(capabilityFor(option(id), null).fastMode, true, id);
+  for (const id of ["claude-fable-5-1", "claude-opus-4-7", "claude-sonnet-5-5", "claude-haiku-4-5"]) assert.equal(capabilityFor(option(id), null).fastMode, false, id);
+});
+
+test("a reported capability decides fast mode, whatever the guess", () => {
+  const capabilities = { codex: { "gpt-5.5": { efforts: [], ultracode: false, fastMode: false } }, claude: { "claude-fable-5-1": { efforts: [], ultracode: true, fastMode: true } } };
+  assert.equal(capabilityFor({ id: "gpt-5.5", name: "", provider: "codex", description: "" }, capabilities).fastMode, false);
+  assert.equal(capabilityFor({ id: "claude-fable-5-1", name: "", provider: "claude", description: "" }, capabilities).fastMode, true);
 });
 
 const fallback: ModelOption[] = [
@@ -15,7 +22,7 @@ const fallback: ModelOption[] = [
   { id: "claude-opus-5-5", name: "Opus 5.5", provider: "claude", description: "Everyday", recommended: true },
   { id: "claude-sonnet-4-6", name: "Sonnet 4.6", provider: "claude", description: "Routine" },
 ];
-const reported = (id: string, extra: Partial<ReportedModel> = {}): ReportedModel => ({ id, name: id.toUpperCase(), description: `${id} model`, recommended: false, efforts: ["low", "high"], ultracode: false, ...extra });
+const reported = (id: string, extra: Partial<ReportedModel> = {}): ReportedModel => ({ id, name: id.toUpperCase(), description: `${id} model`, recommended: false, efforts: ["low", "high"], ultracode: false, fastMode: false, ...extra });
 
 test("each agent's own list replaces the maintained one, recommended model first", () => {
   const models: AgentModels = { codex: [reported("gpt-5.5"), reported("gpt-6.1-sol", { recommended: true })], claude: null };
@@ -33,10 +40,10 @@ test("the maintained list stands in while nothing is reported, or for an empty l
 });
 
 test("capabilities come from the reported models", () => {
-  const models: AgentModels = { codex: [reported("gpt-6-sol", { efforts: ["low", "ultra"], defaultEffort: "medium" })], claude: [reported("claude-opus-5-5", { efforts: ["low", "xhigh"], ultracode: true })] };
+  const models: AgentModels = { codex: [reported("gpt-6-sol", { efforts: ["low", "ultra"], defaultEffort: "medium", fastMode: true })], claude: [reported("claude-opus-5-5", { efforts: ["low", "xhigh"], ultracode: true, fastMode: true })] };
   assert.deepEqual(capabilitiesFrom(models), {
-    codex: { "gpt-6-sol": { efforts: ["low", "ultra"], defaultEffort: "medium", ultracode: false } },
-    claude: { "claude-opus-5-5": { efforts: ["low", "xhigh"], ultracode: true } },
+    codex: { "gpt-6-sol": { efforts: ["low", "ultra"], defaultEffort: "medium", ultracode: false, fastMode: true } },
+    claude: { "claude-opus-5-5": { efforts: ["low", "xhigh"], ultracode: true, fastMode: true } },
   });
   assert.deepEqual(capabilitiesFrom({ codex: null, claude: null }), { codex: {}, claude: {} });
   assert.equal(capabilitiesFrom(null), null);

@@ -15,8 +15,8 @@
   opacity: 1;
   transition: opacity 120ms cubic-bezier(0.16, 1, 0.3, 1);
   background: rgb(0 0 0 / 24%);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(var(--blur-overlay));
+  -webkit-backdrop-filter: blur(var(--blur-overlay));
 }
 .command-palette[data-closing]::backdrop {
   opacity: 0;
@@ -187,10 +187,37 @@
   --radius-card: 10px;
   --radius-window: 14px;
 
+  /* backdrop blur — overlay 3 behind a dialog or viewer, chip 8 for a small control over media,
+   * edge 4 for content scrolling under a window edge (see docs/agents/ui.md) */
+  --blur-overlay: 3px;
+  --blur-chip: 8px;
+  --blur-edge: 4px;
+
   /* easing — strong curves; built-ins are too weak */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-link: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* "Translucent window": the window is see-through and macOS blurs what's behind it. The two
+ * sliders set how much shows through, 0 to 1: `--window-translucency` thins the page's own tint,
+ * and `--panel-translucency` thins the sidebar, panels and fields (at 0.4 a light surface keeps
+ * 72% of its opacity and a dark one 62%, so text stays readable). */
+.translucent {
+  --page: oklch(0.985 0.001 286.376 / calc(1 - var(--window-translucency, 0.8)));
+  --surface: oklch(1 0 0 / calc(1 - var(--panel-translucency, 0.4) * 0.7));
+  --inset: oklch(0.979 0.002 247.839 / calc(1 - var(--panel-translucency, 0.4)));
+  --field: oklch(0.961 0.001 286.375 / calc(1 - var(--panel-translucency, 0.4)));
+}
+.translucent.dark {
+  --page: oklch(0.209 0.004 264.477 / calc(1 - var(--window-translucency, 0.8)));
+  --surface: oklch(0.26 0.006 271.191 / calc(1 - var(--panel-translucency, 0.4) * 0.95));
+  --inset: oklch(0.243 0.004 264.492 / calc(1 - var(--panel-translucency, 0.4)));
+  --field: oklch(0.293 0.006 271.223 / calc(1 - var(--panel-translucency, 0.4)));
+}
+.translucent,
+.translucent body {
+  background: transparent;
 }
 
 /* ── base ─────────────────────────────────────────────── */
@@ -538,8 +565,8 @@ a:focus-visible .animated-underline::after {
  * Every rail glyph remains centered at x=26 in both states. */
 /* Linear blur over the top of a scrolled chat: strongest at the window edge, gone by the bottom. */
 .chat-top-blur {
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--blur-edge));
+  -webkit-backdrop-filter: blur(var(--blur-edge));
   background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 70%, transparent), transparent);
   mask-image: linear-gradient(to bottom, black 35%, transparent);
 }
@@ -552,8 +579,8 @@ a:focus-visible .animated-underline::after {
   inset: 0;
 }
 .chat-bottom-blur > :nth-child(1) {
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--blur-edge));
+  -webkit-backdrop-filter: blur(var(--blur-edge));
   mask-image: linear-gradient(to top, black 20%, transparent 60%);
 }
 .chat-bottom-blur > :nth-child(2) {

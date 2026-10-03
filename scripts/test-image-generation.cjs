@@ -96,11 +96,23 @@ async function browserChecks() {
     await evaluate(`${surface}.parentElement.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`);
     await waitFor("window.imageCalls.length === 3");
     assert.deepEqual(await evaluate("window.imageCalls"), [["copy", PHOTO], ["save", PHOTO], ["menu", PHOTO]]);
+    // Clicking the image opens it full size, morphing out of its place in the chat, and Escape returns it.
+    await evaluate('document.querySelector("[aria-label=\'Preview generated image\']").click()');
+    await waitFor('document.querySelector("dialog[open] img")?.naturalWidth > 0');
+    assert.equal(await evaluate(`${surface}.querySelector("img").classList.contains("opacity-0")`), true, "the chat image hides behind the viewer");
+    await screenshot("preview");
+    // The full-size image has the same right-click menu, shown once though the event bubbles back through the portal.
+    await evaluate('document.querySelector("dialog img").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))');
+    assert.deepEqual(await evaluate("window.imageCalls.slice(3)"), [["menu", PHOTO]]);
+    await evaluate('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))');
+    await waitFor('!document.querySelector("dialog")');
+    assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), "Preview generated image", "focus returns to the image");
+    assert.equal(await evaluate(`${surface}.querySelector("img").classList.contains("opacity-0")`), false);
     await evaluate('window.setFixture("failed")');
     await waitFor(`!${surface} && !!document.querySelector("[data-slot=step][data-status=failed]")`);
     assert.match(await evaluate('document.querySelector("[data-slot=step][data-status=failed]").textContent'), /Couldn't generate an image.*image limit reached/);
     await screenshot("failed");
-    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution, copy and download buttons and a right-click menu (the prompt only as its label), or a failed step row with the reason and no image surface");
+    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution, copy and download buttons and a right-click menu, a full-size preview on click (the prompt only as its label), or a failed step row with the reason and no image surface");
     app.exit(0);
   } catch (error) {
     console.error(error);

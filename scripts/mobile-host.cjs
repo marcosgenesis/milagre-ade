@@ -10,6 +10,8 @@ const { startMobileBridge } = require('../apps/daemon/src/mobile-bridge.cjs');
 const { connect } = require('../apps/daemon/src/client.cjs');
 const { version } = require('../package.json');
 const { printPairing } = require('./mobile-pairing.cjs');
+const { startNamedTunnel, startQuickTunnel } = require('./mobile-tunnel.cjs');
+const { readCloudflare } = require('./mobile-cloudflare.cjs');
 
 async function readToken(file) {
   let handle;
@@ -24,7 +26,8 @@ async function readToken(file) {
   } finally { await handle.close(); }
 }
 
-async function startMobileHost({ dataDir, project, port = 8787, publicUrl, runtimeOptions } = {}) {
+/** `tunnel`: 'quick' opens a temporary trycloudflare.com URL; 'cloudflare' runs the named tunnel from mobile:cloudflare. */
+async function startMobileHost({ dataDir, project, port = 8787, publicUrl, tunnel: tunnelMode, runtimeOptions, tunnels = { startNamedTunnel, startQuickTunnel } } = {}) {
   if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('Use an absolute data directory.');
   if (project && !path.isAbsolute(project)) throw new Error('Use an absolute Project path.');
   if (publicUrl) {
@@ -32,20 +35,27 @@ async function startMobileHost({ dataDir, project, port = 8787, publicUrl, runti
     if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('The public URL must be an HTTPS origin without credentials or a path.');
     publicUrl = url.origin;
   }
+  if (tunnelMode && publicUrl) throw new Error('Use either a tunnel or --public-url, not both.');
+  const cloudflare = tunnelMode === 'cloudflare' ? await readCloudflare(dataDir) : null;
+  // The named tunnel's remote config points at a fixed port.
+  if (cloudflare) port = cloudflare.port;
   const daemon = await startDaemon({ dataDir, version, runtimeOptions });
   const connectionFile = path.join(dataDir, 'mobile-connection.json');
-  let bridge, socket, closing;
-  const close = () => closing ??= (async () => { await bridge?.close(); socket?.close(); await daemon.close(); })();
+  let bridge, socket, tunnel, closing;
+  const close = () => closing ??= (async () => { await tunnel?.close(); await bridge?.close(); socket?.close(); await daemon.close(); })();
   try {
     const token = await readToken(connectionFile);
     bridge = await startMobileBridge({ dataDir, port, token });
+    if (cloudflare) tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
+    else if (tunnelMode === 'quick') tunnel = await tunnels.startQuickTunnel({ port: new URL(bridge.url).port });
+    if (tunnel) publicUrl = tunnel.url;
     if (project) { socket = await connect({ dataDir }); await socket.call('project:open', [project]); socket.close(); socket = null; }
     const temporary = `${connectionFile}.${randomBytes(8).toString('hex')}.tmp`;
     try {
       await fs.writeFile(temporary, JSON.stringify({ url: publicUrl || bridge.url, token }, null, 2), { flag: 'wx', mode: 0o600 });
       await fs.rename(temporary, connectionFile);
     } finally { await fs.rm(temporary, { force: true }); }
-    return { url: publicUrl || bridge.url, localUrl: bridge.url, token, connectionFile, close };
+    return { url: publicUrl || bridge.url, localUrl: bridge.url, token, ...(cloudflare ? { access: cloudflare.access } : {}), connectionFile, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -53,13 +63,13 @@ async function main() {
   const { values } = parseArgs({ options: {
     'data-dir': { type: 'string', default: path.join(os.homedir(), '.milagre-mobile') },
     project: { type: 'string' }, port: { type: 'string', default: '8787' },
-    'public-url': { type: 'string' }, 'stay-awake': { type: 'boolean' }, 'no-qr': { type: 'boolean' }, help: { type: 'boolean' },
+    'public-url': { type: 'string' }, tunnel: { type: 'boolean' }, cloudflare: { type: 'boolean' }, 'stay-awake': { type: 'boolean' }, 'no-qr': { type: 'boolean' }, help: { type: 'boolean' },
   } });
   if (values.help) {
-    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example] [--stay-awake] [--no-qr]\nPrints a QR code and link for the app to pair; --no-qr prints only the link. Separate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
+    console.log('npm run mobile:host -- [--data-dir /absolute/profile] [--project /absolute/Project] [--port 8787] [--public-url https://host.example | --tunnel | --cloudflare] [--stay-awake] [--no-qr]\n--tunnel opens a temporary Cloudflare Quick Tunnel; --cloudflare runs the tunnel set up by mobile:cloudflare, so the phone reaches this Mac from any network.\nPrints a QR code and link for the app to pair; --no-qr prints only the link. Separate real-provider host; never opens the development Project by default. Ctrl+C stops it. Tokens stay in the private connection file and can be reused after restart.');
     return;
   }
-  const host = await startMobileHost({ dataDir: values['data-dir'], project: values.project, port: Number(values.port), publicUrl: values['public-url'] });
+  const host = await startMobileHost({ dataDir: values['data-dir'], project: values.project, port: Number(values.port), publicUrl: values['public-url'], tunnel: values.cloudflare ? 'cloudflare' : values.tunnel ? 'quick' : undefined });
   let awake;
   if (values['stay-awake'] && process.platform === 'darwin') {
     awake = spawn('/usr/bin/caffeinate', ['-i'], { stdio: 'ignore' });
@@ -69,7 +79,7 @@ async function main() {
   process.once('SIGINT', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   process.once('SIGTERM', () => void stop().catch(error => { console.error(error.message); process.exitCode = 1; }));
   console.log(`Milagre host: ${host.url}\nConnection details: ${host.connectionFile}\nUses installed Codex and Claude. Close a Project in other Milagre hosts before opening it here. Ctrl+C stops this host.`);
-  printPairing({ address: host.url, token: host.token, qr: !values['no-qr'] });
+  printPairing({ address: host.url, token: host.token, access: host.access, qr: !values['no-qr'] });
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
 module.exports = { startMobileHost };

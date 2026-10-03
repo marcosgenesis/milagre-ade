@@ -40,3 +40,15 @@ test('HTTPS sends authenticate once, refuse redirects and reject a changed respo
   });
   await assert.rejects(client.call('daemon:status'), /redirect/);
 });
+
+test('a Cloudflare Access token goes on every request and image, and only over HTTPS', async () => {
+  const access = { id: `${'c'.repeat(32)}.access`, secret: 'Secret_with-mixed'.padEnd(43, 'z') };
+  let seen: Record<string, string> = {};
+  const client = createClient('https://mac.example.cloud', 'token', async (_url, init) => { seen = init?.headers as Record<string, string>; return new Response(JSON.stringify({ v: 1, result: 'ok' })); }, 30000, access);
+  assert.equal(await client.call('daemon:status'), 'ok');
+  assert.equal(seen['CF-Access-Client-Id'], access.id);
+  assert.equal(seen['CF-Access-Client-Secret'], access.secret);
+  assert.equal(seen.Authorization, 'Bearer token');
+  assert.equal(client.media('/p', '/p/a.png').headers['CF-Access-Client-Secret'], access.secret);
+  assert.throws(() => createClient('http://127.0.0.1:8797', 'token', fetch, 30000, access), /HTTPS/);
+});

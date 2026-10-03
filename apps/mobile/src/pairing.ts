@@ -1,6 +1,6 @@
-import { localEndpoint } from './client.ts';
+import { localEndpoint, validAccess, type Access } from './client.ts';
 
-export type Pairing = { address: string; token: string; name: string };
+export type Pairing = { address: string; token: string; name: string; access?: Access };
 
 /** Reads the link the host prints and encodes in its QR code (scripts/mobile-pairing.cjs). */
 export function parsePairing(input: string): Pairing {
@@ -16,5 +16,7 @@ export function parsePairing(input: string): Pairing {
   if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error('This pairing link has no valid token. Restart the host on your Mac and scan the new code.');
   const address = localEndpoint(params.address || '');
   const name = (params.name || '').trim().slice(0, 80) || address.replace(/^https?:\/\//, '').replace(/[:/].*$/, '');
-  return { address, token, name };
+  const access = validAccess({ id: params.cfId, secret: params.cfSecret });
+  if (access && !address.startsWith('https:')) throw new Error('This pairing link has a Cloudflare token but no HTTPS address.');
+  return access ? { address, token, name, access } : { address, token, name };
 }

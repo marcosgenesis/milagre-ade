@@ -46,8 +46,9 @@
     "mobile": "npm run start --workspace @milagre/mobile",
     "mobile:demo": "node scripts/mobile-demo.cjs",
     "mobile:host": "node scripts/mobile-host.cjs",
+    "mobile:cloudflare": "node scripts/mobile-cloudflare.cjs",
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
-    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs"
+    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",

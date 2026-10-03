@@ -67,3 +67,14 @@ test('a damaged saved entry is dropped instead of blocking the others and new pa
   await store.save({ name: 'MacBook Pro', address: 'https://mac.example.com', token });
   assert.equal((await store.list()).length, 2);
 });
+
+test('a Cloudflare pairing link keeps its Access token through save and list', async () => {
+  const access = { id: `${'c'.repeat(32)}.access`, secret: 'Secret_with-mixed'.padEnd(43, 'z') };
+  const pairing = parsePairing(`milagre://pair?address=${encodeURIComponent('https://mac.example.cloud')}&token=${token}&name=Mac&cfId=${access.id}&cfSecret=${access.secret}`);
+  assert.deepEqual(pairing.access, access);
+  const store = createHostsStore(storage(), () => 1);
+  await store.save({ name: pairing.name, address: pairing.address, token: pairing.token, access: pairing.access });
+  assert.deepEqual((await store.list())[0].access, access);
+  assert.throws(() => parsePairing(`milagre://pair?address=${encodeURIComponent('http://127.0.0.1:8797')}&token=${token}&cfId=${access.id}&cfSecret=${access.secret}`), /HTTPS/);
+  assert.throws(() => parsePairing(`milagre://pair?address=${encodeURIComponent('https://mac.example.cloud')}&token=${token}&cfId=bad&cfSecret=${access.secret}`), /Cloudflare/);
+});

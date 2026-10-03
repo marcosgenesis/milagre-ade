@@ -5,6 +5,7 @@
   "dependencies": {
     "@milagre/shared": "0.1.0",
     "expo": "~57.0.26",
+    "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.20",
     "expo-linking": "~57.0.11",
     "expo-router": "~57.0.24",

@@ -16,9 +16,11 @@ export function AgentControls({ model, disabled, onToggle }: { model: MobileMode
 }
 
 const SHORT: Record<PermissionMode, string> = { ask: 'Ask', auto: 'Auto', full: 'Full' };
+// The same shields as the chip, as SF Symbols because the system draws the menu.
+const SYMBOL: Record<PermissionMode, string> = { ask: 'shield', auto: 'checkmark.shield', full: 'exclamationmark.shield' };
 /** Desktop's permission picker as a native pull-down: Ask approval, Auto mode, Full permission. */
 export function PermissionChip({ mode, disabled, onChange }: { mode: PermissionMode; disabled?: boolean; onChange: (mode: PermissionMode) => void }) {
-  return <PullDown label="Permissions" sections={[{ title: 'Permissions', items: PERMISSION_MODES.map(item => ({ id: item.id, title: item.name, subtitle: item.description, checked: item.id === mode, disabled })) }]} onSelect={id => onChange(id as PermissionMode)}>
+  return <PullDown label="Permissions" sections={[{ title: 'Permissions', items: PERMISSION_MODES.map(item => ({ id: item.id, title: item.name, systemImage: SYMBOL[item.id], checked: item.id === mode, disabled })) }]} onSelect={id => onChange(id as PermissionMode)}>
     <View accessibilityRole="button" accessibilityLabel={`Permissions, ${PERMISSION_MODES.find(item => item.id === mode)?.name}`} style={{ minHeight: 34, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: disabled ? 0.45 : 1 }}>
       <Icon icon={mode === 'full' ? ShieldAlertIcon : mode === 'auto' ? SecurityCheckIcon : Shield01Icon} tone={mode === 'full' ? 'orange' : 'ink2'} size={15} />
       <Text style={{ color: mode === 'full' ? colors.orange : colors.ink2, fontSize: 13 }}>{SHORT[mode]}</Text>

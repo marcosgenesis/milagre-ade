@@ -1,6 +1,6 @@
 # Mobile readiness verification, 2026-10-03
 
-The native simulator app controls real Milagre agents without Metro. Draft #137 is stacked on #131 and #126, synced through main #135. Source changes end at `a9452ca`; GitHub CI run `37094244399` passed.
+The native simulator app controls real Milagre agents without Metro. The original readiness checks below were recorded at `a9452ca` (CI `37094244399`). The native composer update is based on main after #126, #131 and #136 merged; its implementation at `73b26e7` passed CI `37122974145`.
 
 ## Verified
 
@@ -40,3 +40,13 @@ One fresh reviewer inspected the whole mobile-readiness increment. Both Importan
 
 - Final: minor (deferred): returned Worktree setupNote is not surfaced when configuration was ignored; use desktop setup details for this warning.
 - Final: minor (deferred): iOS27 still offers its system Save Password dialog despite autofill off; chose Not Now. App Remember/Forget is verified platform secure storage.
+
+## Native composer pass
+
+Added semantic light/dark colors, system controls, model/effort/permission sheet, photo/file attachment menu, Markdown, expandable tool output, live activity, agent counts and PR blockers. Shared desktop reply/streaming/PR helpers keep their behavior.
+
+Verified on iOS 26.2: rebuilt standalone Release app installs without clearing saved credentials, reconnects to Morning trial and renders its existing real replies. Native Files picker opens and cancels. Expo Go opens the native model menu, selects and compresses a Photo Library image, sends it through the real HTTP/socket/core demo, and displays the stored photo and reply. The labeled demo's tool response exercises Markdown and failed-tool state; it uses no provider account. Native source tests cover upload privacy/bounds and failed-send draft retention.
+
+Final checks at `73b26e7`: 38 mobile tests, mobile types/lint, desktop build, 1,009 shared/core/desktop/daemon tests, 232 UI tests, 3 workspace checks, 15 release checks, and the standalone iOS Release build pass. One earlier full-suite run hit the existing 300 ms process-start timing assumption in worktree-setup; its 12 focused tests and the complete rerun passed without a code change.
+
+Independent review found three issues fixed before merging: reused empty Chats now keep destination drafts; PR polling is deduplicated and capped at two requests on focused foreground screens; path-only photos after the persistence audit show a filename and desktop-view hint. The image-fetch route and abandoned-upload cleanup remain pending. The running Morning trial host predates PR-status/upload routes, so the updated app correctly shows PR status unavailable there until that host is restarted from current code. Its live process was preserved.

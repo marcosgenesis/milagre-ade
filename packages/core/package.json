@@ -17,6 +17,10 @@
     "./keep-awake": {
       "types": "./src/keep-awake.d.cts",
       "default": "./src/keep-awake.cjs"
+    },
+    "./agents/environment": {
+      "types": "./src/agents/environment.d.cts",
+      "default": "./src/agents/environment.cjs"
     }
   },
   "scripts": {

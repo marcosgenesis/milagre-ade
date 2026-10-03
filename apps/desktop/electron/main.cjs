@@ -1,12 +1,12 @@
 // @ts-check
 const { createQuitHandler } = require("./quit.cjs");
 const { createEditorOpener } = require("./editor-open.cjs");
-const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, protocol, net } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { createRuntime } = require("@milagre/core");
-const { KeepAwake } = require("@milagre/core/keep-awake");
+const { connectDesktopRuntime } = require("./daemon-runtime.cjs");
+const { loadLoginEnvironment } = require("@milagre/core/agents/environment");
 const { detectEditors, openInEditor } = require("@milagre/core/editors");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { revealFolder } = require("./reveal.cjs");
@@ -15,7 +15,7 @@ const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
-function startDesktop() {
+async function startDesktop() {
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
 let updateCheck = null;
@@ -32,7 +32,7 @@ function checkForUpdates() {
   if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
   if (updateCheck) return updateCheck;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   publishUpdateState({ status: "checking", version: null, progress: 0 });
   updateCheck = autoUpdater.checkForUpdates().then(
     () => updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState,
@@ -46,8 +46,9 @@ function checkForUpdates() {
 
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
-// The update installs on a quit too: running chats stop first and continue once the new version opens.
+// Installing replaces the host bundle too. Save and stop it before the updater runs.
 ipcMain.handle("update:install", async () => {
+  await runtime.close({ stopHost: true });
   await prepareQuit();
   autoUpdater.quitAndInstall();
 });
@@ -113,18 +114,19 @@ ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
   if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
 });
 
+let connectionState = { connected: true };
+ipcMain.handle("runtime:connection", () => connectionState);
 let runtime;
 try {
-runtime = createRuntime({
+runtime = await connectDesktopRuntime({
   dataDir: app.getPath("userData"),
   version: app.getVersion(),
   cwd: process.cwd(),
   worktreeRoot: !app.isPackaged ? process.env.MILAGRE_WORKTREE_ROOT : undefined,
-  keepAwake: new KeepAwake({ powerSaveBlocker }),
-  isFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
-  observeAgentEvent: (chatId, event) => notifier.observe(chatId, event),
-  notifyWaiting: notice => { if (notifyWhenWaiting && Notification.isSupported()) notifier.notify(notice); },
   emit(channel, payload) {
+    if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
+    if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
+    if (channel === "runtime:connection") connectionState = payload;
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
     }
@@ -134,8 +136,11 @@ runtime = createRuntime({
   void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error instanceof Error ? error.message : String(error)); app.quit(); });
   return;
 }
-const environmentReady = runtime.environmentReady;
-for (const method of runtime.methods) ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+const environmentReady = loadLoginEnvironment();
+for (const method of runtime.methods) {
+  if (method !== "app:version") ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+}
+ipcMain.handle("app:version", () => app.getVersion());
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({ title: "Open project", properties: ["openDirectory", "createDirectory"] });
   return result.canceled || !result.filePaths[0] ? null : runtime.openProject(result.filePaths[0]);
@@ -159,7 +164,7 @@ function createWindow() {
 
   const indexFile = path.join(__dirname, "../dist/index.html");
   const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
-  // On macOS the close button hides the window, so agents keep running; a quit closes it for real.
+  // On macOS the close button hides the window; the shared host also survives a desktop quit.
   if (process.platform === "darwin") {
     window.on("close", (event) => {
       if (quitting) return;
@@ -193,8 +198,9 @@ app.whenReady().then(async () => {
   createWindow();
   void runtime.resumeRecentProjects().catch(error => console.warn(error.message));
   app.on("browser-window-focus", () => {
-    void runtime.focused().catch(() => {});
+    void runtime.setFocused(true).catch(() => {});
   });
+  app.on("browser-window-blur", () => { void runtime.setFocused(false).catch(() => {}); });
   autoUpdater.on("update-available", (info) => publishUpdateState({ status: "downloading", version: info.version }));
   autoUpdater.on("update-not-available", () => publishUpdateState({ status: "up-to-date" }));
   autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", progress: progress.percent }));
@@ -214,8 +220,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
-// Stops everything a quit has to stop, once. Running chats are saved first so they
-// continue on the next launch; agents run in their own process groups, so they are stopped before the app exits.
+// Flushes accepted changes and disconnects desktop. The host and agents keep running.
 let quitting = false;
 let quitPrepared = null;
 function prepareQuit() {
@@ -247,4 +252,4 @@ app.on("before-quit", (event) => {
 });
 
 }
-startDesktop();
+void startDesktop().catch(error => { void app.whenReady().then(() => { dialog.showErrorBox("Milagre could not start", error.message); app.quit(); }); });

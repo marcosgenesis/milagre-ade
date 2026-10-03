@@ -1,6 +1,6 @@
 # Audit Tasks 1-3: final review and fix record
 
-One independent review covered `9d3fef0..fa87838` using GPT-6 Astra (high). It returned **not ready to merge** with two Critical and five Important findings. All seven were accepted, then addressed in one regression-test and fix pass. There was no second independent review. Claude Fable 5.1 handback remains pending.
+One independent review covered `9d3fef0..fa87838` using GPT-6 Astra (high). It returned **not ready to merge** with two Critical and five Important findings. All seven were accepted, then addressed in one regression-test and fix pass. There was no second independent review. Victor now wants Claude to continue from merged main; no Claude Chat was created.
 
 | Grade | Finding at reviewed revision | Fix and regression evidence |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ One independent review covered `9d3fef0..fa87838` using GPT-6 Astra (high). It r
 | Important | `project-content.cjs:24`: partial final-file writes poisoned subsequent saves. | Complete temporary files are published by exclusive hard link. Failed partial writes are removed and retry succeeds. ENOSPC regression failed first, then passed. |
 | Important | `agent-runs.mjs:193`: live child updates dropped missing transcript references. | Updates retain references; restored full entries take precedence over compact summaries. Temporarily missing history plus new output survives save/reload. Regression failed first, then passed. |
 
-Deferred Minor: `apps/mobile/src/agent-controls.tsx:18` still repeats provider labels and order. The existing console-only reporting of background save failures remains deferred; dirty state is retained, explicit saves reject, and quit provides visible recovery. No retention cleanup was introduced for immutable sidecars.
+The deferred mobile provider-label duplication was removed during stack integration. The existing console-only reporting of background save failures remains deferred; dirty state is retained, explicit saves reject, and quit provides visible recovery. No retention cleanup was introduced for immutable sidecars.
 
 The reviewer set aside arbitrary untrusted Git arguments, sidecar garbage collection, and Tasks 4-9. Those remain separate work: fixed query APIs must precede untrusted Git access, retention needs its own policy, and Victor requested only Tasks 1-3. Full rulings and compatibility costs remain in `code-quality-audit-progress.md`.
 

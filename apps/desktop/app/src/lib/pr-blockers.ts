@@ -6,17 +6,22 @@ type BlockerStatus = {
   conflictStatusKnown?: boolean;
   isBehind?: boolean;
   changesRequested?: boolean;
+  checks?: "running" | "failed";
 };
 
 /** Something on GitHub that stops an open PR from merging and that the agent can fix. */
-export type PullRequestBlocker = "conflicts" | "changes-requested" | "behind";
+export type PullRequestBlocker = "conflicts" | "changes-requested" | "checks-failed" | "behind";
 
-/** Most urgent first: conflicts must be fixed before a branch can be updated, and both before review lands. */
-const ORDER: PullRequestBlocker[] = ["conflicts", "changes-requested", "behind"];
+/**
+ * Most urgent first: conflicts must be fixed before a branch can be updated, and both before review lands.
+ * Failed CI comes before an outdated branch, since updating the branch reruns the checks anyway.
+ */
+const ORDER: PullRequestBlocker[] = ["conflicts", "changes-requested", "checks-failed", "behind"];
 
 export const BLOCKERS: Record<PullRequestBlocker, { short: string; long: string; action: string; tone: "red" | "orange" }> = {
   conflicts: { short: "Conflicts", long: "Merge conflicts", action: "Resolve conflicts", tone: "red" },
   "changes-requested": { short: "Needs changes", long: "Changes requested", action: "Address review", tone: "red" },
+  "checks-failed": { short: "CI failed", long: "CI checks failed", action: "Fix CI", tone: "red" },
   behind: { short: "Out of date", long: "Out of date with the base branch", action: "Update branch", tone: "orange" },
 };
 
@@ -24,6 +29,7 @@ function blocks(pr: BlockerStatus, blocker: PullRequestBlocker) {
   if (pr.state !== "OPEN") return false;
   if (blocker === "conflicts") return Boolean(pr.hasConflicts);
   if (blocker === "behind") return Boolean(pr.isBehind);
+  if (blocker === "checks-failed") return pr.checks === "failed";
   return Boolean(pr.changesRequested);
 }
 
@@ -31,7 +37,7 @@ function blocks(pr: BlockerStatus, blocker: PullRequestBlocker) {
 function clears(pr: BlockerStatus, blocker: PullRequestBlocker) {
   if (pr.state !== "OPEN") return true;
   if (blocks(pr, blocker)) return false;
-  return blocker === "changes-requested" || pr.conflictStatusKnown !== false;
+  return blocker === "changes-requested" || blocker === "checks-failed" || pr.conflictStatusKnown !== false;
 }
 
 export function pullRequestBlockers(pr: BlockerStatus | null | undefined): PullRequestBlocker[] {
@@ -46,6 +52,9 @@ export function blockerPrompt(blocker: PullRequestBlocker, pr: BlockerStatus): s
     return "This branch is out of date with the pull request's base branch. Merge the latest base branch into it, fix anything the merge breaks, run the relevant checks, and push.";
   }
   const ref = pr.number ? `pull request #${pr.number}` : "this branch's pull request";
+  if (blocker === "checks-failed") {
+    return `The CI checks on ${ref} failed. Find the failing runs (\`gh pr checks ${pr.number ?? ""}\`) and read their logs (\`gh run view <run-id> --log-failed\`), fix the cause, run the same checks locally, and push.`;
+  }
   return `A reviewer requested changes on ${ref}. Read every review and inline comment (\`gh pr view ${pr.number ?? ""} --comments\` and \`gh api repos/{owner}/{repo}/pulls/${pr.number ?? "<number>"}/comments\`), address each one, run the relevant checks, and push. Then list what you changed for each comment.`;
 }
 

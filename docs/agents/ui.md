@@ -13,6 +13,10 @@ Every scrolling list or panel is a `ScrollArea` (`app/src/components/primitives/
 
 Every dropdown goes through `primitives/Select`; a native `<select>` opens macOS's own menu. `no-native-select.test.ts` enforces it.
 
+## Sliders
+
+Every slider is a `RangeSlider` (`app/src/components/primitives/RangeSlider.tsx`): tick dots per step, a bar handle that bounces as it lands, drag anywhere on the track or use the arrow keys, and no springs under reduced motion. Its value plumbing is `lib/use-slider.ts`; a native `<input type="range">` draws macOS's own control.
+
 ## Backdrop blur
 
 Three blur strengths, all theme tokens in `app/src/styles.css`:

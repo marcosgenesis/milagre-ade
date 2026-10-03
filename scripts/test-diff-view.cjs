@@ -122,6 +122,27 @@ async function browserChecks() {
     // Electron routes a click in the drag strip to whatever paints on top; every bar button must beat the strip.
     await delay(400);
     assert.equal(await evaluate(`[...document.querySelectorAll("[data-diff-bar] button")].filter(button => { const r = button.getBoundingClientRect(); return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }).length`), 0, "Diff bar buttons sit above the drag strip");
+    // Chromium builds the window's drag region from every element with an app-region, in tree order: drag adds its box,
+    // no-drag subtracts it. Only the bar's buttons opt out; the empty stretch between Back and the toolbar still drags the window.
+    const draggableAt = (x, y) => evaluate(`(() => {
+      let draggable = false;
+      for (const node of document.querySelectorAll("*")) {
+        const style = getComputedStyle(node);
+        const region = style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
+        if (region !== "drag" && region !== "no-drag") continue;
+        const r = node.getBoundingClientRect();
+        if (${x} >= r.left && ${x} < r.right && ${y} >= r.top && ${y} < r.bottom) draggable = region === "drag";
+      }
+      return draggable;
+    })()`);
+    const barGap = await evaluate('(() => { const back = document.querySelector("[data-diff-back]").getBoundingClientRect(); const tools = document.querySelector("[data-diff-toolbar]").getBoundingClientRect(); return { x: (back.right + tools.left) / 2, y: (back.top + back.bottom) / 2 }; })()');
+    assert.ok(barGap.x > 300, "The gap between Back and the toolbar is wide enough to grab");
+    assert.equal(await draggableAt(barGap.x, barGap.y), true, "The empty middle of the diff bar drags the window");
+    assert.equal(await draggableAt(barGap.x, 6), true, "Above the bar still drags the window");
+    const backCentre = await evaluate('(() => { const r = document.querySelector("[data-diff-back]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+    assert.equal(await draggableAt(backCentre.x, backCentre.y), false, "Back is a button, not a drag handle");
+    const toolCentre = await evaluate('(() => { const r = document.querySelector("[data-diff-layout=split]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+    assert.equal(await draggableAt(toolCentre.x, toolCentre.y), false, "Toolbar buttons are not drag handles");
     assert.equal(await evaluate('document.querySelector("[data-chat-stub]").classList.contains("hidden")'), true);
     await waitFor(`!!document.querySelector('${file("README.md")} [data-diff-row]')`);
     await delay(150);

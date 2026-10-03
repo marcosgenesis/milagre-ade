@@ -19,3 +19,10 @@ export const SPRING_SWAP = {
   damping: 30,
   mass: 0.55,
 } as const;
+/** A handle gliding to its stop: quick, with one small overshoot. */
+export const SPRING_GLIDE = {
+  type: "spring",
+  stiffness: 400,
+  damping: 28,
+  mass: 0.5,
+} as const;

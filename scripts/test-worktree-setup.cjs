@@ -31,6 +31,8 @@ window.emitAgent = ({ chatId, event }) => {
   listeners.forEach((listener) => listener({ chatId, event, ...(result.changed ? { state: structuredClone(state) } : {}) }));
 };
 window.milagre = new Proxy({
+  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
+  getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/fixture", name: "shop", state }),
   listBranches: async () => ["main"],
   createWorktree: async () => {

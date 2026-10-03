@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { MAX_RECENT, createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { MAX_RECENT, createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 
 async function tempDir(t) {
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-recent-")));
@@ -219,4 +219,19 @@ test("project:switch opens only a listed project whose real path is a checkout's
   await fs.symlink(path.join(repo, "sub"), link);
   await fs.writeFile(file, JSON.stringify([{ path: link, name: "link", openedAt: "" }]));
   await assert.rejects(switchTarget(recent, link), /That folder isn't a project/);
+});
+
+test("launch opens the folder Milagre started in when it's a repo, else the latest project that still is one", async (t) => {
+  const base = await tempDir(t);
+  const [started, latest, older, plain] = await folders(base, "started", "latest", "older", "plain");
+  gitRepo(started);
+  gitRepo(older);
+  const store = createRecentProjects(path.join(base, "recent.json"), { now: clock() });
+  await store.add(older);
+  await store.add(latest);
+  assert.equal(await launchProject(store, started), started);
+  // "latest" is no longer a repo, so the one before it opens.
+  assert.equal(await launchProject(store, "/"), older);
+  assert.equal(await launchProject(store, plain), older);
+  assert.equal(await launchProject(createRecentProjects(path.join(base, "empty.json")), "/"), "/");
 });

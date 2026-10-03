@@ -66,6 +66,18 @@ test("starts threads and turns with Milagre's identity, instructions and policy"
   assert.deepEqual(find("turn/start").input, [{ type: "text", text: "Hi", text_elements: [] }]);
   // Reasoning summaries are what the reply's thinking steps show.
   assert.equal(find("turn/start").summary, "auto");
+  // Fast mode off: standard speed, whatever ~/.codex/config.toml's service_tier says.
+  assert.equal(find("turn/start").serviceTierForTurn, "default");
+});
+
+test("fast mode runs the turn on Codex's priority tier", async (t) => {
+  const { session, events } = codex(t);
+  await session.startTurn({ ...TURN, fastMode: true });
+  await ended(events);
+  await session.startTurn({ ...TURN, fastMode: false });
+  await ended(events, 2);
+  const tiers = (await received(session)).filter((message) => message.method === "turn/start").map((message) => message.params.serviceTierForTurn);
+  assert.deepEqual(tiers, ["priority", "default"]);
 });
 
 test("Ask asks about untrusted commands, Auto only about leaving the sandbox", async (t) => {

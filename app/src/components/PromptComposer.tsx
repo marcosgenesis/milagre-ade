@@ -10,7 +10,7 @@ import {
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
-import { effortCopy, PERMISSION_MODES, supportsFastMode } from "../model";
+import { effortCopy, PERMISSION_MODES } from "../model";
 import Tooltip from "./primitives/Tooltip";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
@@ -22,6 +22,7 @@ import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
 import { useSkills } from "./useSkills";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -121,7 +122,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share the accent.
   const orchestrating = ultracode || effort === "ultra";
   const effortLabel = ultracode ? "Ultracode" : effortName;
-  const canUseFastMode = supportsFastMode(selectedModel);
+  const canUseFastMode = capability.fastMode;
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
@@ -317,7 +318,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
       <div ref={popoverRootRef} className="relative">
         {menu && (
           <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
-            <div className="relative max-h-64 overflow-y-auto" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
+            <ScrollArea className="relative max-h-64" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
             <span aria-hidden className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover" style={{ top: rowBox?.top ?? 0, height: rowBox?.height ?? 0, opacity: rowBox && engaged ? 1 : 0, transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease" }} />
             {rows.map((row, index) => {
               const source = menu === "at" ? SOURCES.find((item) => item.key === row.key) : undefined;
@@ -334,7 +335,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             })}
             {menu === "at" && !plusOpen && fileSearch.error && <div role="status" className="px-2 text-xs text-red">{fileSearch.error}</div>}
             {rows.length === 0 && <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">{fileSearch.loading && menu === "at" ? "Searching files..." : `No matches for "${tokenQuery}"`}</div>}
-            </div>
+            </ScrollArea>
             {menu === "slash" && skillWarnings.length > 0 && <div role="status" title={skillWarnings.join("\n")} className="px-2 py-1 text-[11px] text-ink-3">{skillWarnings.length === 1 ? skillWarnings[0] : `${skillWarnings.length} skills could not be loaded. Hover for details.`}</div>}
             <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">{menu === "at" ? "Type to search files" : skillsLoading ? "Loading skills…" : "Type to search commands & skills"}</div>
           </div>
@@ -455,7 +456,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}
-            {canUseFastMode && <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster Opus output at higher usage rates`}><button type="button" aria-label="Fast mode" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button></Tooltip>}
+            {canUseFastMode && <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster replies at higher usage rates`}><button type="button" aria-label="Fast mode" aria-pressed={fastMode} onClick={() => onFastModeChange(!fastMode)} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}><Icon icon={FlashIcon} size={15} /></button></Tooltip>}
             </div>
             <button type="button" aria-label="Agent permissions" aria-expanded={permissionOpen} onClick={(event) => { anchorTo(event.currentTarget, 340); setPlusOpen(false); setModelOpen(false); setEffortOpen(false); setPermissionOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}><Icon icon={SecurityCheckIcon} size={14} /><span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span></button>
             <button type="button" aria-label="Send" disabled={!canSend || sendBlocked || imageDraft.loading} onClick={send} className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`} style={{ background: canSend && !sendBlocked ? "var(--ink)" : "var(--line-strong)" }}><Icon icon={ArrowUp01Icon} size={16} /></button>

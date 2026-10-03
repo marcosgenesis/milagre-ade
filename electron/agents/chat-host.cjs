@@ -3,6 +3,11 @@ const { patchSession } = require("../shared/project-edits.mjs");
 const { chatTitle } = require("../shared/chats.mjs");
 const { renderTranscript, providerName } = require("./handover.cjs");
 
+// A chat stopped longer ago than this waits for the user instead of continuing by itself.
+const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RESUME_BODY = "Milagre restarted. Continue where you left off.";
+const RESUME_PROMPT = "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
+
 /** The part of an IPC error the user should read. */
 function errorMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -17,7 +22,8 @@ function errorMessage(error) {
 // while it runs (what the commit dialog did) waits for the turn to end, so it lands after the reply. Every event
 // folded into the runs is numbered, so a window that loads mid-turn takes the runs (see `snapshot`)
 // and skips the events they already hold.
-const withoutDraft = ({ handoverDraft, ...rest }) => rest;
+// A message the user sends replaces the brief waiting as a draft and any resume a quit left.
+const withoutDraft = ({ handoverDraft, resumeTurn, ...rest }) => rest;
 
 class ChatHost {
   /**
@@ -27,13 +33,16 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, handoverTools }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, handoverTools });
+  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, nameChat = async () => {}, handoverTools, now = Date.now }) {
+    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, nameChat, handoverTools, now });
     this.pendingHandovers = new Map();
     this.runs = {};
     this.seq = 0;
     this.openChat = null;
     this.notes = new Map();
+    // The options of each chat's latest turn, so a turn a quit stops can start again the same way.
+    this.turns = new Map();
+    this.quitting = false;
   }
 
   /** The turns streaming now, in every project, and the number of the last event they hold. */
@@ -48,6 +57,8 @@ class ChatHost {
 
   /** Folds one agent event into its chat's project, then publishes it. Events are published in the order they arrive. */
   receive(chatId, event) {
+    // A turn the quit stops says so in its reply.
+    if (this.quitting && event.type === "turn-cancelled") event = { ...event, quit: true };
     const projectPath = projectOfKey(chatId);
     const sessionId = sessionIdFromKey(chatId);
     let seq;
@@ -154,11 +165,9 @@ class ChatHost {
     });
     this.publish(target.chatId, { type: "message-sent", model }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
-    this.startTurn({
-      chatId: target.chatId,
+    const turn = {
       provider,
       model,
-      cwd: target.cwd,
       permissionMode: request.permissionMode,
       effort: request.effort,
       ultracode: request.ultracode,
@@ -166,9 +175,9 @@ class ChatHost {
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
       prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
-      images,
-      resumeId: target.resumeId,
-    }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
+    };
+    this.turns.set(target.chatId, turn);
+    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: errorMessage(error) }));
     return { sessionId: target.sessionId };
   }
 
@@ -247,6 +256,61 @@ class ChatHost {
     });
     if (changed) this.broadcast(projectPath, state);
     return Boolean(changed);
+  }
+
+  /**
+   * Before a quit stops the agents: every chat whose turn runs is saved with what it needs to start again
+   * (`resumeTurn`), and the cancelled turns that follow say the quit stopped them. A chat whose agent never
+   * started keeps its prompt, since no session holds it yet.
+   */
+  async suspendRunning() {
+    this.quitting = true;
+    const stoppedAt = this.now();
+    const byProject = new Map();
+    for (const chatId of Object.keys(this.runs)) {
+      const turn = this.turns.get(chatId);
+      if (!turn) continue;
+      byProject.set(projectOfKey(chatId), [...(byProject.get(projectOfKey(chatId)) ?? []), [sessionIdFromKey(chatId), turn]]);
+    }
+    await Promise.all([...byProject].map(([projectPath, chats]) => this.states.update(projectPath, (latest) => {
+      let sessions = latest.sessions;
+      for (const [sessionId, { prompt, ...turn }] of chats) {
+        const session = sessions[sessionId];
+        if (!session) continue;
+        sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, stoppedAt, ...(session.native_session_id ? {} : { prompt }) } } };
+      }
+      return sessions === latest.sessions ? latest : { ...latest, sessions };
+    }).catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message))));
+  }
+
+  /**
+   * Chats a quit stopped mid-turn (see `suspendRunning`) continue when their project opens. One stopped longer
+   * than RESUME_WINDOW_MS ago keeps its mark instead, and waits for the user to continue it (see `resumeChat`).
+   */
+  async resumeInterrupted(projectPath, state) {
+    for (const session of Object.values(state.sessions)) {
+      if (!session.resumeTurn || this.now() - (session.resumeTurn.stoppedAt ?? 0) > RESUME_WINDOW_MS) continue;
+      await this.resumeChat(projectPath, session.id).catch((error) => console.warn(`Milagre couldn't resume a chat in ${projectPath}:`, error.message));
+    }
+  }
+
+  /** Continues one chat a quit stopped, on the turn's saved options. Resolves false when it has nothing to continue. */
+  async resumeChat(projectPath, sessionId) {
+    if (this.runs[chatKey(projectPath, sessionId)]) return false;
+    let turn = null;
+    // Taken from the latest state, so a chat resumes once.
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const current = latest.sessions[sessionId];
+      if (!current?.resumeTurn) return latest;
+      const { resumeTurn, ...rest } = current;
+      turn = resumeTurn;
+      return { ...latest, sessions: { ...latest.sessions, [sessionId]: rest } };
+    });
+    if (!turn) return false;
+    if (changed) this.broadcast(projectPath, state);
+    const { prompt, stoppedAt: _stoppedAt, ...options } = turn;
+    await this.send({ ...options, projectPath, sessionId, body: RESUME_BODY, prompt: prompt ?? RESUME_PROMPT, images: [], files: [] });
+    return true;
   }
 
   /** A handover still marked pending when its project opens was cut off by a quit: it gets a note instead. */

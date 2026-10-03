@@ -29,6 +29,8 @@ class FakeSession {
   }
 }
 
+const NOW = 1_800_000_000_000;
+const DAY = 24 * 60 * 60 * 1000;
 const ALPHA = "/projects/alpha";
 const BETA = "/projects/beta";
 
@@ -50,7 +52,7 @@ function projectState(projectPath) {
 }
 
 // The main process's chat wiring with fake agents and two projects saved in memory, as main.cjs builds it.
-function harness({ failStart = null, focused = true, handoverTools = { writeTranscript: async ({ sessionId }) => `/tmp/handovers/${sessionId}.md`, brief: async ({ transcriptPath }) => `BRIEF ${transcriptPath}` } } = {}) {
+function harness({ failStart = null, focused = true, now = () => NOW, handoverTools = { writeTranscript: async ({ sessionId }) => `/tmp/handovers/${sessionId}.md`, brief: async ({ transcriptPath }) => `BRIEF ${transcriptPath}` } } = {}) {
   const saved = new Map();
   const published = [];
   const broadcasts = [];
@@ -75,6 +77,7 @@ function harness({ failStart = null, focused = true, handoverTools = { writeTran
     broadcast: (projectPath, state) => broadcasts.push({ projectPath, state }),
     isFocused: () => focused,
     handoverTools,
+    now,
   });
   const session = (cwd) => created.find((item) => item.options.cwd === cwd);
   return { host, manager, states, saved, published, broadcasts, created, session };
@@ -476,4 +479,79 @@ test("a new chat sent while a handover is pending doesn't land in the handover c
   assert.deepEqual(chatMessages(state, target), []);
   assert.equal(state.sessions[target].handoverDraft, "BRIEF");
   assert.equal(state.sessions[target].provider, "codex");
+});
+
+test("a quit saves each running chat to resume, and its cancelled turn says so", async (t) => {
+  const { host, manager, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const running = await host.send(message(ALPHA, "fix the api", { effort: "high" }));
+  const idle = await host.send(message(BETA, "wire the frontend"));
+  await waitUntil(() => session(ALPHA) && session(BETA));
+  session(ALPHA).emit({ type: "session-started", nativeId: "native-1" });
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  session(ALPHA).emit({ type: "text-delta", messageId: "m1", text: "Halfway." });
+  session(BETA).emit({ type: "turn-started", turnId: "t1" });
+  session(BETA).emit({ type: "turn-completed" });
+  await waitUntil(() => saved.get(BETA)?.messages.length === 2 && saved.get(ALPHA)?.sessions[running.sessionId].native_session_id);
+
+  await host.suspendRunning();
+  session(ALPHA).emit({ type: "turn-cancelled" });
+  await waitUntil(() => saved.get(ALPHA).messages.length === 2);
+
+  const alpha = saved.get(ALPHA);
+  // The provider session holds the prompt, so only the turn's options are kept.
+  assert.deepEqual(alpha.sessions[running.sessionId].resumeTurn, { provider: "claude", model: "claude-opus-5-5", permissionMode: "auto", effort: "high", stoppedAt: NOW, ultracode: undefined, fastMode: undefined, replies: undefined, tldrEnabled: undefined });
+  assert.deepEqual(chatMessages(alpha, running.sessionId).at(-1), { role: "assistant", body: "Halfway.\n\nStopped when Milagre closed.", outcome: "cancelled" });
+  assert.equal(saved.get(BETA).sessions[idle.sessionId].resumeTurn, undefined);
+});
+
+test("a chat a quit stopped continues once on its saved session when its project opens", async (t) => {
+  const { host, manager, states, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-1", resumeTurn: { provider: "codex", model: "gpt-6", permissionMode: "auto", effort: "high", stoppedAt: NOW - 60_000 } } } }));
+  const stale = saved.get(ALPHA);
+  await host.resumeInterrupted(ALPHA, stale);
+  await host.resumeInterrupted(ALPHA, stale);
+  await waitUntil(() => session(ALPHA)?.turns.length === 1);
+
+  const state = saved.get(ALPHA);
+  assert.equal(state.sessions[7].resumeTurn, undefined);
+  assert.deepEqual(chatMessages(state, 7), [{ role: "user", body: "Milagre restarted. Continue where you left off." }]);
+  assert.equal(session(ALPHA).provider, "codex");
+  assert.equal(session(ALPHA).options.resumeId, "thread-1");
+  assert.match(session(ALPHA).turns[0].prompt, /closed while you were working/);
+  assert.deepEqual([session(ALPHA).turns[0].model, session(ALPHA).turns[0].effort], ["gpt-6", "high"]);
+  assert.equal(manager.sessions.size, 1);
+});
+
+test("a chat whose agent hadn't started when Milagre quit is sent its prompt again", async (t) => {
+  const { host, manager, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const chat = await host.send(message(ALPHA, "fix the api"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  await host.suspendRunning();
+  assert.equal(saved.get(ALPHA).sessions[chat.sessionId].resumeTurn.prompt, "fix the api");
+});
+
+test("a chat stopped more than a day ago waits for Continue, and a message sent by hand drops the mark", async (t) => {
+  const { host, manager, states, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const old = { provider: "codex", model: "gpt-6", permissionMode: "auto", stoppedAt: NOW - 2 * DAY };
+  await states.update(ALPHA, (state) => ({ ...state, next_id: 9, sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-1", resumeTurn: old }, 8: { id: 8, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_session_id: "thread-2", resumeTurn: old } } }));
+  await host.resumeInterrupted(ALPHA, saved.get(ALPHA));
+  assert.deepEqual(chatMessages(saved.get(ALPHA), 7), []);
+  assert.equal(saved.get(ALPHA).sessions[7].resumeTurn.stoppedAt, NOW - 2 * DAY);
+
+  // Continue resumes it once; a second click has nothing left to continue.
+  assert.equal(await host.resumeChat(ALPHA, 7), true);
+  assert.equal(await host.resumeChat(ALPHA, 7), false);
+  await waitUntil(() => session(ALPHA)?.turns.length === 1);
+  assert.match(session(ALPHA).turns[0].prompt, /closed while you were working/);
+  assert.equal(saved.get(ALPHA).sessions[7].resumeTurn, undefined);
+
+  // The user's own message replaces the resume.
+  await host.send(message(ALPHA, "never mind, do this instead", { sessionId: 8, provider: "codex", model: "gpt-6" }));
+  assert.equal(saved.get(ALPHA).sessions[8].resumeTurn, undefined);
+  assert.deepEqual(chatMessages(saved.get(ALPHA), 8), [{ role: "user", body: "never mind, do this instead" }]);
 });

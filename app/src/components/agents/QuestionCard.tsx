@@ -4,9 +4,10 @@ import type { KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentQuestion, QuestionAnswers, QuestionRequest } from "../../model";
-import { arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
+import { advancesOnPick, arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
 import type { QuestionDrafts } from "../../lib/question-answers";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
+import { ScrollArea } from "../primitives/ScrollArea";
 
 /**
  * The open chat's oldest question: the agent's options as rows, an answer of the user's own, and Dismiss.
@@ -26,7 +27,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
   const [active, setActive] = useState(0);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
-  // Next moves to another question and the panel remounts, so focus would fall to the page: put it in the new panel.
+  // Next, or a pick that moves on, and the panel remounts, so focus would fall to the page: put it in the new panel.
   const focusPanel = useRef(false);
   const questions = request.questions;
   const count = questions.length;
@@ -44,6 +45,11 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
     // One single-choice question: the tap is the answer.
     const done = draftAnswers(questions, next);
     if (sendsOnPick(questions) && done) onAnswer(done);
+    // Several questions: a single-choice pick is the answer to this one, so move on. The last one waits for Send.
+    else if (advancesOnPick(questions, active)) {
+      focusPanel.current = true;
+      setActive(nextTab(count, active));
+    }
   }
 
   function advance() {
@@ -98,7 +104,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
       transition={reduce ? { duration: 0 } : SPRING_SWAP}
       className="flex max-h-[min(72vh,620px)] w-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-overlay"
     >
-      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overscroll-contain p-4">
+      <ScrollArea className="grid flex-1 gap-3 p-4">
         {several && (
           <div role="tablist" aria-label="Questions" className="flex flex-wrap gap-1.5">
             {questions.map((item, index) => {
@@ -174,7 +180,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
             />
           )}
         </div>
-      </div>
+      </ScrollArea>
 
       <AnimatePresence initial={false}>
         {pending && (

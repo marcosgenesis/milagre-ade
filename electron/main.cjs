@@ -1,15 +1,18 @@
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerSaveBlocker, shell, protocol, net } = require("electron");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { autoUpdater } = require("electron-updater");
+const { execFile } = require("node:child_process");
 const fs = require("node:fs/promises");
 const { realpathSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { promisify } = require("node:util");
 const { decodeImages } = require("./image-input.cjs");
 const { detectEditors, openInEditor } = require("./editors.cjs");
 const { revealFolder } = require("./reveal.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
+const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
 const { guardNavigation } = require("./links.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -42,7 +45,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("./shared/attention.mjs");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { saveProjectState, stateFile } = require("./project-store.cjs");
-const { createRecentProjects, rememberProject, switchTarget } = require("./recent-projects.cjs");
+const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
 const { createUsageReader } = require("./usage.cjs");
@@ -52,6 +55,7 @@ const { createFileSearch } = require("./project-files.cjs");
 const searchFiles = createFileSearch();
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
+const execFileAsync = promisify(execFile);
 
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
@@ -91,7 +95,11 @@ function checkForUpdates() {
 
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
-ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
+// The update installs on a quit too: running chats stop first and continue once the new version opens.
+ipcMain.handle("update:install", async () => {
+  await prepareQuit();
+  autoUpdater.quitAndInstall();
+});
 
 async function discoverWorktrees(projectPath) {
   try {
@@ -142,10 +150,13 @@ async function readProject(projectPath) {
     const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
     return Boolean(entry && !entry.session.closed);
   };
-  const state = await updateProject(projectPath, (current) => {
+  let state = await updateProject(projectPath, (current) => {
     const next = reconcileState(current, projectName(projectPath), discovered);
     return markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live)));
   });
+  // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
+  await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
+  state = await states.get(projectPath);
   chatTitles.resume(projectPath, state);
   void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
   void diffs.refresh(projectPath).catch(() => {});
@@ -283,15 +294,15 @@ ipcMain.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
 ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
 
-// A generated image in a chat: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
-const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), writeImage: (image) => clipboard.writeImage(image) });
-const saveImageFile = (event, file) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) });
+// An image in a chat, generated or attached: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
+const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.writeImage(image) });
+const saveImageFile = (event, file, name) => saveImage(file, { downloads: app.getPath("downloads"), showSaveDialog: (options) => dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), options) }, name);
 ipcMain.handle("image:copy", (_event, file) => copyImageFile(file));
-ipcMain.handle("image:save", (event, file) => saveImageFile(event, file));
-ipcMain.handle("image:menu", (event, file) => {
+ipcMain.handle("image:save", (event, file, name) => saveImageFile(event, file, name));
+ipcMain.handle("image:menu", (event, file, name) => {
   Menu.buildFromTemplate([
     { label: "Copy Image", click: () => void copyImageFile(file).catch(() => {}) },
-    { label: "Save Image…", click: () => void saveImageFile(event, file).catch(() => {}) },
+    { label: "Save Image…", click: () => void saveImageFile(event, file, name).catch(() => {}) },
   ]).popup({ window: BrowserWindow.fromWebContents(event.sender) });
 });
 
@@ -349,6 +360,12 @@ ipcMain.handle("notification:completed", (_event, notice) => Notification.isSupp
 // On until the renderer pushes the saved setting.
 const keepAwake = new KeepAwake({ powerSaveBlocker });
 ipcMain.handle("app:set-keep-awake", (_event, enabled) => keepAwake.setEnabled(enabled === true));
+
+// The "Translucent window" appearance setting, pushed by the renderer with the theme it resolved.
+ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
+});
 
 function publishAgentEvent(chatId, event, state, seq) {
   notifier.observe(chatId, event);
@@ -466,6 +483,10 @@ ipcMain.handle("chat:send", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
   return chats.send(request);
 });
+ipcMain.handle("chat:resume", (_event, projectPath, sessionId) => {
+  if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
+  return chats.resumeChat(projectPath, Number(sessionId));
+});
 ipcMain.handle("chat:handover", (_event, request) => {
   if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
   return chats.handover(request);
@@ -540,7 +561,7 @@ function createWindow() {
     minHeight: 680,
     title: "Milagre",
     icon: appIconPath,
-    backgroundColor: "#f7faf8",
+    backgroundColor: OPAQUE_BACKGROUND,
     ...(process.platform === "darwin" ? { titleBarStyle: "hidden", trafficLightPosition: { x: 24, y: 22 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -551,6 +572,20 @@ function createWindow() {
 
   const indexFile = path.join(__dirname, "../dist/index.html");
   const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";
+  // On macOS the close button hides the window, so agents keep running; a quit closes it for real.
+  if (process.platform === "darwin") {
+    window.on("close", (event) => {
+      if (quitting) return;
+      event.preventDefault();
+      // A full-screen window hidden as is leaves a black space behind.
+      if (window.isFullScreen()) {
+        window.once("leave-full-screen", () => window.hide());
+        window.setFullScreen(false);
+      } else {
+        window.hide();
+      }
+    });
+  }
   guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
   // A reload keeps every turn running: the main process saves them, and the renderer takes the
   // turns streaming now, with their approval and question cards, from "chat:runs".
@@ -574,7 +609,16 @@ async function openProject(projectPath) {
   return project;
 }
 
-ipcMain.handle("project:current", () => openProject(process.cwd()));
+ipcMain.handle("project:current", async () => openProject(await launchProject(recentProjects(), process.cwd())));
+
+// Chats a quit stopped continue on launch in every recent project, not only the one on screen.
+async function resumeRecentProjects() {
+  for (const { path: projectPath } of await recentProjects().list()) {
+    const stored = states.has(projectPath) ? null : await readStoredState(projectPath);
+    if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
+    await readProject(projectPath).catch((error) => console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message));
+  }
+}
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({
     title: "Open project",
@@ -597,6 +641,7 @@ app.whenReady().then(async () => {
     if (!appIcon.isEmpty()) app.dock.setIcon(appIcon);
   }
   createWindow();
+  void resumeRecentProjects();
   app.on("browser-window-focus", () => {
     diffs.focused();
     void readOpenChat().catch(() => {});
@@ -608,26 +653,44 @@ app.whenReady().then(async () => {
   autoUpdater.on("error", () => publishUpdateState({ status: "error" }));
   await checkForUpdates();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed());
+    if (window) window.show();
+    else createWindow();
   });
 });
 
+// Only a quit closes the last window on macOS; elsewhere closing it quits.
 app.on("window-all-closed", () => {
-  notifier.closeAll();
-  // No window is left to answer an approval or question, so running turns stop (and are saved) with the last one.
-  void worktreeSetups.cancelAll();
-  void agents.closeAll();
-  if (process.platform !== "darwin") app.quit();
+  // A quit Electron started for a termination signal can end here, windows closed and the app still running.
+  if (process.platform !== "darwin" || quitReady) app.quit();
 });
 
-let agentsClosed = false;
+// Stops everything a quit has to stop, once, within 5 seconds. Running chats are saved first so they
+// continue on the next launch; agents run in their own process groups, so they are stopped before the app exits.
+let quitting = false;
+let quitPrepared = null;
+function prepareQuit() {
+  quitting = true;
+  quitPrepared ??= (async () => {
+    notifier.closeAll();
+    keepAwake.quit();
+    ports.close();
+    // Saved at once, so the chats resume even when stopping the agents runs out the clock.
+    await chats.suspendRunning();
+    await states.flush();
+    await Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]);
+    await states.flush();
+  })();
+  return Promise.race([quitPrepared, new Promise((resolve) => setTimeout(resolve, 5000))]);
+}
+
+let quitReady = false;
 app.on("before-quit", (event) => {
-  if (agentsClosed) return;
+  quitting = true;
+  if (quitReady) return;
   event.preventDefault();
-  agentsClosed = true;
-  keepAwake.quit();
-  ports.close();
-  // Agents run in their own process groups, so stop them before the app exits.
-  // Their cancelled turns are saved before the app exits.
-  Promise.race([Promise.all([worktreeSetups.cancelAll(), agents.closeAll()]).then(() => states.flush()), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => app.quit());
+  void prepareQuit().finally(() => {
+    quitReady = true;
+    app.quit();
+  });
 });

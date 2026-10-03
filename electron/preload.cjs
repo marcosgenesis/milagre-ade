@@ -26,8 +26,8 @@ contextBridge.exposeInMainWorld("milagre", {
   readPullRequests: (worktreePath, refs) => ipcRenderer.invoke("worktree:pull-requests", worktreePath, refs),
   revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
   copyImage: (file) => ipcRenderer.invoke("image:copy", file),
-  saveImage: (file) => ipcRenderer.invoke("image:save", file),
-  showImageMenu: (file) => ipcRenderer.invoke("image:menu", file),
+  saveImage: (file, name) => ipcRenderer.invoke("image:save", file, name),
+  showImageMenu: (file, name) => ipcRenderer.invoke("image:menu", file, name),
   git: {
     changes: (request) => ipcRenderer.invoke("git:changes", request),
     diffFiles: (request) => ipcRenderer.invoke("git:diff-files", request),
@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld("milagre", {
     return () => ipcRenderer.removeListener("project:state", listener);
   },
   sendMessage: (request) => ipcRenderer.invoke("chat:send", request),
+  resumeChat: (projectPath, sessionId) => ipcRenderer.invoke("chat:resume", projectPath, sessionId),
   handover: (request) => ipcRenderer.invoke("chat:handover", request),
   setHandoverDraft: (projectPath, sessionId, text) => ipcRenderer.invoke("chat:handover-draft", projectPath, sessionId, text),
   patchChat: (projectPath, sessionId, patch) => ipcRenderer.invoke("chat:patch", projectPath, sessionId, patch),
@@ -91,6 +92,7 @@ contextBridge.exposeInMainWorld("milagre", {
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
   setNotifyWhenWaiting: (on) => ipcRenderer.invoke("settings:notify-when-waiting", on),
+  setWindowTranslucent: (on, theme) => ipcRenderer.invoke("settings:window-translucent", { on, theme }),
   syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),
   notifyCompletion: (notice) => ipcRenderer.invoke("notification:completed", notice),
   onOpenChat: (callback) => {

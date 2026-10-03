@@ -8,12 +8,15 @@ import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
 import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
+import { PANEL_TRANSLUCENCY_RANGE, WINDOW_TRANSLUCENCY_RANGE } from "../lib/settings";
+import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
+import { ScrollArea } from "./primitives/ScrollArea";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -86,6 +89,15 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
     >
       <span className={`absolute left-0.5 size-4 rounded-full bg-surface shadow-card transition-transform duration-150 ${checked ? "translate-x-3" : "translate-x-0"}`} />
     </button>
+  );
+}
+
+function PercentSlider({ label, value, range, onChange }: { label: string; value: number; range: { min: number; max: number; step: number }; onChange: (value: number) => void }) {
+  return (
+    <span className="flex items-center gap-3">
+      <RangeSlider label={label} value={value} {...range} formatValueText={(v) => `${v}%`} onValueChange={onChange} className="w-44" />
+      <span className="w-10 text-right tabular-nums text-ink-2">{value}%</span>
+    </span>
   );
 }
 
@@ -193,6 +205,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
 function AppearanceSettings() {
   const settings = useSettings();
   return (
+    <>
     <Group title="Theme">
       <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
         <Select<ThemePreference>
@@ -203,6 +216,27 @@ function AppearanceSettings() {
         />
       </Row>
     </Group>
+    {navigator.platform.startsWith("Mac") && (
+      <Group title="Window">
+        <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
+          <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+        </Row>
+        {settings.windowTranslucent && (
+          <>
+            <Row label="Window" description="How much of the desktop shows through the window itself.">
+              <PercentSlider label="Window translucency" value={settings.windowTranslucency} range={WINDOW_TRANSLUCENCY_RANGE} onChange={(windowTranslucency) => updateSettings({ windowTranslucency })} />
+            </Row>
+            <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
+              <PercentSlider label="Panel translucency" value={settings.panelTranslucency} range={PANEL_TRANSLUCENCY_RANGE} onChange={(panelTranslucency) => updateSettings({ panelTranslucency })} />
+            </Row>
+            <Row label="Dot grid" description="Keep the dots on the window background.">
+              <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
+            </Row>
+          </>
+        )}
+      </Group>
+    )}
+    </>
   );
 }
 
@@ -452,7 +486,7 @@ function ProjectSettings({ projectPath }: { projectPath?: string }) {
 export function SettingsPanel({ section, projectPath, models, update }: { section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
-    <div className="h-full overflow-y-auto">
+    <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
@@ -460,6 +494,6 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}
       </div>
-    </div>
+    </ScrollArea>
   );
 }

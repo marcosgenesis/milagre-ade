@@ -7,17 +7,23 @@ import { handoverNotes, providerLabel } from "../lib/handover";
 import { ProviderLogo } from "./ProviderLogo";
 import { Notice } from "./Notice";
 import { Markdown } from "./markdown/Markdown";
+import { ScrollArea } from "./primitives/ScrollArea";
+import Tooltip from "./primitives/Tooltip";
 
-/** Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context. */
+/**
+ * Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context.
+ * When `blocked` holds a reason the row is disabled and the reason shows as a tooltip; a disabled button gets no
+ * pointer events, so the hover lands on the tooltip's wrapper instead.
+ */
 export function HandoverRow({ provider, blocked, onClick }: { provider: ModelProvider; blocked: string | null; onClick: () => void }) {
-  return (
+  const row = (
     <button
       type="button"
       data-handover-row
       disabled={blocked !== null}
-      title={blocked ?? undefined}
+      aria-description={blocked ?? undefined}
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex w-full items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left hover:bg-hover disabled:pointer-events-none disabled:opacity-40"
     >
       <ProviderLogo provider={provider} size={16} />
       <span className="flex min-w-0 flex-col">
@@ -26,6 +32,8 @@ export function HandoverRow({ provider, blocked, onClick }: { provider: ModelPro
       </span>
     </button>
   );
+  if (blocked === null) return row;
+  return <Tooltip label={blocked} wrap className="w-full cursor-not-allowed">{row}</Tooltip>;
 }
 
 export function HandoverLinkBar({ to, onOpen }: { to: { id: number; title: string; provider: ModelProvider }; onOpen: (id: number) => void }) {
@@ -202,9 +210,9 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
               className="min-h-0 w-full flex-1 resize-none rounded-control border border-line bg-field px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink outline-none transition-colors focus:border-line-strong"
             />
           ) : (
-            <div data-brief-preview className="min-h-0 flex-1 overflow-y-auto overscroll-contain text-[13px] leading-[1.55]">
+            <ScrollArea data-brief-preview className="flex-1 text-[13px] leading-[1.55]">
               <Markdown text={text} />
-            </div>
+            </ScrollArea>
           )}
         </div>
         <footer className="flex items-center gap-2 border-t border-line bg-inset px-4 py-3">

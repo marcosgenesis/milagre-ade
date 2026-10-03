@@ -7,8 +7,9 @@ import { EASE_OUT } from "../../lib/ease";
 
 /**
  * Over the open diff: Back to the chat on the left, the diff's toolbar on the right. It comes and goes with the diff.
- * It sits inside the window's drag strip (z-50), and Electron hands clicks to whichever paints on top, so it must
- * paint above the strip for no-drag to take effect.
+ * It sits inside the window's drag strip (z-50) and paints above it, so its buttons get the clicks. Chromium builds the
+ * drag region from every element with an app-region in tree order (drag adds, no-drag subtracts), so only the button
+ * groups opt out: the empty stretch between them keeps dragging the window.
  */
 // The traffic lights and the sidebar toggle (12px + 76px + 32px) end here; with the sidebar collapsed, <main> starts
 // left of it, so Back moves right to stay clear.
@@ -38,10 +39,10 @@ export function DiffBar({ open, onBack, send, trailing }: { open: boolean; onBac
   return (
     <AnimatePresence initial={false}>
       {open && (
-        <motion.div ref={bar} key="diff-bar" data-diff-bar style={{ paddingLeft: inset }} className="absolute inset-x-3 top-[14px] z-[55] flex h-8 items-center justify-between [-webkit-app-region:no-drag]"
+        <motion.div ref={bar} key="diff-bar" data-diff-bar style={{ paddingLeft: inset }} className="absolute inset-x-3 top-[14px] z-[55] flex h-8 items-center justify-between"
           initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
           transition={reduced ? { duration: 0 } : { duration: 0.2, ease: EASE_OUT }}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
             <button type="button" data-diff-back onClick={onBack}
               className="flex h-8 items-center gap-1.5 rounded-control bg-surface pr-3 pl-2 text-[12.5px] font-medium text-ink-2 shadow-card transition-colors hover:text-ink">
               <HugeiconsIcon icon={ArrowLeft02Icon} size={15} strokeWidth={1.8} color="currentColor" />

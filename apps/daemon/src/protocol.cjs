@@ -7,11 +7,24 @@ function protocolError(code, message) { return Object.assign(new Error(message),
 // Each UTF-8 JSON frame ends in a newline. Bound both partial frames and queued
 // writes, so a stalled client cannot accumulate the daemon's event stream.
 function wire(socket, { onMessage, onInvalid, maxFrameBytes = MAX_FRAME_BYTES }) {
-  let buffer = Buffer.alloc(0);
+  // Partial frame as chunks, joined once when a newline arrives: concatenating per chunk is quadratic for multi-MB frames.
+  let pending = [];
+  let pendingBytes = 0;
   let failed = false;
   socket.on('data', chunk => {
     if (failed) return;
-    buffer = Buffer.concat([buffer, chunk]);
+    if (!chunk.includes(10)) {
+      pending.push(chunk);
+      pendingBytes += chunk.length;
+      if (pendingBytes > maxFrameBytes) {
+        failed = true;
+        onInvalid(protocolError('FRAME_TOO_LARGE', 'Frame exceeds the local daemon size limit'));
+      }
+      return;
+    }
+    let buffer = pending.length ? Buffer.concat([...pending, chunk]) : chunk;
+    pending = [];
+    pendingBytes = 0;
     while (buffer.length) {
       const newline = buffer.indexOf(10);
       if (newline > maxFrameBytes || (newline < 0 && buffer.length > maxFrameBytes)) {
@@ -19,7 +32,7 @@ function wire(socket, { onMessage, onInvalid, maxFrameBytes = MAX_FRAME_BYTES })
         onInvalid(protocolError('FRAME_TOO_LARGE', 'Frame exceeds the local daemon size limit'));
         return;
       }
-      if (newline < 0) return;
+      if (newline < 0) { pending = [buffer]; pendingBytes = buffer.length; return; }
       const frame = buffer.subarray(0, newline);
       buffer = buffer.subarray(newline + 1);
       let message;
@@ -33,8 +46,9 @@ function wire(socket, { onMessage, onInvalid, maxFrameBytes = MAX_FRAME_BYTES })
     send(message) {
       if (socket.destroyed || socket.writableEnded) return false;
       const frame = JSON.stringify(message) + '\n';
-      if (Buffer.byteLength(frame) > maxFrameBytes) throw protocolError('FRAME_TOO_LARGE', 'Response exceeds the local daemon size limit');
-      if (socket.writableLength + Buffer.byteLength(frame) > 2 * maxFrameBytes) {
+      const bytes = Buffer.byteLength(frame);
+      if (bytes > maxFrameBytes) throw protocolError('FRAME_TOO_LARGE', 'Response exceeds the local daemon size limit');
+      if (socket.writableLength + bytes > 2 * maxFrameBytes) {
         socket.destroy();
         return false;
       }

@@ -33,9 +33,26 @@ Omit `--project` to choose a Project in the app. The separate profile defaults t
 
 Ctrl+C stops the host cleanly. On macOS, `--stay-awake` keeps the computer awake while the host runs; it does not keep a closed laptop lid awake. The separate daemon/bridge commands below remain available.
 
+### Share the desktop's Chats
+
+The current desktop starts or attaches to the persistent daemon using its Electron userData profile. The mobile bridge can attach to that same daemon, so both clients see the same saved Chats and provider sessions. First launch the current desktop, then use its actual profile path below. The path can differ between development, packaged and explicitly configured launches; the host's `daemon:status` response identifies it. Do not point `mobile:host` at an already owned desktop profile: that command starts its own daemon.
+
+```sh
+# Replace this with the profile used by the running current desktop.
+MILAGRE_DESKTOP_PROFILE="/absolute/path/to/desktop/userData"
+npm run daemon -- status --data-dir "$MILAGRE_DESKTOP_PROFILE"
+
+# Attach only the HTTP bridge. The connection file must not exist yet.
+npm run daemon -- bridge --data-dir "$MILAGRE_DESKTOP_PROFILE" --connection-file /tmp/milagre-desktop-mobile-connection.json
+```
+
+In another terminal, run `npm run mobile`, choose the simulator with Shift+i, and enter `http://127.0.0.1:8787` plus the token from that connection file. Open the same absolute Project path as desktop. Closing desktop leaves its daemon running; Ctrl+C in the bridge terminal disconnects mobile without stopping the daemon. If the daemon stops or an update restarts it, restart the bridge and pair using a new connection file.
+
+This attaches clients without copying or migrating state. A desktop from before the shared-daemon change still owns an embedded runtime: close that older app cleanly before launching the current build with its existing profile. No command here replaces a running app or steals its locks. See [daemon recovery](local-daemon.md) if ownership fails.
+
 ### Separate daemon and bridge processes
 
-Close the chosen Project in other Milagre hosts first. The current desktop still embeds its own runtime; this preview controls a separate daemon. Ownership errors name the lock to investigate. Never remove a lock while its owner is running; see [daemon recovery](local-daemon.md).
+For an isolated trial, close the chosen Project in other Milagre hosts first, or use a temporary Project. The separate daemon has its own profile and cannot open a Project already owned by desktop.
 
 Run each command in a separate terminal, from this repository root:
 

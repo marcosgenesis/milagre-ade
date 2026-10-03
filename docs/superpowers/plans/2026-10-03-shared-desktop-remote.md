@@ -91,4 +91,11 @@ Merged main `63ea8d3` while preserving per-client focus and the canvas's tracked
 
 Review reproduced a reconnect failure when two valid Projects exceeded the aggregate 16 MiB frame limit. Desktop now reads bounded pages from one immutable, per-socket snapshot capture. The capture retains its event watermark, expires after 30 seconds, and releases after its final page or socket closure. Desktop requires the `snapshot-pages-v1` capability. Restoration events before capture are covered by the snapshot rather than retained in the recovery buffer.
 
-After that fix, 55 focused daemon, desktop adapter, core runtime and ChatHost tests passed, including an actual reconnect with two 9 MiB Projects, immutable capture ordering, socket isolation and final-page release. The source Electron saved-state/reconnect smoke passed again, with screenshots in `/tmp/milagre-shared-desktop-paged-shots`. The packaged smoke above preceded the canvas/paging changes. `docs/mobile-local.md` is not present in this branch; any embedded-runtime wording in the mobile stack still needs updating when those branches combine.
+After that fix, 55 focused daemon, desktop adapter, core runtime and ChatHost tests passed, including an actual reconnect with two 9 MiB Projects, immutable capture ordering, socket isolation and final-page release. The source Electron saved-state/reconnect smoke passed again, with screenshots in `/tmp/milagre-shared-desktop-paged-shots`. The packaged smoke above preceded the canvas/paging changes.
+
+
+### Mobile bridge integration
+
+Merged main `1308878` (#137) while retaining both the desktop daemon startup options and the bridge CLI command. `docs/mobile-local.md` now explains attaching the existing bridge to the desktop's actual profile, the separate ownership of `mobile:host`, and the manual transition from an older embedded desktop. The mobile bridge and upload routes remain unchanged from main.
+
+After integration, 14 bridge, CLI, persistent-host and desktop-adapter tests passed, including private/scoped uploads and the two-large-Project reconnect. `npm run typecheck` and `npm run typecheck:mobile` passed after installing the merged lockfile with `npm ci --ignore-scripts`. No live host was restarted. The independent paging review also passed its immutable-capture and real two-Project reconnect checks with no remaining blocker.

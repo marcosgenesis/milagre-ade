@@ -41,8 +41,8 @@
   z-index: 3;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(var(--blur-edge));
+  -webkit-backdrop-filter: blur(var(--blur-edge));
   mask-image:
     linear-gradient(to right, #000, transparent var(--subagent-edge-size)),
     linear-gradient(to left, #000, transparent var(--subagent-edge-size)),

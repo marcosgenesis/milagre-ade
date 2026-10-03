@@ -109,6 +109,7 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     await evaluate('localStorage.setItem("milagre-settings", JSON.stringify({theme:"dark",defaultPermissionMode:"ask",notifyWhenWaiting:false,notifyOnCompletion:false,showDockBadge:false}));');
     await connection.call("Page.reload");
     await waitFor(() => evaluate('document.documentElement?.classList.contains("dark")'), "saved theme after reload");
+    await waitFor(() => evaluate('document.body?.textContent.includes("Saved chat") && !document.querySelector(".startup-splash-screen")'), "saved Chat visible after reload");
     if (process.env.MILAGRE_SCREENSHOT_DIR) {
       await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
       const shot = await connection.call("Page.captureScreenshot");

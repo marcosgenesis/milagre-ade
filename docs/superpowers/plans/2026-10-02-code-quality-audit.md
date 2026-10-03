@@ -66,11 +66,11 @@ When the tasks you took are merged, or you stop:
 - Error shapes: `{ ok, kind, message }` (git-actions, git-diff), `Error(stderr)` (worktrees, cleanup), raw throw (diffstat).
 
 **Steps:**
-- [ ] Write failing tests for `createGit({ execFile, env })`: `run` with named limit profiles (`READ` about 10 s / 16 MB, `NETWORK` about 30 s, `REMOVE` about 5 min), the no-prompt env always set, one error shape, `refExists` with `--end-of-options`, `resolveBase` with the leading-`-` guard, `worktreeList`, `commonDir`.
-- [ ] Implement `packages/core/src/git/client.cjs`. Pure, injected `execFile`, no Electron imports.
-- [ ] Move the six git modules onto it one at a time, deleting their private runners, `refExists` and `resolveBase` copies. Decide with Victor whether `diffstat` keeps its different base rule; if not, it uses `resolveBase` too.
-- [ ] Replace `knownFolders`' git spawn with the Worktrees already in `ProjectStates` (or a cache cleared in `readProject`).
-- [ ] Guard test: no file outside `git/` calls `execFile("git", ...)` or `promisify(execFile)` for git.
+- [x] Write failing tests for `createGit({ execFile, env })`: `run` with named limit profiles (`READ` about 10 s / 16 MB, `NETWORK` about 30 s, `REMOVE` about 5 min), the no-prompt env always set, one error shape, `refExists` with `--end-of-options`, `resolveBase` with the leading-`-` guard, `worktreeList`, `commonDir`.
+- [x] Implement `packages/core/src/git/client.cjs`. Pure, injected `execFile`, no Electron imports.
+- [x] Move the six git modules onto it one at a time, deleting their private runners, `refExists` and `resolveBase` copies. Decide with Victor whether `diffstat` keeps its different base rule; if not, it uses `resolveBase` too.
+- [x] Replace `knownFolders`' git spawn with the Worktrees already in `ProjectStates` (or a cache cleared in `readProject`).
+- [x] Guard test: no file outside `git/` calls `execFile("git", ...)` or `promisify(execFile)` for git.
 
 **Acceptance:** one runner, one base rule, one error shape; `test:agent` and the diff and sidebar Electron checks pass; the no-prompt env is present on every git spawn (assert in the test by inspecting the injected `execFile` calls).
 

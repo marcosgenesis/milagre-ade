@@ -21,8 +21,12 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   await fs.mkdir(directory, { recursive: true });
   const temporary = path.join(directory, `coordination.json.${process.pid}.${++counter}.tmp`);
   try {
-    await fs.writeFile(temporary, contents);
+    // The bytes reach the disk before the rename makes them the state, and the rename before this save returns.
+    const handle = await fs.open(temporary, 'w');
+    try { await handle.writeFile(contents); await handle.sync(); }
+    finally { await handle.close(); }
     await fs.rename(temporary, stateFile(projectPath));
+    await syncDirectory(directory);
   } catch (error) {
     await fs.rm(temporary, { force: true });
     throw error;
@@ -38,4 +42,10 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
 async function readProjectState(projectPath) {
   return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
 }
-module.exports = { saveProjectState, readProjectState, stateFile };
+/** Makes a rename in `directory` durable. Best effort: a file system that can't sync a folder still saves. */
+async function syncDirectory(directory) {
+  let handle;
+  try { handle = await fs.open(directory, 'r'); await handle.sync(); }
+  catch {} finally { await handle?.close().catch(() => {}); }
+}
+module.exports = { saveProjectState, readProjectState, stateFile, syncDirectory };

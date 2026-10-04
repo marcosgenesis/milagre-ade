@@ -1,6 +1,8 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
 const { hydrateSubagents, migrateImages } = require("./project-content.cjs");
+const { syncDirectory } = require("./project-store.cjs");
 
 // Before #117, a linked worktree opened as a project kept its chats in its own .milagre/coordination.json. Since #117
 // the repository's project reads only the main checkout's file, so those chats went missing from the list. This brings
@@ -18,21 +20,34 @@ function messagesBySession(messages) {
   return grouped;
 }
 
-// The same chat copied by hand keeps its first message and its length, even when it lost its provider id.
-const fingerprint = (worktreePath, messages) => JSON.stringify([worktreePath, messages.length, messages[0]?.body ?? ""]);
+// A chat copied by hand keeps every message as it was, even when it lost its provider id. Two chats that only start
+// the same way ("/review", then different replies) are different chats.
+const fingerprint = (worktreePath, messages) => createHash("sha256").update(JSON.stringify([worktreePath, messages.map((message) => message.body ?? "")])).digest("hex");
+
+// The id after every id in use; a loop, since spreading hundreds of thousands of ids into Math.max overflows the stack.
+function firstFreeId(state) {
+  let next = Number(state.next_id) || 1;
+  for (const collection of [state.worktrees, state.sessions, state.messages, state.tasks]) {
+    for (const item of values(collection)) {
+      const id = Number(item.id);
+      if (Number.isFinite(id) && id >= next) next = id + 1;
+    }
+  }
+  return next;
+}
 
 /**
  * The old file's chats with messages merged into the main checkout's state; neither input is changed.
- * A chat the main state already has (same provider id, or same worktree, first message and length when one side has
- * no provider id) is skipped. Worktrees match by path; sessions, messages, added worktrees and tasks get fresh ids
- * from next_id, and every reference moves with them. `listed`, when given, holds the worktree paths git lists now:
- * a chat in any other worktree is skipped, since reconciling would drop it anyway.
+ * A chat the main state already has is skipped: the same provider id, or, when either side has none, the same worktree
+ * and the same message bodies. Worktrees match by path; sessions, messages, added worktrees and tasks get fresh ids from
+ * next_id, and every reference moves with them. `listed`, when given, holds the worktree paths git lists now with their
+ * folders present: a chat in any other worktree is left behind (`gone`), since reconciling would drop it anyway.
+ * Throws on a file whose shape it can't read; the caller then leaves both files as they are.
  */
 function mergeWorktreeChats(main, old, { listed } = {}) {
   const counts = { migrated: 0, duplicates: 0, empty: 0, gone: 0, messages: 0, addedWorktrees: 0 };
   const mainWorktrees = values(main.worktrees);
-  const usedIds = [...mainWorktrees, ...values(main.sessions), ...values(main.messages), ...values(main.tasks)].map((item) => Number(item.id)).filter(Number.isFinite);
-  let nextId = Math.max(Number(main.next_id) || 1, ...usedIds.map((id) => id + 1));
+  let nextId = firstFreeId(main);
   const take = () => nextId++;
 
   const worktreePathById = new Map(mainWorktrees.map((worktree) => [worktree.id, worktree.path]));
@@ -125,9 +140,10 @@ async function readOldChats(worktreePath) {
 /**
  * Brings the chats of each linked worktree's old file into the main checkout's state. `state` is the main checkout's
  * stored state (or one to start from when it has none). The caller holds the project's runtime owner, so no other
- * load merges at the same time. One save covers every file, through the app's own atomic save; only then is each
- * merged file renamed to coordination.json.migrated-<ISO time>. A file that can't be read or parsed, or a save that
- * fails, leaves the files as they are and logs one line; the project still opens with the state it had.
+ * load merges at the same time. One save covers every file, through the app's own atomic save (synced to disk); only
+ * then is each merged file renamed to coordination.json.migrated-<ISO time>. A file that can't be read, parsed or
+ * merged, or a save that fails, leaves the files as they are and logs one line; the project still opens with the state
+ * it had. Chats left behind because their worktree is gone are counted in a log line, and stay in the renamed file.
  * Returns the state to use and, per worktree, how many chats came back.
  */
 async function migrateWorktreeChats({ projectPath, state, linkedWorktrees, listed, save, now = () => new Date(), warn = console.warn }) {
@@ -136,28 +152,37 @@ async function migrateWorktreeChats({ projectPath, state, linkedWorktrees, liste
   const restored = [];
   for (const worktree of linkedWorktrees) {
     const file = oldChatsFile(worktree.path);
-    let old;
-    try { old = await readOldChats(worktree.path); }
-    catch (error) { warn(`Milagre couldn't read the chats saved in ${file}: ${error.message}`); continue; }
-    if (!old) continue;
-    const result = mergeWorktreeChats(merged, old, { listed });
-    merged = result.state;
-    done.push(file);
-    if (result.migrated) restored.push({ worktree: worktree.name, count: result.migrated });
+    try {
+      const old = await readOldChats(worktree.path);
+      if (!old) continue;
+      const result = mergeWorktreeChats(merged, old, { listed });
+      merged = result.state;
+      done.push({ file, gone: result.gone });
+      if (result.migrated) restored.push({ worktree: worktree.name, count: result.migrated });
+    } catch (error) {
+      warn(`Milagre couldn't bring back the chats saved in ${file}; it is left as it is: ${error.message}`);
+    }
   }
   if (restored.length) {
     try {
       merged = await migrateImages(projectPath, merged);
       await save(projectPath, merged);
     } catch (error) {
-      warn(`Milagre couldn't bring back the chats saved in ${done.join(", ")}: ${error.message}`);
+      warn(`Milagre couldn't bring back the chats saved in ${done.map((item) => item.file).join(", ")}: ${error.message}`);
       return { state, restored: [] };
     }
   }
   const stamp = now().toISOString();
-  for (const file of done) {
-    // A rename that fails leaves the file to be read again; the duplicate check then skips what it already merged.
-    await fs.rename(file, `${file}.migrated-${stamp}`).catch((error) => warn(`Milagre brought back the chats in ${file} but couldn't rename it: ${error.message}`));
+  for (const { file, gone } of done) {
+    const renamed = `${file}.migrated-${stamp}`;
+    try {
+      await fs.rename(file, renamed);
+      await syncDirectory(path.dirname(file));
+      if (gone) warn(`Milagre left ${gone} ${gone === 1 ? "chat" : "chats"} in ${renamed}: ${gone === 1 ? "its worktree is" : "their worktrees are"} no longer listed by git, or the folder is missing.`);
+    } catch (error) {
+      // The file is read again on the next open; the duplicate check then skips what this merge already saved.
+      warn(`Milagre brought back the chats in ${file} but couldn't rename it: ${error.message}`);
+    }
   }
   return { state: restored.length ? merged : state, restored };
 }

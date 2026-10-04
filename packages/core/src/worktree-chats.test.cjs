@@ -124,8 +124,10 @@ test('a chat the main state already has is not brought back again', async (t) =>
     sessions: {
       12: chat(12, 11, { native_session_id: 'native-a', title: 'Restored A' }),
       13: chat(13, 11, { title: 'Restored C, no native id' }),
+      17: chat(17, 11, { title: 'Restored review' }),
     },
-    messages: [message(14, 12, 'Hello A'), message(15, 13, 'Hello C'), message(16, 13, 'Reply C', { role: 'assistant' })],
+    messages: [message(14, 12, 'Hello A'), message(15, 13, 'Hello C'), message(16, 13, 'Reply C', { role: 'assistant' }),
+      message(18, 17, '/review'), message(19, 17, 'Looks good', { role: 'assistant' })],
     tasks: {},
   }));
   await writeOld(linked.linked, oldState({
@@ -136,6 +138,7 @@ test('a chat the main state already has is not brought back again', async (t) =>
       5: chat(5, 2, { native_session_id: 'native-c', title: 'C again' }),
       6: chat(6, 2, { title: 'D, same first message as C but longer' }),
       7: chat(7, 2, { title: 'E, a copy of B' }),
+      8: chat(8, 2, { title: 'F, /review with another reply' }),
     },
     messages: [
       message(20, 3, 'Hello A'),
@@ -143,12 +146,13 @@ test('a chat the main state already has is not brought back again', async (t) =>
       message(22, 5, 'Hello C'), message(23, 5, 'Reply C', { role: 'assistant' }),
       message(24, 6, 'Hello C'), message(25, 6, 'Reply D', { role: 'assistant' }), message(26, 6, 'More D'),
       message(27, 7, 'Hello B'),
+      message(28, 8, '/review'), message(29, 8, 'Two problems in auth.ts', { role: 'assistant' }),
     ],
   }));
   const opened = await make().openProject(project);
   const titles = Object.values(opened.state.sessions).map((session) => session.title).filter(Boolean).sort();
-  assert.deepEqual(titles, ['B, no native id', 'D, same first message as C but longer', 'Restored A', 'Restored C, no native id']);
-  assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 2 }]);
+  assert.deepEqual(titles, ['B, no native id', 'D, same first message as C but longer', 'F, /review with another reply', 'Restored A', 'Restored C, no native id', 'Restored review']);
+  assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 3 }]);
   assert.equal((await migratedFiles(linked.linked)).length, 1);
 });
 
@@ -292,7 +296,7 @@ test('two loads at once merge once', async (t) => {
 });
 
 test('a chat in a worktree git no longer lists stays in the renamed file', async (t) => {
-  const { project, linked, make } = await fixture(t);
+  const { project, linked, make, warnings } = await fixture(t);
   await writeOld(linked.linked, oldState({
     project, linked: linked.linked,
     worktrees: { 9: { id: 9, project_id: 1, path: path.join(path.dirname(project), 'removed-long-ago'), name: 'removed-long-ago' } },
@@ -304,6 +308,7 @@ test('a chat in a worktree git no longer lists stays in the renamed file', async
   assert.equal(Object.values(opened.state.sessions).some((session) => session.title === 'Gone'), false);
   const [renamed] = await migratedFiles(linked.linked);
   assert.ok(JSON.parse(await fs.readFile(path.join(linked.linked, '.milagre', renamed), 'utf8')).sessions[4], 'the renamed file keeps it');
+  assert.equal(warnings.filter((line) => line.includes('left 1 chat in') && line.includes(renamed)).length, 1, 'the chat left behind is logged with its count');
 });
 
 test('the merge is pure and counts what it skipped', () => {
@@ -318,4 +323,76 @@ test('the merge is pure and counts what it skipped', () => {
   assert.equal(result.state.messages.at(-1).id, 6);
   assert.equal(result.state.next_id, 7);
   assert.equal(mergeWorktreeChats(result.state, old).migrated, 0, 'merging the same file again adds nothing');
+});
+
+for (const [label, shape] of [
+  ['a null message', { messages: [null] }],
+  ['a null worktree', { worktrees: { 1: null } }],
+  ['messages as an object holding null', { messages: { a: null } }],
+  ['a null session', { sessions: { 3: null } }],
+]) {
+  test(`an old file with ${label} leaves both files untouched and the project still opens`, async (t) => {
+    const { project, linked, make, warnings } = await fixture(t);
+    const state = { ...oldState({ project, linked: linked.linked, sessions: { 3: chat(3, 2, { native_session_id: 'x' }) }, messages: [message(4, 3, 'Hi')] }), ...shape };
+    await writeOld(linked.linked, state);
+    const before = await fs.readFile(oldFile(linked.linked), 'utf8');
+    const opened = await make().openProject(project);
+    assert.equal(opened.path, project);
+    assert.equal(opened.restoredChats, undefined);
+    assert.equal(await fs.readFile(oldFile(linked.linked), 'utf8'), before);
+    await assert.rejects(fs.stat(mainFile(project)), { code: 'ENOENT' }, 'nothing is written to the main checkout');
+    assert.equal(warnings.filter((line) => line.includes(oldFile(linked.linked))).length, 1, 'one line is logged');
+  });
+}
+
+test('a main state with more ids than Math.max can spread still merges', () => {
+  const messages = Array.from({ length: 200_000 }, (_, index) => message(10 + index, 2, `m${index}`));
+  const main = { next_id: 1, projects: { 1: { id: 1, name: 'p' } }, worktrees: { 1: { id: 1, project_id: 1, path: '/p', name: 'main' } }, sessions: { 2: chat(2, 1) }, messages, tasks: {} };
+  const old = { worktrees: { 1: { id: 1, project_id: 1, path: '/p', name: 'main' } }, sessions: { 5: chat(5, 1, { native_session_id: 'n' }) }, messages: [message(6, 5, 'new')] };
+  const result = mergeWorktreeChats(main, old);
+  assert.equal(result.migrated, 1);
+  assert.equal(result.state.messages.at(-1).id, 200_011);
+});
+
+test('a failed rename after the save brings nothing back twice, even for a chat without a native id', async (t) => {
+  const { project, linked, make, warnings } = await fixture(t);
+  await writeOld(linked.linked, oldState({ project, linked: linked.linked, sessions: { 3: chat(3, 2, { title: 'No native id' }) }, messages: [message(4, 3, 'Only here'), message(5, 3, 'Reply', { role: 'assistant' })] }));
+  const rename = fs.rename;
+  let fail = true;
+  t.mock.method(fs, 'rename', async (...args) => {
+    if (fail && String(args[0]) === oldFile(linked.linked)) throw new Error('permission denied');
+    return rename(...args);
+  });
+  const first = make();
+  assert.deepEqual((await first.openProject(project)).restoredChats, [{ worktree: 'linked', count: 1 }]);
+  assert.ok(warnings.some((line) => line.includes("couldn't rename") && line.includes('permission denied')));
+  await fs.stat(oldFile(linked.linked));
+  fail = false;
+  await first.close();
+  const reopened = await make().openProject(project);
+  assert.equal(reopened.restoredChats, undefined);
+  assert.equal(Object.values(reopened.state.sessions).filter((session) => session.title === 'No native id').length, 1);
+  assert.equal(reopened.state.messages.filter((item) => item.body === 'Only here').length, 1);
+  assert.equal((await migratedFiles(linked.linked)).length, 1, 'the second open renames it');
+});
+
+test('a crash between the save and the rename brings nothing back twice', async (t) => {
+  const { project, linked, make } = await fixture(t);
+  await writeOld(linked.linked, oldState({ project, linked: linked.linked, sessions: { 3: chat(3, 2, { title: 'Crash survivor' }) }, messages: [message(4, 3, 'Before the crash'), message(5, 3, 'Saved', { role: 'assistant' })] }));
+  // A separate process saves the merge, then exits before it can rename the old file.
+  const script = `
+    const { migrateWorktreeChats } = require(${JSON.stringify(path.join(__dirname, 'worktree-chats.cjs'))});
+    const { saveProjectState } = require(${JSON.stringify(path.join(__dirname, 'project-store.cjs'))});
+    const { emptyState } = require(${JSON.stringify(path.join(__dirname, 'project-state.cjs'))});
+    const [project, linked] = process.argv.slice(1);
+    migrateWorktreeChats({ projectPath: project, state: emptyState('project'), linkedWorktrees: [{ path: linked, name: 'linked' }],
+      save: async (...args) => { await saveProjectState(...args); process.exit(0); } });`;
+  execFileSync(process.execPath, ['-e', script, project, linked.linked], { stdio: 'ignore' });
+  assert.ok(Object.values(JSON.parse(await fs.readFile(mainFile(project), 'utf8')).sessions).some((session) => session.title === 'Crash survivor'));
+  await fs.stat(oldFile(linked.linked));
+  const opened = await make().openProject(project);
+  assert.equal(opened.restoredChats, undefined, 'nothing new came back');
+  assert.equal(Object.values(opened.state.sessions).filter((session) => session.title === 'Crash survivor').length, 1);
+  assert.equal(opened.state.messages.filter((item) => item.body === 'Before the crash').length, 1);
+  assert.equal((await migratedFiles(linked.linked)).length, 1);
 });

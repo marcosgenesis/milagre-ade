@@ -26,8 +26,12 @@ export type PhoneStatus = {
   enabled: boolean;
   state: "off" | "starting" | "on" | "error";
   error?: string;
-  /** "cloudflare": reachable from any network at `publicUrl`. "none": only this Mac, at `localUrl`. */
-  remote: "cloudflare" | "none";
+  /** "cloudflare": reachable from any network at `publicUrl`. "relay": reachable from any network through relay.milagre.cloud. "none": only this Mac, at `localUrl`. */
+  remote: "cloudflare" | "relay" | "none";
+  /** Only with `remote: "relay"`: whether this Mac is connected to the relay. */
+  relay?: "connecting" | "online" | "offline";
+  /** Only with `remote: "relay"`: when (ms since the epoch) the window in which new phones may pair ends. */
+  pairingUntil?: number;
   localUrl?: string;
   publicUrl?: string;
   pairingLink?: string;
@@ -182,6 +186,8 @@ declare global {
       setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
       /** A new access token: phones paired before scan again. */
       resetPhoneAccess: () => Promise<PhoneStatus>;
+      /** Lets phones that have not paired yet do so for another ten minutes. */
+      openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */

@@ -5,6 +5,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { createPhone, LOCAL_PORT } = require('./phone.cjs');
+const { createPhones } = require('./relay-identity.cjs');
+
+const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 
 const ACCESS = { id: `${'a'.repeat(32)}.access`, secret: 'b'.repeat(40) };
 
@@ -14,7 +17,7 @@ async function waitFor(read) {
 }
 
 /** A bridge and tunnel that only record what the phone asks of them. */
-async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDelaysMs = [1, 1, 1] } = {}) {
+async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDelaysMs = [1, 1, 1], clock = { now: 0 } } = {}) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-phone-')));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   if (cloudflare) await fs.writeFile(path.join(dataDir, 'cloudflare.json'), JSON.stringify({ hostname: 'mac.example.com', port: 8801, connectorToken: 'connector', access: ACCESS }), { mode: 0o600 });
@@ -38,11 +41,18 @@ async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDel
     log.push('tunnel:start');
     return tunnel;
   } };
+  const relays = [];
+  const startRelay = options => {
+    const relay = { options, closed: false, state: 'connecting', status: () => relay.state, close: async () => { relay.closed = true; log.push('relay:close'); } };
+    relays.push(relay);
+    log.push('relay:start');
+    return relay;
+  };
   const changes = [];
-  const create = () => createPhone({ dataDir, tunnels, startBridge, retryDelaysMs, name: () => 'Test Mac', onChange: status => changes.push(status.state) });
+  const create = () => createPhone({ dataDir, tunnels, startBridge, startRelay, now: () => clock.now, retryDelaysMs, name: () => 'Test Mac', onChange: status => changes.push(status.state) });
   const phone = create();
   t.after(() => phone.close());
-  return { dataDir, phone, create, log, bridges, tunnelsStarted, changes, file: path.join(dataDir, 'mobile.json') };
+  return { dataDir, phone, create, log, bridges, tunnelsStarted, relays, clock, changes, file: path.join(dataDir, 'mobile.json') };
 }
 
 test('a phone that was never enabled is off and starts nothing', async t => {
@@ -54,32 +64,114 @@ test('a phone that was never enabled is off and starts nothing', async t => {
   await assert.rejects(fs.stat(file), { code: 'ENOENT' });
 });
 
-test('enabling without Cloudflare opens the bridge on loopback only and says so', async t => {
-  const { phone, log, bridges, tunnelsStarted, changes } = await fixture(t);
+test('without a tunnel the phone pairs through the relay', async t => {
+  const { phone, log, bridges, tunnelsStarted, relays, changes } = await fixture(t);
   const started = await phone.setEnabled(true);
   assert.equal(started.state, 'starting');
   await phone.settled();
   const status = phone.status();
   assert.equal(status.enabled, true);
   assert.equal(status.state, 'on');
-  assert.equal(status.remote, 'none');
+  assert.equal(status.remote, 'relay');
+  assert.equal(status.relay, 'connecting');
+  assert.equal(status.pairingUntil, PAIRING_WINDOW_MS);
   assert.equal(status.localUrl, `http://127.0.0.1:${LOCAL_PORT}`);
   assert.equal(status.publicUrl, undefined);
-  assert.match(status.pairingLink, new RegExp(`^milagre://pair\\?address=${encodeURIComponent(status.localUrl)}&token=${bridges[0].token}&name=Test%20Mac$`));
-  assert.doesNotMatch(status.pairingLink, /cfId|cfSecret/);
+  assert.match(status.pairingLink, /^milagre:\/\/pair\?relay=wss%3A%2F%2Frelay\.milagre\.cloud&host=[A-Za-z0-9_-]{22}&key=[A-Za-z0-9_-]{43}&token=[a-f0-9]{64}&name=Test%20Mac$/);
+  assert.equal(new URL(status.pairingLink).searchParams.get('token'), bridges[0].token);
   assert.match(status.qrSvg, /^<svg[^>]*viewBox=/);
-  assert.deepEqual(log, [`bridge:start:${LOCAL_PORT}`]);
+  assert.equal(relays.length, 1);
+  assert.equal(relays[0].options.relayUrl, 'wss://relay.milagre.cloud');
+  assert.equal(relays[0].options.bridgeUrl, `http://127.0.0.1:${LOCAL_PORT}`);
+  assert.equal(relays[0].options.token, bridges[0].token);
+  assert.equal(new URL(status.pairingLink).searchParams.get('host'), relays[0].options.identity.hostId);
+  assert.deepEqual(log, [`bridge:start:${LOCAL_PORT}`, 'relay:start']);
   assert.equal(tunnelsStarted.length, 0);
-  assert.deepEqual(changes, ['starting', 'on']);
+  relays[0].state = 'online';
+  relays[0].options.onStatus('online');
+  assert.equal(phone.status().relay, 'online');
+  assert.deepEqual(changes, ['starting', 'on', 'on']);
+});
+
+test('the pairing window closes after 10 minutes and opens again on openPairing', async t => {
+  const { phone, relays, clock } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const { canPair } = relays[0].options;
+  assert.equal(canPair(), true);
+  clock.now = PAIRING_WINDOW_MS - 1;
+  assert.equal(canPair(), true);
+  clock.now = PAIRING_WINDOW_MS + 1;
+  assert.equal(canPair(), false);
+  assert.equal(phone.status().pairingUntil, PAIRING_WINDOW_MS);
+  const reopened = await phone.openPairing();
+  assert.equal(canPair(), true);
+  assert.equal(reopened.pairingUntil, PAIRING_WINDOW_MS + 1 + PAIRING_WINDOW_MS);
+  assert.equal(phone.status().pairingUntil, reopened.pairingUntil);
+});
+
+test('openPairing while the phone is off opens nothing', async t => {
+  const { phone, clock } = await fixture(t);
+  clock.now = 5;
+  assert.deepEqual(await phone.openPairing(), { enabled: false, state: 'off', remote: 'none' });
+});
+
+test('reset opens the pairing window again and forgets relay phones', async t => {
+  const { phone, dataDir, relays, clock } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const phones = createPhones(dataDir);
+  await phones.add('phoneA');
+  clock.now = PAIRING_WINDOW_MS * 3;
+  assert.equal(relays[0].options.canPair(), false);
+  await phone.reset();
+  await phone.settled();
+  const after = createPhones(dataDir);
+  await after.load();
+  assert.equal(after.isKnown('phoneA'), false);
+  assert.equal(relays.length, 2);
+  assert.equal(relays[0].closed, true);
+  assert.equal(relays[1].options.canPair(), true);
+  assert.equal(relays[1].options.token, JSON.parse(await fs.readFile(path.join(dataDir, 'mobile.json'), 'utf8')).token);
+});
+
+test('reset while off forgets relay phones too', async t => {
+  const { phone, dataDir } = await fixture(t);
+  await createPhones(dataDir).add('phoneA');
+  await phone.reset();
+  const after = createPhones(dataDir);
+  await after.load();
+  assert.equal(after.isKnown('phoneA'), false);
+});
+
+test('disabling stops the relay before the bridge', async t => {
+  const { phone, log } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await phone.setEnabled(false);
+  await phone.settled();
+  assert.deepEqual(log.slice(2), ['relay:close', 'bridge:close:0']);
+  assert.equal(phone.status().relay, 'offline');
+});
+
+test('a relay phone that paired before the daemon restarted is still known', async t => {
+  const { phone, dataDir, relays } = await fixture(t);
+  await createPhones(dataDir).add('phoneA');
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(relays[0].options.phones.isKnown('phoneA'), true);
 });
 
 test('with cloudflare.json the bridge uses its port, a named tunnel runs and the link carries the Access token', async t => {
-  const { phone, log, bridges, tunnelsStarted } = await fixture(t, { cloudflare: true });
+  const { phone, log, bridges, tunnelsStarted, relays } = await fixture(t, { cloudflare: true });
   await phone.setEnabled(true);
   await phone.settled();
   const status = phone.status();
   assert.equal(status.state, 'on');
   assert.equal(status.remote, 'cloudflare');
+  assert.equal(relays.length, 0, 'the relay is not started');
+  assert.equal(status.relay, undefined);
+  assert.equal(status.pairingUntil, undefined);
   assert.equal(status.publicUrl, 'https://mac.example.com');
   assert.equal(status.localUrl, 'http://127.0.0.1:8801');
   assert.deepEqual(log, ['bridge:start:8801', 'tunnel:start']);

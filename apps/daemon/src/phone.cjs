@@ -4,11 +4,17 @@ const { randomBytes } = require('node:crypto');
 const QRCode = require('qrcode');
 const { startMobileBridge } = require('./mobile-bridge.cjs');
 const { readCloudflare } = require('./mobile-cloudflare.cjs');
-const { pairingLink, computerName } = require('./mobile-pairing.cjs');
+const { pairingLink, relayPairingLink, computerName } = require('./mobile-pairing.cjs');
+const { startRelayHost } = require('./relay-host.cjs');
+const { readIdentity, createPhones } = require('./relay-identity.cjs');
+const { b64url } = require('@milagre/shared/relay-crypto');
 const defaultTunnels = require('./mobile-tunnel.cjs');
 
 // Without a Cloudflare tunnel the bridge only answers on this Mac's loopback. 8797 is the port `mobile:cloudflare` also defaults to.
 const LOCAL_PORT = 8797;
+const RELAY_URL = 'wss://relay.milagre.cloud';
+// A phone that is not yet known may pair only for this long after the QR was shown, so a leaked link is not a standing invitation.
+const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const TOKEN = /^[a-f0-9]{64}$/;
 const message = error => error instanceof Error ? error.message : String(error);
@@ -18,14 +24,19 @@ const message = error => error instanceof Error ? error.message : String(error);
  * `<dataDir>/mobile.json` ({ enabled, token }, 0600). Transitions run one at a time. `setEnabled`, `reset` and `start`
  * return once the new state is saved and the change has begun (`status().state` is then 'starting' or 'off'); `settled()`
  * resolves when it has finished, and every change goes to `onChange`. A start that fails is an 'error' state, not a throw.
+ * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`); `status()` then also
+ * carries the relay's `relay` state and `pairingUntil` (ms epoch), the end of the window in which new phones may pair.
  */
-function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMobileBridge, onChange = () => {}, localPort = LOCAL_PORT, retryDelaysMs = RETRY_DELAYS_MS, name = computerName }) {
+function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMobileBridge, relayUrl = RELAY_URL, startRelay = startRelayHost, now = Date.now, onChange = () => {}, localPort = LOCAL_PORT, retryDelaysMs = RETRY_DELAYS_MS, name = computerName }) {
   const file = path.join(dataDir, 'mobile.json');
   let config; // { enabled, token | null }, read once
   let state = 'off';
   let error;
-  let live; // { bridge, tunnel, localUrl, publicUrl, remote, link, qrSvg } while on
+  let live; // { bridge, tunnel, relay, localUrl, publicUrl, remote, link, qrSvg } while on
   let remote = 'none';
+  let relayStatus = 'offline';
+  let pairingUntil = 0;
+  let relayPhones; // the paired-phone list, one instance so a reset clears what the running host sees
   let generation = 0; // a bridge or retry from an earlier run must not touch this one
   let attempts = 0;
   let retryTimer;
@@ -35,10 +46,12 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
 
   function status() {
     const on = state === 'on' && live;
+    const current = live?.remote ?? remote;
     return {
       enabled: config?.enabled === true, state,
       ...(state === 'error' ? { error } : {}),
-      remote: live?.remote ?? remote,
+      remote: current,
+      ...(current === 'relay' ? { relay: relayStatus, pairingUntil } : {}),
       ...(on ? { localUrl: live.localUrl, ...(live.publicUrl ? { publicUrl: live.publicUrl } : {}), pairingLink: live.link, qrSvg: live.qrSvg } : {}),
     };
   }
@@ -65,14 +78,22 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     } finally { await fs.rm(temporary, { force: true }); }
   }
 
+  const openPairing = () => { pairingUntil = now() + PAIRING_WINDOW_MS; };
+
+  // The tunnel or relay goes first so it never answers 502 from a bridge that is already gone.
+  async function closeLive(old) {
+    await old?.tunnel?.close().catch(() => {});
+    await old?.relay?.close().catch(() => {});
+    await old?.bridge?.close().catch(() => {});
+  }
+
   async function teardown() {
     generation++;
     clearTimeout(retryTimer);
     const old = live;
     live = undefined;
-    // The tunnel goes first so it never answers 502 from a bridge that is already gone.
-    await old?.tunnel?.close().catch(() => {});
-    await old?.bridge.close().catch(() => {});
+    relayStatus = 'offline';
+    await closeLive(old);
   }
 
   async function cloudflareOrNull() {
@@ -84,22 +105,39 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
   async function launch({ retrying = false } = {}) {
     const mine = generation;
     set('starting');
-    let bridge, tunnel;
+    let bridge, tunnel, relay;
     try {
       const cloudflare = await cloudflareOrNull();
-      remote = cloudflare ? 'cloudflare' : 'none';
+      remote = cloudflare ? 'cloudflare' : 'relay';
+      relayStatus = 'connecting';
       bridge = await startBridge({ dataDir, port: cloudflare ? cloudflare.port : localPort, token: config.token });
-      if (cloudflare) tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
+      let link;
+      if (cloudflare) {
+        tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
+        link = pairingLink({ address: tunnel.url || bridge.url, token: config.token, name: name(), access: cloudflare.access });
+      } else {
+        const identity = await readIdentity(dataDir);
+        relayPhones ??= createPhones(dataDir);
+        await relayPhones.load();
+        relay = startRelay({
+          relayUrl, identity, phones: relayPhones, token: config.token, bridgeUrl: bridge.url,
+          canPair: () => now() < pairingUntil,
+          onStatus: next => {
+            if (mine !== generation) return;
+            relayStatus = next;
+            try { onChange(status()); } catch { /* a listener must not break the setting */ }
+          },
+        });
+        link = relayPairingLink({ relay: relayUrl, hostId: identity.hostId, key: b64url(identity.box.publicKey), token: config.token, name: name() });
+      }
       const publicUrl = tunnel?.url;
-      const link = pairingLink({ address: publicUrl || bridge.url, token: config.token, name: name(), access: cloudflare?.access });
       const qrSvg = await QRCode.toString(link, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' });
-      live = { bridge, tunnel, localUrl: bridge.url, publicUrl, remote, link, qrSvg };
+      live = { bridge, tunnel, relay, localUrl: bridge.url, publicUrl, remote, link, qrSvg };
       attempts = 0;
       void bridge.lost.then(() => { if (mine === generation) restartLater(); });
       set('on');
     } catch (failure) {
-      await tunnel?.close().catch(() => {});
-      await bridge?.close().catch(() => {});
+      await closeLive({ tunnel, relay, bridge });
       if (retrying && attempts < retryDelaysMs.length) restartLater();
       else set('error', message(failure));
     }
@@ -114,10 +152,7 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     const old = live;
     live = undefined;
     // Closing is queued so a new enable or disable cannot interleave with it.
-    void enqueue(async () => {
-      await old?.tunnel?.close().catch(() => {});
-      await old?.bridge.close().catch(() => {});
-    });
+    void enqueue(() => closeLive(old));
     retryTimer = setTimeout(() => {
       void enqueue(async () => { if (mine === generation && !closed && config.enabled) await launch({ retrying: true }); });
     }, delay);
@@ -142,6 +177,7 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
         if (enabled && config.enabled && state !== 'error') return;
         config.enabled = enabled;
         if (enabled && !config.token) config.token = randomBytes(32).toString('hex');
+        if (enabled) openPairing();
         await save();
         attempts = 0;
         if (enabled) set('starting'); else set('off');
@@ -155,7 +191,18 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
         await load();
         config.token = randomBytes(32).toString('hex');
         await save();
+        // Phones paired through the relay are bound to the old token, so they go with it.
+        await (relayPhones ??= createPhones(dataDir)).clear();
+        openPairing();
         if (config.enabled) { attempts = 0; set('starting'); void apply().catch(() => {}); }
+      });
+      return status();
+    },
+    /** Lets phones that are not yet known pair for another window. Settings calls it whenever it shows the QR. */
+    async openPairing() {
+      await enqueue(async () => {
+        await load();
+        if (config.enabled) { openPairing(); try { onChange(status()); } catch { /* a listener must not break the setting */ } }
       });
       return status();
     },
@@ -175,4 +222,4 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
   };
 }
 
-module.exports = { createPhone, LOCAL_PORT };
+module.exports = { createPhone, LOCAL_PORT, RELAY_URL, PAIRING_WINDOW_MS };

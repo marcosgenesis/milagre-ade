@@ -402,19 +402,25 @@ test('a daemon that resumes a turn at startup brings the chats back first and ke
   assert.equal((await fs.readdir(path.join(linked, '.milagre'))).includes('coordination.json'), false, 'nothing recreated the old file');
 });
 
+// No test may dial the real relay.
+const fakePhoneOptions = () => ({ localPort: 0, startRelay: () => ({ close: async () => {}, status: () => 'online' }) });
 const phoneStatus = async (client, state) => waitFor(async () => { const next = await client.call('phone:status'); return next.state === state && next; });
 const unreachable = url => waitFor(() => fetch(url).then(() => false, () => true));
 
 test('phone methods are advertised to desktop, drive a real bridge, and stay out of the mobile bridge', async t => {
-  const { dataDir, client } = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const { dataDir, client } = await fixture(t, { phoneOptions: fakePhoneOptions() });
   const desktop = await client();
   const status = await desktop.call('daemon:status');
-  for (const method of ['phone:status', 'phone:set-enabled', 'phone:reset']) assert.ok(status.methods.includes(method), method);
+  for (const method of ['phone:status', 'phone:set-enabled', 'phone:reset', 'phone:open-pairing']) assert.ok(status.methods.includes(method), method);
   assert.deepEqual(await desktop.call('phone:status'), { enabled: false, state: 'off', remote: 'none' });
   const changes = [];
   desktop.on('event', event => { if (event.channel === 'phone:status') changes.push(event.payload.state); });
   assert.equal((await desktop.call('phone:set-enabled', [true])).state, 'starting');
   const on = await phoneStatus(desktop, 'on');
+  assert.equal(on.remote, 'relay');
+  assert.ok(on.pairingUntil > Date.now(), 'enabling opens the pairing window');
+  const reopened = await desktop.call('phone:open-pairing');
+  assert.ok(reopened.pairingUntil >= on.pairingUntil);
   assert.match(on.localUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.match(on.qrSvg, /^<svg/);
   const token = new URL(on.pairingLink).searchParams.get('token');
@@ -423,7 +429,7 @@ test('phone methods are advertised to desktop, drive a real bridge, and stay out
   // The phone's own bridge serves daemon methods but never the ones that manage its access.
   const call = (method, args = [], url = on.localUrl, bearer = token) => fetch(url + '/rpc', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method, args }) });
   assert.equal((await call('daemon:status')).status, 200);
-  for (const [method, args] of [['phone:status'], ['phone:set-enabled', [false]], ['phone:reset']]) assert.equal((await call(method, args)).status, 403, method);
+  for (const [method, args] of [['phone:status'], ['phone:set-enabled', [false]], ['phone:reset'], ['phone:open-pairing']]) assert.equal((await call(method, args)).status, 403, method);
   assert.equal((await desktop.call('phone:status')).state, 'on');
   await assert.rejects(desktop.call('phone:set-enabled', ['yes']), /true or false/);
   // A reset settles (and clears push registrations) before it answers, so it answers with the new code.
@@ -437,13 +443,13 @@ test('phone methods are advertised to desktop, drive a real bridge, and stay out
 });
 
 test('an enabled phone comes back when the daemon restarts, and stopping the daemon closes its bridge', async t => {
-  const first = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const first = await fixture(t, { phoneOptions: fakePhoneOptions() });
   const desktop = await first.client();
   await desktop.call('phone:set-enabled', [true]);
   const on = await phoneStatus(desktop, 'on');
   await first.daemon.close();
   await unreachable(on.localUrl + '/rpc');
-  const second = await startDaemon({ dataDir: first.dataDir, version: '9.8.7', phoneOptions: { localPort: 0 }, runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }) } });
+  const second = await startDaemon({ dataDir: first.dataDir, version: '9.8.7', phoneOptions: fakePhoneOptions(), runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }) } });
   const client = await connect({ dataDir: first.dataDir });
   try {
     const back = await phoneStatus(client, 'on');

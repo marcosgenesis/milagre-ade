@@ -212,11 +212,13 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         let result;
         if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1', 'mobile-push-v1'], methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS] };
         else if (request.method === 'phone:status') result = phone.status();
+        // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
+        // "starting" one a reset began from, or the window hides the new code.
         else if (request.method === 'phone:set-enabled') {
           result = await phone.setEnabled(request.args[0]);
-          if (request.args[0] === false) { await phone.settled(); await push.clear(); }
+          if (request.args[0] === false) { await phone.settled(); await push.clear(); result = phone.status(); }
         }
-        else if (request.method === 'phone:reset') { result = await phone.reset(); await phone.settled(); await push.clear(); }
+        else if (request.method === 'phone:reset') { await phone.reset(); await phone.settled(); await push.clear(); result = phone.status(); }
         else if (request.method === 'push:register') result = await push.register(request.args[0]);
         else if (request.method === 'push:unregister') result = await push.unregister(request.args[0]);
         else if (request.method === 'push:focus') result = push.focus(request.args[0]);

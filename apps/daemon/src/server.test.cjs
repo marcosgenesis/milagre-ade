@@ -411,7 +411,8 @@ test('phone methods are advertised to desktop, drive a real bridge, and stay out
   for (const [method, args] of [['phone:status'], ['phone:set-enabled', [false]], ['phone:reset']]) assert.equal((await call(method, args)).status, 403, method);
   assert.equal((await desktop.call('phone:status')).state, 'on');
   await assert.rejects(desktop.call('phone:set-enabled', ['yes']), /true or false/);
-  assert.equal((await desktop.call('phone:reset')).state, 'starting');
+  // A reset settles (and clears push registrations) before it answers, so it answers with the new code.
+  assert.equal((await desktop.call('phone:reset')).state, 'on');
   const again = await phoneStatus(desktop, 'on');
   assert.notEqual(new URL(again.pairingLink).searchParams.get('token'), token);
   assert.equal((await call('daemon:status', [], again.localUrl)).status, 401, 'the old token stops working');
@@ -562,4 +563,17 @@ test('daemon delivers push after clients leave and Phone reset/disable revokes r
   await second.call('push:register', [registration]);
   await second.call('phone:set-enabled', [false]);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile-push.json'), 'utf8')), []);
+});
+
+test('a phone reset or disable answers with the status it settled on, not the one it started from', async t => {
+  const { client } = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const desktop = await client();
+  await desktop.call('phone:set-enabled', [true]);
+  const on = await phoneStatus(desktop, 'on');
+  // Settings shows the reply, which arrives after the status events: a stale "starting" would hide the new code.
+  const reset = await desktop.call('phone:reset');
+  assert.equal(reset.state, 'on');
+  assert.notEqual(new URL(reset.pairingLink).searchParams.get('token'), new URL(on.pairingLink).searchParams.get('token'));
+  const off = await desktop.call('phone:set-enabled', [false]);
+  assert.equal(off.state, 'off');
 });

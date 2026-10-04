@@ -261,6 +261,46 @@ function chatHost({ pickAttachments = async () => [] } = {}) {
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+function pullDownHost() {
+  const sheets = [];
+  const modifiers = new Proxy({}, { get: (_, name) => value => ({ name, value }) });
+  const { PullDown } = load('ui.tsx', {
+    react: { forwardRef: fn => fn }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, ActionSheetIOS: { showActionSheetWithOptions: (options, select) => sheets.push({ options, select }) }, StyleSheet: { create: value => value }, Pressable: 'Pressable', View: 'View' },
+    '@expo/ui': {}, '@expo/ui/swift-ui': Object.fromEntries(['Button', 'Host', 'Menu', 'Picker', 'Section', 'Text', 'Toggle', 'HStack', 'Image'].map(name => [name, `IOS${name}`])), '@expo/ui/swift-ui/modifiers': modifiers, '@expo/ui/community/menu': { MenuView: 'MenuView' },
+    'expo-haptics': { selectionAsync: async () => {} }, '@hugeicons/core-free-icons': {}, './theme': { colors: { ink2: '#aaa', ink3: '#666' }, fonts: { mono: 'monospace' } }, './icons': { Icon: 'Icon' },
+  });
+  return { PullDown, sheets };
+}
+
+test('composer attachment choices stay in a native menu after the header action-sheet fix', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const kinds = [];
+  const screen = chatHost({ pickAttachments: async kind => { kinds.push(kind); return []; } });
+  const { PullDown, sheets } = pullDownHost();
+  const trigger = find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Add photos or files');
+  const rendered = PullDown(trigger.props);
+  const menu = find(rendered, node => node.type === 'IOSMenu');
+  assert.ok(menu, 'the attachment + must open a menu, not the header action sheet');
+  assert.equal(find(menu.props.label, node => node.type === 'View'), undefined, 'the SwiftUI trigger cannot host React Native views');
+  const files = find(menu, node => node.type === 'IOSButton' && node.props.label === 'Choose Files');
+  files.props.onPress();
+  t.mock.timers.tick(250);
+  await settle();
+  assert.deepEqual(kinds, ['files']);
+  assert.equal(sheets.length, 0);
+});
+
+test('header switchers keep their action sheet and omit the current choice', () => {
+  const { PullDown, sheets } = pullDownHost();
+  const selected = [];
+  const header = PullDown({ label: 'Switch Chat', sections: [{ items: [{ id: 'current', title: 'Current Chat', checked: true }, { id: 'other', title: 'Other Chat' }] }], children: jsx('View', {}), onSelect: id => selected.push(id) });
+  header.props.onPress();
+  assert.deepEqual(Array.from(sheets[0].options.options), ['Other Chat', 'Cancel']);
+  sheets[0].select(0);
+  assert.deepEqual(selected, ['other']);
+});
+
 test('New Chat opens the composer directly when there are multiple Worktrees', () => {
   const react = hookHost();
   const pushed = [];

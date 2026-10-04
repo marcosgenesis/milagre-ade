@@ -9,14 +9,13 @@ import type { Client, OpenProject } from '../client';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { useComposer, useSession } from '../session';
-import { isListedChat } from '@milagre/shared/chats';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { ChatReply } from '../chat-reply';
 import { ThinkingIndicator } from '../running-logo';
-import { BottomFade, EdgeFade } from '../bottom-fade';
+import { BottomFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
@@ -30,7 +29,7 @@ import { archiveFromPhone } from '../archive';
 const PAGE = 40;
 
 export default function ChatScreen() {
-  const params = useLocalSearchParams<{ id?: string; worktreeId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
   const insets = useSafeAreaInsets();
@@ -67,12 +66,6 @@ export default function ChatScreen() {
   const allMessages = session.snapshot?.project.state.messages;
   const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
   const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
-  // Each Chat's newest message id, for the switcher's order; one pass instead of a scan per comparison.
-  const lastMessage = useMemo(() => {
-    const last = new Map<number, number>();
-    for (const message of allMessages ?? []) if (message.id > (last.get(message.session_id) ?? 0)) last.set(message.session_id, message.id);
-    return last;
-  }, [allMessages]);
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   // The Changes panel that slides in from the right; its files load the first time it is pulled.
@@ -80,7 +73,14 @@ export default function ChatScreen() {
   const [changesMounted, setChangesMounted] = useState(false);
   const visible = shown.id === params.id ? shown.count : PAGE;
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
+  const { rememberChat } = session;
+  const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
+  const canRemember = !!params.id && !!session.snapshot?.project.state.sessions[Number(params.id)] && targetMatches;
+  useFocusEffect(useCallback(() => {
+    if (canRemember) rememberChat(Number(params.id));
+  }, [canRemember, params.id, rememberChat]));
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
+  if (!targetMatches) return <View style={styles.screen} />;
   const client = session.client;
   const { project, runs } = session.snapshot;
   const chat = params.id ? project.state.sessions[Number(params.id)] : null;
@@ -185,21 +185,19 @@ export default function ChatScreen() {
     try {
       const result = await archiveFromPhone({ client, alert: (...args) => Alert.alert(...args), projectPath: project.path, state: project.state, chat: target, running: !!run,
         onConfirm: () => { setBusy(true); session.expectActivity(); }, notify: setError, refresh: session.refresh });
-      if (result === 'hidden' || result === 'removed') router.back();
+      if (result === 'hidden' || result === 'removed') router.replace('/projects');
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
-  const recent = Object.values(project.state.sessions).filter(item => !item.archived && (item.id === chat?.id || lastMessage.has(item.id) || isListedChat(item, 0))).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
-  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { session.cancelNavigation(); if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
+  const header = <>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
-      {/* The label lives in a native menu: its views keep one shape (text changes only), so nothing mounts or unmounts inside it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text></View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: worktree ? 1 : 0 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree?.name ?? ''}</Text><Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>{diff && (diff.added > 0 || diff.removed > 0) ? `+${diff.added}` : ''}</Text>{diff && (diff.added > 0 || diff.removed > 0) ? ' ' : ''}<Text style={{ color: colors.red }}>{diff && (diff.added > 0 || diff.removed > 0) ? `−${diff.removed}` : ''}</Text></Text></View>
     </View>
-  </PullDown>;
+  </>;
   const more = <Stack.Toolbar placement="right">
     <Stack.Toolbar.Menu icon="ellipsis" accessibilityLabel="Chat actions">
       <Stack.Toolbar.MenuAction icon="doc.text.magnifyingglass" subtitle={diff ? `+${diff.added} −${diff.removed}` : undefined} onPress={() => headerAction('changes')}>View changes</Stack.Toolbar.MenuAction>
@@ -221,7 +219,8 @@ export default function ChatScreen() {
     <IconButton label="Close Changes" icon={Cancel01Icon} onPress={() => setChangesOpen(false)} />
   </View>} /> : null;
   return <View style={[styles.screen, dots]}>
-    <Stack.Screen options={{ title, headerTitle: () => header, gestureEnabled: !changesOpen }} />
+    <Stack.Screen options={{ title, headerTitle: () => header, headerBackVisible: false, gestureEnabled: false }} />
+    <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => { Keyboard.dismiss(); router.push({ pathname: '/navigation', params: { chatId: params.id || '' } }); }} /></Stack.Toolbar>
     {more}
     <SlideOver open={changesOpen} onOpenChange={setChangesOpen} onPull={() => setChangesMounted(true)} panel={changesPanel} enabled={!!worktree}>
     <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
@@ -231,14 +230,12 @@ export default function ChatScreen() {
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
       {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
-      {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
-      {run && <ChatReply run={run} media={media} onActivity={openActivity} />}
+      {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />)}
+      {run && <ChatReply run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />}
       {run && <ThinkingIndicator startedAt={run.startedAt} label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </KeyboardChatScrollView>
-    {/* iOS's soft edge already blurs under the title; this only fades the text into the page. */}
-    <EdgeFade edge="top" height={insets.top + 72} blur={false} />
     <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />

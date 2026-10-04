@@ -36,24 +36,24 @@ export default function ComputersScreen() {
     try { const hosts = await session.loadHosts(); setError(''); void check(hosts); return hosts; }
     catch (e) { setError((e as Error).message); return []; }
   }, [session.loadHosts, check]); // eslint-disable-line react-hooks/exhaustive-deps
-  async function open(host: HostLink) {
+  async function open(host: HostLink, resume = false) {
     setBusy(host.address); setError('');
-    try { if (await session.connect(host, !DEMO)) router.push('/projects'); }
+    try { if (await session.connect(host, !DEMO)) router.replace({ pathname: '/projects', params: { resume: resume ? '1' : '0' } }); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   useEffect(() => {
-    // One saved computer, or the demo host, goes straight to its Projects.
-    if (autoOpened.current) return;
+    // Resume the last computer (or the only pairing) once, unless a deep link takes over.
+    if (autoOpened.current || !session.booted) return;
     const target = DEMO && process.env.EXPO_PUBLIC_DAEMON_URL && process.env.EXPO_PUBLIC_DAEMON_TOKEN ? { address: process.env.EXPO_PUBLIC_DAEMON_URL, token: process.env.EXPO_PUBLIC_DAEMON_TOKEN, name: 'Demo host' }
-      : session.hosts.length === 1 && !session.client ? session.hosts[0] : null;
+      : !session.client ? session.hosts.find(host => host.id === session.lastLocation?.hostId) ?? (session.hosts.length === 1 ? session.hosts[0] : null) : null;
     if (!target || !session.claimAutoOpen()) return;
     autoOpened.current = true;
     const version = session.navigationVersion();
-    const timer = setTimeout(() => { if (session.navigationVersion() === version) void open(target); }, 0);
-    return () => clearTimeout(timer);
-  }, [session.hosts]); // eslint-disable-line react-hooks/exhaustive-deps
+    // A hosts refresh can render again immediately. It must not cancel an already claimed auto-open.
+    void Promise.resolve().then(() => { if (session.navigationVersion() === version) void open(target, true); });
+  }, [session.hosts, session.booted]); // eslint-disable-line react-hooks/exhaustive-deps
   function manage(host: SavedHost, action: string) {
     if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
     if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(() => { if (host.relay) relayRuntime.forget(host.relay.hostId); }).then(load).catch(e => setError(e.message)); } }]);
@@ -80,7 +80,7 @@ export default function ComputersScreen() {
       </View> : <View style={{ gap: 16, paddingTop: 48, alignItems: 'center' }}>
         <Icon icon={LaptopIcon} tone="ink3" size={44} />
         <Text style={[styles.subtitle, { textAlign: 'center' }]}>Pair your computer</Text>
-        <Text style={[styles.muted, { textAlign: 'center' }]}>Run <Text style={styles.code}>npm run mobile:host</Text> on your Mac, then scan the code it shows. Your agents keep working when you leave the app.</Text>
+        <Text style={[styles.muted, { textAlign: 'center' }]}>Open Settings → Phone in Milagre on your Mac, then scan its pairing code. Your projects and chats will appear here.</Text>
       </View>}
       {error ? <ErrorNotice message={error} /> : null}
     </PageScroll>

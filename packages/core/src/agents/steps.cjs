@@ -154,7 +154,7 @@ function codexStep(item) {
     case "webSearch":
       return step("search", webSearchTitle(item));
     case "imageView":
-      return step("read", `Viewed ${fileName(item.path)}`);
+      return step("image", `Viewed ${fileName(item.path)}`, undefined, item.path);
     case "imageGeneration":
       return step("image", "Generating an image");
     default:
@@ -185,6 +185,8 @@ function codexStepResult(item) {
     }
     case "webSearch":
       return compact({ id, status: "done", title: webSearchTitle(item), detail: webResults(item.results) });
+    case "imageView":
+      return compact({ id, status: item.status === "failed" ? "failed" : "done", file: filePath(item.path) });
     case "imageGeneration": {
       // Codex reports "completed", or "failed" with a failure such as a used-up limit; result is the image as base64.
       const failed = item.status === "failed" || Boolean(item.failure) || (!item.savedPath && !item.result);

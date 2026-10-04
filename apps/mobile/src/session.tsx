@@ -4,7 +4,8 @@ import { AppState } from 'react-native';
 import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
 import { relayRuntime } from './relay-native';
 import { syncProject } from './live';
-import { readPermission, savedHosts, savePermission } from './hosts-native';
+import { readPermission, savedHosts, savedNavigation, savePermission } from './hosts-native';
+import type { ChatLocation } from './navigation-store';
 import type { SavedHost } from './hosts-store';
 import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/shared/model';
 import type { Attachment } from './attachments';
@@ -25,6 +26,7 @@ function useSessionState() {
   const [hosts, setHosts] = useState<SavedHost[]>([]);
   const [hostName, setHostName] = useState('');
   const [booted, setBooted] = useState(false);
+  const [lastLocation, setLastLocation] = useState<ChatLocation | null>(null);
   const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
@@ -49,13 +51,18 @@ function useSessionState() {
     return list;
   }, []);
   // Saved computers are read once at launch; the startup splash waits for them.
-  useEffect(() => { void savedHosts.list().then(setHosts).catch(() => {}).finally(() => setBooted(true)); }, []);
+  useEffect(() => { void Promise.all([savedHosts.list().then(setHosts).catch(() => {}), savedNavigation.read().then(setLastLocation)]).finally(() => setBooted(true)); }, []);
+  const rememberChat = useCallback((chatId: number) => {
+    if (!client || !snapshot || !Number.isSafeInteger(chatId) || chatId <= 0) return;
+    const location = { hostId: client.url, projectPath: snapshot.project.path, chatId };
+    setLastLocation(location);
+    void savedNavigation.save(location);
+  }, [client, snapshot?.project.path]); // eslint-disable-line react-hooks/exhaustive-deps
   const connect = async (host: HostLink, remember = true) => {
     const next = createClient(host, undefined, undefined, relayRuntime);
     const name = host.name || '';
     const current = ++generation.current;
     const previous = selection.current;
-    selection.current = null;
     try {
       await next.call('daemon:status');
       const projects = await next.call<RecentProject[]>('project:recent');
@@ -70,6 +77,7 @@ function useSessionState() {
       if (current !== generation.current) return false;
       setModels(null); setCliStatus(null); setProviderError('');
       autoOpen.current = false;
+      selection.current = null;
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
       setHostName(name || hosts.find(saved => saved.id === next.url)?.name || hostOf(next.url));
       return true;
@@ -100,21 +108,26 @@ function useSessionState() {
   };
   const navigationVersion = useCallback(() => generation.current, []);
   const cancelNavigation = useCallback(() => { generation.current++; }, []);
-  const open = async (projectPath: string) => {
+  const open = async (projectPath: string, options: { background?: boolean; chatId?: number } = {}) => {
     if (!client) throw new Error('Connect to your computer first.');
     const current = ++generation.current;
     const previous = selection.current;
-    selection.current = null;
+    if (!options.background) selection.current = null;
     const cached = seen.current.get(`${client.url}|${projectPath}`);
-    setOpening({ path: projectPath, cached: !!cached });
-    if (cached) setSnapshot(cached);
+    if (!options.background) {
+      setOpening({ path: projectPath, cached: !!cached });
+      if (cached) setSnapshot(cached);
+    }
     try {
       const project = await client.call<OpenProject>('project:open', [projectPath]);
       const state = await client.snapshot(project.path);
       if (current === generation.current) {
+        if (options.chatId !== undefined && !state.project.state.sessions[options.chatId]) throw new Error('This Chat is no longer available. Choose another Chat.');
         selection.current = { client, path: project.path };
         seen.current.set(`${client.url}|${projectPath}`, state).set(`${client.url}|${project.path}`, state);
         setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
+        setRecent(previous => previous.some(item => item.path === project.path) ? previous : [...previous, { path: project.path, name: project.name }]);
+        return state;
       }
     } catch (error) {
       if (current === generation.current) selection.current = previous;
@@ -123,6 +136,18 @@ function useSessionState() {
       if (current === generation.current) setOpening(null);
     }
   };
+  // Reading a drawer group does not select it or disturb the Chat behind the drawer.
+  const previewProject = useCallback(async (path: string) => {
+    if (!client) throw new Error('Connect to your computer first.');
+    const project = await client.call<OpenProject>('project:open', [path]);
+    return client.snapshot(project.path);
+  }, [client]);
+  const reloadProjects = useCallback(async () => {
+    if (!client) return;
+    const current = generation.current;
+    const projects = await client.call<RecentProject[]>('project:recent');
+    if (current === generation.current) setRecent(projects);
+  }, [client]);
   const projectPath = snapshot?.project.path;
   const refresh = useCallback(async () => {
     const current = selection.current;
@@ -167,7 +192,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
+  return { booted, lastLocation, rememberChat, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

@@ -123,7 +123,7 @@ export default function ChatsScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: session.error ? colors.red : colors.green }} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, maxWidth: 200 }}>{session.hostName}</Text></View>
     </View>
   </PullDown>;
-  const startChat = (id: number) => router.push({ pathname: '/chat', params: { worktreeId: String(id) } });
+  const startChat = (id: number) => router.push({ pathname: '/chat', params: { worktreeId: String(id), projectPath: project.path, hostId: client.url } });
   // Native bar items: iOS draws the glass toolbar, the bottom search field and their menus.
   const toolbars = <>
     <Stack.SearchBar placeholder="Search Chats" onChangeText={event => setQuery(event.nativeEvent.text)} onCancelButtonPress={() => setQuery('')} hideWhenScrolling={false} />
@@ -147,7 +147,8 @@ export default function ChatsScreen() {
   </>;
   const empty = show === 'archived' ? 'No archived Chats.' : show !== 'all' || query || worktreeFilter !== null ? 'No Chats match this filter.' : worktrees.length ? 'No Chats yet. Start one below.' : 'Open a Git repository to start a Chat.';
   return <View style={styles.screen}>
-    <Stack.Screen options={{ headerTitle: () => switcher }} />
+    <Stack.Screen options={{ headerTitle: () => switcher, headerBackVisible: false }} />
+    <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => router.push('/navigation')} /></Stack.Toolbar>
     {toolbars}
     <FlatList data={rows} keyExtractor={row => String(row.chat.id)} contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void session.refresh().catch(e => setError(e.message)).finally(() => setRefreshing(false)); }} />}
@@ -155,6 +156,6 @@ export default function ChatsScreen() {
       ListHeaderComponent={error || session.error ? <View style={{ padding: 16 }}><ErrorNotice message={error || session.error} retry={session.error ? () => router.dismissTo('/') : undefined} /></View> : null}
       ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingTop: 64, paddingHorizontal: 32 }]}>{empty}</Text>}
       contentContainerStyle={{ paddingBottom: 24 }}
-      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id) } })} onAction={action => void act(item.chat, action, item.run)} />} />
+      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id), projectPath: project.path, hostId: client.url } })} onAction={action => void act(item.chat, action, item.run)} />} />
   </View>;
 }

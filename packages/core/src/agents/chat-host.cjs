@@ -1,3 +1,4 @@
+const { ChatImages } = require("../chat-images.cjs");
 const { storeImages } = require("../project-content.cjs");
 const { ipcErrorMessage } = require("@milagre/shared/result");
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -43,6 +44,7 @@ class ChatHost {
     this.pendingHandovers = new Map();
     this.subagentRecoveries = new Map();
     this.runs = {};
+    this.images = new ChatImages({ states, runs: () => this.runs, broadcast });
     this.seq = 0;
     this.openChat = null;
     this.notes = new Map();
@@ -123,6 +125,7 @@ class ChatHost {
     const projectPath = projectOfKey(chatId);
     const sessionId = sessionIdFromKey(chatId);
     let seq;
+    let added = [];
     return this.states.update(projectPath, (state) => {
       const result = applyAgentEvent(state, this.runs, projectPath, chatId, event);
       this.runs = result.runs;
@@ -131,14 +134,34 @@ class ChatHost {
       const visible = this.isChatFocused ? this.isChatFocused(chatId) : chatId === this.openChat && this.isFocused();
       const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
       const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
-      return isTurnEnd(event) ? this.withNotes(next, chatId) : next;
+      const recorded = isTurnEnd(event) ? this.withNotes(next, chatId) : next;
+      const previousIds = new Set(state.messages.map(message => message.id));
+      added = recorded.messages.filter(message => !previousIds.has(message.id) && message.role === 'assistant');
+      return recorded;
     }, { persist: event.type !== "subagent-update" }).then(
-      ({ state, changed }) => this.publish(chatId, event.type === "subagent-update" && changed ? { ...event, agent: state.sessions[sessionId].subagents.find(agent => agent.id === event.agent.id) } : event, changed && event.type !== "subagent-update" ? state : undefined, seq),
+      async ({ state, changed }) => {
+        this.publish(chatId, event.type === "subagent-update" && changed ? { ...event, agent: state.sessions[sessionId].subagents.find(agent => agent.id === event.agent.id) } : event, changed && event.type !== "subagent-update" ? state : undefined, seq);
+        await this.captureImages(projectPath, state, added);
+      },
       (error) => {
         console.warn(`Milagre couldn't record an agent event for ${chatId}:`, error.message);
         this.publish(chatId, event);
       },
     );
+  }
+
+  /** Capture newly saved replies after publication, outside the state mutation queue. */
+  async captureImages(projectPath, state, messages) {
+    for (const message of messages) {
+      const captured = await this.images.capture(projectPath, state, message);
+      if (captured === message) continue;
+      const saved = await this.states.update(projectPath, latest => {
+        const current = latest.messages.find(item => item.id === message.id);
+        if (current !== message) return latest;
+        return { ...latest, messages: latest.messages.map(item => item === message ? captured : item) };
+      }).catch(() => null);
+      if (saved?.changed) this.broadcast(projectPath, saved.state);
+    }
   }
 
   /**
@@ -160,9 +183,11 @@ class ChatHost {
     catch (error) { await this.takeBack(chatId, pendingId); throw error; }
     let messageId = null;
     let seq;
+    let added = [];
     const { state } = await this.states.update(projectPath, latest => {
       const withoutPending = { ...latest, messages: latest.messages.filter(message => message.id !== pendingId) };
       const result = recordAnswers(withoutPending, this.runs, projectPath, chatId, body);
+      added = result.state.messages.slice(withoutPending.messages.length).filter(message => message.role === 'assistant');
       this.runs = result.runs;
       messageId = result.messageId;
       seq = ++this.seq;
@@ -170,6 +195,7 @@ class ChatHost {
     });
     // No disk await between the current mutation and publication.
     this.publish(chatId, { type: 'answers-sent' }, state, seq);
+    await this.captureImages(projectPath, state, added);
     return messageId;
   }
 
@@ -256,10 +282,12 @@ class ChatHost {
       throw error;
     }
     let seq;
+    let added = [];
     const { state } = await this.states.update(projectPath, latest => {
       const message = latest.messages.find(item => item.id === pendingId);
       const withoutPending = { ...latest, messages: latest.messages.filter(item => item.id !== pendingId) };
       const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: 'message-sent', model });
+      added = sent.state.messages.slice(withoutPending.messages.length).filter(message => message.role === 'assistant');
       this.runs = sent.runs;
       seq = ++this.seq;
       return { ...sent.state, messages: [...sent.state.messages, message] };
@@ -282,6 +310,7 @@ class ChatHost {
       void this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) });
       return null;
     });
+    await this.captureImages(projectPath, state, added);
     return { sessionId: target.sessionId, started };
   }
 

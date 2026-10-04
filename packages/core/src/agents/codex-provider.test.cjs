@@ -940,3 +940,19 @@ test('unknown recovery still supports providers without paginated history', asyn
  assert.equal(events[0]?.agent.status,'cancelled');
  assert.deepEqual(calls.map(call=>call.method),['initialize','thread/read','thread/turns/list','thread/read']);
 });
+
+test('Codex tool image blocks become visible image steps, including dynamic tool output', async t => {
+  const events = [];
+  const session = new CodexSession({ emit: event => events.push(event) });
+  session.state.threadId = 'parent';
+  t.after(() => session.close());
+  const data = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('tool image')]).toString('base64');
+  for (const type of ['mcpToolCall', 'dynamicToolCall']) {
+    const content = [{ type: 'image', data, mimeType: 'image/png' }];
+    session.handleNotification('item/completed', { threadId: 'parent', item: { id: type, type, tool: 'screenshot', status: 'completed', result: { content }, contentItems: content } });
+  }
+  const images = events.filter(event => event.type === 'step-completed' && event.file);
+  assert.equal(images.length, 2);
+  assert.deepEqual(fs.readFileSync(images[0].file), Buffer.from(data, 'base64'));
+  assert.ok(events.some(event => event.type === 'step-started' && event.step.kind === 'image'));
+});

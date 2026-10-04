@@ -655,3 +655,45 @@ test('a rejected answer preserves the question, current reply and concurrent tok
  h.block(null);release();await assert.rejects(answer,/disk full/);assert.equal(h.host.runs[chatId].text,'Question details');assert.equal(h.host.runs[chatId].questions[0].requestId,'q');
  assert.equal((await h.states.get(ALPHA)).messages.length,1);h.fail(false);await h.states.close();
 });
+
+test('a completed assistant reply captures its local screenshot before the temporary file disappears', async t => {
+  const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-reply-image-'));
+  const project = path.join(root, 'repo'); await fs.mkdir(project);
+  const file = path.join(root, 'shot.png');
+  const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('screenshot')]);
+  await fs.writeFile(file, png);
+  const h = harness();
+  t.after(async () => { await h.manager.closeAll(); await h.states.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const { sessionId } = await h.host.send(message(project, 'Show the screenshot'));
+  const chatId = `${project}#${sessionId}`;
+  await h.host.receive(chatId, { type: 'text-delta', text: `![Screenshot](${file})` });
+  await h.host.receive(chatId, { type: 'turn-completed' });
+  const reply = (await h.states.get(project)).messages.find(message => message.role === 'assistant');
+  assert.equal(reply.images[0].sourcePath, file);
+  await fs.unlink(file);
+  assert.deepEqual(await fs.readFile(reply.images[0].path), png);
+  assert.ok(h.broadcasts.some(item => item.state.messages.some(message => message.images?.[0]?.sourcePath === file)));
+});
+
+for (const split of ['steering', 'answers']) test(`a ${split} split preserves the assistant screenshot before its source disappears`, async t => {
+  const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-split-image-'));
+  const project = path.join(root, 'repo'); await fs.mkdir(project);
+  const file = path.join(root, 'shot.png');
+  const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('screenshot')]);
+  await fs.writeFile(file, png);
+  const h = harness();
+  t.after(async () => { await h.manager.closeAll(); await h.states.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const { sessionId } = await h.host.send(message(project, 'Show the screenshot'));
+  const chatId = `${project}#${sessionId}`;
+  await h.host.receive(chatId, { type: 'text-delta', text: `![Screenshot](${file})` });
+  if (split === 'steering') await h.host.send(message(project, 'Continue', { sessionId }));
+  else await h.host.recordAnswers(chatId, 'Keep this layout');
+  await h.host.receive(chatId, { type: 'turn-completed' });
+  const reply = (await h.states.get(project)).messages.find(message => message.role === 'assistant');
+  assert.equal(reply.images?.[0]?.sourcePath, file);
+  await fs.unlink(file);
+  assert.deepEqual(await fs.readFile(reply.images[0].path), png);
+  assert.equal(await h.host.images.resolve(project, file), reply.images[0].path);
+});

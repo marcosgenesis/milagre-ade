@@ -247,6 +247,27 @@ test('mobile uploads are private, bounded and scoped to an open Project', async 
   assert.notEqual(next.path, file.path);
 });
 
+test('a chat screenshot outside the Project is served privately and retained after its temporary source is removed', async t => {
+  const { project, dataDir, request, rpc } = await fixture(t);
+  const file = path.join(path.dirname(project), 'drawer.png');
+  const png = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('screenshot')]);
+  await fs.writeFile(file, png);
+  await rpc('project:open', [project]);
+  const snapshot = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  const chat = Object.values(snapshot.project.state.sessions)[0];
+  const media = () => request(`/media?projectPath=${encodeURIComponent(project)}&path=${encodeURIComponent(file)}`);
+  assert.equal((await media()).status, 403);
+  const client = await connect({ dataDir });
+  t.after(() => client.close());
+  await client.call('chat:git-note', [`${project}#${chat.id}`, `![Drawer](${file})`]);
+  const response = await media();
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+  await fs.unlink(file);
+  assert.deepEqual(Buffer.from(await (await media()).arrayBuffer()), png);
+  assert.equal((await request(`/media?projectPath=${encodeURIComponent(project)}&path=${encodeURIComponent(path.join(path.dirname(project), 'unshared.png'))}`)).status, 403);
+});
+
 test('mobile media serves images only from the Project Worktrees and Milagre image folders', async t => {
   const { project, dataDir, bridge, request, rpc, token } = await fixture(t);
   const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('pretend image data')]);

@@ -36,11 +36,14 @@ async function readIdentity(dataDir) {
 function createPhones(dataDir) {
   const file = path.join(dataDir, 'relay-phones.json');
   let known = [];
+  // Writes land in call order, so a clear is never overwritten by an add that started before it.
+  let writes = Promise.resolve();
+  const write = phones => { const next = writes.then(() => writePrivate(file, { phones })); writes = next.catch(() => {}); return next; };
   return {
     async load() { try { known = JSON.parse(await fs.readFile(file, 'utf8')).phones ?? []; } catch { known = []; } },
     isKnown: id => known.includes(id),
-    async add(id) { known = [...known.filter(item => item !== id), id].slice(-MAX_PHONES); await writePrivate(file, { phones: known }); },
-    async clear() { known = []; await writePrivate(file, { phones: known }); },
+    async add(id) { known = [...known.filter(item => item !== id), id].slice(-MAX_PHONES); await write(known); },
+    async clear() { known = []; await write(known); },
   };
 }
 

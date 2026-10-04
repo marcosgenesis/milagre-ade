@@ -185,16 +185,27 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
       });
       return status();
     },
-    /** A new token: phones paired with the old one stop working and scan again. */
+    /**
+     * A new token: phones paired with the old one stop working and scan again. Whatever runs is stopped first, so the
+     * old host can never see the new pairing window or re-add a phone after the list is cleared. A failure part way
+     * leaves the phone stopped in 'error'.
+     */
     async reset() {
       await enqueue(async () => {
         await load();
-        config.token = randomBytes(32).toString('hex');
-        await save();
-        // Phones paired through the relay are bound to the old token, so they go with it.
-        await (relayPhones ??= createPhones(dataDir)).clear();
-        openPairing();
-        if (config.enabled) { attempts = 0; set('starting'); void apply().catch(() => {}); }
+        if (config.enabled) set('starting');
+        await teardown();
+        try {
+          config.token = randomBytes(32).toString('hex');
+          await save();
+          // Phones paired through the relay are bound to the old token, so they go with it.
+          await (relayPhones ??= createPhones(dataDir)).clear();
+          openPairing();
+        } catch (failure) {
+          set('error', message(failure));
+          return;
+        }
+        if (config.enabled) { attempts = 0; void apply().catch(() => {}); } else set('off');
       });
       return status();
     },

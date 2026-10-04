@@ -135,6 +135,54 @@ test('reset opens the pairing window again and forgets relay phones', async t =>
   assert.equal(relays[1].options.token, JSON.parse(await fs.readFile(path.join(dataDir, 'mobile.json'), 'utf8')).token);
 });
 
+test('reset closes the old relay host before it changes the token, the phones or the pairing window', async t => {
+  const { phone, dataDir, relays, clock, file } = await fixture(t);
+  await createPhones(dataDir).add('phoneA');
+  await phone.setEnabled(true);
+  await phone.settled();
+  const old = relays[0];
+  const oldToken = JSON.parse(await fs.readFile(file, 'utf8')).token;
+  clock.now = PAIRING_WINDOW_MS * 3;
+  const seen = {};
+  old.close = async () => {
+    // A hello still in flight on the old host: it may pair only if the window is open.
+    seen.canPair = old.options.canPair();
+    seen.knowsPhoneA = old.options.phones.isKnown('phoneA');
+    seen.token = JSON.parse(await fs.readFile(file, 'utf8')).token;
+    if (old.options.canPair()) await old.options.phones.add('intruder');
+    old.closed = true;
+  };
+  await phone.reset();
+  await phone.settled();
+  assert.deepEqual(seen, { canPair: false, knowsPhoneA: true, token: oldToken });
+  assert.equal(relays.length, 2);
+  assert.equal(relays[1].options.phones.isKnown('intruder'), false);
+  assert.equal(relays[1].options.phones.isKnown('phoneA'), false);
+  const after = createPhones(dataDir);
+  await after.load();
+  assert.equal(after.isKnown('intruder'), false);
+  assert.equal(after.isKnown('phoneA'), false);
+});
+
+test('a reset that fails part way leaves no old host running and reports an error', async t => {
+  const { phone, dataDir, relays, bridges, file } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const oldToken = JSON.parse(await fs.readFile(file, 'utf8')).token;
+  // A directory where the phone list lives: clearing it cannot be written.
+  await fs.mkdir(path.join(dataDir, 'relay-phones.json'));
+  const status = await phone.reset();
+  await phone.settled();
+  assert.equal(status.state, 'error');
+  assert.equal(phone.status().state, 'error');
+  assert.equal(phone.status().pairingLink, undefined);
+  assert.equal(relays.length, 1);
+  assert.equal(relays[0].closed, true);
+  assert.equal(bridges.length, 1);
+  assert.equal(bridges[0].closed, true);
+  assert.notEqual(JSON.parse(await fs.readFile(file, 'utf8')).token, oldToken);
+});
+
 test('reset while off forgets relay phones too', async t => {
   const { phone, dataDir } = await fixture(t);
   await createPhones(dataDir).add('phoneA');

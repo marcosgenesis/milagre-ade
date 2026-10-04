@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 /** @type {Window["milagre"]} */
 const bridge = {
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
+  restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
   onRuntimeConnection: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("runtime:connection", listener);

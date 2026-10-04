@@ -5,6 +5,8 @@ export interface DaemonClient extends EventEmitter {
   call(method: 'daemon:snapshot-page', args: [number, number]): Promise<string>;
   call(method: string, args?: unknown[]): Promise<unknown>;
   close(): void;
+  /** What daemon:status reported when the connection was checked. */
+  status?: { methods: string[]; capabilities: string[] };
 }
 export interface DaemonOptions {
   dataDir: string;

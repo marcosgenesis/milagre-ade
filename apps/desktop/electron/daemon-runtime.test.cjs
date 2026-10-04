@@ -185,50 +185,108 @@ test('a Project state over 16 MB opens in the desktop, and its changes reach the
   assert.equal(events.some(e => e.channel === 'runtime:connection'), false, 'the connection never dropped');
 });
 
-test('an event whose state was left out reaches the window with it, in order, and a failed read degrades', async t => {
+// A host on a temporary socket that answers like the daemon; `snapshot(request)` answers project:snapshot.
+async function fakeHost(t, { capabilities = ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], snapshot = () => null, onStop } = {}) {
   const net = require('node:net');
   const { once } = require('node:events');
   const { socketPath, prepareSocketDirectory } = require('../../daemon/src/paths.cjs');
   const { wire } = require('../../daemon/src/protocol.cjs');
-  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-large-events-')));
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-fake-host-')));
   const socket = socketPath(dataDir); prepareSocketDirectory(socket);
   const sockets = new Set();
-  let snapshots = 0;
-  let protocol;
+  const host = { protocol: null, reads: [] };
   const server = net.createServer(connection => {
     sockets.add(connection);
     connection.on('error', () => {});
-    protocol = wire(connection, {
+    connection.on('close', () => sockets.delete(connection));
+    const protocol = wire(connection, {
       onInvalid() { connection.destroy(); },
       onMessage(request) {
-        if (request.method === 'project:snapshot') {
-          snapshots++;
-          // The first read is slow, so later events wait behind it; the third fails.
-          if (snapshots === 3) { protocol.send({ v: 1, id: request.id, error: { code: 'COMMAND_FAILED', message: 'gone' } }); return; }
-          setTimeout(() => protocol.send({ v: 1, id: request.id, result: { path: '/p', state: { read: snapshots } } }), snapshots === 1 ? 50 : 0);
-          return;
-        }
-        const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: [] } : null;
+        if (request.method === 'project:snapshot') { host.reads.push(request.args[0]); void snapshot(request, protocol); return; }
+        if (request.method === 'daemon:stop') { protocol.send({ v: 1, id: request.id, result: { stopping: true } }); void onStop?.(connection, server); return; }
+        const result = request.method === 'daemon:status' ? { capabilities, methods: ['project:open'] } : null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
+    host.protocol = protocol;
   });
   server.listen(socket); await once(server, 'listening');
+  host.push = (seq, channel, payload) => host.protocol.send({ v: 1, event: { seq, channel, payload } });
+  t.after(async () => { for (const client of sockets) client.destroy(); await new Promise(resolve => server.close(() => resolve())); await fs.rm(dataDir, { recursive: true, force: true }); });
+  return { dataDir, host, server };
+}
+const row = ({ channel, payload }) => [channel, payload.event?.type ?? null, payload.state ?? null, 'stateTooLarge' in payload];
+
+test('events whose state was left out reach the window with it, in order, one read per burst', async t => {
+  let reads = 0;
+  const { dataDir, host } = await fakeHost(t, {
+    snapshot: (request, protocol) => { reads++; setTimeout(() => protocol.send({ v: 1, id: request.id, result: { path: '/p', state: { read: reads } } }), 50); },
+  });
   const events = [];
-  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
-  t.after(async () => { await desktop.close().catch(() => {}); for (const client of sockets) client.destroy(); await new Promise(resolve => server.close(resolve)); await fs.rm(dataDir, { recursive: true, force: true }); });
-  const push = (seq, channel, payload) => protocol.send({ v: 1, event: { seq, channel, payload } });
-  push(1, 'agent:event', { chatId: '/p#2', event: { type: 'turn-completed' }, seq: 7, stateTooLarge: true });
-  push(2, 'agent:event', { chatId: '/p#2', event: { type: 'turn-started' }, seq: 8 });
-  push(3, 'project:state', { path: '/p', stateTooLarge: true });
-  push(4, 'agent:event', { chatId: '/p#2', event: { type: 'turn-failed' }, seq: 9, stateTooLarge: true });
-  push(5, 'project:state', { path: '/p', stateTooLarge: true });
-  await waitFor(() => events.length >= 5 || null);
-  assert.deepEqual(events.map(({ channel, payload }) => [channel, payload.event?.type ?? null, payload.state ?? null, 'stateTooLarge' in payload]), [
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(() => desktop.close().catch(() => {}));
+  host.push(1, 'agent:event', { chatId: '/p#2', event: { type: 'turn-completed' }, seq: 7, stateTooLarge: true });
+  host.push(2, 'agent:event', { chatId: '/p#2', event: { type: 'turn-started' }, seq: 8 });
+  host.push(3, 'project:state', { path: '/p', stateTooLarge: true });
+  host.push(4, 'agent:event', { chatId: '/p#2', event: { type: 'turn-failed' }, seq: 9, stateTooLarge: true });
+  for (let seq = 5; seq < 10; seq++) host.push(seq, 'project:state', { path: '/p', stateTooLarge: true });
+  // Another Project's state and another chat's streaming don't wait for the read.
+  host.push(10, 'project:state', { path: '/q', state: { small: true } });
+  host.push(11, 'agent:event', { chatId: '/p#5', event: { type: 'text-delta' }, seq: 10 });
+  await waitFor(() => events.length >= 6 || null);
+  assert.deepEqual(events.slice(0, 2).map(row), [['project:state', null, { small: true }, false], ['agent:event', 'text-delta', null, false]]);
+  assert.deepEqual(events.slice(2).map(row), [
     ['agent:event', 'turn-completed', { read: 1 }, false],
     ['agent:event', 'turn-started', null, false],
-    ['project:state', null, { read: 2 }, false],
-    ['agent:event', 'turn-failed', null, false],
-    ['project:state', null, { read: 4 }, false],
+    ['agent:event', 'turn-failed', { read: 1 }, false],
+    ['project:state', null, { read: 1 }, false],
   ]);
+  assert.deepEqual(host.reads, ['/p'], 'one read answered the whole burst');
+});
+
+test('a failed state read keeps the window state and still moves the turn', async t => {
+  const { dataDir, host } = await fakeHost(t, {
+    snapshot: (request, protocol) => protocol.send({ v: 1, id: request.id, error: { code: 'COMMAND_FAILED', message: 'gone' } }),
+  });
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(() => desktop.close().catch(() => {}));
+  host.push(1, 'project:state', { path: '/p', stateTooLarge: true });
+  host.push(2, 'agent:event', { chatId: '/p#2', event: { type: 'turn-completed' }, seq: 3, stateTooLarge: true });
+  host.push(3, 'project:state', { path: '/p', state: { own: true } });
+  await waitFor(() => events.length >= 2 || null);
+  await delay(50);
+  assert.deepEqual(events.map(row), [['agent:event', 'turn-completed', null, false], ['project:state', null, { own: true }, false]]);
+});
+
+test('a host without result pages still serves the desktop, says so, and can be restarted into this one', async t => {
+  let stopped = false;
+  const { dataDir, host } = await fakeHost(t, {
+    capabilities: ['desktop-v1', 'snapshot-pages-v1'],
+    // Like the real host: answer, then close every connection and the socket so a new host can listen.
+    onStop: async (connection, server) => { stopped = true; await new Promise(resolve => setTimeout(resolve, 20)); connection.end(); server.close(); },
+  });
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', cwd: dataDir, reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
+  // The real host this starts is stopped at the end of the test, while its data folder still exists.
+  let hostStarted = false;
+  t.after(async () => { if (hostStarted) await desktop.close({ stopHost: true }).catch(() => {}); else await desktop.close().catch(() => {}); });
+  assert.deepEqual(events.find(event => event.channel === 'runtime:connection')?.payload, { connected: true, hostOutdated: true, message: "Restart Milagre's background host to load large projects." });
+  assert.ok(host.protocol);
+  events.length = 0;
+  hostStarted = true;
+  await desktop.restartHost();
+  assert.equal(stopped, true, 'the old host was asked to stop, so it saved first');
+  assert.deepEqual(events.filter(event => event.channel === 'runtime:connection').map(event => event.payload), [
+    { connected: false, message: 'Restarting the background host…' },
+    { connected: true },
+  ]);
+  assert.ok(desktop.methods.includes('chat:send'), 'the new host brings its commands');
+  const { connect: connectClient } = require('@milagre/daemon/client');
+  const observer = await connectClient({ dataDir }); t.after(() => observer.close());
+  assert.ok((await observer.call('daemon:status')).capabilities.includes('result-pages-v1'));
+  observer.close();
+  await desktop.close({ stopHost: true });
+  hostStarted = false;
+  await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' }, 'the new host stopped');
 });

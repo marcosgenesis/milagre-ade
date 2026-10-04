@@ -66,10 +66,65 @@ function load(file, modules, extra = '') {
   vm.runInNewContext(compiled, { exports, require: id => {
     assert.ok(id in modules, `Unexpected import: ${id}`);
     return modules[id];
-  }, process: { env: {} }, setTimeout, clearTimeout, setInterval, clearInterval });
+  }, process: { env: {} }, URL, setTimeout, clearTimeout, setInterval, clearInterval });
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
+
+function markdownHost() {
+  const react = { ...hookHost(), memo: fn => fn };
+  const viewer = require('../apps/mobile/src/viewer-store.ts');
+  const routes = [], links = [];
+  const { Markdown } = load('markdown.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Text: 'Text', View: 'View', Image: 'Image', Pressable: 'Pressable', Alert: {}, Linking: { openURL: async url => { links.push(url); } } },
+    'expo-router': { router: { push: route => routes.push(route) } }, './viewer-store': viewer,
+    './chat-presentation': require('../apps/mobile/src/chat-presentation.ts'),
+    './ui': { PageScroll: 'PageScroll', colors: {}, styles: { muted: {}, code: {} } },
+  });
+  function expand(node) {
+    if (Array.isArray(node)) return node.flatMap(expand);
+    if (!node || typeof node !== 'object') return node;
+    if (typeof node.type === 'function') return expand(node.type(node.props));
+    return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
+  }
+  return { render(text) { react.begin(); return expand(Markdown({ text })); }, routes, links, viewer };
+}
+
+test('Markdown screenshot links render image previews outside Text and open the image viewer', () => {
+  const screen = markdownHost();
+  const url = 'https://raw.githubusercontent.com/marcosgenesis/milagre-ade/22cc3932b99921b51318d869f617db4bfef45523/mobile-push/computers.jpg';
+  const rendered = screen.render(`Here is the **Computers screen**:\n\n![Computers with Settings and bottom +](${url})`);
+  const image = find(rendered, node => node.type === 'Image');
+  assert.ok(image, 'The screenshot must render as an image, not an alt-text placeholder');
+  assert.equal(image.props.source.uri, url);
+  assert.equal(find(rendered, node => node.type === 'Text' && [node.props.children].flat(Infinity).some(child => find(child, nested => nested.type === 'Image'))), undefined);
+  const preview = find(rendered, node => node.props?.accessibilityRole === 'imagebutton');
+  preview.props.onPress();
+  assert.equal(screen.routes.at(-1), '/viewer');
+  assert.equal(screen.viewer.viewerImages().images[0].source.uri, url);
+});
+
+test('images embedded in emphasis, links and tables keep their surrounding text', () => {
+  const screen = markdownHost();
+  const rendered = screen.render('Before **bold ![Preview](https://example.org/screen.png) after** end.\n\n| Screenshot |\n| --- |\n| [![Table preview](https://example.org/table.png)](https://example.org) |');
+  assert.ok(find(rendered, node => node.type === 'Image' && node.props.source.uri === 'https://example.org/screen.png'));
+  assert.ok(find(rendered, node => node.type === 'Image' && node.props.source.uri === 'https://example.org/table.png'));
+  assert.ok(find(rendered, node => node.type === 'Text' && Array.isArray(node.props.style) && node.props.style.some(style => style.fontWeight === '600') && [node.props.children].flat(Infinity).some(child => find(child, nested => nested.type === 'Text' && nested.props.children === ' after'))));
+});
+
+test('a broken Markdown image leaves a browser link, and unsafe sources never load', async () => {
+  const screen = markdownHost();
+  const text = '![Missing screenshot](https://example.org/missing.png)';
+  find(screen.render(text), node => node.type === 'Image').props.onError();
+  const fallback = find(screen.render(text), node => node.props?.accessibilityRole === 'link');
+  assert.ok(fallback);
+  await fallback.props.onPress();
+  assert.equal(screen.links.at(-1), 'https://example.org/missing.png');
+  for (const source of ['file:///etc/passwd', 'mailto:hello@example.org', 'milagre://pair', 'https://secret@example.org/image.png']) {
+    assert.equal(find(markdownHost().render(`![blocked](${source})`), node => node.type === 'Image'), undefined);
+  }
+});
 const snapshot = projectPath => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
 function sessionHost(client, { effects = false, AppState = {} } = {}) {

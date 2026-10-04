@@ -414,3 +414,20 @@ test('a GET with an empty chunk and an invalid part both behave', async t => {
   phone.send({ t: 'req', id: 2, method: 'POST', path: '/attachments', headers: {}, chunk: '***', more: false });
   assert.equal((await phone.closed).code, 1000);
 });
+
+test('a phone that never completes its hello is closed at the hello deadline; a paired one stays', async t => {
+  const { relay, mac, connect } = await paired(t, { mac: { timing: { helloMs: 150 } } });
+  const good = await connect();
+  const silent = connectPhone({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => silent.close());
+  await silent.opened;
+  const started = Date.now();
+  const closed = await Promise.race([silent.closed, sleep(3000).then(() => null)]);
+  assert.ok(closed, 'the silent phone was never closed');
+  assert.equal(closed.code, 1000);
+  assert.equal(closed.reason, 'closed-by-host');
+  assert.ok(Date.now() - started >= 100, 'closed before the deadline');
+  await sleep(200);
+  good.send({ t: 'ping' });
+  assert.deepEqual(await good.next(), { t: 'pong' });
+});

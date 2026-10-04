@@ -11,7 +11,8 @@ const MAX_INFLIGHT = 16;
 const MAX_UPLOAD = 8 * 1024 * 1024;
 // Longer than the phone's own deadline for the slowest call (worktree:create, 330 s), so the phone gives up first.
 const REQUEST_TIMEOUT = 340_000;
-const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, backoff: [1000, 2000, 5000, 10_000, 30_000], jitter: true };
+// helloMs: a phone connection that has not finished its hello by then is closed, so idle sockets cannot fill the room.
+const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, helloMs: 15_000, backoff: [1000, 2000, 5000, 10_000, 30_000], jitter: true };
 // What the phone may set. Origin and Host belong to the bridge's own checks, and Authorization is ours.
 const BLOCKED_HEADERS = new Set(['host', 'origin', 'authorization', 'connection', 'content-length', 'transfer-encoding', 'upgrade', 'cookie']);
 const FORWARDED_HEADERS = ['content-type', 'etag'];
@@ -35,7 +36,7 @@ const routeOk = path => typeof path === 'string' && path.startsWith('/') && !pat
  * an encrypted channel per phone, with requests and live sockets forwarded to the loopback bridge.
  */
 function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair, WebSocket = require('ws').WebSocket, fetch: fetchBridge = globalThis.fetch, random = defaultRandom, onStatus, timing }) {
-  const { pingMs, idleMs, backoff, jitter } = { ...DEFAULT_TIMING, ...timing };
+  const { pingMs, idleMs, helloMs, backoff, jitter } = { ...DEFAULT_TIMING, ...timing };
   let status = 'connecting';
   let closed = false;
   let attempt = 0;
@@ -62,6 +63,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     const record = current.conns.get(conn);
     if (!record) return;
     current.conns.delete(conn);
+    clearTimeout(record.helloTimer);
     closeLives(record);
     if (notify) sendFrame(current, CLOSE, conn);
   }
@@ -86,6 +88,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     if (current.conns.get(conn) !== record) return;
     record.channel = accepted.channel;
     record.state = 'open';
+    clearTimeout(record.helloTimer);
     sendFrame(current, DATA, conn, accepted.reply);
   }
 
@@ -196,7 +199,12 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     const type = bytes[0];
     const conn = new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(1);
     const payload = bytes.subarray(9);
-    if (type === OPEN) { current.conns.set(conn, { state: 'hello', channel: null, lives: new Map(), inflight: 0, uploads: new Map(), rejected: new Set(), assembler: createAssembler() }); return; }
+    if (type === OPEN) {
+      const record = { state: 'hello', channel: null, lives: new Map(), inflight: 0, uploads: new Map(), rejected: new Set(), assembler: createAssembler(), helloTimer: null };
+      current.conns.set(conn, record);
+      record.helloTimer = setTimeout(() => { if (current.conns.get(conn) === record && record.state !== 'open') dropConn(current, conn, true); }, helloMs);
+      return;
+    }
     if (type === CLOSE) { dropConn(current, conn, false); return; }
     if (type !== DATA) return;
     const record = current.conns.get(conn);

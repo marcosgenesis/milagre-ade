@@ -1,8 +1,11 @@
 import type { ChatMessage, CoordinatorState } from '@milagre/shared/model';
 import type { AgentRuns } from '@milagre/shared/agent-runs';
+import { openLive, type LiveOptions } from './live.ts';
 
 export type OpenProject = { path: string; name: string; state: CoordinatorState };
-export type Snapshot = { project: OpenProject; runs: { runs: AgentRuns } };
+/** A Project's streaming turns; `seq` numbers the last event they hold. */
+export type Runs = { runs: AgentRuns; seq?: number };
+export type Snapshot = { project: OpenProject; runs: Runs };
 export type RecentProject = { path: string; name?: string };
 
 /** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
@@ -69,6 +72,10 @@ export function createClient(address: string, token: string, fetcher: typeof fet
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
+    /** Just the Project's streaming turns: what a live "runs" signal fetches instead of the whole snapshot. */
+    runs: (projectPath: string) => request<Runs>('/runs?projectPath=' + encodeURIComponent(projectPath)),
+    /** The Project's live socket, through the same tunnel and Access headers as every request. */
+    live: (projectPath: string, options: LiveOptions) => openLive(`${url.replace(/^http/, 'ws')}/live?projectPath=${encodeURIComponent(projectPath)}`, auth, options),
   };
 }
 export type Client = ReturnType<typeof createClient>;

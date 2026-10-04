@@ -6,19 +6,21 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const http = require('node:http');
+const { setTimeout: delay } = require('node:timers/promises');
+const { WebSocket } = require('ws');
 const { startDaemon } = require('./server.cjs');
 const { forPhone, startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
 
-async function fixture(t) {
+async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-')));
   const dataDir = path.join(root, 'profile');
   const project = path.join(root, 'project');
   await fs.mkdir(project);
   execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
-  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, worktreeRoot: path.join(root, 'worktrees'), agentCli: Object.assign(async () => ({ command: null, problem: 'Test has no provider' }), { invalidate() {} }) } });
+  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, worktreeRoot: path.join(root, 'worktrees'), agentCli: Object.assign(async () => ({ command: null, problem: 'Test has no provider' }), { invalidate() {} }), ...runtimeOptions } });
   const token = randomBytes(32).toString('hex');
-  const bridge = await startMobileBridge({ dataDir, port: 0, token });
+  const bridge = await startMobileBridge({ dataDir, port: 0, token, ...bridgeOptions });
   t.after(async () => { await bridge.close(); await daemon.close(); await fs.rm(root, { recursive: true, force: true }); });
   const request = (route, options = {}) => fetch(bridge.url + route, { ...options, headers: { authorization: `Bearer ${token}`, ...options.headers } });
   const rpc = (method, args = []) => request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method, args }) });
@@ -235,4 +237,129 @@ test('the phone can change a Chat\'s permission mode, and only to a known one', 
   await rpc('project:open', [project]);
   assert.equal((await rpc('agent:set-permission-mode', [{ chatId: `${project}#1`, mode: 'full' }])).status, 200);
   assert.equal((await rpc('agent:set-permission-mode', [{ chatId: `${project}#1`, mode: 'root' }])).status, 409);
+});
+
+// An agent whose events the test sends itself, so each signal can be told apart.
+function scriptedAgent() {
+  const sessions = [];
+  const createSession = (_provider, { emit }) => {
+    const session = { closed: false, turnActive: false, nativeId: `scripted-${sessions.length}`, emit,
+      async startTurn() { session.turnActive = true; emit({ type: 'session-started', nativeId: session.nativeId }); emit({ type: 'turn-started', turnId: 'turn' }); return { turnId: 'turn' }; },
+      respondToPermission: () => false, answerQuestion: () => false,
+      async interrupt() { if (session.turnActive) emit({ type: 'turn-cancelled' }); session.turnActive = false; },
+      async close() { await session.interrupt(); session.closed = true; } };
+    sessions.push(session);
+    return session;
+  };
+  return { sessions, runtimeOptions: { createSession, agentCli: Object.assign(async () => ({ command: '/scripted/codex' }), { invalidate() {} }) } };
+}
+function openLive(bridge, projectPath, headers, options = {}) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${bridge.url.replace(/^http/, 'ws')}/live?projectPath=${encodeURIComponent(projectPath)}`, { headers, ...options });
+    const messages = [];
+    socket.on('message', data => messages.push(JSON.parse(String(data)).type));
+    socket.once('open', () => resolve({ socket, messages, closed: new Promise(done => socket.once('close', (code, reason) => done({ code, reason: String(reason) }))) }));
+    socket.once('unexpected-response', (_req, res) => { res.resume(); resolve({ status: res.statusCode }); });
+    socket.once('error', reject);
+  });
+}
+async function until(check, ms = 3000) {
+  for (const start = Date.now(); Date.now() - start < ms; await delay(10)) if (check()) return;
+  throw new Error('Timed out');
+}
+
+test('the live socket checks the token, Host, Origin and path before upgrading', async t => {
+  const { project, bridge, token } = await fixture(t);
+  const auth = { authorization: `Bearer ${token}` };
+  assert.equal((await openLive(bridge, project, {})).status, 401);
+  assert.equal((await openLive(bridge, project, { authorization: 'Bearer wrong' })).status, 401);
+  assert.equal((await openLive(bridge, project, { ...auth, origin: 'https://evil.example' })).status, 403);
+  assert.equal((await openLive(bridge, project, { ...auth, host: 'evil.example' })).status, 403);
+  assert.equal((await openLive(bridge, 'relative/path', auth)).status, 400);
+  const elsewhere = await new Promise(resolve => {
+    const socket = new WebSocket(`${bridge.url.replace(/^http/, 'ws')}/snapshot`, { headers: auth });
+    socket.once('unexpected-response', (_req, res) => { res.resume(); resolve(res.statusCode); });
+  });
+  assert.equal(elsewhere, 404);
+  // React Native always sends an Origin; the app's own is the one accepted.
+  const phone = await openLive(bridge, project, { ...auth, origin: 'milagre-app://phone' });
+  assert.equal(phone.socket.readyState, WebSocket.OPEN);
+  const bare = await openLive(bridge, project, auth);
+  assert.equal(bare.socket.readyState, WebSocket.OPEN);
+  // A plain request to the socket's path is not an endpoint.
+  assert.equal((await fetch(bridge.url + '/live?projectPath=' + encodeURIComponent(project), { headers: auth })).status, 404);
+  await bridge.close();
+  assert.equal((await phone.closed).code, 1001);
+  assert.equal((await bare.closed).code, 1001);
+});
+
+test('a live socket signals runs and state changes of its Project only, and /runs returns that Project\'s turns', async t => {
+  const agent = scriptedAgent();
+  const { project, bridge, rpc, request, token } = await fixture(t, { runtimeOptions: agent.runtimeOptions });
+  const other = project + '-other';
+  await fs.mkdir(other);
+  execFileSync('git', ['init', '-b', 'main', other], { stdio: 'ignore' });
+  const chatOf = async path => {
+    await rpc('project:open', [path]);
+    return Object.values((await (await request('/snapshot?projectPath=' + encodeURIComponent(path))).json()).result.project.state.sessions)[0].id;
+  };
+  const [chat, otherChat] = [await chatOf(project), await chatOf(other)];
+  const auth = { authorization: `Bearer ${token}` };
+  const mine = await openLive(bridge, project, auth);
+  const theirs = await openLive(bridge, other, auth);
+
+  // A state change elsewhere reaches only that Project's socket.
+  await rpc('chat:patch', [other, otherChat, { title: 'Elsewhere' }]);
+  await until(() => theirs.messages.includes('project'));
+  await delay(500);
+  assert.deepEqual(mine.messages, []);
+  await rpc('chat:patch', [project, chat, { title: 'Here' }]);
+  await until(() => mine.messages.length);
+  assert.deepEqual(mine.messages, ['project']);
+
+  // Sending saves the user's message (a Project change) and starts a run.
+  const send = (path, sessionId) => rpc('chat:send', [{ projectPath: path, sessionId, body: 'hello', provider: 'codex', model: 'm', permissionMode: 'ask' }]);
+  assert.equal((await send(project, chat)).status, 200);
+  await until(() => mine.messages.length === 2);
+  await delay(300);
+  assert.deepEqual(mine.messages, ['project', 'project']);
+  // Streamed text is a burst of run events: one "runs" signal per window, and nothing for the other Project.
+  const theirCount = theirs.messages.length;
+  const session = agent.sessions[0];
+  for (let i = 0; i < 5; i++) session.emit({ type: 'text-delta', text: `part ${i} ` });
+  await until(() => mine.messages.length === 3);
+  await delay(300);
+  assert.deepEqual(mine.messages.slice(2), ['runs']);
+  assert.equal(theirs.messages.length, theirCount);
+
+  const runs = await (await request('/runs?projectPath=' + encodeURIComponent(project))).json();
+  assert.match(runs.result.runs[`${project}#${chat}`].text, /part 4/);
+  assert.ok(Number.isInteger(runs.result.seq));
+  assert.deepEqual((await (await request('/runs?projectPath=' + encodeURIComponent(other))).json()).result.runs, {});
+  assert.deepEqual(Object.keys((await (await request('/snapshot?projectPath=' + encodeURIComponent(other))).json()).result.runs.runs), [], 'snapshots carry their own Project\'s turns only');
+  assert.equal((await request('/runs?projectPath=relative')).status, 400);
+  assert.equal((await fetch(bridge.url + '/runs?projectPath=' + encodeURIComponent(project))).status, 401);
+
+  // The turn's end saves its reply: one prompt "project" signal, so the reply never disappears between fetches.
+  const started = Date.now();
+  session.turnActive = false;
+  session.emit({ type: 'turn-completed' });
+  await until(() => mine.messages.length === 4);
+  assert.equal(mine.messages[3], 'project');
+  assert.ok(Date.now() - started < 400, 'a turn\'s end is not held back like other Project changes');
+  assert.deepEqual((await (await request('/runs?projectPath=' + encodeURIComponent(project))).json()).result.runs, {});
+});
+
+test('live sockets are pinged, capped, and the oldest gives way to a new one', async t => {
+  const { project, bridge, token } = await fixture(t, { bridgeOptions: { pingMs: 40 } });
+  const auth = { authorization: `Bearer ${token}` };
+  const sockets = [];
+  for (let i = 0; i < 8; i++) sockets.push(await openLive(bridge, project, auth));
+  await until(() => sockets[0].messages.includes('ping'));
+  // A socket that stops answering pings is ended.
+  const silent = await openLive(bridge, project, auth, { autoPong: false });
+  assert.equal((await sockets[0].closed).code, 1013, 'the oldest socket made room');
+  assert.equal(sockets[1].socket.readyState, WebSocket.OPEN);
+  assert.equal((await silent.closed).code, 1006);
+  assert.equal(sockets[1].socket.readyState, WebSocket.OPEN);
 });

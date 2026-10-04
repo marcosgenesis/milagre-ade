@@ -13,11 +13,12 @@ const deferred = () => {
 
 // Execute the actual hook/screen handlers without loading native modules in Node.
 // Effects are driven explicitly so request ordering is deterministic.
-function hookHost() {
+function hookHost({ effects = false } = {}) {
   const slots = [];
   let cursor = 0;
   return {
     begin() { cursor = 0; },
+    unmount() { for (const slot of slots) slot?.cleanup?.(); },
     useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = initial;
@@ -35,7 +36,16 @@ function hookHost() {
       const previous = slots[index];
       if (!previous || deps.some((value, i) => value !== previous.deps[i])) slots[index] = { value: fn(), deps };
       return slots[index].value;
-    }, useEffect() {}, createContext() { return {}; }, useContext() {},
+    },
+    // Off by default; when on, an effect runs during the render whose deps changed, after its previous cleanup.
+    useEffect(fn, deps) {
+      if (!effects) return;
+      const index = cursor++;
+      const previous = slots[index];
+      if (previous && deps.every((value, i) => value === previous.deps[i])) return;
+      previous?.cleanup?.();
+      slots[index] = { deps, cleanup: fn() };
+    }, createContext() { return {}; }, useContext() {},
   };
 }
 function load(file, modules, extra = '') {
@@ -51,14 +61,14 @@ function load(file, modules, extra = '') {
 const jsx = (type, props) => ({ type, props });
 const snapshot = projectPath => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
-function sessionHost(client) {
-  const react = hookHost();
+function sessionHost(client, { effects = false, AppState = {} } = {}) {
+  const react = hookHost({ effects });
   const { useSessionState } = load('session.tsx', {
-    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
+    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: () => client }, './live': require('../apps/mobile/src/live.ts'),
     './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
   }, '\nexport { useSessionState };');
-  return () => { react.begin(); return useSessionState(); };
+  return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount });
 }
 
 test('a poll from the previous Project cannot restore it after another Project opens', async () => {
@@ -83,6 +93,54 @@ test('a poll from the previous Project cannot restore it after another Project o
   assert.equal(render().snapshot.project.path, 'B');
   await oldSession.refresh();
   assert.equal(render().snapshot.project.path, 'B');
+});
+
+test('the session fetches on live signals and polls only while the live socket is down', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sockets = [];
+  const fetched = { snapshot: 0, runs: 0 };
+  const listeners = [];
+  const AppState = { currentState: 'active', addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } };
+  const setApp = state => { AppState.currentState = state; listeners.forEach(listener => listener(state)); };
+  const render = sessionHost({
+    call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? { path: args[0] } : {},
+    snapshot: async projectPath => { fetched.snapshot++; return { ...snapshot(projectPath), runs: { runs: {}, seq: 1 } }; },
+    runs: async () => { fetched.runs++; return { runs: { 'A#1': { text: 'streaming' } }, seq: 2 }; },
+    live: (projectPath, options) => { const socket = { projectPath, options, closed: false, close() { socket.closed = true; } }; sockets.push(socket); return socket; },
+  }, { effects: true, AppState });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const snapshots = async (count, message) => { await settle(); assert.equal(fetched.snapshot, count, message); };
+  await render().connect('address', 'token');
+  await render().open('A');
+  render();
+  assert.deepEqual(sockets.map(socket => socket.projectPath), ['A']);
+  await snapshots(2, 'opening fetches, then the sync fetches once');
+  t.mock.timers.tick(4000);
+  await snapshots(3, 'it polls while the socket is not open (an older bridge)');
+  sockets[0].options.onStatus(true);
+  await snapshots(4, 'it catches up once the socket opens');
+  t.mock.timers.tick(30000);
+  await snapshots(4, 'no polling while live');
+  sockets[0].options.onSignal('runs');
+  await settle();
+  assert.equal(fetched.runs, 1);
+  assert.equal(render().snapshot.runs.runs['A#1'].text, 'streaming');
+  assert.equal(render().snapshot.project.path, 'A');
+  sockets[0].options.onSignal('project');
+  await snapshots(5);
+  sockets[0].options.onStatus(false);
+  await snapshots(6, 'losing the socket fetches at once');
+  t.mock.timers.tick(4000);
+  await snapshots(7, 'and polls again');
+  setApp('background');
+  assert.equal(sockets[0].closed, true, 'the socket closes in the background');
+  t.mock.timers.tick(30000);
+  await snapshots(7, 'and nothing polls');
+  setApp('active');
+  assert.equal(sockets.length, 2, 'it opens again in the foreground');
+  await snapshots(8);
+  render.unmount();
+  assert.equal(sockets[1].closed, true);
 });
 
 test('disconnect cancels a connection that is still loading recent Projects', async () => {

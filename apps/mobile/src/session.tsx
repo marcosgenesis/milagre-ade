@@ -2,6 +2,7 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { syncProject } from './live';
 import { readPermission, savedHosts, savePermission } from './hosts-native';
 import type { SavedHost } from './hosts-store';
 import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/shared/model';
@@ -107,27 +108,36 @@ function useSessionState() {
       if (current === selection.current) throw error;
     }
   }, [client, projectPath]);
-  const live = useRef(false);
-  const running = !!snapshot && Object.keys(snapshot.runs.runs).length > 0;
-  useEffect(() => { live.current = running; }, [running]);
+  /** Fetches only the Project's streaming turns and puts them into the snapshot on screen. */
+  const refreshRuns = useCallback(async () => {
+    const current = selection.current;
+    if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
+    try {
+      const runs = await client.runs(projectPath);
+      // A snapshot that landed meanwhile may already hold later runs.
+      if (current === selection.current) { setSnapshot(previous => previous?.project.path === projectPath && (runs.seq ?? 0) >= (previous.runs.seq ?? 0) ? reconcileState(previous, { ...previous, runs }) : previous); setError(''); }
+    } catch (error) {
+      if (current === selection.current) throw error;
+    }
+  }, [client, projectPath]);
+  const running = useRef(false);
+  const anyRunning = !!snapshot && Object.keys(snapshot.runs.runs).length > 0;
+  useEffect(() => { running.current = anyRunning; }, [anyRunning]);
   /** Poll quickly for a while after the user acts, so a new turn shows up before its first event arrives. */
   const expectActivity = () => { busyUntil.current = Date.now() + 15000; };
+  // The bridge's live socket says when to fetch; polling is the fallback while it is down or the bridge predates it.
   useEffect(() => {
     if (!client || !projectPath) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    let inFlight = false;
-    async function poll() {
-      if (cancelled || inFlight || AppState.currentState !== 'active') return;
-      inFlight = true;
-      try { await refresh(); } catch (e) { if (!cancelled) setError((e as Error).message); }
+    return syncProject({
+      connect: options => client.live(projectPath, options),
+      snapshot: refresh, runs: refreshRuns,
+      onError: error => setError(error.message),
+      active: () => AppState.currentState === 'active',
+      watchActive: listener => { const subscription = AppState.addEventListener('change', state => listener(state === 'active')); return () => subscription.remove(); },
       // Live turns refresh every second; an idle Project only needs a slower check for changes made elsewhere.
-      finally { inFlight = false; if (!cancelled) timer = setTimeout(poll, live.current || Date.now() < busyUntil.current ? 1000 : 4000); }
-    }
-    void poll();
-    const subscription = AppState.addEventListener('change', state => { clearTimeout(timer); if (state === 'active') void poll(); });
-    return () => { cancelled = true; clearTimeout(timer); subscription.remove(); };
-  }, [client, projectPath, refresh]);
+      pollDelay: () => running.current || Date.now() < busyUntil.current ? 1000 : 4000,
+    });
+  }, [client, projectPath, refresh, refreshRuns]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };

@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "@milagre/core": "0.1.0",
-    "qrcode": "^1.5.4"
+    "@milagre/shared": "0.1.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.22.0"
   },
   "engines": {
     "node": ">=24"

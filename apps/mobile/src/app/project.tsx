@@ -93,7 +93,7 @@ export default function ChatsScreen() {
   }
   const switcher = <PullDown label="Switch Project" title={session.hostName || undefined} sections={[
     { title: 'Projects', items: [...session.recent.map(item => ({ id: `project:${item.path}`, title: item.name || item.path.split('/').at(-1) || 'Project', checked: item.path === project.path, systemImage: 'folder' })), { id: 'open', title: 'Open another folder…', systemImage: 'folder.badge.plus' }] },
-    { title: 'Computer', items: [{ id: 'computers', title: session.hostName || 'Computers', subtitle: 'Switch computer', systemImage: 'laptopcomputer' }] },
+    { title: 'Computer', items: [{ id: 'computers', title: 'Switch Computer', subtitle: session.hostName || undefined, systemImage: 'laptopcomputer' }] },
   ]} onSelect={id => {
     if (id === 'open') router.navigate('/projects');
     else if (id === 'computers') router.dismissTo('/');

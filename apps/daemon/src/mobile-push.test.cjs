@@ -192,3 +192,21 @@ test('caps notification copy, isolates errors and never places credentials in da
   assert.equal(errors.length, 1);
   assert.ok(!errors[0].message.includes('private payload'));
 });
+
+test('a relay computer registers, survives a restart, and a malformed relay id is rejected', async t => {
+  const relayId = 'relay://AbCdEfGhIjKlMnOpQrSt_-';
+  const { push, dataDir, messages } = await fixture(t);
+  assert.deepEqual(await push.register(registration({ hostId: relayId })), { registered: true });
+  const errors = [];
+  const second = createMobilePush({ dataDir, send: async message => messages.push(message), context: async () => ({ projectName: 'Project' }), onError: error => errors.push(error) });
+  await second.load();
+  assert.deepEqual(errors, []);
+  second.observe(chatId, approval);
+  await second.settled();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].data.hostId, relayId);
+  await second.close();
+  for (const hostId of ['relay://short', 'relay://AbCdEfGhIjKlMnOpQrSt_-x', 'relay://AbCdEfGhIjKlMnOpQrSt+/', 'relay://AbCdEfGhIjKlMnOpQrSt_-/', 'RELAY://AbCdEfGhIjKlMnOpQrSt_-']) {
+    await assert.rejects(push.register(registration({ hostId })), /Invalid push computer address/, hostId);
+  }
+});

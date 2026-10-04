@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
@@ -11,11 +11,25 @@ import { Icon } from './icons';
 import { ActivityTitle } from './activity-item';
 import { ToolRow } from './tool-row';
 import { hex } from './theme';
-import { showImages, type ViewerImage } from './viewer-store';
+import { showImages, type MediaValue, type ViewerImage } from './viewer-store';
 import { colors, styles } from './ui';
 
-/** Resolves a saved file on the computer to an authenticated image source. */
-export type MediaSource = (path: string) => ImageSourcePropType;
+/** Resolves a saved file on the computer to an authenticated image source, or a cached file once it is fetched. */
+export type MediaSource = (path: string) => MediaValue;
+
+/** The image to show now: a ready source as is, a loading one once it arrives (null until then, or if it fails). */
+export function useMedia(source: MediaValue | null): ImageSourcePropType | null {
+  const pending = typeof (source as Promise<ImageSourcePropType> | null)?.then === 'function' ? source as Promise<ImageSourcePropType> : null;
+  const [loaded, setLoaded] = useState<{ from: Promise<ImageSourcePropType>; value: ImageSourcePropType | null } | null>(null);
+  useEffect(() => {
+    if (!pending) return;
+    let current = true;
+    pending.then(value => { if (current) setLoaded({ from: pending, value }); }, () => { if (current) setLoaded({ from: pending, value: null }); });
+    return () => { current = false; };
+  }, [pending]);
+  if (!pending) return source as ImageSourcePropType | null;
+  return loaded?.from === pending ? loaded.value : null;
+}
 /** Measures every thumbnail first, so the viewer morphs out of the tapped one and back into whichever is showing. */
 function open(images: ViewerImage[], index: number, thumbs: (View | null)[]) {
   void Promise.all(images.map((image, i) => new Promise<ViewerImage>(resolve => {
@@ -33,9 +47,15 @@ function Photos({ message, media }: { message: ChatMessage; media: MediaSource }
   const single = photos.length === 1;
   return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end', maxWidth: 264 }}>
     {photos.map((photo, index) => <Pressable key={index} ref={view => { thumbs.current[index] = view; }} accessibilityRole="imagebutton" accessibilityLabel={`${photo.name}. Open full screen`} onPress={() => open(photos, index, thumbs.current)}>
-      <Image source={photo.source} resizeMode="cover" style={{ width: single ? 220 : 130, height: single ? 220 : 130, borderRadius: 14, backgroundColor: colors.canvas }} />
+      <Thumbnail source={photo.source} size={single ? 220 : 130} />
     </Pressable>)}
   </View>;
+}
+/** One photo tile; a relay image shows the empty tile until its file is ready. */
+function Thumbnail({ source, size }: { source: MediaValue; size: number }) {
+  const ready = useMedia(source);
+  const style = { width: size, height: size, borderRadius: 14, backgroundColor: colors.canvas };
+  return ready ? <Image source={ready} resizeMode="cover" style={style} /> : <View style={style} />;
 }
 function FileChip({ path }: { path: string }) {
   const name = path.split(/[\\/]/).pop() || path;
@@ -49,10 +69,14 @@ function FileChip({ path }: { path: string }) {
 function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource }) {
   const [ratio, setRatio] = useState(4 / 5);
   const thumb = useRef<View>(null);
-  if (!step.file || step.status !== 'done') return null;
-  const image: ViewerImage = { source: media(step.file), name: step.file.split('/').pop() || 'Generated image' };
+  const shown = !!step.file && step.status === 'done';
+  const source = shown ? media(step.file!) : null;
+  const ready = useMedia(source);
+  if (!shown || !source) return null;
+  const image: ViewerImage = { source, name: step.file!.split('/').pop() || 'Generated image' };
   return <Pressable accessibilityRole="imagebutton" accessibilityLabel="Generated image. Open full screen" ref={thumb} onPress={() => open([image], 0, [thumb.current])} style={{ width: 240 }}>
-    <Image source={image.source} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width && height) setRatio(width / height); }} style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />
+    {ready ? <Image source={ready} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width && height) setRatio(width / height); }} style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />
+      : <View style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />}
     <View style={{ position: 'absolute', right: 8, top: 8, width: 30, height: 30, borderRadius: 10, backgroundColor: '#ffffffcc', alignItems: 'center', justifyContent: 'center' }}><Icon icon={Maximize01Icon} tone="ink" size={15} /></View>
   </Pressable>;
 }

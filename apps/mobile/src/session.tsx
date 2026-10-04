@@ -1,7 +1,8 @@
 import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { relayRuntime } from './relay-native';
 import { syncProject } from './live';
 import { readPermission, savedHosts, savePermission } from './hosts-native';
 import type { SavedHost } from './hosts-store';
@@ -9,7 +10,9 @@ import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/share
 import type { Attachment } from './attachments';
 import { defaultPreferences, type TurnPreferences } from './turn-options';
 
-const hostOf = (url: string) => String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
+const hostOf = (url: string) => /^relay:/.test(url) ? 'Mac' : String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
+/** A computer to connect to: a saved one, a scanned pairing, or an address and token typed in. */
+export type HostLink = ClientHost & { name?: string };
 
 function useSessionState() {
   const [client, setClient] = useState<Client | null>(null);
@@ -47,8 +50,9 @@ function useSessionState() {
   }, []);
   // Saved computers are read once at launch; the startup splash waits for them.
   useEffect(() => { void savedHosts.list().then(setHosts).catch(() => {}).finally(() => setBooted(true)); }, []);
-  const connect = async (address: string, token: string, remember = true, name = '', access?: Access) => {
-    const next = createClient(address, token, undefined, undefined, access);
+  const connect = async (host: HostLink, remember = true) => {
+    const next = createClient(host, undefined, undefined, relayRuntime);
+    const name = host.name || '';
     const current = ++generation.current;
     const previous = selection.current;
     selection.current = null;
@@ -58,7 +62,7 @@ function useSessionState() {
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== '1') {
         if (remember) {
-          try { await savedHosts.save({ name: name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url), address: next.url, token: token.trim(), ...(access ? { access } : {}) }); }
+          try { await savedHosts.save({ name: name || hosts.find(saved => saved.id === next.url)?.name || hostOf(next.url), address: next.url, token: host.token.trim(), ...(host.access ? { access: host.access } : {}), ...(host.relay ? { relay: host.relay } : {}) }); }
           catch { throw new Error('Could not save this computer on your device. Try pairing again.'); }
           void loadHosts().catch(() => {});
         }
@@ -67,7 +71,7 @@ function useSessionState() {
       setModels(null); setCliStatus(null); setProviderError('');
       autoOpen.current = false;
       setClient(next); setRecent(projects); setSnapshot(null); setError('');
-      setHostName(name || hosts.find(host => host.id === next.url)?.name || hostOf(next.url));
+      setHostName(name || hosts.find(saved => saved.id === next.url)?.name || hostOf(next.url));
       return true;
     } catch (error) {
       if (current === generation.current) selection.current = previous;
@@ -77,7 +81,7 @@ function useSessionState() {
   const openNotificationTarget = async (host: SavedHost, projectPath: string, sessionId: number) => {
     autoOpen.current = false;
     const current = ++generation.current;
-    const next = createClient(host.address, host.token, undefined, undefined, host.access);
+    const next = createClient(host, undefined, undefined, relayRuntime);
     try {
       await next.call('daemon:status');
       if (current !== generation.current) return false;

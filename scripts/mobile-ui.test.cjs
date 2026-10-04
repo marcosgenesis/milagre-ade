@@ -127,15 +127,28 @@ test('a broken Markdown image leaves a browser link, and unsafe sources never lo
 });
 const snapshot = projectPath => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
-function sessionHost(client, { effects = false, AppState = {} } = {}) {
+const relayRuntime = { name: 'relay runtime' };
+function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
   const react = hookHost({ effects });
   const { useSessionState } = load('session.tsx', {
-    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: () => client }, './live': require('../apps/mobile/src/live.ts'),
-    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
+    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
+    './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
   }, '\nexport { useSessionState };');
   return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount });
 }
+
+test('pairing through the relay builds the client from the pairing and saves the relay link', async () => {
+  const created = [], saved = [];
+  const relay = { url: 'wss://relay.milagre.cloud', hostId: 'H'.repeat(22), key: 'K'.repeat(43) };
+  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async method => method === 'project:recent' ? [] : {} }, { created, saved });
+  const pairing = { address: `relay://${relay.hostId}`, token: 'a'.repeat(64), name: '', relay };
+  assert.equal(await render().connect(pairing), true);
+  assert.equal(created[0][0], pairing);
+  assert.equal(created[0][3], relayRuntime);
+  assert.deepEqual(JSON.parse(JSON.stringify(saved)), [{ name: 'Mac', address: `relay://${relay.hostId}`, token: 'a'.repeat(64), relay }]);
+  assert.equal(render().hostName, 'Mac');
+});
 
 test('a poll from the previous Project cannot restore it after another Project opens', async () => {
   const openingB = deferred(), pollingA = deferred();
@@ -144,7 +157,7 @@ test('a poll from the previous Project cannot restore it after another Project o
     call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? (args[0] === 'B' ? openingB.promise : { path: 'A' }) : {},
     snapshot: async projectPath => projectPath === 'A' && delayA ? pollingA.promise : snapshot(projectPath),
   });
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   await render().open('A');
   const oldSession = render();
   delayA = true;
@@ -176,7 +189,7 @@ test('the session fetches on live signals and polls only while the live socket i
   }, { effects: true, AppState });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const snapshots = async (count, message) => { await settle(); assert.equal(fetched.snapshot, count, message); };
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   await render().open('A');
   render();
   assert.deepEqual(sockets.map(socket => socket.projectPath), ['A']);
@@ -212,7 +225,7 @@ test('the session fetches on live signals and polls only while the live socket i
 test('disconnect cancels a connection that is still loading recent Projects', async () => {
   const recent = deferred();
   const render = sessionHost({ call: async method => method === 'project:recent' ? recent.promise : {} });
-  const connecting = render().connect('address', 'token');
+  const connecting = render().connect({ address: 'address', token: 'token' });
   await Promise.resolve();
   render().disconnect();
   recent.resolve([]);
@@ -594,11 +607,11 @@ test('late Chat rename cannot pop another screen after its form loses focus', as
 
 test('selection guards expire when Project or connection changes', async () => {
   const render = sessionHost({ call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async p => snapshot(p) });
-  await render().connect('address', 'token'); await render().open('A');
+  await render().connect({ address: 'address', token: 'token' }); await render().open('A');
   const first = render(); assert.equal(first.isSelected(), true);
   await first.open('B'); assert.equal(first.isSelected(), false);
   const second = render(); assert.equal(second.isSelected(), true);
-  await second.connect('another-address', 'token'); assert.equal(second.isSelected(), false);
+  await second.connect({ address: 'another-address', token: 'token' }); assert.equal(second.isSelected(), false);
 });
 
 test('attachment drafts survive a failed send and move only after a successful first send', async () => {
@@ -698,7 +711,7 @@ function pushHost(t, initial = 'index') {
   const { usePushState } = load('push.tsx', {
     react, 'react/jsx-runtime': { jsx }, 'react-native': { Alert: { alert() {} }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
     'expo-router': { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
-    './client': {}, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
+    './client': {}, './relay-native': { relayRuntime: {} }, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
     './push-controller': require('../apps/mobile/src/push-controller.ts'),
     './push-native': { pushStore: { read: async () => ({ enabled: false, pending: [] }) }, pushNative: {
       available: () => 'Simulator', listen: async (_view, tap) => { receive = tap; return () => {}; },
@@ -767,7 +780,7 @@ test('a notification target clears an older Project loading state', async () => 
     call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? args[0] === '/old' ? oldOpening.promise : { path: args[0] } : {},
     snapshot: async projectPath => ({ ...snapshot(projectPath), project: { path: projectPath, state: { sessions: { 2: { id: 2 } } } } }),
   });
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   const old = render().open('/old');
   assert.equal(render().opening.path, '/old');
   await render().openNotificationTarget({ address: 'new', token: 'new', name: 'Mac' }, '/target', 2);
@@ -838,4 +851,42 @@ test('tool disclosure reveals late output, while its chat action opens Activity 
   find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
   assert.equal(opened, 1);
   assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
+});
+
+test('relay transports: one per Mac, replaced by a new code, closed in the background and on forget', async () => {
+  const listeners = [], made = [];
+  const identity = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+  const phoneRandom = n => new Uint8Array(n);
+  const { relayRuntime } = load('relay-native.ts', {
+    'react-native': { AppState: { addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } } },
+    'expo-file-system': { Directory: class {}, File: class {}, Paths: {} },
+    './relay-transport': { createRelayTransport: options => { const transport = { options, closed: 0, close() { transport.closed++; } }; made.push(transport); return transport; } },
+    './phone-identity': { phoneIdentity: async () => identity, phoneRandom },
+  });
+  const link = (hostId, key = 'K'.repeat(43)) => ({ url: 'wss://relay.milagre.cloud', hostId, key });
+  const a = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) });
+  assert.equal(await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) }), a, 'one transport per Mac');
+  assert.equal(a.options.identity, identity);
+  assert.equal(a.options.random, phoneRandom);
+  assert.equal(a.options.hostId, 'A'.repeat(22));
+  const b = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b, a);
+  // A new pairing code for the same Mac replaces its transport.
+  const a2 = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'c'.repeat(64) });
+  assert.notEqual(a2, a);
+  assert.equal(a.closed, 1);
+  // The background closes every open transport; they stay in place to reopen on the next request.
+  for (const listener of listeners) listener('inactive');
+  assert.deepEqual([a2.closed, b.closed], [0, 0]);
+  for (const listener of listeners) listener('background');
+  assert.deepEqual([a2.closed, b.closed], [1, 1]);
+  assert.equal(await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) }), b);
+  // Forget closes the transport and drops it: the next use builds a new one.
+  relayRuntime.forget('B'.repeat(22));
+  assert.equal(b.closed, 2);
+  const b2 = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b2, b);
+  relayRuntime.forget('nobody');
+  for (const listener of listeners) listener('background');
+  assert.equal(b.closed, 2, 'a forgotten transport is not closed again');
 });

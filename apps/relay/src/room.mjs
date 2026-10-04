@@ -17,6 +17,16 @@ export function unframe(bytes) {
   return { type: view[0], conn: new DataView(view.buffer, view.byteOffset).getBigUint64(1), payload: view.slice(9) };
 }
 
+const TOO_BIG = Symbol('too-big');
+/** Binary payloads only, never copied: null for text and anything that is not an ArrayBuffer or a view, TOO_BIG past `max` bytes. */
+function toBytes(data, max) {
+  let bytes;
+  if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+  else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  else return null;
+  return bytes.byteLength > max ? TOO_BIG : bytes;
+}
+
 /** One Mac and its phones. Knows nothing about what the frames say. */
 export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8Array(32)) }) {
   let host = null, pending = null, challenge = null, next = 0n; // host: the proven Mac; pending: a newcomer still proving its key
@@ -25,6 +35,7 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
   const drop = (socket, code, reason) => { try { socket.close(code, reason); } catch { /* already closed */ } };
   const proves = data => {
     try {
+      if ((typeof data === 'string' ? data.length : data.byteLength) > 4096) return false;
       const proof = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
       const key = proof?.t === 'proof' ? fromB64url(String(proof.key)) : null;
       return !!key && key.length === 32 && hostIdOf(key) === id && nacl.sign.detached.verify(challenge, fromB64url(String(proof.sig)), key);
@@ -47,8 +58,9 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
         return socket.send(JSON.stringify({ t: 'ready' }));
       }
       if (socket !== host) return drop(socket, 4409, 'replaced');
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-      if (bytes.length > MAX_FRAME + 9) return drop(socket, 1009, 'too-big');
+      const bytes = toBytes(data, MAX_FRAME + 9);
+      if (bytes === TOO_BIG) return drop(socket, 1009, 'too-big');
+      if (!bytes || bytes.byteLength < 9) return drop(socket, 1003, 'bad-frame');
       const { type, conn, payload } = unframe(bytes);
       const phone = phones.get(conn);
       if (!phone) return;
@@ -72,8 +84,9 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
     phoneMessage(socket, data) {
       const conn = connOf.get(socket);
       if (conn === undefined || !host) return;
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-      if (bytes.length > MAX_FRAME) return drop(socket, 1009, 'too-big');
+      const bytes = toBytes(data, MAX_FRAME);
+      if (bytes === TOO_BIG) return drop(socket, 1009, 'too-big');
+      if (!bytes) return drop(socket, 1003, 'binary-only');
       host.send(frame(DATA, conn, bytes));
     },
     phoneClosed(socket) {

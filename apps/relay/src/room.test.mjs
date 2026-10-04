@@ -165,3 +165,56 @@ test('with no proven host, a phone is offline even while a host is pending', () 
   room.phoneOpened(phone);
   assert.equal(phone.closed.code, 4404);
 });
+
+test('a phone text frame closes that phone with 1003 and forwards nothing', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  room.phoneOpened(phone);
+  const before = host.sent.length;
+  room.phoneMessage(phone, 'hello');
+  assert.equal(phone.closed.code, 1003);
+  assert.equal(host.sent.length, before);
+});
+
+test('a numeric text frame from a phone is refused without allocating', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  room.phoneOpened(phone);
+  const before = host.sent.length;
+  const buffers = process.memoryUsage().arrayBuffers;
+  room.phoneMessage(phone, '200000000');
+  assert.ok(process.memoryUsage().arrayBuffers - buffers < 1024 * 1024);
+  assert.equal(phone.closed.code, 1003);
+  assert.equal(host.sent.length, before);
+  const small = fakeSocket();
+  room.phoneOpened(small);
+  const sentBefore = host.sent.length;
+  room.phoneMessage(small, '5');
+  assert.equal(small.closed.code, 1003);
+  assert.equal(host.sent.length, sentBefore);
+});
+
+test('a ready host sending a frame under 9 bytes or a text frame is closed with 1003', () => {
+  for (const bad of [new Uint8Array(8), new Uint8Array(), 'text', '300000000']) {
+    const room = createRoom({ id, nonce: randomNonce });
+    const host = connectHost(room);
+    const phone = fakeSocket();
+    room.phoneOpened(phone);
+    assert.doesNotThrow(() => room.hostMessage(host, bad));
+    assert.equal(host.closed.code, 1003);
+    assert.equal(phone.sent.length, 0);
+  }
+});
+
+test('ArrayBuffer frames from the socket layer are forwarded', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  const conn = room.phoneOpened(phone);
+  room.phoneMessage(phone, new Uint8Array([4, 2]).buffer);
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 2, conn, payload: new Uint8Array([4, 2]) });
+  room.hostMessage(host, frame(2, conn, new Uint8Array([8])).buffer);
+  assert.deepEqual(phone.sent.at(-1), new Uint8Array([8]));
+});

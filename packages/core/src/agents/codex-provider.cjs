@@ -1,6 +1,8 @@
 const { isDeepStrictEqual } = require('node:util');
 const { active: activeSubagent, settleSubagents } = require("./subagents.cjs");
 const fs = require("node:fs/promises");
+const { createHash } = require("node:crypto");
+const { decodeImages } = require("../image-input.cjs");
 const { mkdirSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -47,6 +49,29 @@ function saveGeneratedImage(item, directory = path.join(os.tmpdir(), "milagre-ge
   } catch {
     return item;
   }
+}
+
+// Tool image blocks are separate visible steps; their base64 never bloats the saved transcript.
+function toolImageEvents(item) {
+  if (!['mcpToolCall', 'dynamicToolCall'].includes(item?.type) || item.status !== 'completed' || item.success === false || item.error) return [];
+  const content = item.type === 'mcpToolCall' ? item.result?.content : item.contentItems;
+  if (!Array.isArray(content)) return [];
+  const events = [];
+  for (const [index, block] of content.entries()) {
+    if (!['image', 'inputImage'].includes(block?.type)) continue;
+    try {
+      const dataUrl = block.data ? `data:${block.mimeType};base64,${block.data}` : block.imageUrl || block.image_url;
+      const [{ bytes, mime }] = decodeImages([{ dataUrl }]);
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      const directory = path.join(os.tmpdir(), 'milagre-generated-images');
+      mkdirSync(directory, { recursive: true });
+      const file = path.join(directory, `${hash}.${mime === 'image/jpeg' ? 'jpg' : mime.slice(6)}`);
+      writeFileSync(file, bytes, { mode: 0o600 });
+      const id = `${item.id}:image:${index}`;
+      events.push({ type: 'step-started', step: { id, kind: 'image', title: 'Image from tool', file } }, { type: 'step-completed', id, status: 'done', file });
+    } catch { /* Unsupported tool media must not interrupt its text result. */ }
+  }
+  return events;
 }
 
 const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
@@ -274,6 +299,8 @@ class CodexSession {
     if (method === "turn/started" && params.threadId === this.state.threadId) this.state.turnId ??= params.turn?.id ?? null;
     if (method === "item/completed" && params.item?.type === "imageGeneration") params = { ...params, item: saveGeneratedImage(params.item) };
     const events = mapCodexNotification(method, params, this.state);
+    // The mapper filters other threads and stale turns before any image is surfaced here.
+    if (method === 'item/completed' && events.some(event => event.type === 'step-completed' && event.id === String(params.item?.id))) events.push(...toolImageEvents(params.item));
     if (events.some(event => event.type === "subagent-update")) this.scheduleSubagents();
     if (!events.some(isTerminal)) {
       events.forEach((event) => this.emit(event));

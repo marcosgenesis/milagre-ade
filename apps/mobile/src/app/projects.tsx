@@ -1,37 +1,37 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
-import { Redirect, Stack, router } from 'expo-router';
-import { Folder01Icon, FolderAddIcon } from '@hugeicons/core-free-icons';
+import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../session';
-import { Icon } from '../icons';
-import { ErrorNotice, Field, ListRow, PageScroll, PillButton, colors, styles } from '../ui';
+import { ProjectNavigation } from '../project-navigation';
+import { ErrorNotice, styles } from '../ui';
+import { SpinnerRing } from '../icons';
 
 export default function ProjectsScreen() {
   const session = useSession();
-  const [path, setPath] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { resume } = useLocalSearchParams<{ resume?: string }>();
+  const attempted = useRef(false);
+  const [restoring, setRestoring] = useState(resume === '1' && !!session.lastLocation && session.lastLocation.hostId === session.client?.url);
   const [error, setError] = useState('');
+  useEffect(() => {
+    if (attempted.current || !session.client) return;
+    attempted.current = true;
+    const target = session.lastLocation;
+    if (resume !== '1' || !target || target.hostId !== session.client.url) return;
+    let cancelled = false;
+    void session.open(target.projectPath).then(copy => {
+      if (cancelled || !copy) return;
+      const chat = copy.project.state.sessions[target.chatId];
+      if (chat && !chat.archived) router.replace({ pathname: '/chat', params: { id: String(chat.id), projectPath: copy.project.path, hostId: target.hostId } });
+    }).catch(() => { if (!cancelled) setError('Could not reopen your last Chat. Choose a project below to continue.'); })
+      .finally(() => { if (!cancelled) setRestoring(false); });
+    return () => { cancelled = true; };
+  }, [session.client]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!session.client) return <Redirect href="/" />;
-  // Like Paseo: go to the Chats right away (they show the last copy, or a loading state) while the Project opens.
-  async function open(projectPath: string) {
-    setBusy(true); setError('');
-    router.push('/project');
-    try { await session.open(projectPath); }
-    catch (e) { setError((e as Error).message); router.back(); }
-    finally { setBusy(false); }
-  }
-  const folder = (icon: typeof Folder01Icon) => <View style={{ width: 36, height: 36, borderRadius: 9, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={icon} tone="ink" size={18} /></View>;
-  return <PageScroll>
-    <Stack.Screen options={{ title: session.hostName || 'Projects' }} />
-    <Stack.Toolbar placement="right"><Stack.Toolbar.Button icon="rectangle.portrait.and.arrow.right" accessibilityLabel="Disconnect" onPress={() => { session.disconnect(); router.replace('/'); }} /></Stack.Toolbar>
-    <Text style={styles.section}>Projects</Text>
-    <View style={[styles.card, { paddingVertical: 0, gap: 0, marginTop: -12 }]}>
-      {session.recent.map((project, index) => <View key={project.path}>{index > 0 && <View style={styles.separator} />}<ListRow title={project.name || project.path.split('/').at(-1) || 'Project'} subtitle={project.path.replace(/^\/Users\/[^/]+/, '~')} onPress={() => void open(project.path)} disabled={busy} leading={folder(Folder01Icon)} /></View>)}
-      {session.recent.length > 0 && <View style={styles.separator} />}
-      <ListRow title="Open another folder…" onPress={() => setAdding(!adding)} leading={folder(FolderAddIcon)} trailing={<View />} />
-      {adding && <View style={{ paddingBottom: 14, gap: 10 }}><Field label="Project folder on your Mac" hideLabel value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoFocus onSubmitEditing={() => void open(path)} /><PillButton title={busy ? 'Opening…' : 'Open folder'} onPress={() => void open(path)} disabled={busy || !path.startsWith('/')} /></View>}
-    </View>
-    {error ? <ErrorNotice message={error} /> : null}
-  </PageScroll>;
+  return <View style={styles.screen}>
+    <Stack.Screen options={{ headerShown: false }} />
+    {restoring ? <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><SpinnerRing size={22} /><Text style={styles.muted}>Reopening your Chat...</Text></View> : <>
+      {error ? <View style={{ paddingHorizontal: 16, paddingTop: 60 }}><ErrorNotice message={error} /></View> : null}
+      <ProjectNavigation key={session.client.url} onNavigate={(href, secondary) => secondary ? router.push(href) : router.replace(href)} />
+    </>}
+  </View>;
 }

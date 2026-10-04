@@ -123,7 +123,7 @@ test("Codex: MCP tools, web searches and images", () => {
   const found = { ...search, query: "IANA example domain", action: { type: "search", query: "IANA example domain", queries: null }, results: [{ type: "text_result", title: "Example Domains", url: "https://www.iana.org/help/example-domains", snippet: "…" }] };
   assert.deepEqual(codexStepResult(found), { id: "exec-5", status: "done", title: "Searched the web for `IANA example domain`", detail: "Example Domains\nhttps://www.iana.org/help/example-domains" });
 
-  assert.deepEqual(codexStep({ type: "imageView", id: "exec-6", path: "/repo/shot.png" }), { id: "exec-6", kind: "read", title: "Viewed `shot.png`" });
+  assert.deepEqual(codexStep({ type: "imageView", id: "exec-6", path: "/repo/shot.png" }), { id: "exec-6", kind: "image", title: "Viewed `shot.png`", file: "/repo/shot.png" });
   assert.deepEqual(codexStep({ type: "dynamicToolCall", id: "exec-7", tool: "lookup", arguments: {}, status: "inProgress" }), { id: "exec-7", kind: "other", title: "Used `lookup`" });
 });
 

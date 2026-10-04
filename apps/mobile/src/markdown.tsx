@@ -1,34 +1,52 @@
-import { memo, useMemo, useRef, useState } from 'react';
-import { Alert, Image, Linking, Pressable, Text, View, type TextStyle } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Image, Linking, Pressable, Text, View, type ImageSourcePropType, type TextStyle } from 'react-native';
 import { router } from 'expo-router';
 import type { Token } from 'markdown-it';
 import { markdownChunks, markdownTokens, safeLink } from './chat-presentation';
 import { PageScroll, colors, styles } from './ui';
-import { showImages, type ThumbRect } from './viewer-store';
+import { showImages, type MediaValue, type ThumbRect } from './viewer-store';
+
+import { resolveMarkdownImage } from './markdown-image';
+
+type ImageOptions = { media?: (path: string) => MediaValue; basePath?: string };
 
 // Chat reading size: desktop uses 13px at 1.55; a phone reads best a little larger.
 const body = { color: colors.ink, fontSize: 15, lineHeight: 22 };
 
-function imageURL(src: string) {
-  try {
-    const url = new URL(src);
-    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? src : null;
-  } catch { return null; }
-}
-function MarkdownImage({ src, alt }: { src: string; alt: string }) {
-  const url = imageURL(src);
+function MarkdownImage({ src, alt, media, basePath }: { src: string; alt: string } & ImageOptions) {
+  const target = useMemo(() => resolveMarkdownImage(src, basePath), [src, basePath]);
+  const [attempt, setAttempt] = useState(0);
+  const source = useMemo(() => {
+    void attempt;
+    if (!target) return null;
+    if ('url' in target) return { uri: target.url };
+    try { return media?.(target.path) ?? null; } catch { return null; }
+  }, [target, media, attempt]);
+  const pending = source && typeof (source as Promise<ImageSourcePropType>).then === 'function' ? source as Promise<ImageSourcePropType> : null;
+  const [loaded, setLoaded] = useState<{ source: MediaValue; value: ImageSourcePropType | null } | null>(null);
+  const [failed, setFailed] = useState<MediaValue | null>(null);
+  useEffect(() => {
+    if (!pending) return;
+    let current = true;
+    pending.then(value => { if (current) setLoaded({ source: pending, value }); }, () => { if (current) setLoaded({ source: pending, value: null }); });
+    return () => { current = false; };
+  }, [pending]);
+  const ready = pending ? loaded?.source === pending ? loaded.value : null : source as ImageSourcePropType | null;
+  const broken = !source || failed === source || pending && loaded?.source === pending && !loaded.value;
   const [ratio, setRatio] = useState(1);
-  const [failed, setFailed] = useState(false);
   const thumb = useRef<View>(null);
-  if (!url) return <Text style={styles.muted}>[Image: {alt}]</Text>;
-  if (failed) return <Text accessibilityRole="link" style={[styles.muted, { color: colors.accent, textDecorationLine: 'underline' }]} onPress={() => void Linking.openURL(url).catch(() => Alert.alert('Cannot open image', 'Try opening this address in your browser.'))}>Cannot load {alt}. Open image</Text>;
+  if (!target) return <Text style={styles.muted}>[Image: {alt}]</Text>;
+  if (broken) return 'url' in target
+    ? <Text accessibilityRole="link" style={[styles.muted, { color: colors.accent, textDecorationLine: 'underline' }]} onPress={() => void Linking.openURL(target.url).catch(() => Alert.alert('Cannot open image', 'Try opening this address in your browser.'))}>Cannot load {alt}. Open image</Text>
+    : <Pressable accessibilityRole="button" accessibilityLabel={`Retry ${alt}`} onPress={() => { setFailed(null); setAttempt(value => value + 1); }}><Text style={styles.muted}>Cannot load {alt} from your computer. Tap to retry.</Text></Pressable>;
+  if (!ready) return <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading {alt}...</Text>;
   const open = () => {
-    const show = (from?: ThumbRect) => { showImages([{ name: alt, source: { uri: url }, from }], 0); router.push('/viewer'); };
+    const show = (from?: ThumbRect) => { showImages([{ name: alt, source: ready, from }], 0); router.push('/viewer'); };
     if (thumb.current) thumb.current.measureInWindow((x, y, width, height) => show(width && height ? { x, y, width, height } : undefined));
     else show();
   };
   return <Pressable ref={thumb} accessibilityRole="imagebutton" accessibilityLabel={`${alt}. Open full screen`} onPress={open} style={{ width: '100%', maxWidth: 320, borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field }}>
-    <Image source={{ uri: url }} accessibilityLabel={alt} resizeMode="contain" onError={() => setFailed(true)} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width > 0 && height > 0) setRatio(width / height); }} style={{ width: '100%', aspectRatio: Math.max(1, ratio) }} />
+    <Image source={ready} accessibilityLabel={alt} resizeMode="contain" onError={() => setFailed(source)} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width > 0 && height > 0) setRatio(width / height); }} style={{ width: '100%', aspectRatio: Math.max(0.4, ratio) }} />
   </Pressable>;
 }
 
@@ -47,7 +65,7 @@ function inline(tokens: Token[]) {
   return inlineNodes(tree(tokens));
 }
 /** Images need their own native View; split text runs while preserving open emphasis and links. */
-function inlineContent(tokens: Token[], style: TextStyle = body, heading = false) {
+function inlineContent(tokens: Token[], style: TextStyle = body, heading = false, images: ImageOptions = {}) {
   const parts: React.ReactNode[] = [];
   const open: Token[] = [];
   let text: Token[] = [];
@@ -58,7 +76,7 @@ function inlineContent(tokens: Token[], style: TextStyle = body, heading = false
     if (token.type === 'image') {
       flush();
       const src = String(token.attrGet('src') || '');
-      parts.push(<MarkdownImage key={`image-${parts.length}-${src}`} src={src} alt={token.content || 'Image'} />);
+      parts.push(<MarkdownImage key={`image-${parts.length}-${src}`} src={src} alt={token.content || 'Image'} {...images} />);
       text = [...open];
     } else {
       text.push(token);
@@ -78,25 +96,25 @@ function inlineNodes(nodes: Node[]): React.ReactNode {
     return <Text key={i} style={[style, url ? { color: colors.accent, textDecorationLine: 'underline' } : {}]} accessibilityRole={url ? 'link' : undefined} onPress={url ? () => void Linking.openURL(url).catch(() => Alert.alert('Cannot open link', 'Try opening this address in your browser.')) : undefined}>{text}</Text>;
   });
 }
-function blocks(nodes: Node[]): React.ReactNode {
+function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
   return nodes.map(({ token, children }, index) => {
     const key = `${token.type}-${index}`;
-    if (token.type === 'inline') return <View key={key}>{inlineContent(token.children || [])}</View>;
+    if (token.type === 'inline') return <View key={key}>{inlineContent(token.children || [], body, false, images)}</View>;
     if (token.type === 'fence' || token.type === 'code_block') return <View key={key} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden' }}>{token.info && <Text style={[styles.label, { paddingHorizontal: 12, paddingTop: 10 }]}>{token.info}</Text>}<PageScroll horizontal contentContainerStyle={{ padding: 12, paddingBottom: 12 }}><Text selectable style={styles.code}>{token.content.replace(/\n$/, '')}</Text></PageScroll></View>;
-    if (token.type === 'heading_open') return <View key={key}>{inlineContent(children.flatMap(n => n.token.children || []), { color: colors.ink, fontWeight: '600', lineHeight: 23, fontSize: token.tag === 'h1' ? 17 : token.tag === 'h2' ? 16 : 15 }, true)}</View>;
-    if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') return <View key={key} style={{ gap: 8 }}>{children.map((child, i) => <View key={i} style={{ flexDirection: 'row', gap: 10 }}><Text style={body}>{token.type === 'ordered_list_open' ? `${Number(token.attrGet('start') || 1) + i}.` : '•'}</Text><View style={{ flex: 1, gap: 8 }}>{blocks(child.children)}</View></View>)}</View>;
-    if (token.type === 'blockquote_open') return <View key={key} style={{ borderLeftWidth: 3, borderColor: colors.line, paddingLeft: 14, gap: 8 }}>{blocks(children)}</View>;
+    if (token.type === 'heading_open') return <View key={key}>{inlineContent(children.flatMap(n => n.token.children || []), { color: colors.ink, fontWeight: '600', lineHeight: 23, fontSize: token.tag === 'h1' ? 17 : token.tag === 'h2' ? 16 : 15 }, true, images)}</View>;
+    if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') return <View key={key} style={{ gap: 8 }}>{children.map((child, i) => <View key={i} style={{ flexDirection: 'row', gap: 10 }}><Text style={body}>{token.type === 'ordered_list_open' ? `${Number(token.attrGet('start') || 1) + i}.` : '•'}</Text><View style={{ flex: 1, gap: 8 }}>{blocks(child.children, images)}</View></View>)}</View>;
+    if (token.type === 'blockquote_open') return <View key={key} style={{ borderLeftWidth: 3, borderColor: colors.line, paddingLeft: 14, gap: 8 }}>{blocks(children, images)}</View>;
     if (token.type === 'hr') return <View key={key} style={{ height: 1, backgroundColor: colors.line }} />;
-    if (token.type === 'tr_open') return <View key={key} style={{ flexDirection: 'row', gap: 12, paddingVertical: 8, borderBottomWidth: 0.5, borderColor: colors.line }}>{children.map((child, i) => <View key={i} style={{ flex: 1 }}>{blocks(child.children)}</View>)}</View>;
-    return <View key={key} style={{ gap: 8 }}>{children.length ? blocks(children) : <Text selectable style={body}>{token.content}</Text>}</View>;
+    if (token.type === 'tr_open') return <View key={key} style={{ flexDirection: 'row', gap: 12, paddingVertical: 8, borderBottomWidth: 0.5, borderColor: colors.line }}>{children.map((child, i) => <View key={i} style={{ flex: 1 }}>{blocks(child.children, images)}</View>)}</View>;
+    return <View key={key} style={{ gap: 8 }}>{children.length ? blocks(children, images) : <Text selectable style={body}>{token.content}</Text>}</View>;
   });
 }
 /** One top-level block; unchanged blocks skip parsing and rendering while the reply streams. */
-const Chunk = memo(function Chunk({ text, streaming }: { text: string; streaming: boolean }) {
+const Chunk = memo(function Chunk({ text, streaming, media, basePath }: { text: string; streaming: boolean } & ImageOptions) {
   const nodes = useMemo(() => tree(markdownTokens(text, streaming)), [text, streaming]);
-  return <>{blocks(nodes)}</>;
+  return <>{blocks(nodes, { media, basePath })}</>;
 });
-export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, media, basePath }: { text: string; streaming?: boolean } & ImageOptions) {
   const chunks = useMemo(() => markdownChunks(text), [text]);
-  return <View style={{ gap: 12 }}>{chunks.map((chunk, index) => <Chunk key={index} text={chunk} streaming={streaming && index === chunks.length - 1} />)}</View>;
+  return <View style={{ gap: 12 }}>{chunks.map((chunk, index) => <Chunk key={index} text={chunk} media={media} basePath={basePath} streaming={streaming && index === chunks.length - 1} />)}</View>;
 });

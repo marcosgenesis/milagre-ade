@@ -15,7 +15,7 @@ function usePushState() {
   const sessionRef = useRef(session);
   useLayoutEffect(() => { sessionRef.current = session; });
   const path = usePathname();
-  const params = useGlobalSearchParams<{ id?: string; worktreeId?: string }>();
+  const params = useGlobalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const [state, setState] = useState<PushState | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +37,8 @@ function usePushState() {
   // eslint-disable-next-line react-hooks/refs
   const [controller] = useState(() => createPushController({ store: pushStore, hosts: savedHosts.list, forgetHost,
     native: pushNative, call: (host, method, args) => createClient(host, fetch, 5000, relayRuntime).call(method, args), onError: setError }));
-  const view: PushView = path === '/chat' && session.client && session.snapshot && params.id && /^\d+$/.test(String(params.id))
+  const targetMatches = (!params.hostId || params.hostId === session.client?.url) && (!params.projectPath || params.projectPath === session.snapshot?.project.path);
+  const view: PushView = path === '/chat' && targetMatches && session.client && session.snapshot && params.id && /^\d+$/.test(String(params.id))
     ? { hostId: session.client.url, chatId: `${session.snapshot.project.path}#${params.id}` } : null;
   const viewRef = useRef(view);
   useLayoutEffect(() => { viewRef.current = view; });
@@ -56,7 +57,7 @@ function usePushState() {
   };
   const hostKeys = session.hosts.map(host => `${host.id}:${host.lastUsed}`).join('|');
   useEffect(() => { void refresh(); }, [refresh, hostKeys]);
-  const route = `${path}:${params.id || ''}:${params.worktreeId || ''}`;
+  const route = JSON.stringify([path, params.hostId, params.projectPath, params.id, params.worktreeId]);
   const previousRoute = useRef(route);
   useEffect(() => {
     if (previousRoute.current !== route) {
@@ -100,10 +101,8 @@ function usePushState() {
       targetGeneration.current = sessionRef.current.navigationVersion();
       const opened = await opening;
       if (opened && pending.ticket === ticket.current) {
-        router.dismissTo('/');
-        router.push('/projects');
-        router.push('/project');
-        router.push({ pathname: '/chat', params: { id: String(target.sessionId) } });
+        router.dismissAll();
+        router.replace({ pathname: '/chat', params: { id: String(target.sessionId), projectPath: target.projectPath, hostId: target.host.address } });
       }
     })().catch(e => { if (pending.ticket === ticket.current) Alert.alert('Could not open Chat', e.message); })
       .finally(() => { if (pending.ticket === ticket.current) { targetGeneration.current = null; activeTap.current = null; setPending(null); } });

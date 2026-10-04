@@ -18,7 +18,7 @@ export default function PairLink() {
         // The link is rebuilt from the params expo-router parsed; only the ones it carried go back in.
         const query = (['address', 'relay', 'host', 'key', 'token', 'name', 'cfId', 'cfSecret'] as const).flatMap(key => params[key] === undefined ? [] : [`${key}=${encodeURIComponent(params[key] || '')}`]);
         const pairing = parsePairing(`milagre://pair?${query.join('&')}`);
-        if (await session.connect(pairing) && !cancelled) { router.dismissTo('/'); router.push('/projects'); }
+        if (await session.connect(pairing) && !cancelled) { router.dismissAll(); router.replace('/projects'); }
       } catch (e) { if (!cancelled) setError((e as Error).message); }
     })();
     return () => { cancelled = true; };

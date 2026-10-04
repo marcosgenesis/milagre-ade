@@ -458,7 +458,7 @@ function pushHost(t, initial = 'index') {
   const host = { id: 'https://mac.example', address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac', lastUsed: 0 };
   const session = { booted: true, hosts: [host], snapshot: snapshot('/project'), client: { url: host.id },
     claimAutoOpen() {}, cancelNavigation() { generation++; }, navigationVersion: () => generation,
-    openNotificationTarget: async (...args) => { const current = generation; opens.push(args); await opening.promise; return current === generation; },
+    openNotificationTarget: async (...args) => { const current = ++generation; opens.push(args); await opening.promise; return current === generation; },
   };
   const { usePushState } = load('push.tsx', {
     react, 'react/jsx-runtime': { jsx }, 'react-native': { Alert: { alert() {} }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
@@ -474,6 +474,7 @@ function pushHost(t, initial = 'index') {
   render();
   return { render, opens, opening, tap: (eventId = 'event') => { receive({ kind: 'milagre-chat', hostId: host.id, projectPath: '/project', sessionId: 2, eventId }); render(); },
     switchChat: id => { params = { id }; pathname = '/chat'; render(); }, routes: () => navigation.routes, back: () => apply({ type: 'GO_BACK' }),
+    pair: () => { const current = ++generation; pathname = '/pair'; params = {}; render(); return current === generation; },
   };
 }
 
@@ -512,4 +513,15 @@ test('duplicate in-flight taps share one opening and a later tap can open again'
   screen.tap();
   await settle();
   assert.equal(screen.opens.length, 2);
+});
+
+test('route changes preserve a newer normal pairing while cancelling notification work', async t => {
+  const screen = pushHost(t);
+  assert.equal(screen.pair(), true);
+  screen.tap();
+  await settle();
+  assert.equal(screen.pair(), true);
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes().at(-1).name, 'index');
 });

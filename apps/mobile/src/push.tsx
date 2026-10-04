@@ -21,6 +21,7 @@ function usePushState() {
   const [pending, setPending] = useState<{ data: unknown; ticket: number; navigationVersion: number } | null>(null);
   const ticket = useRef(0);
   const activeTap = useRef<string | null>(null);
+  const targetGeneration = useRef<number | null>(null);
   const forgetHost = useCallback(async (host: SavedHost) => {
       const current = (await savedHosts.list()).find(item => item.id === host.id);
       if (current?.token === host.token && current.lastUsed === host.lastUsed) {
@@ -56,7 +57,12 @@ function usePushState() {
   const route = `${path}:${params.id || ''}:${params.worktreeId || ''}`;
   const previousRoute = useRef(route);
   useEffect(() => {
-    if (previousRoute.current !== route) { sessionRef.current.cancelNavigation(); previousRoute.current = route; }
+    if (previousRoute.current !== route) {
+      ticket.current++;
+      if (targetGeneration.current === sessionRef.current.navigationVersion()) sessionRef.current.cancelNavigation();
+      targetGeneration.current = null; activeTap.current = null; setPending(null);
+      previousRoute.current = route;
+    }
   }, [route]);
   const invalidatePending = useCallback(() => { ticket.current++; activeTap.current = null; }, []);
   useEffect(() => {
@@ -88,7 +94,9 @@ function usePushState() {
       if (pending.ticket !== ticket.current || pending.navigationVersion !== sessionRef.current.navigationVersion()) return;
       const target = notificationTarget(pending.data, hosts);
       if (!target) throw new Error('This notification belongs to a computer that is no longer paired. Pair it again to open its Chat.');
-      const opened = await sessionRef.current.openNotificationTarget(target.host, target.projectPath, target.sessionId);
+      const opening = sessionRef.current.openNotificationTarget(target.host, target.projectPath, target.sessionId);
+      targetGeneration.current = sessionRef.current.navigationVersion();
+      const opened = await opening;
       if (opened && pending.ticket === ticket.current) {
         router.dismissTo('/');
         router.push('/projects');
@@ -96,7 +104,7 @@ function usePushState() {
         router.push({ pathname: '/chat', params: { id: String(target.sessionId) } });
       }
     })().catch(e => { if (pending.ticket === ticket.current) Alert.alert('Could not open Chat', e.message); })
-      .finally(() => { if (pending.ticket === ticket.current) { activeTap.current = null; setPending(null); } });
+      .finally(() => { if (pending.ticket === ticket.current) { targetGeneration.current = null; activeTap.current = null; setPending(null); } });
   }, [pending, session.booted]);
   return { state, error, busy, unavailable: pushNative.available(), refresh,
     enable: () => run(() => controller.enable()), disable: () => run(() => controller.disable()),

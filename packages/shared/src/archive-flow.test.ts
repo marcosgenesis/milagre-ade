@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentSession, ChatMessage, CoordinatorState } from "../model";
-import { archiveChat } from "./archive-flow.ts";
-import type { ArchiveDeps } from "./archive-flow.ts";
-import type { ArchivePlan } from "./archive.ts";
+import type { AgentSession, ChatMessage, CoordinatorState } from "./model.ts";
+import { archiveChat } from "./archive.mjs";
+import type { ArchiveDeps } from "./archive.mjs";
+import type { ArchivePlan } from "./archive.mjs";
 
 const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}) => ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
 const baseState = (): CoordinatorState => ({
@@ -149,4 +149,17 @@ test("a project switched to midway keeps its state untouched", async () => {
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "removed");
   assert.deepEqual(h.calls, ["stop", "hide", "remove"]);
   assert.deepEqual(h.applied, []);
+});
+
+test("an async hide lands before the removal, and an async restore before the notice", async () => {
+  const order: string[] = [];
+  const later = (label: string) => () => new Promise<void>((resolve) => setTimeout(() => { order.push(label); resolve(); }, 5));
+  const h = harness({
+    hide: later("hidden"),
+    restore: later("restored"),
+    remove: async () => { order.push("remove"); throw new Error("fatal: busy"); },
+    notify: (message) => { order.push(message); },
+  });
+  assert.equal(await archiveChat(h.deps, 2, "delete", plan), "kept");
+  assert.deepEqual(order, ["hidden", "remove", "restored", "Couldn't remove the worktree: busy. The chat stays so you can find it."]);
 });

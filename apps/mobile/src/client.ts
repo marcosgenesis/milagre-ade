@@ -67,6 +67,8 @@ type Answer = { status: number; ok: boolean; etag?: string | null; text: () => P
 const LOST = 'Connection lost. Reconnect to your computer. Check the Chat before sending again.';
 const decoder = new TextDecoder();
 const MEDIA_AT_ONCE = 4;
+// Creating a worktree can fetch and copy files; removing one with big ignored folders can take minutes.
+const LONG_CALLS = new Set(['worktree:create', 'worktree:remove']);
 
 export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, timeoutMs = 30000, runtime?: RelayRuntime) {
   const relay = host.relay ? validRelay(host.relay) : undefined;
@@ -191,8 +193,8 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
   return {
     url,
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
-    // Git fetches and worktree setup get the same deadline as the desktop daemon client.
-    call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }, method === 'worktree:create' ? Math.max(timeoutMs, 330000) : timeoutMs),
+    // Git fetches, worktree setup and removing a worktree get the same deadline as the desktop daemon client.
+    call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }, LONG_CALLS.has(method) ? Math.max(timeoutMs, 330000) : timeoutMs),
     media,
     /** A relay computer's image, fetched once into the cache folder; resolves to its file:// URI. */
     mediaFile: (projectPath: string, path: string) => relayImage(projectPath, path).then(source => source.uri),

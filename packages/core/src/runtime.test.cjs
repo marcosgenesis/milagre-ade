@@ -139,7 +139,8 @@ for (const operation of ['create', 'remove']) {
     if (operation === 'create') {
       await assert.rejects(other.invoke('worktree:create', [{ projectPath: project, baseBranch: 'main', prompt: 'Ownership check' }]), /already owned/);
     } else {
-      await assert.rejects(other.invoke('worktree:remove', [target, { projectPath: project, base: 'main' }]), /already owned/);
+      // A runtime that hasn't opened the Project refuses before it takes ownership of anything.
+      await assert.rejects(other.invoke('worktree:remove', [target, { projectPath: project, base: 'main' }]), /Open this project in Milagre first/);
     }
     assert.equal(listing(), before, 'A rejected command must leave every Worktree in place');
   });
@@ -230,11 +231,21 @@ test('canvas Links survive runtime restart and worktree:remove clears their endp
   const b = before.projects.find(entry => entry.path === other).id;
   await first.invoke('canvas:link-add', [{ project_id: a, worktree_path: linked }, { project_id: b }]);
   assert.equal((await first.invoke('canvas:snapshot')).links.length, 1);
+  // A saved edit writes the Project's state to disk.
+  const anySession = Object.values(before.states.find(entry => entry.path === project).state.sessions)[0];
+  await first.invoke('chat:patch', [project, anySession.id, { title: 'Saved' }]);
   await first.close();
+  // Milagre records the base of a worktree it made; this one was added by git, so the test records it.
+  const file = path.join(project, '.milagre/coordination.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  const entry = Object.values(saved.worktrees).find(worktree => worktree.path === linked);
+  entry.base = 'main';
+  await fs.writeFile(file, JSON.stringify(saved));
+  const chat = Object.values(saved.sessions).find(session => session.worktree_id === entry.id);
   const second = make({ worktreeRoot: root, registryRoots: [] });
   assert.equal((await second.invoke('canvas:snapshot')).links.length, 1);
   const seen = await second.invoke('worktree:status', [linked, 'main']);
-  await second.invoke('worktree:remove', [linked, { projectPath: project, base: 'main', seen, force: false }]);
+  await second.invoke('worktree:remove', [linked, { projectPath: project, base: 'main', seen, force: false, ...(chat ? { chatId: `${project}#${chat.id}` } : {}) }]);
   assert.deepEqual((await second.invoke('canvas:snapshot')).links, []);
 });
 

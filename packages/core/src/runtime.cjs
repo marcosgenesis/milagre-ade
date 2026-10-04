@@ -262,30 +262,76 @@ function createRuntime(options) {
     await environmentReady;
     return worktreeStatus(worktreePath, base);
   });
-  // The renderer sends what the user saw (base, status, chat) and the project; main re-checks after closing the chat's agent.
-  // The path and branch are read from git as they are now, so a branch renamed after creation is found as it is.
-  commands.handle("worktree:remove", async (_event, worktreePath, options = {}) => {
-    const { force, base, projectPath, chatId, seen } = options;
+  // The renderer or the phone sends what the user saw (status, chat) and the project; the daemon re-checks after closing
+  // the chat's agent. The path and branch are read from git as they are now, so a branch renamed after creation is found
+  // as it is. Whatever the caller sent, only a worktree Milagre made in a project open here goes, and only while no other
+  // chat uses it. Two removals of one worktree take turns: the second finds it gone and says so instead of failing.
+  const removals = new Map();
+  commands.handle("worktree:remove", async (_event, worktreePath, options) => {
+    const { force, projectPath, chatId, seen } = options && typeof options === "object" ? options : {};
+    if (typeof projectPath !== "string" || !states.has(projectPath)) throw new Error("Open this project in Milagre first.");
+    if (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath)) throw new Error("An absolute worktree path is required.");
     await ownProject(projectPath);
+    const key = `${projectPath}\0${worktreePath}`;
+    const earlier = removals.get(key);
+    const removal = (async () => {
+      const before = earlier ? await earlier.catch(() => null) : null;
+      if (before?.removed && !worktreeAt(await states.get(projectPath), worktreePath)) return { removed: false, alreadyRemoved: true, branch: before.branch, branchDeleted: false };
+      return removeOwnWorktree({ worktreePath, projectPath, chatId, seen, force: Boolean(force) });
+    })();
+    removals.set(key, removal);
+    try {
+      return await removal;
+    } finally {
+      if (removals.get(key) === removal) removals.delete(key);
+    }
+  });
+  const worktreeAt = (state, worktreePath) => Object.values(state.worktrees ?? {}).find((worktree) => worktree.path === worktreePath);
+  async function openAsProject(folder) {
+    const real = await fs.realpath(folder).catch(() => folder);
+    for (const projectPath of states.projects()) {
+      if (projectPath === folder || (await fs.realpath(projectPath).catch(() => projectPath)) === real) return true;
+    }
+    return false;
+  }
+  async function removeOwnWorktree({ worktreePath, projectPath, chatId, seen, force }) {
+    const worktree = worktreeAt(await states.get(projectPath), worktreePath);
+    if (!worktree) throw new Error(`${worktreePath} isn't a worktree of this project, so it is kept.`);
+    if (!worktree.base) throw new Error(`Milagre didn't create ${worktreePath}, so it is kept.`);
+    if (await openAsProject(worktreePath)) throw new Error(`${worktreePath} is open as a project, so it is kept.`);
+    // The chat being archived must be on this worktree, and no other chat that isn't archived may use it: one may have
+    // started there since the user looked, while the archive went through its steps.
+    const inUse = (state) => {
+      if (chatId !== undefined) {
+        const own = typeof chatId === "string" && projectOfKey(chatId) === projectPath ? state.sessions[sessionIdFromKey(chatId)] : undefined;
+        if (!own || own.worktree_id !== worktree.id) throw new Error("That chat isn't on this worktree, so the worktree is kept.");
+      }
+      const others = Object.values(state.sessions).filter((session) => session.worktree_id === worktree.id && !session.archived && `${projectPath}#${session.id}` !== chatId);
+      if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
+    };
+    inUse(await states.get(projectPath));
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
       root: worktreeRoot(),
       projectPath,
-      base,
+      base: worktree.base,
       seen,
-      force: Boolean(force),
-      closeSession: typeof chatId === "string" ? async () => {
-        await worktreeSetups.cancel(chatId);
-        worktreeSetups.forget(worktreePath);
-        return agents.closeChat(chatId);
-      } : undefined,
+      force,
+      closeSession: async () => {
+        if (typeof chatId === "string") {
+          await worktreeSetups.cancel(chatId);
+          worktreeSetups.forget(worktreePath);
+          await agents.closeChat(chatId);
+        }
+        inUse(await states.get(projectPath));
+      },
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
     if (result.removed) await pruneLinks();
     return result;
-  });
+  }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
     await knownFolder(projectPath);
     await environmentReady;

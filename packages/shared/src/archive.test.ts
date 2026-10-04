@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentSession, ChatMessage, CoordinatorState, Worktree } from "../model";
-import { archiveChoices, isInsideRoots, isMilagreWorktree, lossReason, removeFailureNotice, worktreeShared } from "./archive.ts";
-import type { ArchivePlan, WorktreeStatus } from "./archive.ts";
+import type { AgentSession, ChatMessage, CoordinatorState, Worktree } from "./model.ts";
+import { archiveChoices, isInsideRoots, isMilagreWorktree, lossReason, removeFailureNotice, worktreeShared } from "./archive.mjs";
+import type { ArchivePlan, WorktreeStatus } from "./archive.mjs";
 
 const clean: WorktreeStatus = { uncommitted: 0, unpushed: 0, branch: "milagre/x", head: "abc", removable: true };
 const dirty: WorktreeStatus = { uncommitted: 3, unpushed: 2, branch: "milagre/x", head: "abc", removable: false };

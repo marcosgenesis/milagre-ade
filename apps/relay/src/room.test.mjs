@@ -309,3 +309,171 @@ test('closing twice (an error then a close) is the same as closing once', () => 
   assert.notEqual(room.phoneOpened(fakeSocket()), null);
   assert.equal(next.closed, null);
 });
+
+// Restore: the Durable Object can be evicted while sockets stay open. The room marks each socket's
+// role on it (the worker stores that as the socket's attachment) and a fresh room rebuilds from those marks.
+
+/** A room whose marks are kept the way serializeAttachment keeps them: a structured clone, last write wins. */
+function markedRoom(nonce = randomNonce) {
+  const marks = new Map();
+  const room = createRoom({ id, nonce, mark: (socket, state) => marks.set(socket, structuredClone(state)) });
+  return { room, marks };
+}
+/** Simulates eviction: a brand-new room built only from the sockets and their last marks, in the order given. */
+function revive(marks, sockets, nonce = () => new Uint8Array(32).fill(9)) {
+  const next = markedRoom(nonce);
+  next.room.restore(sockets.map(socket => ({ socket, state: marks.has(socket) ? marks.get(socket) : null })));
+  return next;
+}
+
+test('the room marks each socket with its role and state', () => {
+  const { room, marks } = markedRoom();
+  const host = fakeSocket();
+  room.hostOpened(host);
+  assert.deepEqual(marks.get(host), { role: 'pending', challenge: b64url(randomNonce()) });
+  room.hostMessage(host, proofFor(host, keys));
+  assert.deepEqual(marks.get(host), { role: 'host', next: '0' });
+  const phone = fakeSocket();
+  const conn = room.phoneOpened(phone);
+  assert.deepEqual(marks.get(phone), { role: 'phone', conn: String(conn) });
+  assert.deepEqual(marks.get(host), { role: 'host', next: String(conn) });
+  room.phoneClosed(phone);
+  assert.equal(marks.get(phone), null);
+});
+
+test('a restored ready host and its phones keep talking, new phones get fresh conns, and CLOSE still works', () => {
+  const { room, marks } = markedRoom();
+  const host = connectHost(room);
+  const first = fakeSocket(), second = fakeSocket();
+  const a = room.phoneOpened(first), b = room.phoneOpened(second);
+  const { room: revived, marks: after } = revive(marks, [host, first, second]);
+  for (const socket of [host, first, second]) assert.equal(socket.closed, null);
+
+  revived.phoneMessage(first, new Uint8Array([1, 2]));
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 2, conn: a, payload: new Uint8Array([1, 2]) });
+  revived.hostMessage(host, frame(2, b, new Uint8Array([7])));
+  assert.deepEqual(second.sent.at(-1), new Uint8Array([7]));
+
+  const third = fakeSocket();
+  const c = revived.phoneOpened(third);
+  assert.ok(c > a && c > b, `conn ${c} is newer than ${a} and ${b}`);
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 1, conn: c, payload: new Uint8Array() });
+  assert.deepEqual(after.get(host), { role: 'host', next: String(c) });
+
+  revived.hostMessage(host, frame(3, a));
+  assert.deepEqual(first.closed, { code: 1000, reason: 'closed-by-host' });
+  revived.phoneClosed(second);
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 3, conn: b, payload: new Uint8Array() });
+  assert.equal(host.closed, null);
+});
+
+test('a restored phone conn above the host mark still moves the counter past it', () => {
+  const { room, marks } = markedRoom();
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  const conn = room.phoneOpened(phone);
+  marks.set(host, { role: 'host', next: '0' }); // a stale counter must not hand out a conn that is in use
+  const { room: revived } = revive(marks, [host, phone]);
+  const later = fakeSocket();
+  assert.ok(revived.phoneOpened(later) > conn);
+});
+
+test('a restored pending host proves against its original challenge and then replaces the old host', () => {
+  const { room, marks } = markedRoom(() => new Uint8Array(32).fill(3));
+  const old = connectHost(room);
+  const phone = fakeSocket();
+  room.phoneOpened(phone);
+  const newcomer = fakeSocket();
+  room.hostOpened(newcomer);
+  const { room: revived, marks: after } = revive(marks, [old, phone, newcomer]); // the new room would issue a different nonce
+  assert.equal(old.closed, null);
+  assert.equal(newcomer.closed, null);
+  revived.hostMessage(newcomer, proofFor(newcomer, keys));
+  assert.deepEqual(JSON.parse(newcomer.sent.at(-1)), { t: 'ready' });
+  assert.deepEqual(old.closed, { code: 4409, reason: 'replaced' });
+  assert.deepEqual(phone.closed, { code: 4410, reason: 'host-gone' });
+  assert.equal(after.get(newcomer).role, 'host');
+  assert.notEqual(revived.phoneOpened(fakeSocket()), null);
+});
+
+test('a restored pending host with a bad proof is still refused and the restored host is untouched', () => {
+  const { room, marks } = markedRoom();
+  const host = connectHost(room);
+  const impostor = fakeSocket();
+  room.hostOpened(impostor);
+  const { room: revived } = revive(marks, [host, impostor]);
+  revived.hostMessage(impostor, proofFor(impostor, nacl.sign.keyPair()));
+  assert.equal(impostor.closed.code, 4403);
+  assert.equal(host.closed, null);
+});
+
+test('sockets restored with no state or an unknown one are closed as lost-state', () => {
+  const { room } = markedRoom();
+  const bare = fakeSocket(), unknown = fakeSocket(), badConn = fakeSocket(), badChallenge = fakeSocket();
+  room.restore([
+    { socket: bare, state: null },
+    { socket: unknown, state: { role: 'admin' } },
+    { socket: badConn, state: { role: 'phone', conn: 'x' } },
+    { socket: badChallenge, state: { role: 'pending', challenge: 'short' } },
+  ]);
+  for (const socket of [bare, unknown, badConn, badChallenge]) assert.deepEqual(socket.closed, { code: 1011, reason: 'lost-state' });
+});
+
+test('with two restored hosts the last listed one is kept and the other is replaced', () => {
+  const one = markedRoom(), two = markedRoom();
+  const first = connectHost(one.room), second = connectHost(two.room);
+  const marks = new Map([[first, one.marks.get(first)], [second, two.marks.get(second)]]);
+  const { room: revived } = revive(marks, [first, second]);
+  assert.deepEqual(first.closed, { code: 4409, reason: 'replaced' });
+  assert.equal(second.closed, null);
+  const phone = fakeSocket();
+  const conn = revived.phoneOpened(phone);
+  assert.deepEqual(unframe(second.sent.at(-1)), { type: 1, conn, payload: new Uint8Array() });
+  revived.hostMessage(first, frame(2, conn, new Uint8Array([1])));
+  assert.equal(phone.sent.length, 0);
+});
+
+test('with two restored pending hosts the last listed one is kept', () => {
+  const one = markedRoom(), two = markedRoom();
+  const older = fakeSocket(), newer = fakeSocket();
+  one.room.hostOpened(older);
+  two.room.hostOpened(newer);
+  const marks = new Map([[older, one.marks.get(older)], [newer, two.marks.get(newer)]]);
+  const { room: revived } = revive(marks, [older, newer]);
+  assert.deepEqual(older.closed, { code: 4409, reason: 'replaced' });
+  revived.hostMessage(newer, proofFor(newer, keys));
+  assert.deepEqual(JSON.parse(newer.sent.at(-1)), { t: 'ready' });
+});
+
+test('phones restored without a host are closed as host-gone, even with a host pending', () => {
+  const { room, marks } = markedRoom();
+  const host = connectHost(room);
+  const phone = fakeSocket(), other = fakeSocket();
+  room.phoneOpened(phone);
+  room.phoneOpened(other);
+  const pending = fakeSocket();
+  room.hostOpened(pending);
+  revive(marks, [phone]);
+  assert.deepEqual(phone.closed, { code: 4410, reason: 'host-gone' });
+  revive(marks, [pending, other]);
+  assert.deepEqual(other.closed, { code: 4410, reason: 'host-gone' });
+  assert.equal(pending.closed, null);
+  assert.equal(host.closed, null);
+});
+
+test('a socket the room already closed is not restored as live, even if it is still listed while closing', () => {
+  const { room, marks } = markedRoom();
+  const first = connectHost(room);
+  const phone = fakeSocket();
+  room.phoneOpened(phone);
+  const second = connectHost(room);
+  assert.equal(first.closed.code, 4409);
+  first.closed = null; phone.closed = null; // still CLOSING, so getWebSockets() may list them
+  const { room: revived } = revive(marks, [second, first, phone]);
+  assert.equal(first.closed.code, 1011);
+  assert.equal(phone.closed.code, 1011);
+  assert.equal(second.closed, null);
+  const late = fakeSocket();
+  const conn = revived.phoneOpened(late);
+  assert.deepEqual(unframe(second.sent.at(-1)), { type: 1, conn, payload: new Uint8Array() });
+});

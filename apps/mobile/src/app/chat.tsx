@@ -15,7 +15,7 @@ import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indic
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { ChatReply } from '../chat-reply';
 import { ThinkingIndicator } from '../running-logo';
-import { BottomFade, EdgeFade } from '../bottom-fade';
+import { BottomFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
@@ -222,8 +222,6 @@ export default function ChatScreen() {
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </KeyboardChatScrollView>
-    {/* iOS's soft edge already blurs under the title; this only fades the text into the page. */}
-    <EdgeFade edge="top" height={insets.top + 72} blur={false} />
     <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />

@@ -45,8 +45,8 @@ function MarkdownImage({ src, alt, media, basePath }: { src: string; alt: string
     if (thumb.current) thumb.current.measureInWindow((x, y, width, height) => show(width && height ? { x, y, width, height } : undefined));
     else show();
   };
-  return <Pressable ref={thumb} accessibilityRole="imagebutton" accessibilityLabel={`${alt}. Open full screen`} onPress={open} style={{ width: '100%', maxWidth: 320, borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field }}>
-    <Image source={ready} accessibilityLabel={alt} resizeMode="contain" onError={() => setFailed(source)} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width > 0 && height > 0) setRatio(width / height); }} style={{ width: '100%', aspectRatio: Math.max(0.4, ratio) }} />
+  return <Pressable ref={thumb} accessibilityRole="imagebutton" accessibilityLabel={`${alt}. Open full screen`} onPress={open} style={{ width: '100%', maxWidth: Math.min(320, 300 * ratio), borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field }}>
+    <Image source={ready} accessibilityLabel={alt} resizeMode="contain" onError={() => setFailed(source)} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width > 0 && height > 0) setRatio(width / height); }} style={{ width: '100%', aspectRatio: ratio }} />
   </Pressable>;
 }
 

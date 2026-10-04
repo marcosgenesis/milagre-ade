@@ -13,7 +13,7 @@ export default function NavigationDrawer() {
   const session = useSession();
   const { chatId } = useLocalSearchParams<{ chatId?: string }>();
   const { width } = useWindowDimensions();
-  const drawerWidth = Math.min(380, width - 32);
+  const drawerWidth = width;
   const progress = useSharedValue(0);
   const from = useSharedValue(0);
   const closing = useSharedValue(false);
@@ -49,7 +49,7 @@ export default function NavigationDrawer() {
   return <GestureHandlerRootView style={{ flex: 1 }} accessibilityViewIsModal>
     <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
     <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: colors.backdrop }, shade]}><Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => close()} style={StyleSheet.absoluteFill} /></Animated.View>
-    <GestureDetector gesture={pan}><Animated.View style={[{ width: drawerWidth, flex: 1, backgroundColor: colors.page, borderRightWidth: StyleSheet.hairlineWidth, borderColor: colors.line }, panel]}>
+    <GestureDetector gesture={pan}><Animated.View style={[{ width: drawerWidth, flex: 1, backgroundColor: colors.page }, panel]}>
       <ProjectNavigation key={session.client.url} activeChatId={chatId ? Number(chatId) : undefined} onClose={() => close()} onNavigate={close} />
     </Animated.View></GestureDetector>
   </GestureHandlerRootView>;

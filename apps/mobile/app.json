@@ -70,6 +70,12 @@
         "projectId": "53a87eea-769e-4d7c-a818-b9e2440cc065"
       }
     },
-    "owner": "victorlucss"
+    "owner": "victorlucss",
+    "updates": {
+      "url": "https://u.expo.dev/53a87eea-769e-4d7c-a818-b9e2440cc065"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    }
   }
 }

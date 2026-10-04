@@ -11,6 +11,7 @@ const { WebSocket } = require('ws');
 const { startDaemon } = require('./server.cjs');
 const { forPhone, runsForPhone, startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
+const { demoRuntimeOptions } = require('./demo-agent.cjs');
 
 async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-')));
@@ -133,6 +134,98 @@ test('the phone checks a Chat\'s worktree and removes a clean Milagre worktree, 
     assert.match((await refused.json()).error.message, /^WORKTREE_CHANGED: /);
   }
   assert.equal(await fs.readFile(path.join(changed.worktree.path, 'late.txt'), 'utf8'), 'written after the check\n');
+});
+
+// A bridge over a daemon whose Chats run the scripted demo agent, with one commit, the Project open, and helpers to
+// create a worktree (with its Chat), add a Chat to it and ask for its removal.
+async function removalFixture(t) {
+  const { createSession, agentCli, agentModels, agentCliStatus } = demoRuntimeOptions({});
+  const f = await fixture(t, { runtimeOptions: { createSession, agentCli, agentModels, agentCliStatus } });
+  execFileSync('git', ['-C', f.project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  await f.rpc('project:open', [f.project]);
+  const answer = async response => ({ status: response.status, body: await response.json() });
+  const snapshot = async () => (await (await f.request('/snapshot?projectPath=' + encodeURIComponent(f.project))).json()).result;
+  const idle = async () => {
+    for (let i = 0; i < 200 && Object.keys((await snapshot()).runs.runs).length; i++) await delay(20);
+  };
+  const create = async prompt => {
+    const { body } = await answer(await f.rpc('worktree:create', [{ projectPath: f.project, baseBranch: 'main', prompt }]));
+    const worktree = body.result.project.state.worktrees[body.result.worktreeId];
+    const chat = Object.values(body.result.project.state.sessions).find(session => session.worktree_id === worktree.id);
+    const seen = (await answer(await f.rpc('worktree:status', [worktree.path, worktree.base]))).body.result;
+    return { worktree, chatId: `${f.project}#${chat.id}`, seen };
+  };
+  const addChat = async worktree => {
+    const { status, body } = await answer(await f.rpc('chat:send', [{ projectPath: f.project, worktreeId: worktree.id, body: 'hello', provider: 'codex', model: 'demo', permissionMode: 'ask' }]));
+    assert.equal(status, 200, JSON.stringify(body));
+    await idle();
+    return body.result.sessionId;
+  };
+  const remove = (worktreePath, options) => f.rpc('worktree:remove', [worktreePath, { force: false, base: 'main', projectPath: f.project, ...options }]).then(answer);
+  return { ...f, answer, snapshot, create, addChat, remove };
+}
+
+test('the daemon refuses to remove a worktree another Chat started using, or for a Chat on another worktree', async t => {
+  const f = await removalFixture(t);
+  const first = await f.create('First');
+  const second = await f.create('Second');
+  // A Chat started in the worktree after the phone checked it.
+  assert.equal(await f.addChat(first.worktree), Number(first.chatId.split('#')[1]), 'the first message goes to the worktree\'s own Chat');
+  const later = await f.addChat(first.worktree);
+  assert.notEqual(later, Number(first.chatId.split('#')[1]));
+  let refused = await f.remove(first.worktree.path, { chatId: first.chatId, seen: first.seen });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error.message, /Another chat uses this worktree now/);
+  // The Chat named is on another worktree.
+  refused = await f.remove(first.worktree.path, { chatId: second.chatId, seen: first.seen });
+  assert.match(refused.body.error.message, /isn't on this worktree/);
+  refused = await f.remove(first.worktree.path, { chatId: `${f.project}#9999`, seen: first.seen });
+  assert.match(refused.body.error.message, /isn't on this worktree/);
+  await fs.stat(first.worktree.path);
+  // Once the other Chat is archived too, the worktree goes.
+  await f.rpc('chat:patch', [f.project, later, { archived: true }]);
+  const removed = await f.remove(first.worktree.path, { chatId: first.chatId, seen: first.seen });
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal(removed.body.result.removed, true);
+});
+
+test('the daemon removes only a worktree Milagre made in a Project open here', async t => {
+  const f = await removalFixture(t);
+  const made = await f.create('Made');
+  // A Project that isn't open: refused before anything is written into it.
+  const elsewhere = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-elsewhere-')));
+  t.after(() => fs.rm(elsewhere, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-b', 'main', elsewhere], { stdio: 'ignore' });
+  let refused = await f.remove(made.worktree.path, { projectPath: elsewhere, chatId: made.chatId, seen: made.seen });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error.message, /Open this project in Milagre first/);
+  await assert.rejects(fs.stat(path.join(elsewhere, '.milagre')), { code: 'ENOENT' });
+  // A folder that isn't one of the Project's worktrees.
+  refused = await f.remove(path.join(path.dirname(made.worktree.path), 'unknown'), { chatId: made.chatId, seen: made.seen });
+  assert.match(refused.body.error.message, /isn't a worktree of this project/);
+  // A worktree git has but Milagre didn't make: it has no base.
+  const manual = path.join(path.dirname(made.worktree.path), 'manual');
+  execFileSync('git', ['-C', f.project, 'worktree', 'add', '-b', 'manual', manual, 'main'], { stdio: 'ignore' });
+  await f.rpc('project:open', [f.project]);
+  const listed = Object.values((await f.snapshot()).project.state.worktrees).find(worktree => worktree.path === manual);
+  assert.ok(listed && !listed.base);
+  refused = await f.remove(manual, { seen: made.seen });
+  assert.match(refused.body.error.message, /didn't create/);
+  // The Project's own checkout.
+  refused = await f.remove(f.project, { seen: made.seen });
+  assert.match(refused.body.error.message, /didn't create|isn't a worktree/);
+  await fs.stat(manual);
+  await fs.stat(made.worktree.path);
+});
+
+test('two removals of one worktree take turns, and the second reports it already removed', async t => {
+  const f = await removalFixture(t);
+  const made = await f.create('Twice');
+  const [one, two] = await Promise.all([1, 2].map(() => f.remove(made.worktree.path, { chatId: made.chatId, seen: made.seen })));
+  assert.deepEqual([one.status, two.status], [200, 200], JSON.stringify([one.body, two.body]));
+  assert.equal(one.body.result.removed, true);
+  assert.equal(two.body.result.alreadyRemoved, true);
+  await assert.rejects(fs.stat(made.worktree.path), { code: 'ENOENT' });
 });
 
 test('mobile uploads are private, bounded and scoped to an open Project', async t => {

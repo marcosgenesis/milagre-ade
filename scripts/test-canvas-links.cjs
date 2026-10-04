@@ -22,7 +22,7 @@ window.milagre = {
   setWorktreePosition: async () => null,
 };
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root")).render(<div style={{ display: "flex", height: "100vh", padding: "20px" }}><CanvasView states={{}} runs={{}} onOpenChat={(path, id) => { window.__openedChat = { path, id }; }} onBack={() => {}} /></div>);
+createRoot(document.getElementById("root")).render(<div style={{ display: "flex", height: "100vh", padding: "20px" }}><CanvasView states={{}} runs={{}} linkedWork={{ delegations: [], negotiations: [], receiveOnly: [] }} onOpenChat={(path, id) => { window.__openedChat = { path, id }; }} onBack={() => {}} /></div>);
 `;
 
 async function browserChecks() {

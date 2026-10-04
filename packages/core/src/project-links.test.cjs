@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { canLink, createLink, pruneLinks, visibleWorktrees } = require("./project-links.cjs");
+const { canLink, createLink, linkedWorktrees, pruneLinks } = require("./project-links.cjs");
+
+// The reached Worktrees without the Link that reaches each one.
+const visibleWorktrees = (...args) => linkedWorktrees(...args).map(({ project_id, worktree_path }) => ({ project_id, worktree_path }));
 
 const projects = [{ id: "a" }, { id: "b" }, { id: "c" }];
 const active = { a: ["/a/one", "/a/two"], b: ["/b/one"], c: ["/c/one"] };
@@ -41,4 +44,11 @@ test("inactive Worktree endpoints are pruned but Project endpoints remain", () =
   const worktreeLink = createLink([], worktree("a", "/a/two"), project("b"), projects, active);
   const projectLink = createLink([worktreeLink], project("a"), project("c"), projects, active);
   assert.deepEqual(pruneLinks([worktreeLink, projectLink], projects, { ...active, a: ["/a/one"] }), [projectLink]);
+});
+
+test("each reached Worktree names the Link that reaches it", () => {
+  const broad = createLink([], project("a"), project("b"), projects, active);
+  const narrow = createLink([broad], worktree("a", "/a/one"), worktree("b", "/b/one"), projects, active);
+  assert.deepEqual(linkedWorktrees(worktree("a", "/a/one"), [broad, narrow], active), [{ project_id: "b", worktree_path: "/b/one", link_id: broad.id }]);
+  assert.deepEqual(linkedWorktrees(worktree("b", "/b/one"), [narrow], active), [{ project_id: "a", worktree_path: "/a/one", link_id: narrow.id }]);
 });

@@ -5,6 +5,7 @@ const { killTree } = require("./process-tree.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
+const { runTool } = require("../linked-tools.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
 // the user, through canUseTool, before edits and commands its rules don't already allow.
@@ -51,11 +52,25 @@ function userMessage(prompt, images = []) {
   return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 }
 
+// A Chat's linked tools, served in-process. They are allowed outright: the reads need no approval, and
+// `delegate` asks through Milagre's own card (see Delegations), in every provider the same way.
+function linkedOptions(tools, sdk) {
+  const server = sdk.createSdkMcpServer({
+    name: "milagre",
+    alwaysLoad: true,
+    tools: tools.map((definition) => sdk.tool(definition.name, definition.description, definition.input, async (args) => {
+      const { text, isError } = await runTool(definition, args);
+      return { content: [{ type: "text", text }], isError };
+    }, { annotations: { readOnlyHint: definition.readOnly } })),
+  });
+  return { mcpServers: { milagre: server }, allowedTools: tools.map((definition) => `mcp__milagre__${definition.name}`) };
+}
+
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class ClaudeSession {
-  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
-    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, loadSdk, spawnImpl, interruptGraceMs });
+  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
+    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
     this.state = { sessionId: resumeId ?? null, turnId: null, hasText: false };
     this.query = null;
     this.inbox = null;
@@ -193,11 +208,12 @@ class ClaudeSession {
     Object.assign(this.state, { turnId, hasText: false });
     this.turnReady = Promise.resolve();
     this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
-    this.emit({ type: "turn-started", turnId });
+    // It runs a steering message the last turn didn't take; that message's sender learns which turn has it.
+    this.emit({ type: "turn-started", turnId, ...(this.lastTurnId ? { continues: this.lastTurnId } : {}) });
   }
 
   async start(model, mode, effort, ultracode = false, fastMode = false) {
-    const { query } = await this.loadSdk();
+    const sdk = await this.loadSdk();
     if (this.closed) return;
     this.stderr = "";
     this.child = null;
@@ -208,7 +224,7 @@ class ClaudeSession {
     this.ultracode = ultracode;
     this.fastMode = fastMode;
     this.outputStyle = null;
-    this.query = query({
+    this.query = sdk.query({
       prompt: this.inbox,
       options: {
         cwd: this.cwd,
@@ -222,6 +238,7 @@ class ClaudeSession {
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled) },
+        ...(this.linked?.tools.length ? linkedOptions(this.linked.tools, sdk) : {}),
         canUseTool: (toolName, input, options) => (toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options)),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
@@ -353,6 +370,7 @@ class ClaudeSession {
   finishTurn(event) {
     if (!this.turnActive) return;
     this.turnActive = false;
+    this.lastTurnId = this.state.turnId;
     const markEnded = this.markEnded;
     clearTimeout(this.interruptTimer);
     this.permissions.cancelAll();

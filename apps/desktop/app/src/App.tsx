@@ -73,6 +73,7 @@ import { createDraftStore } from "./lib/draft-store";
 import { lazyView } from "./lib/lazy-view";
 import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
 import { reuseRows, useEvent, useStableSet } from "./lib/stable";
+import { delegatedChats, useLinkedWork } from "./lib/linked-work";
 import { DraftChatComposer } from "./components/DraftChatComposer";
 import type { ChatRowActions, SidebarRecent } from "./components/sidebar/ChatRow";
 
@@ -363,6 +364,8 @@ function App() {
   const waiting = useStableSet(useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
   const asking = useStableSet(useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
   const running = useStableSet(useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]));
+  const linkedWork = useLinkedWork();
+  const delegated = useStableSet(useMemo(() => delegatedChats(linkedWork, project?.path ?? ""), [linkedWork, project?.path]));
   const messagesBySession = useMemo(() => {
     const grouped = new Map<number, ChatMessage[]>();
     for (const message of state?.messages ?? []) {
@@ -388,7 +391,7 @@ function App() {
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), delegated: delegated.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
@@ -402,7 +405,7 @@ function App() {
       });
     // Rows that came out the same stay the same objects, so only a changed chat's row renders.
     return previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows);
-  }, [state, messagesBySession, chatOrder, asking, waiting, running, pullRequests, chatPrs, agentPorts, project]);
+  }, [state, messagesBySession, chatOrder, asking, waiting, delegated, running, pullRequests, chatPrs, agentPorts, project]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
@@ -988,7 +991,7 @@ function App() {
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
-        {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}
+        {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} linkedWork={linkedWork} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}
         {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
         <div data-chat-pane className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>
@@ -1033,6 +1036,7 @@ function App() {
               onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
             } : undefined}
             resume={project && selectedSession?.resumeTurn ? { onContinue: () => void window.milagre.resumeChat(project.path, selectedSession.id).catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)) } : undefined}
+            onOpenLinkedChat={(key) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
             models={models}
             cliStatus={cliStatus}

@@ -157,6 +157,6 @@ The work ships as stacked pull requests, each usable on its own:
 
 ## Further Notes
 
-- **Codex MCP.** Whether `codex app-server` accepts MCP servers in the per-thread `config` is unverified. Check it before step 4, since it decides whether Codex **Chats** are full participants or receive-only.
+- **Codex MCP (verified with codex-cli 0.160.0).** `codex app-server` accepts a streamable-HTTP MCP server in the per-thread `config` (`config.mcp_servers.milagre.url`), on `thread/start` and `thread/resume`. It starts the server, lists its tools and calls them without asking for approval, read-only or not, so `delegate` keeps Milagre's own approval card for both providers. Milagre serves the tools on loopback (`linked-mcp-server.cjs`), one unguessable path per **Chat**, with `tool_timeout_sec` raised so an approval can wait. A Codex that rejects the thread `config` gets the retry without it (no question tool, no linked tools): that **Chat** is marked receive-only on the canvas and still gets the push summary and **Delegations**. Codex's experimental `dynamicTools` were not used: they exist only on `thread/start`, so a resumed thread would lose them.
 - **Turn input context.** Claude's appended system prompt and Codex's `developerInstructions` are fixed at session start, which is why the push summary goes in each turn's input instead.
 - **Dead MVP UI.** The never-rendered "Shared context" panel in `ChatComposer.tsx` and its Connection wiring in `App.tsx` belong to spec 001 and can be removed separately.

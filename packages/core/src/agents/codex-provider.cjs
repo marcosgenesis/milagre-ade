@@ -71,8 +71,8 @@ async function readLatestChildTurn(rpc, threadId) {
 }
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, clientVersion, interruptGraceMs, createRpc });
+  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
     // steps: ids of the tool steps started in this turn and not yet completed.
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
@@ -206,7 +206,10 @@ class CodexSession {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
     rpc.notify("initialized");
     await this.checkLogin(rpc);
-    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled), config: THREAD_CONFIG };
+    // The Chat's linked tools reach Codex as an MCP server in the thread's config (see linked-mcp-server.cjs).
+    const url = this.linked ? await this.linked.url().catch(() => null) : null;
+    const config = url ? { ...THREAD_CONFIG, mcp_servers: { milagre: { url, tool_timeout_sec: 86400 } } } : THREAD_CONFIG;
+    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled), config };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;
@@ -226,14 +229,20 @@ class CodexSession {
   }
 
   // Codex ignores a feature it doesn't know, but a Codex that rejects `config` outright would leave the
-  // chat unusable. On an RPC error the call is tried once more without it: no question tool, but a chat.
+  // chat unusable. On an RPC error the call is tried again with less: first without the linked tools' MCP
+  // server (the Chat then only receives Delegations), then without any config (no question tool either).
   async requestThread(method, params) {
-    try {
-      return await this.rpc.request(method, params, { timeoutMs: 60_000 });
-    } catch (error) {
-      if (!error.rpcError || !params.config) throw error;
-      const { config: _config, ...bare } = params;
-      return this.rpc.request(method, bare, { timeoutMs: 60_000 });
+    const { mcp_servers: linkedServer, ...rest } = params.config ?? {};
+    const { config: _config, ...bare } = params;
+    const attempts = [params, ...(linkedServer ? [{ ...params, config: rest }] : []), ...(params.config ? [bare] : [])];
+    for (const [index, attempt] of attempts.entries()) {
+      try {
+        const result = await this.rpc.request(method, attempt, { timeoutMs: 60_000 });
+        if (linkedServer) this.linked?.toolsAvailable(index === 0);
+        return result;
+      } catch (error) {
+        if (!error.rpcError || index === attempts.length - 1) throw error;
+      }
     }
   }
 

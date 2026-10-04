@@ -12,12 +12,13 @@ const { waitUntil } = require("./test-helpers.cjs");
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const TURN = { prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto" };
 
-function codex(t, { scenario = "reply", resumeId, tldrEnabled, command = process.execPath, interruptGraceMs } = {}) {
+function codex(t, { scenario = "reply", resumeId, tldrEnabled, linked, command = process.execPath, interruptGraceMs } = {}) {
   const events = [];
   const session = new CodexSession({
     cwd: os.tmpdir(),
     resumeId,
     tldrEnabled,
+    linked,
     command,
     clientVersion: "test",
     interruptGraceMs,
@@ -549,6 +550,24 @@ test("threads start and resume without the question tool when Codex rejects the 
   }
 });
 
+
+test("a Chat's linked tools reach Codex as an MCP server in the thread config; a Codex that refuses it makes the Chat receive-only", async (t) => {
+  const reported = [];
+  const linked = { tools: [], url: async () => "http://127.0.0.1:1234/mcp/abc", toolsAvailable: (available) => reported.push(available) };
+  const { session, events } = codex(t, { linked });
+  await session.startTurn(TURN);
+  await ended(events);
+  const start = (await received(session)).find((message) => message.method === "thread/start").params;
+  assert.deepEqual(start.config, { features: { default_mode_request_user_input: true }, mcp_servers: { milagre: { url: "http://127.0.0.1:1234/mcp/abc", tool_timeout_sec: 86400 } } });
+  assert.deepEqual(reported, [true]);
+  const rejecting = codex(t, { scenario: "reject-config", linked });
+  await rejecting.session.startTurn(TURN);
+  await ended(rejecting.events);
+  const attempts = (await received(rejecting.session)).filter((message) => message.method === "thread/start").map((message) => message.params.config);
+  assert.deepEqual(attempts, [start.config, { features: { default_mode_request_user_input: true } }, undefined], "the MCP server goes first, the whole config last");
+  assert.deepEqual(reported, [true, false]);
+  assert.deepEqual(rejecting.events.at(-1), { type: "turn-completed" });
+});
 
 test("a Codex whose token expired mid-session closes its session, so the next message starts a fresh app-server", async (t) => {
   const { session, events } = codex(t, { scenario: "unauthorized" });

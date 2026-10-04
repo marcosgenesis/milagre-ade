@@ -22,8 +22,8 @@ function streamKey(event) {
 // session run one at a time per chat, and onSessionClosed(chatId) runs once a chat's session is gone. Events from a session that is no longer the chat's
 // current one are dropped. A turn's session steers it when the chat sends again while it runs.
 class SessionManager {
-  constructor({ createSession, send, onSessionClosed = () => {}, onTurnStarted = () => {}, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
-    Object.assign(this, { createSession, send, onSessionClosed, onTurnStarted, idleMs, batchMs });
+  constructor({ createSession, send, linkedFor = () => null, onSessionClosed = () => {}, onTurnStarted = () => {}, idleMs = IDLE_MS, batchMs = BATCH_MS }) {
+    Object.assign(this, { createSession, send, linkedFor, onSessionClosed, onTurnStarted, idleMs, batchMs });
     this.sessions = new Map();
     this.buffers = new Map();
     this.queues = new Map();
@@ -60,6 +60,7 @@ class SessionManager {
       resumeId,
       tldrEnabled,
       command: request.command,
+      linked: this.linkedFor(chatId),
       emit: (event) => this.forward(chatId, entry, event),
     });
     this.sessions.set(chatId, entry);
@@ -142,6 +143,21 @@ class SessionManager {
   answerQuestion(chatId, requestId, answers) {
     if (!validAnswers(answers)) throw new Error("Invalid answers to an agent question.");
     return this.sessions.get(chatId)?.session.answerQuestion(requestId, answers) ?? false;
+  }
+
+  // Milagre's own tools (a Delegation) ask through the chat's approval cards, which follow its permission
+  // mode (Full answers at once). A chat without a session has nobody to ask.
+  askApproval(chatId, request) {
+    const permissions = this.sessions.get(chatId)?.session.permissions;
+    return permissions ? new Promise((resolve) => permissions.add(request, resolve)) : Promise.resolve("cancelled");
+  }
+
+  permissionMode(chatId) {
+    return this.sessions.get(chatId)?.session.permissions?.mode ?? "ask";
+  }
+
+  isTurnActive(chatId) {
+    return Boolean(this.sessions.get(chatId)?.session.turnActive);
   }
 
   // A mode switch reaches the chat's session at once, so a running turn stops asking for what it allows.

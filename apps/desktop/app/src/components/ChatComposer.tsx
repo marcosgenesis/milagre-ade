@@ -29,6 +29,7 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoverBriefChip, HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
+import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
 import { otherProvider, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
@@ -89,6 +90,7 @@ const MessageSection = memo(function MessageSection({
   asking = false,
   waitingStepIds = [],
   animate = false,
+  onOpenChat,
 }: {
   message: AppChatMessage;
   isUser: boolean;
@@ -103,7 +105,12 @@ const MessageSection = memo(function MessageSection({
   waitingStepIds?: string[];
   /** Fade in on arrival; messages already there when the chat opened skip it, so a long chat doesn't animate all at once. */
   animate?: boolean;
+  /** Opens another Chat by key, from a message it sent across a Link. */
+  onOpenChat?: (chatKey: string) => void;
 }) {
+  const linked = linkedContext(message);
+  // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
+  const bubble = isUser && !linked;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -118,11 +125,13 @@ const MessageSection = memo(function MessageSection({
       id={`message-${message.id}`}
       data-slot="message"
       data-from={isUser ? "user" : "assistant"}
+      data-linked={linked?.kind}
       data-streaming={streaming || undefined}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${isUser ? "items-end pl-12" : ""}`}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
-      <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${isUser ? "rounded-xl bg-field px-3 py-1.5" : ""}`}>
+      {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
+      <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}>
         <Attachments images={message.images} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
         {isUser ? (
           message.body.trim() ? <UserBody body={message.body} /> : null
@@ -204,6 +213,8 @@ interface ChatComposerProps {
   /** A handed-over chat's brief while it waits for the first message; `chatId` is the chat's key. */
   handoverBrief?: { chatId: string; brief: string; onSave: (text: string) => Promise<void> };
   handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
+  /** Opens the Chat a Delegation, report or agreement came from, in whichever Project it is. */
+  onOpenLinkedChat?: (chatKey: string) => void;
   /** A chat a quit stopped longer ago than Milagre resumes by itself: Continue starts its turn again. */
   resume?: { onContinue: () => void };
   /** The models the picker offers (see mergeModels). */
@@ -365,6 +376,7 @@ export function ChatComposer({
   canHandover = false,
   handoverBrief,
   handover,
+  onOpenLinkedChat,
   resume,
   models,
   cliStatus,
@@ -473,6 +485,7 @@ export function ChatComposer({
               updatingCli={updatingCli}
               cliStatus={cliStatus}
               animate={!openingMessages.current.ids.has(message.id)}
+              onOpenChat={onOpenLinkedChat}
             />
           ))}
 

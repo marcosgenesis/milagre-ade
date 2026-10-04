@@ -1158,3 +1158,18 @@ code.step-shimmer {
   background: transparent;
   color: var(--ink-3);
 }
+
+/* A Link something travels along: its line moves toward the receiving side. Still under reduced motion. */
+.milagre-canvas-flow .milagre-link-active {
+  stroke: var(--color-accent) !important;
+  stroke-dasharray: 6 4;
+  animation: milagre-link-flow 900ms linear infinite;
+}
+
+@keyframes milagre-link-flow {
+  to { stroke-dashoffset: -10; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .milagre-canvas-flow .milagre-link-active { animation: none; }
+}

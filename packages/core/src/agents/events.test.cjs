@@ -136,7 +136,13 @@ test("agents are told to put what the user needs in their reply, not only in thi
 
 test("agents are told to ask with their question tool, and in a short list without one", () => {
   assert.match(MILAGRE_INSTRUCTIONS, /ask with your question tool if you have one \(AskUserQuestion or request_user_input\)/);
-  assert.match(MILAGRE_INSTRUCTIONS, /otherwise ask in your reply as a short numbered list\.$/);
+  assert.match(MILAGRE_INSTRUCTIONS, /otherwise ask in your reply as a short numbered list\.\n/);
+});
+
+test("agents are told about Links, the read-only linked tools, Delegations and Negotiations", () => {
+  for (const name of ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files", "delegate", "conclude_negotiation"]) assert.match(MILAGRE_INSTRUCTIONS, new RegExp(name));
+  assert.match(MILAGRE_INSTRUCTIONS, /Never edit a linked Worktree's files yourself/);
+  assert.match(MILAGRE_INSTRUCTIONS, /up to 10 rounds/);
 });
 
 const toolUse = (id, name, input, parent = null) => ({ type: "assistant", parent_tool_use_id: parent, message: { content: [{ type: "tool_use", id, name, input }] } });

@@ -11,6 +11,11 @@ test("chatMark: a question beats waiting beats running beats unread", () => {
   assert.equal(chatMark({ waiting: false, running: false, unread: false }), "idle");
 });
 
+test("chatMark: a Delegation working in the chat shows over running, under anything that waits on the user", () => {
+  assert.equal(chatMark({ waiting: false, delegated: true, running: true, unread: true }), "delegated");
+  assert.equal(chatMark({ waiting: true, delegated: true, running: true, unread: false }), "waiting");
+});
+
 test("formatLineCount and folderName", () => {
   assert.equal(formatLineCount(0), "0");
   assert.equal(formatLineCount(980), "980");

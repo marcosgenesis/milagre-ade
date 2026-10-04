@@ -36,6 +36,7 @@ export function projectOfKey(key: string): string;
 export function chatInProject(projectPath: string, key: string): boolean;
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns;
 export function isTurnEnd(event: AgentEvent): boolean;
+export function runStatus(run: AgentRun | undefined): "idle" | "working" | "waiting";
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
 export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent;
 export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent;

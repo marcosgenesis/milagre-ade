@@ -41,6 +41,7 @@ const { saveProjectState, readProjectState, stateFile } = require("./project-sto
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
+const { createLinkedWorktrees } = require("./linked-worktrees.cjs");
 const { createUsageReader } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
@@ -250,7 +251,7 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await projectRegistry().pruneLinks(await canvasActiveWorktrees());
+    if (result.removed) await pruneLinks();
     return result;
   });
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -342,6 +343,7 @@ function createRuntime(options) {
     keepAwake.observe(chatId, event);
     void notifyIfWaiting(chatId, event).catch(() => {});
     diffs.observe(chatId, event);
+    void linked.observe(chatId, event).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
     // A turn that just failed on a login problem makes a "ready" picker status out of date.
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
@@ -353,6 +355,7 @@ function createRuntime(options) {
     createSession: options.createSession ?? ((provider, options) => (provider === "codex"
       ? new CodexSession({ ...options, clientVersion: version })
       : new ClaudeSession(options))),
+    linkedFor: (chatId) => linked.forChat(chatId),
     onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
     onTurnStarted: () => ports.wake(),
     send: (chatId, event) => void chats.receive(chatId, event),
@@ -379,8 +382,10 @@ function createRuntime(options) {
   // The renderer is untrusted: only a pid the chat's port list shows can be stopped.
   commands.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
+  // Resolves with what took the message: { turnId, steered }, a null turnId when no turn started, and
+  // `cancelled` when quitting or a stopped setup stopped it before it began.
   async function startAgentTurn(request) {
-    if (closing) return { turnId: null, steered: false };
+    if (closing) return { turnId: null, steered: false, cancelled: true };
     const images = decodeImages(request.images);
     const prompt = await expandSkillPrompt(request.cwd, request.prompt);
     const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
@@ -390,14 +395,18 @@ function createRuntime(options) {
       return { turnId: null, steered: false };
     }
     // A new worktree's first turn waits for its setup command; one that failed tells the agent, one that was stopped stops the turn.
-    if (closing) return { turnId: null, steered: false };
+    if (closing) return { turnId: null, steered: false, cancelled: true };
     const setup = await worktreeSetups.beforeTurn(request.chatId, request.cwd);
     if (closing || setup.cancelled) {
       await chats.receive(request.chatId, { type: "turn-cancelled" });
-      return { turnId: null, steered: false };
+      return { turnId: null, steered: false, cancelled: true };
     }
+    // A new turn carries the summary of the Chat's linked Worktrees after its message (a leading slash command
+    // stays first); a message steering a turn doesn't repeat it.
+    const context = agents.isTurnActive(request.chatId) ? "" : await linked.context(request.chatId);
+    const text = [prompt, setup.note, context].filter(Boolean).join("\n\n");
     try {
-      return await agents.startTurn({ ...request, prompt: setup.note ? `${prompt}\n\n${setup.note}` : prompt, images, command: cli.command });
+      return await agents.startTurn({ ...request, prompt: text, images, command: cli.command });
     } catch (error) {
       // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
       keepAwake.turnNotStarted(request.chatId);
@@ -452,7 +461,8 @@ function createRuntime(options) {
 
   commands.handle("chat:send", (_event, request) => {
     if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
-    return chats.send(request);
+    // Only Milagre marks a message as coming from another Chat.
+    return chats.send({ ...request, context: undefined }).then(({ sessionId }) => ({ sessionId }));
   });
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
@@ -506,6 +516,7 @@ function createRuntime(options) {
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
     await worktreeSetups.cancel(chatId);
+    await linked.stop({ chatKey: chatId });
     await agents.interrupt(chatId);
   });
 
@@ -546,6 +557,18 @@ function createRuntime(options) {
       (await activeWorktrees(project.path)).map(worktree => worktree.path),
     ])));
   }
+  // Links whose Worktree endpoint went away are dropped, with what was waiting to travel along them.
+  async function pruneLinks(active) {
+    for (const link of await projectRegistry().pruneLinks(active ?? await canvasActiveWorktrees())) await linked.linkRemoved(link.id);
+  }
+  // A linked Project not open yet is opened here (ownership, reconciled Worktrees, interrupted turns), as the
+  // canvas opens every Project it shows.
+  async function linkedState(projectPath) {
+    return states.has(projectPath) ? states.get(projectPath) : (await readProject(projectPath)).state;
+  }
+  const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit });
+  commands.handle("linked:snapshot", () => linked.snapshot());
+  commands.handle("linked:stop-negotiation", (_event, id) => (typeof id === "string" ? linked.stop({ negotiationId: id }) : undefined));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
   async function openProject(projectPath) {
     const identity = await resolveProject(projectPath);
@@ -573,8 +596,7 @@ function createRuntime(options) {
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("canvas:snapshot", async () => {
     const projects = await projectRegistry().list();
-    const active = await canvasActiveWorktrees();
-    await projectRegistry().pruneLinks(active);
+    await pruneLinks(await canvasActiveWorktrees());
     const registry = await projectRegistry().snapshot();
     const statesByPath = await Promise.all(projects.map(async project => ({ path: project.path, state: (await readProject(project.path)).state })));
     return { ...registry, states: statesByPath };
@@ -585,6 +607,7 @@ function createRuntime(options) {
   });
   commands.handle("canvas:link-remove", async (_event, id) => {
     await projectRegistry().removeLink(id);
+    await linked.linkRemoved(id);
     return (await projectRegistry().snapshot()).links;
   });
   commands.handle("canvas:worktree-position", (_event, id, worktreePath, position) => projectRegistry().setWorktreePosition(id, worktreePath, position));
@@ -619,6 +642,7 @@ function createRuntime(options) {
         await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
       }
       await states.close();
+      await linked.close();
       await usageStore.idle();
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();

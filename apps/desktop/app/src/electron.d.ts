@@ -5,7 +5,7 @@ import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, LinkedWork, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -123,6 +123,11 @@ declare global {
       getCanvas: () => Promise<CanvasSnapshot>;
       addLink: (a: LinkEndpoint, b: LinkEndpoint) => Promise<ProjectLink[]>;
       removeLink: (id: string) => Promise<ProjectLink[]>;
+      /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
+      getLinkedWork: () => Promise<LinkedWork>;
+      onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
+      stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;
       openCanvasProject: (projectPath: string) => Promise<OpenProject>;
       /** Opens a project from the recent list. Rejects for a path that isn't listed or isn't a checkout's top folder. */

@@ -4,6 +4,10 @@ const { once } = require('node:events');
 const { createRuntime } = require('@milagre/core');
 const { socketPath: pathFor, prepareSocketDirectory } = require('./paths.cjs');
 const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, pageSize, wire } = require('./protocol.cjs');
+const { createPhone } = require('./phone.cjs');
+
+// Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
+const PHONE_METHODS = Object.freeze(['phone:status', 'phone:set-enabled', 'phone:reset']);
 
 const PAGES_TTL_MS = 30000;
 // What one connection may hold in paged responses at once, in characters. A response larger than that alone is still
@@ -97,7 +101,7 @@ function eventFrame(channel, payload, seq, inlineLimit) {
   return { json, bytes: Buffer.byteLength(json) + 1 };
 }
 
-async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, pagesTtlMs, pagesBudgetChars, onError = error => console.error(error) }) {
+async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, pagesTtlMs, pagesBudgetChars, onError = error => console.error(error) }) {
   // Anything bigger travels in pages, or (a state in an event) is read in pages by the client.
   const inlineLimit = Math.floor(maxFrameBytes / 4);
   const clients = new Map();
@@ -126,6 +130,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       catch (error) { onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`)); }
     }
   }
+  // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
+  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), ...phoneOptions });
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();
@@ -177,7 +183,10 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       }
       try {
         let result;
-        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: runtime.methods };
+        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: [...runtime.methods, ...PHONE_METHODS] };
+        else if (request.method === 'phone:status') result = phone.status();
+        else if (request.method === 'phone:set-enabled') result = await phone.setEnabled(request.args[0]);
+        else if (request.method === 'phone:reset') result = await phone.reset();
         else if (request.method === 'daemon:snapshot') {
           const snapshot = { ...runtime.snapshot(), eventSeq };
           if (request.args[0]?.paged === true) {
@@ -232,6 +241,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     stopping ??= (async () => {
       // Keep the listening socket available after a failed save so a client
       // can receive the error and retry stop after disk recovery.
+      await phone.close();
       await runtime.close();
       const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
       for (const socket of clients.keys()) socket.end();
@@ -250,6 +260,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     listening = true;
     await fs.chmod(socketPath, 0o600);
     server.on('error', onError);
+    await phone.start();
     await runtime.resumeRecentProjects();
   } catch (error) {
     await close();

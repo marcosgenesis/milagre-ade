@@ -186,3 +186,14 @@ test('mobile media serves images only from the Project Worktrees and Milagre ima
   });
   assert.equal(hostileHost, 403);
 });
+
+test('the bridge reports a lost daemon and stops listening, so its owner can restart it', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-mobile-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const dataDir = path.join(root, 'profile');
+  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {} } });
+  const bridge = await startMobileBridge({ dataDir, port: 0, token: randomBytes(32).toString('hex') });
+  await daemon.close();
+  await bridge.lost;
+  await assert.rejects(fetch(bridge.url + '/rpc', { method: 'POST' }));
+});

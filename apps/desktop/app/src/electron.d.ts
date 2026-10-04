@@ -21,6 +21,19 @@ export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetu
 
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
 
+/** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
+export type PhoneStatus = {
+  enabled: boolean;
+  state: "off" | "starting" | "on" | "error";
+  error?: string;
+  /** "cloudflare": reachable from any network at `publicUrl`. "none": only this Mac, at `localUrl`. */
+  remote: "cloudflare" | "none";
+  localUrl?: string;
+  publicUrl?: string;
+  pairingLink?: string;
+  qrSvg?: string;
+};
+
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
@@ -151,6 +164,12 @@ declare global {
       checkForUpdates: () => Promise<UpdateState>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
+      getPhoneStatus: () => Promise<PhoneStatus>;
+      /** Turns phone access on or off. Resolves as it starts; progress and the result arrive through onPhoneStatus. */
+      setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
+      /** A new access token: phones paired before scan again. */
+      resetPhoneAccess: () => Promise<PhoneStatus>;
+      onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;

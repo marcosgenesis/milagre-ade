@@ -174,12 +174,15 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
     });
     return closed;
   }
-  client.once('close', () => { void close(); });
+  // The daemon connection dropping (daemon restarted or stopped) ends this bridge; `lost` tells the owner to restart it.
+  let lostConnection;
+  const lost = new Promise(resolve => { lostConnection = resolve; });
+  client.once('close', () => { lostConnection(); void close(); });
   try {
     server.listen(port, '127.0.0.1');
     await once(server, 'listening');
     url = `http://127.0.0.1:${server.address().port}`;
   } catch (error) { await close(); throw error; }
-  return { url, close };
+  return { url, close, lost };
 }
 module.exports = { startMobileBridge };

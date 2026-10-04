@@ -88,6 +88,8 @@ One-time setup, with a domain whose DNS is on Cloudflare and Zero Trust enabled 
 
 Then start the host with `npm run mobile:host -- --cloudflare --desktop` and scan the QR code. `--desktop` shares the Milagre app's daemon, so the phone lists the app's recent Projects and its running Chats; without it the host runs its own profile in `--data-dir`. Use `--desktop` only with a Milagre app new enough to run the daemon, never next to an older build that runs Projects in its own process. The pairing link carries the Access service token, which the app keeps in secure storage with the bridge token. Anyone holding the QR code can reach the Mac, so treat it like a password. To revoke every paired phone, delete the service token in Zero Trust → Access → Service credentials and run `mobile:cloudflare` again.
 
+**From the app.** Settings › Phone runs the same bridge inside the daemon, so no `mobile:host` is needed: turn on "Allow your phone to connect" and scan the QR code. If `cloudflare.json` exists in the app's data directory (`mobile:cloudflare --data-dir <userData>`), the daemon also runs the named tunnel; otherwise the bridge listens on `127.0.0.1:8797` only, for a phone simulator on this Mac. "Reset access" makes a new token, so paired phones scan again. The setting lives in `mobile.json` in the data directory and survives restarts; the commands `phone:status`, `phone:set-enabled` and `phone:reset` are not available through the bridge itself.
+
 `npm run mobile:host -- --tunnel` opens a temporary Cloudflare Quick Tunnel instead: no account, a random `trycloudflare.com` address that changes on every start, and no Access in front.
 
 TLS ends at Cloudflare's edge, so Cloudflare can see the traffic. This is not an end-to-end encrypted relay.

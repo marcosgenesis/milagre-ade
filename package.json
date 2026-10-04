@@ -31,6 +31,7 @@
     "test:chat-order": "node scripts/test-chat-order.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
     "test:archive-enter": "node scripts/test-archive-enter.cjs",
+    "test:phone": "node scripts/test-phone.cjs",
     "test:ui": "npm run test:ui --workspace milagre",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",

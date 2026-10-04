@@ -1,0 +1,17 @@
+import { Text } from 'react-native';
+import { AiBrainIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Search01Icon, Wrench01Icon } from '@hugeicons/core-free-icons';
+import type { ChatStep, StepKind } from '@milagre/shared/model';
+import type { IconData } from './icons';
+import { ActivityItem } from './activity-item';
+import { Markdown } from './markdown';
+import { styles } from './ui';
+
+const icons: Record<StepKind, IconData> = { shell: CommandLineIcon, setup: CommandLineIcon, read: File01Icon, edit: FileEditIcon, search: Search01Icon, thinking: AiBrainIcon, image: Image01Icon, other: Wrench01Icon };
+
+/** Tool data adapted to the shared activity presentation; Chat taps open the sheet. */
+export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live: boolean; waiting: boolean; onPress?: () => void }) {
+  const running = live && step.status === 'running';
+  return <ActivityItem title={step.title} icon={icons[step.kind]} state={step.status === 'failed' ? 'failed' : running ? waiting ? 'waiting' : 'running' : 'idle'} note={[running && waiting ? 'Waiting for approval' : '', step.note].filter(Boolean).join(' · ')} loading={!!step.hasDetail} onPress={onPress}>
+    {step.detail ? step.kind === 'thinking' ? <Markdown text={step.detail} streaming={running} /> : <Text selectable style={styles.code}>{step.detail}</Text> : undefined}
+  </ActivityItem>;
+}

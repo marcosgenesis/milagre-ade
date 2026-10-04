@@ -26,8 +26,9 @@ const message = error => error instanceof Error ? error.message : String(error);
  * resolves when it has finished, and every change goes to `onChange`. A start that fails is an 'error' state, not a throw.
  * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`); `status()` then also
  * carries the relay's `relay` state and `pairingUntil` (ms epoch), the end of the window in which new phones may pair.
+ * `allowedRoot` confines a paired phone to one folder (see the bridge); the owner's app never sets it.
  */
-function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMobileBridge, relayUrl = RELAY_URL, startRelay = startRelayHost, now = Date.now, onChange = () => {}, localPort = LOCAL_PORT, retryDelaysMs = RETRY_DELAYS_MS, name = computerName }) {
+function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMobileBridge, relayUrl = RELAY_URL, startRelay = startRelayHost, now = Date.now, onChange = () => {}, localPort = LOCAL_PORT, retryDelaysMs = RETRY_DELAYS_MS, name = computerName, allowedRoot }) {
   const file = path.join(dataDir, 'mobile.json');
   let config; // { enabled, token | null }, read once
   let state = 'off';
@@ -110,7 +111,7 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
       const cloudflare = await cloudflareOrNull();
       remote = cloudflare ? 'cloudflare' : 'relay';
       relayStatus = 'connecting';
-      bridge = await startBridge({ dataDir, port: cloudflare ? cloudflare.port : localPort, token: config.token });
+      bridge = await startBridge({ dataDir, port: cloudflare ? cloudflare.port : localPort, token: config.token, ...(allowedRoot ? { allowedRoot } : {}) });
       let link;
       if (cloudflare) {
         tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });

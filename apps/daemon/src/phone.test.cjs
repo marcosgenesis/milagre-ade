@@ -433,3 +433,21 @@ test('closing stops the bridge, tunnel and any pending restart', async t => {
   assert.equal(tunnelsStarted.length, 1);
   assert.equal(tunnelsStarted[0].closed, true);
 });
+
+test('allowedRoot reaches the bridge only when it is set', async t => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-phone-')));
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const seen = [];
+  const startBridge = async options => { seen.push(options); return { url: `http://127.0.0.1:${options.port}`, lost: new Promise(() => {}), close: async () => {} }; };
+  const startRelay = () => ({ status: () => 'connecting', close: async () => {} });
+  for (const extra of [{ allowedRoot: '/demo/project' }, {}]) {
+    const phone = createPhone({ dataDir, startBridge, startRelay, name: () => 'Test Mac', ...extra });
+    // The second phone finds the setting already on and starts from it.
+    await phone.start();
+    await phone.setEnabled(true);
+    await phone.settled();
+    await phone.close();
+  }
+  assert.equal(seen[0].allowedRoot, '/demo/project');
+  assert.equal('allowedRoot' in seen[1], false);
+});

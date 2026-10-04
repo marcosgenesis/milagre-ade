@@ -13,6 +13,14 @@ export interface RuntimeOptions {
   emit?: (channel: string, payload: unknown) => void;
   observeAgentEvent?: (chatId: string, event: AgentEvent) => void;
   notifyWaiting?: (notice: AttentionNotice & { chatId: string; requestId: string }) => void;
+  /** Replace the real readers, for a host that runs no real agent (the review demo). */
+  readUsage?: () => Promise<{ providers: unknown[] }>;
+  agentModels?: () => Promise<unknown>;
+  agentCliStatus?: (() => Promise<unknown>) & { invalidate(provider: string): void };
+  /** false: `/skill` in a prompt is sent as typed, without the skill's text. */
+  expandSkills?: boolean;
+  /** worktree:pull-request; the default asks `gh`. */
+  readPullRequest?: (worktreePath: string) => Promise<unknown>;
 }
 export interface Runtime {
   readonly methods: readonly string[];

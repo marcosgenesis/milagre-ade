@@ -135,9 +135,7 @@ export default function ChatsScreen() {
     <Stack.Toolbar placement="bottom">
       <Stack.Toolbar.SearchBarSlot />
       <Stack.Toolbar.Spacer />
-      {show !== 'archived' && newChatWorktree !== undefined && (worktrees.length > 1
-        ? <Stack.Toolbar.Menu icon="square.and.pencil" title="New Chat in" accessibilityLabel="New Chat">{worktrees.map(item => <Stack.Toolbar.MenuAction key={item.id} icon="arrow.triangle.branch" isOn={item.id === newChatWorktree} onPress={() => startChat(item.id)}>{item.name}</Stack.Toolbar.MenuAction>)}</Stack.Toolbar.Menu>
-        : <Stack.Toolbar.Button icon="square.and.pencil" accessibilityLabel="New Chat" onPress={() => startChat(newChatWorktree)} />)}
+      {show !== 'archived' && newChatWorktree !== undefined && <Stack.Toolbar.Button icon="square.and.pencil" accessibilityLabel="New Chat" onPress={() => startChat(newChatWorktree)} />}
     </Stack.Toolbar>
   </>;
   const empty = show === 'archived' ? 'No archived Chats.' : show !== 'all' || query || worktreeFilter !== null ? 'No Chats match this filter.' : worktrees.length ? 'No Chats yet. Start one below.' : 'Open a Git repository to start a Chat.';

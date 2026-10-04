@@ -29,6 +29,21 @@ test('errors and incompatible responses are explicit, and timeouts abort the fet
   await assert.rejects(client.call('daemon:status'), /Connection lost/);
 });
 
+test('creating a worktree gets the desktop deadline instead of the normal request timeout', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal: AbortSignal | null | undefined;
+  const client = createClient('http://127.0.0.1:8787', 'token', (_url, init) => new Promise((_resolve, reject) => {
+    signal = init?.signal;
+    signal?.addEventListener('abort', () => reject(new Error('aborted')));
+  }));
+  const pending = assert.rejects(client.call('worktree:create', [{ projectPath: '/p', baseBranch: 'main', prompt: 'Preview' }]), /Connection lost/);
+  t.mock.timers.tick(30000);
+  assert.equal(signal?.aborted, false, 'creation can still be fetching or copying files after 30 seconds');
+  t.mock.timers.tick(300000);
+  assert.equal(signal?.aborted, true);
+  await pending;
+});
+
 
 test('HTTPS sends authenticate once, refuse redirects and reject a changed response origin', async () => {
   const client = createClient('https://computer.example.com', 'private-token', async (_url, init) => {

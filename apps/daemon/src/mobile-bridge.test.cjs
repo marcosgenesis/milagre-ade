@@ -229,3 +229,10 @@ test('the phone snapshot leaves out tool output and old subagent transcript, kee
   assert.equal(phone.state.sessions[1].subagents[0].transcript.at(-1).text.length, 601);
   assert.equal(project.state.messages[0].steps[1].detail.length, 5000, 'the daemon\'s state is untouched');
 });
+
+test('the phone can change a Chat\'s permission mode, and only to a known one', async t => {
+  const { project, rpc } = await fixture(t);
+  await rpc('project:open', [project]);
+  assert.equal((await rpc('agent:set-permission-mode', [{ chatId: `${project}#1`, mode: 'full' }])).status, 200);
+  assert.equal((await rpc('agent:set-permission-mode', [{ chatId: `${project}#1`, mode: 'root' }])).status, 409);
+});

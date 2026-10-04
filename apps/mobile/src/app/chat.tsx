@@ -18,7 +18,7 @@ import { BottomFade, EdgeFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
-import { defaultPreferences, selectedModel, sendOptions } from '../turn-options';
+import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, showActions, styles } from '../ui';
 
@@ -64,7 +64,7 @@ export default function ChatScreen() {
   const draft = composer.drafts[chatId] || '';
   const attachments = composer.attachments[chatId] || [];
   const run = chat ? runs.runs[chatId] : undefined;
-  const preferences = composer.preferences[chatId] || defaultPreferences;
+  const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ''), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);

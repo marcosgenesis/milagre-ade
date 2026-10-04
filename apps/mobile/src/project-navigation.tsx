@@ -23,7 +23,7 @@ type Row = { key: string; path: string } & (
 const labels: Record<ChatMark, string> = { idle: '', running: 'Running', question: 'Needs reply', waiting: 'Needs approval', interrupted: 'Interrupted', failed: 'Failed', unread: 'Unread' };
 
 /** The same project tree is the first-run destination and the drawer over a Chat. */
-export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number }) {
+export function ProjectNavigation({ onNavigate, onClose, activeChatId, visible = true }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number; visible?: boolean }) {
   const session = useSession();
   const insets = useSafeAreaInsets();
   const { reloadProjects, previewProject } = session;
@@ -41,6 +41,9 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const pending = useRef(new Map<string, Promise<void>>());
   const selecting = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // A Project still opening must not take over once the navigation is put away.
+  const { cancelNavigation } = session;
+  useEffect(() => { if (!visible && selecting.current) cancelNavigation(); }, [visible, cancelNavigation]);
   useEffect(() => { void reloadProjects().catch(e => setError(e.message)); }, [reloadProjects]);
   const load = useCallback((projectPath: string) => {
     const existing = pending.current.get(projectPath);
@@ -91,6 +94,12 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
 
   async function select(projectPath: string, chatId?: number, all = false) {
     if (selecting.current) return;
+    // A Chat opens at once; the Chat screen loads its Project behind the splash mark.
+    if (chatId !== undefined && session.client) {
+      if (projectPath === currentPath && chatId === activeChatId && onClose) onClose();
+      else onNavigate({ pathname: '/chat', params: { projectPath, hostId: session.client.url, id: String(chatId) } });
+      return;
+    }
     selecting.current = true; setBusy(true); setError('');
     try {
       const copy = await session.open(projectPath, { background: true, chatId });

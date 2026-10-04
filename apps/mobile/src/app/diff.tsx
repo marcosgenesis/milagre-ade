@@ -15,40 +15,47 @@ const MARKER = { add: '+', remove: '−', context: '' } as const;
 const MARKER_COLOR = { add: colors.green, remove: colors.red, context: colors.ink3 } as const;
 const code = { fontFamily: fonts.mono, fontSize: 12, lineHeight: 18 } as const;
 
-/** Desktop's DiffFile, unified: hunk headers, one line-number gutter, +/− markers, row tints and changed-word highlights. */
+export type DiffTarget = { worktreeId: string; path: string; oldPath?: string; untracked?: string; binary?: string; mode: string; base?: string; status?: DiffFileEntry['status']; added?: string; removed?: string };
+
 export default function Diff() {
-  const params = useLocalSearchParams<{ worktreeId: string; path: string; oldPath?: string; untracked?: string; binary?: string; mode: string; base?: string; status?: DiffFileEntry['status']; added?: string; removed?: string }>();
+  const params = useLocalSearchParams<DiffTarget>();
   const session = useSession();
-  const worktree = session.snapshot?.project.state.worktrees[Number(params.worktreeId)];
-  const { path, oldPath, untracked, mode, base } = params;
-  const added = Number(params.added || 0);
-  const removed = Number(params.removed || 0);
+  if (!session.client || !session.snapshot?.project.state.worktrees[Number(params.worktreeId)]) return <Redirect href="/" />;
+  return <View style={styles.screen}>
+    <Stack.Screen options={{ title: params.path.split('/').pop() || params.path }} />
+    <DiffView target={params} />
+  </View>;
+}
+
+/** Desktop's DiffFile, unified: hunk headers, one line-number gutter, +/− markers, row tints and changed-word highlights. */
+export function DiffView({ target }: { target: DiffTarget }) {
+  const session = useSession();
+  const worktree = session.snapshot?.project.state.worktrees[Number(target.worktreeId)];
+  const { path, oldPath, untracked, mode, base } = target;
+  const added = Number(target.added || 0);
+  const removed = Number(target.removed || 0);
   const [forced, setForced] = useState(false);
   const large = added + removed > LARGE_DIFF_LINES && !forced;
-  const skip = !worktree || large || params.binary === '1';
+  const skip = !worktree || large || target.binary === '1';
   const { data: result, error, refresh } = useRpc<DiffFileResult>(skip ? null : session.client, 'git:diff-file', [{ cwd: worktree?.path, path, oldPath, untracked: untracked === '1', mode, base }]);
   const patch = result?.patch;
   const rows = useMemo(() => patch ? diffRows(patch) : [], [patch]);
-  if (!session.client || !session.snapshot || !worktree) return <Redirect href="/" />;
-  const name = path.split('/').pop() || path;
-  const notice = params.binary === '1' || result?.binary ? 'This is a binary file. Review it on your computer.'
+  if (!worktree) return null;
+  const notice = target.binary === '1' || result?.binary ? 'This is a binary file. Review it on your computer.'
     : large ? `This file changes ${added + removed} lines.`
     : result?.tooLarge ? 'This diff is over 1 MB. Review it on your computer.'
     : result && !rows.length ? 'No diff remains for this file. Pull to refresh Changes.' : '';
   const header = <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, gap: 6 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      {params.status && <StatusBox status={params.status} />}
+      {target.status && <StatusBox status={target.status} />}
       <Text selectable numberOfLines={2} ellipsizeMode="middle" style={[styles.caption, { flex: 1 }]}>{oldPath ? `${oldPath} → ${path}` : path}</Text>
-      {params.binary !== '1' && <Counts added={added} removed={removed} />}
+      {target.binary !== '1' && <Counts added={added} removed={removed} />}
     </View>
   </View>;
-  return <View style={styles.screen}>
-    <Stack.Screen options={{ title: name }} />
-    {error ? <View style={{ padding: 16 }}>{header}<ErrorNotice message={error} retry={refresh} /></View>
-      : notice ? <View>{header}<View style={{ alignItems: 'center', gap: 12, paddingVertical: 32, paddingHorizontal: 24 }}><Text style={[styles.muted, { textAlign: 'center' }]}>{notice}</Text>{large && <PillButton title="Show diff" secondary onPress={() => setForced(true)} />}</View></View>
-      : <FlatList data={rows} keyExtractor={row => row.key} renderItem={({ item }) => <Row row={item} />} ListHeaderComponent={header} ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingVertical: 32 }]}>Reading diff…</Text>}
-        contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ paddingBottom: 40 }} initialNumToRender={60} windowSize={11} />}
-  </View>;
+  return error ? <View style={{ padding: 16 }}>{header}<ErrorNotice message={error} retry={refresh} /></View>
+    : notice ? <View>{header}<View style={{ alignItems: 'center', gap: 12, paddingVertical: 32, paddingHorizontal: 24 }}><Text style={[styles.muted, { textAlign: 'center' }]}>{notice}</Text>{large && <PillButton title="Show diff" secondary onPress={() => setForced(true)} />}</View></View>
+    : <FlatList data={rows} keyExtractor={row => row.key} renderItem={({ item }) => <Row row={item} />} ListHeaderComponent={header} ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingVertical: 32 }]}>Reading diff…</Text>}
+      contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ paddingBottom: 40 }} initialNumToRender={60} windowSize={11} />;
 }
 
 const Row = memo(function Row({ row }: { row: DiffRow }) {

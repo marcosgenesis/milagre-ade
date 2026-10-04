@@ -13,6 +13,7 @@ import { Icon, ProviderLogo } from '../icons';
 import { LoadingLogo } from '../loading-logo';
 import { ErrorNotice, PullDown, colors, styles, type MenuSection } from '../ui';
 import { archiveFromPhone } from '../archive';
+import { PanelSwipe, useSidePanels } from '../side-panels';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -54,6 +55,8 @@ export default function ChatsScreen() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  // A rightward drag over the list opens the project navigation, as it does over a Chat.
+  const panels = useSidePanels({});
   const snapshot = session.snapshot;
   const rows = useMemo(() => {
     if (!snapshot) return [];
@@ -148,14 +151,14 @@ export default function ChatsScreen() {
   const empty = show === 'archived' ? 'No archived Chats.' : show !== 'all' || query || worktreeFilter !== null ? 'No Chats match this filter.' : worktrees.length ? 'No Chats yet. Start one below.' : 'Open a Git repository to start a Chat.';
   return <View style={styles.screen}>
     <Stack.Screen options={{ headerTitle: () => switcher, headerBackVisible: false }} />
-    <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => router.push('/navigation')} /></Stack.Toolbar>
+    <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show('left')} /></Stack.Toolbar>
     {toolbars}
-    <FlatList data={rows} keyExtractor={row => String(row.chat.id)} contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="on-drag"
+    <PanelSwipe panels={panels}><FlatList data={rows} keyExtractor={row => String(row.chat.id)} contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void session.refresh().catch(e => setError(e.message)).finally(() => setRefreshing(false)); }} />}
       ItemSeparatorComponent={() => <View style={[styles.separator, { marginLeft: 52 }]} />}
       ListHeaderComponent={error || session.error ? <View style={{ padding: 16 }}><ErrorNotice message={error || session.error} retry={session.error ? () => router.dismissTo('/') : undefined} /></View> : null}
       ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingTop: 64, paddingHorizontal: 32 }]}>{empty}</Text>}
       contentContainerStyle={{ paddingBottom: 24 }}
-      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id), projectPath: project.path, hostId: client.url } })} onAction={action => void act(item.chat, action, item.run)} />} />
+      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id), projectPath: project.path, hostId: client.url } })} onAction={action => void act(item.chat, action, item.run)} />} /></PanelSwipe>
   </View>;
 }

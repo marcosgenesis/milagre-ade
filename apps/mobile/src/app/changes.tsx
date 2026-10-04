@@ -4,6 +4,7 @@ import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { ArrowDown01Icon, ArrowRight01Icon, File01Icon } from '@hugeicons/core-free-icons';
 import type { DiffFileEntry, DiffFilesResult, DiffMode } from '@milagre/shared/git-diff';
 import { buildDiffTree, type DiffTreeNode } from '@milagre/shared/diff-tree';
+import type { DiffTarget } from './diff';
 import { useSession } from '../session';
 import { useRpc } from '../use-rpc';
 import { Counts, StatusBox } from '../diff-ui';
@@ -12,7 +13,7 @@ import { ErrorNotice, PageScroll, Segmented, colors, styles } from '../ui';
 
 const MODES = [{ value: 'uncommitted', title: 'Uncommitted' }, { value: 'committed', title: 'Committed' }];
 
-/** Desktop's ChangesPanel as a page; the Chat screen shows the same view in the panel that slides in from the right. */
+/** Desktop's ChangesPanel as a page; the side panels show the same view over a Chat. */
 export default function Changes() {
   const { worktreeId } = useLocalSearchParams<{ worktreeId: string }>();
   const session = useSession();
@@ -23,8 +24,8 @@ export default function Changes() {
   </>;
 }
 
-/** The Worktree's changed files as a folder tree with counts and status boxes; a file opens its diff. */
-export function ChangesView({ worktreeId, header }: { worktreeId: number; header?: React.ReactNode }) {
+/** The Worktree's changed files as a folder tree with counts and status boxes; a file opens its diff, as a page unless `onOpen` shows it. */
+export function ChangesView({ worktreeId, header, onOpen }: { worktreeId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
   const session = useSession();
   const worktree = session.snapshot?.project.state.worktrees[worktreeId];
   const [mode, setMode] = useState<DiffMode>('uncommitted');
@@ -36,7 +37,10 @@ export function ChangesView({ worktreeId, header }: { worktreeId: number; header
   const added = files?.reduce((sum, file) => sum + file.added, 0) ?? 0;
   const removed = files?.reduce((sum, file) => sum + file.removed, 0) ?? 0;
   const base = result?.isRepo ? result.base : null;
-  const open = (file: DiffFileEntry) => router.push({ pathname: '/diff', params: { worktreeId: String(worktreeId), mode, path: file.path, status: file.status, added: String(file.added), removed: String(file.removed), ...(file.oldPath ? { oldPath: file.oldPath } : {}), untracked: file.untracked ? '1' : '0', binary: file.binary ? '1' : '0', ...(base ? { base } : {}) } });
+  const open = (file: DiffFileEntry) => {
+    const target: DiffTarget = { worktreeId: String(worktreeId), mode, path: file.path, status: file.status, added: String(file.added), removed: String(file.removed), ...(file.oldPath ? { oldPath: file.oldPath } : {}), untracked: file.untracked ? '1' : '0', binary: file.binary ? '1' : '0', ...(base ? { base } : {}) };
+    if (onOpen) onOpen(target); else router.push({ pathname: '/diff', params: target });
+  };
   const empty = !result ? 'Reading changes…' : !result.isRepo ? result.message : mode === 'committed' && base === null ? 'No base branch to compare with.' : files?.length ? '' : result.message || (mode === 'uncommitted' ? 'No uncommitted changes.' : 'Nothing committed since the base branch.');
   return <PageScroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); refresh(); setTimeout(() => setRefreshing(false), 400); }} />} contentContainerStyle={{ gap: 12 }}>
     {header}

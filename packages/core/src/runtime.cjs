@@ -109,7 +109,8 @@ function createRuntime(options) {
     if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
   }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
-  const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
+  // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
+  const readUsage = options.readUsage ?? createUsageReader({ ready: () => environmentReady, store: usageStore });
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
@@ -355,7 +356,7 @@ function createRuntime(options) {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
     return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
   });
-  const readPullRequest = createPullRequestReader();
+  const readPullRequest = options.readPullRequest ?? createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);
@@ -417,8 +418,11 @@ function createRuntime(options) {
   // `cancelled` when quitting or a stopped setup stopped it before it began.
   async function startAgentTurn(request) {
     if (closing) return { turnId: null, steered: false, cancelled: true };
+    // The linked summary is read while the turn gets ready, so a Chat with Links starts no later than one without.
+    const linkedContext = agents.isTurnActive(request.chatId) ? Promise.resolve("") : linked.context(request.chatId);
     const images = decodeImages(request.images);
-    const prompt = await expandSkillPrompt(request.cwd, request.prompt);
+    // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
+    const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
     const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
     // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
     if (cli.problem) {
@@ -434,7 +438,7 @@ function createRuntime(options) {
     }
     // A new turn carries the summary of the Chat's linked Worktrees after its message (a leading slash command
     // stays first); a message steering a turn doesn't repeat it.
-    const context = agents.isTurnActive(request.chatId) ? "" : await linked.context(request.chatId);
+    const context = agents.isTurnActive(request.chatId) ? "" : await linkedContext;
     const text = [prompt, setup.note, context].filter(Boolean).join("\n\n");
     try {
       return await agents.startTurn({ ...request, prompt: text, images, command: cli.command });
@@ -532,7 +536,7 @@ function createRuntime(options) {
 
   // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
   // after 5 minutes, a problem on every call.
-  const agentCliStatus = createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
+  const agentCliStatus = options.agentCliStatus ?? createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
   commands.handle("agent:cli-status", () => agentCliStatus());
   commands.handle("agent:update-cli", async (_event, provider) => {
     const result = await runCliUpdate(provider);
@@ -542,7 +546,7 @@ function createRuntime(options) {
     return { ...result, status: status[provider] };
   });
 
-  const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
+  const agentModels = options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
   commands.handle("agent:models", () => agentModels());
 
   commands.handle("agent:interrupt", async (_event, chatId) => {

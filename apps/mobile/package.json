@@ -32,8 +32,8 @@
     "markdown-it": "^15.0.2",
     "react": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-keyboard-controller": "1.21.9",
     "react-native-gesture-handler": "3.3.0",
+    "react-native-keyboard-controller": "1.21.9",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
@@ -45,9 +45,11 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "postinstall": "cd ../.. && patch-package --patch-dir apps/mobile/patches",
     "start": "node ../../scripts/start-mobile.cjs",
     "android": "node ../../scripts/start-mobile.cjs --android",
     "ios": "node ../../scripts/start-mobile.cjs --ios",

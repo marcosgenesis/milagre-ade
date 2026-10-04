@@ -15,6 +15,7 @@
     "test:handover": "node scripts/test-handover.cjs",
     "test:question-card": "node scripts/test-question-card.cjs",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
+    "test:chat-timer": "node scripts/test-chat-timer.cjs",
     "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",
     "test:reply-thought": "node scripts/test-reply-thought.cjs",
@@ -47,12 +48,13 @@
     "test:daemon": "npm run test --workspace @milagre/daemon",
     "mobile": "npm run start --workspace @milagre/mobile",
     "mobile:demo": "node scripts/mobile-demo.cjs",
+    "review:demo": "node scripts/review-demo.cjs",
     "mobile:host": "node scripts/mobile-host.cjs",
     "mobile:cloudflare": "node scripts/mobile-cloudflare.cjs",
     "test:relay": "npm run test --workspace @milagre/relay",
     "typecheck:relay": "npm run typecheck --workspace @milagre/relay",
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
-    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs",
+    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/review-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs",
     "test:delegation": "node scripts/test-delegation.cjs"
   },
   "devDependencies": {

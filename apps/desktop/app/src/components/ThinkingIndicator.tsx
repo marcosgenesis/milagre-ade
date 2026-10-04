@@ -13,21 +13,22 @@ function RunningLogo() {
   );
 }
 
-function useElapsed() {
-  const [tenths, setTenths] = useState(0);
+function useElapsed(startedAt?: number) {
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setTenths((current) => current + 1), 100);
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, []);
 
-  const total = tenths / 10;
+  const total = Math.floor(Math.max(0, now - (startedAt ?? mountedAt)) / 100) / 10;
   return total < 60 ? `${total.toFixed(1)}s` : `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
 }
 
 /** The running mark and the elapsed time. The label is only announced to screen readers, unless `showLabel` writes it out beside the mark. */
-export function ThinkingIndicator({ label, showLabel = false }: { label: string; showLabel?: boolean }) {
-  const elapsed = useElapsed();
+export function ThinkingIndicator({ label, showLabel = false, startedAt }: { label: string; showLabel?: boolean; startedAt?: number }) {
+  const elapsed = useElapsed(startedAt);
 
   return (
     <div role="status" aria-label={label} className="flex w-fit items-center gap-2.5 px-1 py-1">

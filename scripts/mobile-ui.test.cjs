@@ -838,7 +838,7 @@ test('subagent details stay expanded across live updates and collapse through th
 
 test('tool disclosure reveals late output, while its chat action opens Activity without expanding', () => {
   const item = activityItemHost();
-  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: true, waiting: false };
+  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: false, waiting: false };
   let tree = item.tool(props);
   find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
   assert.ok(find(item.tool(props), node => node.type === 'Text' && node.props.children === 'Loading output…'));
@@ -851,6 +851,218 @@ test('tool disclosure reveals late output, while its chat action opens Activity 
   find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
   assert.equal(opened, 1);
   assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
+});
+
+function updatesHost() {
+  const react = hookHost();
+  const listeners = new Set();
+  const state = { status: 'idle', error: '' };
+  const appState = { currentState: 'active', addEventListener: (_, listener) => { listeners.add(listener); return { remove: () => listeners.delete(listener) }; } };
+  let reloads = 0, retries = 0;
+  const { UpdateSheet, useUpdatePresentation } = load('update-sheet.tsx', {
+    react: { ...react, useEffect: react.effect, useSyncExternalStore: (_, get) => get() },
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
+    'react-native': { View: 'View', Text: 'Text', Modal: 'Modal', ActivityIndicator: 'ActivityIndicator', useColorScheme: () => 'dark',
+      AppState: appState },
+    'expo-router': {},
+    'expo-updates': {}, './update-controller': {}, './theme': { colors: {}, hex: () => ({ page: '#17181a' }) },
+    './ui': { PillButton: 'PillButton' },
+  });
+  return {
+    set(status, error = '') { state.status = status; state.error = error; },
+    render() {
+      react.begin(); useUpdatePresentation(state); react.flush();
+      react.begin(); useUpdatePresentation(state);
+      react.begin(); const presentation = useUpdatePresentation(state);
+      const content = UpdateSheet({ state, onUpdate: () => { reloads++; }, onRetry: () => { retries++; }, onDismiss: presentation.dismiss });
+      return { ...presentation, content };
+    },
+    foreground() { appState.currentState = 'active'; for (const listener of listeners) listener('active'); },
+    background() { appState.currentState = 'background'; for (const listener of listeners) listener('background'); },
+    cleanup: react.cleanup, listeners, reloads: () => reloads, retries: () => retries,
+  };
+}
+
+test('the update sheet opens only for an actionable update and Later lasts until foreground entry', () => {
+  const host = updatesHost();
+  for (const status of ['idle', 'checking', 'downloading', 'up-to-date', 'disabled']) {
+    host.set(status);
+    assert.equal(host.render().presented, false, status);
+  }
+  host.set('ready');
+  const ready = host.render();
+  assert.equal(ready.presented, true);
+  find(ready.content, node => node.type === 'PillButton' && node.props.title === 'Later').props.onPress();
+  assert.equal(host.render().presented, false);
+  host.background();
+  assert.equal(host.render().presented, false);
+  host.foreground();
+  assert.equal(host.render().presented, true);
+  host.render().dismiss();
+  assert.equal(host.render().presented, false, 'swipe dismissal behaves like Later');
+  assert.equal(host.reloads(), 0);
+  host.cleanup();
+  assert.equal(host.listeners.size, 0);
+});
+
+test('an update downloaded in the background waits until foreground entry to present', () => {
+  const host = updatesHost();
+  host.render(); host.background(); host.set('ready');
+  assert.equal(host.render().presented, false);
+  host.foreground();
+  assert.equal(host.render().presented, true);
+  host.cleanup();
+});
+
+test('Later during retry stays dismissed when the download finishes or polling fails', () => {
+  for (const final of ['ready', 'error']) {
+    const host = updatesHost();
+    host.set('error'); host.render(); host.set('downloading');
+    find(host.render().content, node => node.type === 'PillButton' && node.props.title === 'Later').props.onPress();
+    host.set(final);
+    assert.equal(host.render().presented, false);
+    host.foreground();
+    assert.equal(host.render().presented, true);
+    host.cleanup();
+  }
+});
+
+test('sheet actions apply or retry, keep progress visible, and recover from reload errors', () => {
+  const host = updatesHost();
+  host.set('error', 'Could not download the update. Try again.');
+  assert.equal(host.render().presented, true);
+  find(host.render().content, node => node.type === 'PillButton' && node.props.title === 'Try again').props.onPress();
+  assert.equal(host.retries(), 1);
+  for (const status of ['checking', 'downloading']) {
+    host.set(status);
+    const progress = host.render();
+    assert.equal(progress.presented, true);
+    assert.ok(find(progress.content, node => node.type === 'ActivityIndicator'));
+    assert.equal(find(progress.content, node => node.type === 'PillButton' && node.props.title === 'Try again'), undefined);
+  }
+  host.set('ready');
+  find(host.render().content, node => node.type === 'PillButton' && node.props.title === 'Update now').props.onPress();
+  assert.equal(host.reloads(), 1);
+  host.set('restarting');
+  assert.ok(find(host.render().content, node => node.type === 'ActivityIndicator'));
+  assert.equal(find(host.render().content, node => node.type === 'PillButton'), undefined);
+  host.set('ready', 'Could not apply the update. Try again.');
+  const failed = host.render();
+  assert.ok(find(failed.content, node => node.props?.accessibilityRole === 'alert'));
+  find(failed.content, node => node.type === 'PillButton' && node.props.title === 'Try again').props.onPress();
+  assert.equal(host.reloads(), 2);
+  assert.equal(host.retries(), 1, 'a reload failure must retry the downloaded update');
+  host.cleanup();
+});
+
+test('the global shell waits for navigation, pushes once, and preserves each current page', () => {
+  const react = hookHost();
+  let created = 0, navigation;
+  const routes = [], resets = [];
+  let latestTree;
+  let navigationListener;
+  const navigationRef = {
+    getRootState: () => ({ key: 'generated-root', routes: [{ name: '__root', state: navigation }] }),
+    addListener: (_, listener) => { navigationListener = listener; return () => { navigationListener = undefined; }; },
+    dispatch: action => { assert.equal(action.target, 'root'); resets.push(action.payload); navigation = action.payload; },
+  };
+  const state = { status: 'ready', error: '' };
+  const shell = load('update-sheet.tsx', {
+    react: { ...react, useEffect: react.effect, createContext: () => ({ Provider: 'UpdatesProvider' }), useSyncExternalStore: (_, get) => get() },
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
+    'expo-router': { router: { push: route => routes.push(route) }, useRootNavigationState: () => navigation, useNavigationContainerRef: () => navigationRef },
+    'expo-updates': { isEnabled: true, useUpdates: () => ({}) },
+    './update-controller': { watchUpdates: () => () => {}, createUpdateController: () => { created++; return { subscribe() {}, get: () => state, install() {}, check() {}, syncNative() {} }; } },
+    './theme': { colors: {} }, './ui': {},
+  }, '\nconst __DEV__ = false;').UpdateShell;
+  for (const page of ['Computers', 'Chat', 'Settings']) {
+    react.begin();
+    const navigator = jsx('Stack', { page });
+    const tree = latestTree = shell({ children: navigator });
+    assert.equal(tree.props.children, navigator);
+    assert.equal(tree.props.value.state, state);
+    react.flush();
+    if (!navigation) { assert.deepEqual(routes, []); navigation = { key: 'root', routeNames: ['index', 'update-sheet', 'projects'], index: 0, routes: [{ key: 'computers', name: 'index' }] }; navigationListener(); }
+  }
+  assert.equal(created, 1, 'navigation keeps one update controller');
+  assert.deepEqual(routes, ['/update-sheet'], 'pending updates push one sheet above the current route');
+  const updateRoute = { key: 'pending-update', name: 'update-sheet' };
+  const destination = { key: 'connected-projects', name: 'projects', params: { host: 'saved' } };
+  navigation = { ...navigation, index: 2, routes: [...navigation.routes, updateRoute, destination] };
+  navigationListener();
+  react.begin(); shell({ children: jsx('Stack', {}) }); react.flush();
+  assert.equal(resets.length, 1);
+  assert.equal(navigation.index, 2);
+  assert.equal(navigation.routes[1], destination, 'late navigation retains the destination and its params');
+  assert.equal(navigation.routes[2].name, 'update-sheet');
+  assert.equal(navigation.routes.filter(route => route.name === 'update-sheet').length, 1, 'late navigation retains one prompt');
+  react.begin(); shell({ children: jsx('Stack', {}) }); react.flush();
+  navigationListener();
+  assert.equal(resets.length, 1, 'the focused sheet does not reset navigation again');
+  navigation = { ...navigation, index: 0, routes: [navigation.routes[0]] };
+  navigationListener();
+  assert.equal(routes.length, 2, 'a notification reset restores the pending prompt');
+  latestTree.props.value.dismiss();
+  navigationListener();
+  assert.equal(routes.length, 2, 'explicit dismissal stops navigation from reopening the prompt');
+  react.cleanup();
+  assert.equal(navigationListener, undefined);
+});
+
+test('Later, swipe and Android back defer; notification reset and route replacement do not', () => {
+  const react = hookHost();
+  let dismissals = 0, backs = 0, beforeRemove;
+  const dismiss = () => { dismissals++; };
+  const navigation = { addListener: (_, listener) => { beforeRemove = listener; return () => { beforeRemove = undefined; }; } };
+  const state = { status: 'ready', error: '' };
+  const route = load('app/update-sheet.tsx', {
+    react: { ...react, useEffect: react.effect },
+    'react/jsx-runtime': { jsx, jsxs: jsx },
+    'expo-router': { router: { back: () => { backs++; } }, useNavigation: () => navigation },
+    '../update-sheet': { UpdateSheet: 'UpdateSheet', useAppUpdates: () => ({ state, check() {}, install() {}, dismiss }) },
+  }).default;
+  react.begin(); const tree = route(); react.flush();
+  for (const type of ['RESET', 'POP_TO']) beforeRemove({ data: { action: { type } } });
+  assert.equal(dismissals, 0, 'programmatic navigation keeps the prompt pending');
+  for (const type of ['GO_BACK', 'POP']) beforeRemove({ data: { action: { type } } });
+  assert.equal(dismissals, 2);
+  tree.props.onDismiss();
+  assert.equal(backs, 1);
+  assert.equal(dismissals, 3, 'Later defers before removing its route');
+  state.status = 'restarting'; react.begin(); route(); react.flush();
+  assert.equal(dismissals, 3);
+  react.cleanup();
+  assert.equal(dismissals, 3, 'replacing a native sheet route does not defer the prompt');
+  assert.equal(beforeRemove, undefined);
+});
+
+test('a live turn\'s step whose output the phone left out does not expand, while saved and clipped steps do', () => {
+  const pending = 'Output appears when the turn finishes.';
+  const note = tree => find(tree, node => node.type === 'Text' && node.props.children === pending);
+  const button = tree => find(tree, node => node.props?.accessibilityRole === 'button');
+  const step = { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'done', hasDetail: true };
+  // Live and slimmed: a muted line, no disclosure, and nothing that loads.
+  const item = activityItemHost();
+  let tree = item.tool({ step, live: true, waiting: false });
+  assert.ok(note(tree));
+  assert.equal(button(tree), undefined, 'not expandable');
+  assert.equal(find(tree, node => node.type === 'Text' && node.props.children === 'Loading output…'), undefined);
+  // In the chat the row opens Activity, which says it, so the chat row stays as it was.
+  const chat = activityItemHost().tool({ step, live: true, waiting: false, onPress: () => {} });
+  assert.equal(note(chat), undefined);
+  // Live with its clipped tail kept: expands and shows it.
+  const kept = activityItemHost();
+  tree = kept.tool({ step: { ...step, hasDetail: undefined, detail: '…tail of the log' }, live: true, waiting: false });
+  assert.equal(note(tree), undefined);
+  button(tree).props.onPress();
+  assert.ok(find(kept.tool({ step: { ...step, hasDetail: undefined, detail: '…tail of the log' }, live: true, waiting: false }), node => node.type === 'Text' && node.props.children === '…tail of the log'));
+  // Saved message: hasDetail still means "fetch", shown as loading while it does.
+  const saved = activityItemHost();
+  tree = saved.tool({ step, live: false, waiting: false });
+  assert.equal(note(tree), undefined);
+  button(tree).props.onPress();
+  assert.ok(find(saved.tool({ step, live: false, waiting: false }), node => node.type === 'Text' && node.props.children === 'Loading output…'));
 });
 
 test('relay transports: one per Mac, replaced by a new code, closed in the background and on forget', async () => {

@@ -1,0 +1,96 @@
+export type NativeUpdateState = {
+  isStartupProcedureRunning: boolean;
+  isChecking: boolean;
+  isDownloading: boolean;
+  isUpdatePending: boolean;
+  checkError?: Error;
+  downloadError?: Error;
+};
+export type UpdateState = { status: 'idle' | 'disabled' | 'checking' | 'up-to-date' | 'check-error' | 'downloading' | 'ready' | 'restarting' | 'error'; error: string };
+type Dependencies = {
+  enabled: boolean;
+  check: () => Promise<{ isAvailable: boolean; isRollBackToEmbedded: boolean }>;
+  fetch: () => Promise<{ isNew: boolean; isRollBackToEmbedded: boolean }>;
+  reload: () => Promise<unknown>;
+  now?: () => number;
+};
+
+/** Native startup downloads and foreground checks share one notice. Applying an update always needs a tap. */
+export function createUpdateController({ enabled, check, fetch, reload, now = Date.now }: Dependencies) {
+  let snapshot: NativeUpdateState = { isStartupProcedureRunning: false, isChecking: false, isDownloading: false, isUpdatePending: false };
+  let state: UpdateState = { status: enabled ? 'idle' : 'disabled', error: '' };
+  let inFlight: Promise<void> | null = null;
+  let lastCheck = -Infinity;
+  const listeners = new Set<() => void>();
+  const applying = () => state.status === 'restarting';
+  function publish(status: UpdateState['status'], error = '') {
+    if (state.status === status && state.error === error) return;
+    state = { status, error };
+    listeners.forEach(listener => listener());
+  }
+  function syncNative(next = snapshot) {
+    snapshot = next;
+    if (!enabled || state.status === 'restarting') return;
+    if (!inFlight && (snapshot.isChecking || snapshot.isStartupProcedureRunning)) lastCheck = now();
+    if (snapshot.isUpdatePending) publish('ready', state.status === 'ready' ? state.error : '');
+    else if (state.status !== 'ready' && !inFlight) {
+      if (snapshot.isDownloading) publish('downloading');
+      else if (snapshot.downloadError) publish('error', 'Could not download the update. Try again.');
+      else if (snapshot.isChecking || snapshot.isStartupProcedureRunning) publish('checking');
+      else if (state.status === 'checking') publish(snapshot.checkError ? 'idle' : 'up-to-date');
+    }
+  }
+  function refresh(force = false): Promise<void> {
+    if (!enabled) return Promise.resolve();
+    syncNative();
+    if (inFlight) return inFlight;
+    if (state.status === 'ready' || state.status === 'restarting' || snapshot.isStartupProcedureRunning || snapshot.isChecking || snapshot.isDownloading) return Promise.resolve();
+    if (!force && now() - lastCheck < 60000) return Promise.resolve();
+    lastCheck = now();
+    publish('checking');
+    inFlight = (async () => {
+      try {
+        const result = await check();
+        if (state.status === 'ready' || applying()) return;
+        if (!result.isAvailable && !result.isRollBackToEmbedded) { publish('up-to-date'); return; }
+        publish('downloading');
+        const downloaded = await fetch();
+        if (applying()) return;
+        if (downloaded.isNew || downloaded.isRollBackToEmbedded) publish('ready');
+        else publish('error', 'Could not download the update. Try again.');
+      } catch {
+        // An offline check must not claim there is an update. A failed known download offers a retry.
+        if (state.status === 'ready' || state.status === 'restarting') return;
+        if (state.status === 'downloading') publish('error', 'Could not download the update. Try again.');
+        else if (force) publish('check-error', 'Could not check for updates. Check your connection and try again.');
+        else publish('idle');
+      }
+    })().finally(() => { inFlight = null; });
+    return inFlight;
+  }
+  async function install() {
+    if (!enabled || state.status !== 'ready') return;
+    publish('restarting');
+    try { await reload(); }
+    catch { publish('ready', 'Could not apply the update. Try again.'); }
+  }
+  return {
+    get: () => state,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    syncNative, check: refresh, install,
+  };
+}
+
+/** Only foreground use checks for updates; subscriptions and the timer live as long as the app layout. */
+export function watchUpdates(controller: ReturnType<typeof createUpdateController>, environment: {
+  active: () => boolean;
+  watchActive: (listener: () => void) => () => void;
+  schedule: (refresh: () => void, delayMs: number) => () => void;
+}) {
+  let stopped = false;
+  const refresh = () => { if (!stopped && environment.active()) void controller.check(); };
+  const unsubscribe = environment.watchActive(refresh);
+  const unschedule = environment.schedule(refresh, 15 * 60000);
+  refresh();
+  return () => { stopped = true; unsubscribe(); unschedule(); };
+}

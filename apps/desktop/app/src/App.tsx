@@ -1026,6 +1026,7 @@ function App() {
               : undefined}
             isSending={isSending}
             sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
+            runStartedAt={run?.startedAt}
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={subagents}

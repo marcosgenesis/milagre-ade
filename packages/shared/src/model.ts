@@ -191,7 +191,11 @@ export interface ChatStep {
   status: "running" | "done" | "failed";
   /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
-  /** The phone's snapshot leaves a tool's detail out and sets this; the full message has it. */
+  /**
+   * The phone leaves a tool's detail out and sets this. A saved message's full text comes from GET /message; a step of
+   * a turn still streaming has no full message to fetch until the turn ends (the phone keeps only the tail of the last
+   * few steps and of running ones).
+   */
   hasDetail?: boolean;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. For an image step, the generated image. */
   file?: string;

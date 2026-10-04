@@ -1136,3 +1136,25 @@ code.step-shimmer {
   .chat-title-outgoing, .chat-title[data-changing] .chat-title-current { animation: none; }
   .chat-title-outgoing { display: none; }
 }
+.milagre-canvas-flow .react-flow__controls {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.milagre-canvas-flow .react-flow__controls-button {
+  background: var(--surface);
+  color: var(--ink-2);
+  fill: currentColor;
+  border-color: var(--line);
+}
+
+.milagre-canvas-flow .react-flow__controls-button:hover {
+  background: var(--hover-2);
+}
+
+.milagre-canvas-flow .react-flow__attribution {
+  background: transparent;
+  color: var(--ink-3);
+}

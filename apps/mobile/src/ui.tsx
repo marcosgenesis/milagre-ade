@@ -115,8 +115,12 @@ export function showActions({ title, actions, onSelect }: { title?: string; acti
   }
   Alert.alert(title || '', undefined, [...enabled.map(action => ({ text: action.title, style: action.destructive ? 'destructive' as const : 'default' as const, onPress: () => onSelect(action.id) })), { text: 'Cancel', style: 'cancel' as const }]);
 }
-export function PullDown({ title, sections, onSelect, children, label, longPress = false, style }: { title?: string; sections: MenuSection[]; onSelect: (id: string) => void; children: React.ReactNode; label: string; longPress?: boolean; style?: StyleProp<ViewStyle> }) {
-  if (Platform.OS === 'ios' && !longPress) {
+/**
+ * A native pull-down menu on its trigger. With `onPress`, a tap runs it and a long press opens the menu (a Chat row);
+ * without it, a tap opens the menu (the header switchers, a row's ⋯ button).
+ */
+export function PullDown({ title, sections, onSelect, children, label, onPress, style }: { title?: string; sections: MenuSection[]; onSelect: (id: string) => void; children: React.ReactNode; label: string; onPress?: () => void; style?: StyleProp<ViewStyle> }) {
+  if (Platform.OS === 'ios') {
     // A SwiftUI menu laid over the trigger, its label an invisible shape. Hosting the React trigger inside the menu
     // (RNHostView) crashed Fabric when SwiftUI re-attached a view React had already recycled (TestFlight build 9,
     // -[RCTViewComponentView unmountChildComponentView:index:]); here no React view ever lives inside SwiftUI.
@@ -131,17 +135,14 @@ export function PullDown({ title, sections, onSelect, children, label, longPress
     return <View style={style} onTouchStart={() => Keyboard.dismiss()}>
       <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{children}</View>
       <IOSHost style={StyleSheet.absoluteFill} testID={label} ignoreSafeArea="all">
-        <IOSMenu label={<Rectangle modifiers={[foregroundStyle('#00000001'), contentShape(shapes.rectangle()), accessibilityLabel(label)]} />} modifiers={[menuOrder('fixed')]}>{title ? <IOSSection title={title}>{body}</IOSSection> : body}</IOSMenu>
+        <IOSMenu label={<Rectangle modifiers={[foregroundStyle('#00000001'), contentShape(shapes.rectangle()), accessibilityLabel(label)]} />} onPrimaryAction={onPress} modifiers={[menuOrder('fixed')]}>{title ? <IOSSection title={title}>{body}</IOSSection> : body}</IOSMenu>
       </IOSHost>
     </View>;
   }
-  if (Platform.OS === 'ios') {
-    // A long-press menu would need its trigger hosted inside SwiftUI (see above), so it opens the action sheet.
-    const actions = sections.flatMap(section => section.items.filter(item => !item.checked).map(item => ({ id: item.id, title: item.title, destructive: item.destructive, disabled: item.disabled })));
-    return <Pressable accessibilityRole="button" accessibilityLabel={label} testID={label} style={style} onLongPress={() => showActions({ title, actions, onSelect })}>{children}</Pressable>;
-  }
   // The system draws menus below the keyboard, so a touch on the trigger lowers it first.
-  const trigger = <View accessibilityLabel={label} onTouchStart={() => Keyboard.dismiss()}>{children}</View>;
+  const trigger = onPress
+    ? <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} onTouchStart={() => Keyboard.dismiss()}>{children}</Pressable>
+    : <View accessibilityLabel={label} onTouchStart={() => Keyboard.dismiss()}>{children}</View>;
   const actions: MenuAction[] = sections.map((section, index) => ({ id: `section-${index}`, title: section.title || '', displayInline: true, subactions: section.items.map(item => ({ id: item.id, title: item.subtitle ? `${item.title}\n${item.subtitle}` : item.title, image: item.systemImage as MenuAction['image'], state: item.checked ? 'on' : undefined, attributes: { destructive: item.destructive, disabled: item.disabled } })) }));
-  return <MenuView title={title} actions={actions} shouldOpenOnLongPress={longPress} onPressAction={({ nativeEvent }) => { tap(); onSelect(nativeEvent.event); }} style={style} testID={label}>{trigger}</MenuView>;
+  return <MenuView title={title} actions={actions} shouldOpenOnLongPress={!!onPress} onPressAction={({ nativeEvent }) => { tap(); onSelect(nativeEvent.event); }} style={style} testID={label}>{trigger}</MenuView>;
 }

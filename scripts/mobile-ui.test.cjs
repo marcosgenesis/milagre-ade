@@ -71,8 +71,8 @@ function load(file, modules, extra = '') {
 }
 const jsx = (type, props) => ({ type, props });
 
-function markdownHost() {
-  const react = { ...hookHost(), memo: fn => fn };
+function markdownHost({ media, basePath } = {}) {
+  const react = { ...hookHost({ effects: true }), memo: fn => fn };
   const viewer = require('../apps/mobile/src/viewer-store.ts');
   const routes = [], links = [];
   const { Markdown } = load('markdown.tsx', {
@@ -80,6 +80,7 @@ function markdownHost() {
     'react-native': { Text: 'Text', View: 'View', Image: 'Image', Pressable: 'Pressable', Alert: {}, Linking: { openURL: async url => { links.push(url); } } },
     'expo-router': { router: { push: route => routes.push(route) } }, './viewer-store': viewer,
     './chat-presentation': require('../apps/mobile/src/chat-presentation.ts'),
+    './markdown-image': require('../apps/mobile/src/markdown-image.ts'),
     './ui': { PageScroll: 'PageScroll', colors: {}, styles: { muted: {}, code: {} } },
   });
   function expand(node) {
@@ -88,7 +89,7 @@ function markdownHost() {
     if (typeof node.type === 'function') return expand(node.type(node.props));
     return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
   }
-  return { render(text) { react.begin(); return expand(Markdown({ text })); }, routes, links, viewer };
+  return { render(text) { react.begin(); return expand(Markdown({ text, media, basePath })); }, routes, links, viewer };
 }
 
 test('Markdown screenshot links render image previews outside Text and open the image viewer', () => {
@@ -103,6 +104,29 @@ test('Markdown screenshot links render image previews outside Text and open the 
   preview.props.onPress();
   assert.equal(screen.routes.at(-1), '/viewer');
   assert.equal(screen.viewer.viewerImages().images[0].source.uri, url);
+});
+
+test('local Markdown images use the computer connection and keep authentication in the viewer', () => {
+  const paths = [];
+  const source = { uri: 'https://mac/media?path=shot', headers: { Authorization: 'Bearer paired-token' } };
+  const screen = markdownHost({ basePath: '/worktrees/feature', media: path => { paths.push(path); return source; } });
+  const rendered = screen.render('![Screenshot](./screens/left%20bar.png)');
+  const image = find(rendered, node => node.type === 'Image');
+  assert.ok(image, 'a local path must use the daemon, not disappear into alt text');
+  assert.deepEqual(paths, ['/worktrees/feature/screens/left bar.png']);
+  assert.equal(image.props.source, source);
+  find(rendered, node => node.props?.accessibilityRole === 'imagebutton').props.onPress();
+  assert.equal(screen.viewer.viewerImages().images[0].source, source);
+});
+
+test('relay Markdown images wait for the cached file and render it when ready', async () => {
+  const file = deferred();
+  const screen = markdownHost({ media: () => file.promise });
+  const text = '![Screenshot](/tmp/shot.png)';
+  assert.equal(find(screen.render(text), node => node.type === 'Image'), undefined);
+  file.resolve({ uri: 'file:///phone/cache/shot.png' });
+  await settle();
+  assert.equal(find(screen.render(text), node => node.type === 'Image')?.props.source.uri, 'file:///phone/cache/shot.png');
 });
 
 test('images embedded in emphasis, links and tables keep their surrounding text', () => {
@@ -132,7 +156,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
   const react = hookHost({ effects });
   const { useSessionState } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
-    './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
+    './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, savedNavigation: { read: async () => null, save: async () => {} }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
   }, '\nexport { useSessionState };');
   return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount });
@@ -259,7 +283,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
-  const router = { setParams: values => Object.assign(params, values), push() {}, back() { router.backs = (router.backs ?? 0) + 1; } };
+  const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.useEffect(fn, [fn]) },
@@ -274,6 +298,87 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   return { session, sending, params, field, send, render, router, calls };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('browsing another Project in the drawer leaves the current Chat selected', async () => {
+  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path) });
+  await render().connect({ address: 'mac', token: 'token' });
+  await render().open('/current');
+  const before = render();
+  const preview = await before.previewProject('/other');
+  assert.equal(preview.project.path, '/other');
+  assert.equal(render().snapshot.project.path, '/current');
+  assert.equal(before.isSelected(), true);
+});
+
+test('closing the drawer during an open keeps the previous Chat usable', async () => {
+  const loading = deferred();
+  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => path === '/other' ? loading.promise : snapshot(path) });
+  await render().connect({ address: 'mac', token: 'token' });
+  await render().open('/current');
+  const before = render();
+  const opening = before.open('/other', { background: true });
+  render().cancelNavigation();
+  loading.resolve(snapshot('/other'));
+  assert.equal(await opening, undefined);
+  assert.equal(render().snapshot.project.path, '/current');
+  assert.equal(before.isSelected(), true);
+});
+
+test('a deleted drawer Chat does not switch the Project behind the drawer', async () => {
+  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path) });
+  await render().connect({ address: 'mac', token: 'token' });
+  await render().open('/current');
+  await assert.rejects(render().open('/other', { background: true, chatId: 77 }), /no longer available/);
+  assert.equal(render().snapshot.project.path, '/current');
+});
+
+test('cancelling a computer switch preserves the active Chat selection', async () => {
+  const status = deferred();
+  let delay = false;
+  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'daemon:status' && delay ? status.promise : method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path) });
+  await render().connect({ address: 'mac', token: 'token' });
+  await render().open('/current');
+  const before = render();
+  delay = true;
+  const connecting = before.connect({ address: 'studio', token: 'token' });
+  render().cancelNavigation();
+  status.resolve({});
+  assert.equal(await connecting, false);
+  assert.equal(before.isSelected(), true);
+});
+
+function resumeHost({ target = { hostId: 'mac', projectPath: '/last', chatId: 3 }, state = snapshot('/last'), failure } = {}) {
+  const react = hookHost();
+  react.useEffect = react.effect;
+  const routes = [], opened = [];
+  const session = { client: { url: 'mac' }, lastLocation: target, open: async path => { opened.push(path); if (failure) throw new Error(failure); return state; } };
+  const { default: Screen } = load('app/projects.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View' },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { replace: route => routes.push(route) }, useLocalSearchParams: () => ({ resume: '1' }) },
+    '../session': { useSession: () => session }, '../project-navigation': { ProjectNavigation: 'ProjectNavigation' }, '../ui': { ErrorNotice: 'ErrorNotice', styles: {} }, '../icons': { SpinnerRing: 'SpinnerRing' },
+  });
+  return { routes, opened, render() { react.begin(); const tree = Screen(); react.flush(); return tree; }, unmount: react.cleanup };
+}
+
+test('launch restoration opens the saved computer/Project/Chat target directly', async () => {
+  const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 };
+  const app = resumeHost({ state }); app.render(); await settle();
+  assert.deepEqual(app.opened, ['/last']);
+  assert.equal(app.routes.length, 1);
+  assert.equal(app.routes[0].pathname, '/chat');
+  assert.equal(app.routes[0].params.id, '3');
+  assert.equal(app.routes[0].params.hostId, 'mac');
+  assert.equal(app.routes[0].params.projectPath, '/last');
+});
+
+test('missing, archived and unreachable last Chats leave the project list usable', async () => {
+  const archived = snapshot('/last'); archived.project.state.sessions[3] = { id: 3, archived: true };
+  for (const input of [{}, { state: archived }, { failure: 'offline' }, { target: { hostId: 'other', projectPath: '/last', chatId: 3 } }]) {
+    const app = resumeHost(input); app.render(); await settle();
+    assert.equal(app.routes.length, 0);
+    assert.ok(find(app.render(), node => node.type === 'ProjectNavigation'));
+  }
+});
 
 function pullDownHost() {
   const sheets = [];
@@ -334,7 +439,7 @@ test('New Chat opens the composer directly when there are multiple Worktrees', (
   const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
   assert.equal(typeof button.props.onPress, 'function', 'one tap must navigate without choosing a Worktree first');
   button.props.onPress();
-  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1' } }]));
+  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1', projectPath: '/p' } }]));
 });
 
 // A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.
@@ -395,7 +500,7 @@ test('the Chat screen Archive falls back to a plain Archive on an older Mac, the
   assert.deepEqual(alerts, [{ title: 'Archive this Chat?', message: undefined, buttons: [['Cancel', 'cancel'], ['Archive', 'destructive']] }]);
   assert.deepEqual(screen.calls.map(call => call.method), ['worktree:roots', 'chat:patch']);
   assert.deepEqual(screen.calls[1].args, ['/p', 5, { archived: true, unread: false }]);
-  assert.equal(screen.router.backs, 1);
+  assert.equal(screen.router.replaced, '/projects');
 });
 
 test('a new Chat can switch Worktrees and keep each Worktree draft', async () => {
@@ -758,6 +863,7 @@ function pushHost(t, initial = 'index') {
   let params = initial === 'chat' ? { id: '1' } : {};
   const apply = action => { navigation = stack.getStateForAction(navigation, action, options) || navigation; };
   const router = {
+    dismissAll: () => apply(StackActions.popToTop()),
     replace: route => apply(StackActions.replace(route.pathname.slice(1), route.params)),
     dismissTo: path => apply(StackActions.popTo(path === '/' ? 'index' : path.slice(1))),
     push: route => apply(StackActions.push(typeof route === 'string' ? route.slice(1) : route.pathname.slice(1), route.params)),
@@ -782,7 +888,7 @@ function pushHost(t, initial = 'index') {
   t.after(() => react.cleanup());
   render();
   return { render, opens, opening, tap: (eventId = 'event') => { receive({ kind: 'milagre-chat', hostId: host.id, projectPath: '/project', sessionId: 2, eventId }); render(); },
-    switchChat: id => { params = { id }; pathname = '/chat'; render(); }, routes: () => navigation.routes, back: () => apply({ type: 'GO_BACK' }),
+    switchChat: (id, projectPath, hostId) => { params = { id, projectPath, hostId }; pathname = '/chat'; render(); }, routes: () => navigation.routes, back: () => apply({ type: 'GO_BACK' }),
     pair: () => { const current = ++generation; pathname = '/pair'; params = {}; render(); return current === generation; },
   };
 }
@@ -798,15 +904,25 @@ test('a same-screen Chat switch cancels a slow notification target', async t => 
   assert.equal(screen.routes()[0].params, undefined);
 });
 
-test('a cold-start notification builds a route back to All Chats', async t => {
+test('switching Projects with the same Chat id cancels a slow notification target', async t => {
+  const screen = pushHost(t, 'chat');
+  screen.tap();
+  await settle();
+  screen.switchChat('1', '/another-project', 'https://mac.example');
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes()[0].params, undefined);
+});
+
+test('a cold-start notification opens the target directly without setup screens', async t => {
   const screen = pushHost(t);
   screen.tap();
   await settle();
   screen.opening.resolve();
   await settle();
-  assert.deepEqual(screen.routes().map(route => route.name), ['index', 'projects', 'project', 'chat']);
-  screen.back();
-  assert.equal(screen.routes().at(-1).name, 'project');
+  assert.deepEqual(screen.routes().map(route => route.name), ['chat']);
+  assert.equal(screen.routes()[0].params.projectPath, '/project');
+  assert.equal(screen.routes()[0].params.hostId, 'https://mac.example');
 });
 
 test('duplicate in-flight taps share one opening and a later tap can open again', async t => {
@@ -1162,4 +1278,31 @@ test('relay transports: one per Mac, replaced by a new code, closed in the backg
   relayRuntime.forget('nobody');
   for (const listener of listeners) listener('background');
   assert.equal(b.closed, 2, 'a forgotten transport is not closed again');
+});
+
+test('refreshing saved hosts during startup cannot cancel the claimed auto-open', async () => {
+  const react = hookHost(); react.useEffect = react.effect;
+  const host = { id: 'mac', address: 'mac', name: 'Mac', token: 'token' };
+  const opened = [], routes = [];
+  let claimed = false;
+  const session = { booted: true, hosts: [host], lastLocation: { hostId: 'mac', projectPath: '/p', chatId: 1 }, client: null,
+    loadHosts: async () => [host], connect: async value => { opened.push(value.id); return true; },
+    claimAutoOpen: () => { if (claimed) return false; claimed = true; return true; }, navigationVersion: () => 0,
+  };
+  const { default: Screen } = load('app/index.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Alert: {}, Platform: { OS: 'ios' }, RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
+    'expo-router': { Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Button: 'Button', Spacer: 'Spacer' }) }, router: { replace: route => routes.push(route) }, useFocusEffect() {} },
+    '@hugeicons/core-free-icons': {}, 'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0 }) },
+    '../session': { useSession: () => session }, '../push': { usePush: () => ({}) }, '../hosts-native': { savedHosts: {} }, '../client': {}, '../relay-native': {}, '../icons': { Icon: 'Icon' },
+    '../ui': { colors: {}, styles: {}, ErrorNotice: 'ErrorNotice', ListRow: 'ListRow', PageScroll: 'PageScroll' },
+  });
+  react.begin(); Screen(); react.flush();
+  session.hosts = [...session.hosts];
+  react.begin(); Screen(); react.flush();
+  await settle();
+  assert.deepEqual(opened, ['mac']);
+  assert.equal(routes[0].pathname, '/projects');
+  assert.equal(routes[0].params.resume, '1');
+  react.cleanup();
 });

@@ -132,7 +132,7 @@ const MessageSection = memo(function MessageSection({
     >
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}>
-        <Attachments images={message.images} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
+        <Attachments images={isUser ? message.images : message.images?.filter(image => !image.sourcePath)} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
         {isUser ? (
           message.body.trim() ? <UserBody body={message.body} /> : null
         ) : recommendation ? (

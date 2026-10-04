@@ -715,6 +715,7 @@ function createRuntime(options) {
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
   });
   // What the phone's media check needs, without the whole state.
+  commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its worktrees.");
     return Object.values((await states.get(projectPath)).worktrees ?? {}).map((worktree) => worktree.path);

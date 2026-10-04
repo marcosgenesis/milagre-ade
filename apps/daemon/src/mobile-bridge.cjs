@@ -207,7 +207,13 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
       path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'generated_images'),
     ].filter(candidate => typeof candidate === 'string' && path.isAbsolute(candidate));
     const roots = (await Promise.all(candidates.map(realOrNull))).filter(Boolean);
-    const real = await realOrNull(requested);
+    let real = await realOrNull(requested);
+    if (!real || !roots.some(root => inside(root, real))) {
+      // A screenshot in /tmp must be explicitly shared in this Project's assistant reply.
+      // The runtime validates that reference and returns a durable Project attachment, never arbitrary bytes.
+      const stored = await client.call('project:chat-image', [projectPath, requested]).catch(() => null);
+      if (stored) real = await realOrNull(stored);
+    }
     if (!real) {
       // Missing files are only reported as missing inside an allowed folder, so paths elsewhere are not probed.
       const lexical = path.resolve(requested);

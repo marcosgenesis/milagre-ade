@@ -26,7 +26,7 @@ function Fixture() {
   const finalStep = state === "failed" ? image("failed", { title: "Couldn't generate an image", note: "image limit reached" }) : image("done", { file: ${JSON.stringify(PHOTO)}, detail: PROMPT });
   const messages = [
     { id: 1, session_id: 1, context: null, role: "user", body: "make me an image of a mountain landscape at sunset" },
-    ...(running ? [] : [{ id: 2, session_id: 1, context: null, role: "assistant", body: state === "failed" ? "I couldn't generate it: the image limit is used up." : "Here it is.", steps: [thought, { ...finalStep, offset: 0 }] }]),
+    ...(running ? [] : [{ id: 2, session_id: 1, context: null, role: "assistant", body: state === "failed" ? "I couldn't generate it: the image limit is used up." : "Here it is.", steps: [thought, { ...finalStep, offset: 0 }], images: state === "failed" ? [] : [{ id: "captured", name: "photo.png", path: ${JSON.stringify(PHOTO)}, sourcePath: ${JSON.stringify(PHOTO)} }] }]),
   ];
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
@@ -85,6 +85,7 @@ async function browserChecks() {
     assert.doesNotMatch(done.text, /mountain landscape/, "the prompt isn't repeated under the image");
     assert.match(await evaluate(`${surface}.querySelector("[role=img]").getAttribute("aria-label")`), /mountain landscape/, "the prompt is the image's label");
     await screenshot("complete");
+    assert.equal(await evaluate('document.querySelectorAll("[data-from=assistant] [aria-label=Attachments]").length'), 0, "durable assistant image copies do not duplicate the reply image as attachments");
     // Hovering shows the buttons; each acts on the saved file, and so does the right-click menu.
     const box = await evaluate(`(() => { const r = ${surface}.querySelector("[role=img]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
     window.webContents.sendInputEvent({ type: "mouseMove", x: box.x, y: box.y });

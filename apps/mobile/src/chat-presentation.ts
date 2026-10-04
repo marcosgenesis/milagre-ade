@@ -2,6 +2,9 @@ import MarkdownIt from 'markdown-it';
 import { closeOpenMarkdown } from '@milagre/shared/streaming-markdown';
 
 const markdown = new MarkdownIt({ html: false, linkify: false, breaks: true });
+const validateLink = markdown.validateLink.bind(markdown);
+// A file URI in an image is resolved through the paired computer, never opened on the phone.
+markdown.validateLink = url => /^file:/i.test(url) || validateLink(url);
 export function markdownTokens(text: string, streaming = false) {
   return markdown.parse(streaming ? closeOpenMarkdown(text) : text, {});
 }

@@ -23,7 +23,7 @@ export default function AddComputer() {
     if (busy) return;
     setBusy(true); setError('');
     try {
-      if (await session.connect(pairing)) { router.dismissAll(); router.push('/projects'); }
+      if (await session.connect(pairing)) { router.dismissAll(); router.replace('/projects'); }
     } catch (e) { setError((e as Error).message); setScanned(false); }
     finally { setBusy(false); }
   }

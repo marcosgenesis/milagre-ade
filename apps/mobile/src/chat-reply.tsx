@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
@@ -74,7 +74,7 @@ function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource })
   const ready = useMedia(source);
   if (!shown || !source) return null;
   const image: ViewerImage = { source, name: step.file!.split('/').pop() || 'Generated image' };
-  return <Pressable accessibilityRole="imagebutton" accessibilityLabel="Generated image. Open full screen" ref={thumb} onPress={() => open([image], 0, [thumb.current])} style={{ width: 240 }}>
+  return <Pressable accessibilityRole="imagebutton" accessibilityLabel="Image. Open full screen" ref={thumb} onPress={() => open([image], 0, [thumb.current])} style={{ width: 240 }}>
     {ready ? <Image source={ready} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width && height) setRatio(width / height); }} style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />
       : <View style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />}
     <View style={{ position: 'absolute', right: 8, top: 8, width: 30, height: 30, borderRadius: 10, backgroundColor: '#ffffffcc', alignItems: 'center', justifyContent: 'center' }}><Icon icon={Maximize01Icon} tone="ink" size={15} /></View>
@@ -96,7 +96,8 @@ function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; liv
     <Icon icon={ArrowRight01Icon} tone="ink3" size={12} />
   </Pressable>;
 }
-export const ChatReply = memo(function ChatReply({ message, run, onActivity, media }: { message?: ChatMessage; run?: AgentRun; onActivity: (message: string) => void; media: MediaSource }) {
+export const ChatReply = memo(function ChatReply({ message, run, onActivity, media, basePath }: { message?: ChatMessage; run?: AgentRun; onActivity: (message: string) => void; media: MediaSource; basePath?: string }) {
+  const savedMedia = useCallback((path: string) => media(message?.images?.find(image => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : 'run');
   const text = run?.text ?? message?.body ?? '';
   const steps = run?.steps ?? message?.steps ?? [];
@@ -112,8 +113,8 @@ export const ChatReply = memo(function ChatReply({ message, run, onActivity, med
     {reply.setup.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={openActivity} />)}
     {reply.activity.length === 1 && reply.activity[0].type === 'step' ? <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={openActivity} />
       : reply.activity.length > 0 && <ActivityRow steps={reply.activity.flatMap(entry => entry.type === 'step' ? [entry.step] : [])} live={!!run} waiting={waiting} onPress={openActivity} />}
-    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onPress={openActivity} /><GeneratedImage step={step} media={media} /></View>)}
-    {!!answer && <Markdown text={answer} streaming={!!run} />}
+    {reply.images.map(step => <View key={step.id} style={{ gap: 6 }}><ToolRow step={step} live={!!run} waiting={waiting} onPress={openActivity} /><GeneratedImage step={step} media={savedMedia} /></View>)}
+    {!!answer && <Markdown text={answer} streaming={!!run} media={savedMedia} basePath={basePath} />}
     {run?.tasks?.length ? <View style={[styles.card, { gap: 8 }]}>{run.tasks.map(task => <View key={task.id} style={[styles.row, { flexWrap: 'nowrap' }]}><Icon icon={task.status === 'completed' ? CheckmarkCircle02Icon : CircleIcon} tone={task.status === 'completed' ? 'green' : 'ink3'} size={16} /><Text style={[styles.muted, { flex: 1 }]}>{task.status === 'in_progress' ? task.activeForm || task.content : task.content}</Text></View>)}</View> : null}
     {!run && message?.outcome === 'cancelled' && <Text style={styles.muted}>Turn stopped</Text>}
     {!run && message?.outcome === 'failed' && <Text accessibilityRole="alert" style={{ color: colors.error }}>The turn failed. Review the response before trying again.</Text>}

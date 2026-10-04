@@ -9,7 +9,7 @@ import { SessionProvider, useSession } from '../session';
 import { PushProvider } from '../push';
 import { StartupSplash } from '../startup-splash';
 import { hex } from '../theme';
-import { UpdateShell } from '../update-banner';
+import { UpdateShell } from '../update-sheet';
 
 export default function Layout() {
   const scheme = useColorScheme();
@@ -21,8 +21,8 @@ export default function Layout() {
   return <GestureHandlerRootView style={{ flex: 1 }}><KeyboardProvider><SessionProvider><PushProvider><ThemeProvider value={theme}><StatusBar style="auto" /><UpdateShell><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
     <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+    <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: 'fitToContents' }} />
     <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
-    <Stack.Screen name="updates" options={{ title: 'App updates' }} />
     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
     <Stack.Screen name="pair" options={{ title: 'Pairing' }} />
     <Stack.Screen name="projects" options={{ title: 'Projects' }} />

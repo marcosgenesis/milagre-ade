@@ -27,6 +27,8 @@ export function localEndpoint(input: string): string {
 export function createClient(address: string, token: string, fetcher: typeof fetch = fetch, timeoutMs = 30000, access?: Access) {
   const url = localEndpoint(address);
   if (access && !url.startsWith('https:')) throw new Error('A Cloudflare access token needs an HTTPS address.');
+  // The last snapshot per route and its ETag: an unchanged Project answers 304 instead of megabytes.
+  const cached = new Map<string, { etag: string; value: unknown }>();
   const auth = { Authorization: `Bearer ${token.trim()}`, ...(access ? { 'CF-Access-Client-Id': access.id, 'CF-Access-Client-Secret': access.secret } : {}) };
   async function request<T>(route: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
@@ -34,13 +36,15 @@ export function createClient(address: string, token: string, fetcher: typeof fet
     try {
       let response: Response;
       try {
+        const previous = body === undefined ? cached.get(route) : undefined;
         response = await fetcher(url + route, { method: body === undefined ? 'GET' : 'POST',
-          headers: { ...auth, 'Content-Type': 'application/json' },
+          headers: { ...auth, 'Content-Type': 'application/json', ...(previous ? { 'If-None-Match': previous.etag } : {}) },
           body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, redirect: 'error' });
       } catch {
         throw new Error('Connection lost. Reconnect to your computer. Check the Chat before sending again.');
       }
       if (response.redirected || (response.url && new URL(response.url).origin !== url)) throw new Error('The computer address redirected. Enter its direct HTTPS address.');
+      if (response.status === 304 && cached.has(route)) return cached.get(route)!.value as T;
       let value;
       // Cloudflare and proxies answer with an HTML page when the request never reaches the host.
       try { value = JSON.parse(await response.text()); }
@@ -51,6 +55,8 @@ export function createClient(address: string, token: string, fetcher: typeof fet
       }
       if (value?.v !== 1) throw new Error('Incompatible daemon response. Update the app and daemon together.');
       if (!response.ok || value.error) throw new Error(value.error?.message || `Request failed (${response.status})`);
+      const etag = response.headers?.get?.('etag');
+      if (body === undefined && etag) cached.set(route, { etag, value: value.result });
       return value.result as T;
     } finally { clearTimeout(timeout); }
   }

@@ -431,3 +431,80 @@ test('a phone that never completes its hello is closed at the hello deadline; a 
   good.send({ t: 'ping' });
   assert.deepEqual(await good.next(), { t: 'pong' });
 });
+
+/** A relay that answers the proof with ready and then does `after(ws)`: a stand-in for a flapping or replacing relay. */
+function scriptedRelay(t, plan) {
+  const dials = [], closes = [];
+  return startRelay(t, {
+    hostBehavior: (ws, index) => {
+      dials.push(Date.now());
+      ws.on('close', () => closes.push(Date.now()));
+      const step = plan(index);
+      if (!step) return false;
+      ws.send(JSON.stringify({ t: 'challenge', nonce: b64url(random(32)) }));
+      ws.once('message', () => { ws.send(JSON.stringify({ t: 'ready' })); step(ws); });
+      return true;
+    },
+  }).then(relay => ({ ...relay, dials, closes }));
+}
+
+test('a host closed as replaced (4409) waits replacedMs before dialing again; other closes keep the short backoff', async t => {
+  const bridge = await startFakeBridge(t);
+  for (const [code, slow] of [[4409, true], [1011, false]]) {
+    const relay = await scriptedRelay(t, index => index === 0 && (ws => ws.close(code, 'bye')));
+    const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20], replacedMs: 400, jitter: false } });
+    await until(() => mac.host.status() === 'online' && relay.dials.length === 2, `back online after ${code}`);
+    const gap = relay.dials[1] - relay.closes[0];
+    if (slow) assert.ok(gap >= 380, `after 4409 the host waited ${gap} ms`);
+    else assert.ok(gap < 300, `after ${code} the host waited only ${gap} ms`);
+    await mac.host.close();
+  }
+});
+
+test('the 4409 wait is jittered but never shorter than replacedMs', async t => {
+  const bridge = await startFakeBridge(t);
+  const relay = await scriptedRelay(t, index => index === 0 && (ws => ws.close(4409, 'replaced')));
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20], replacedMs: 300, jitter: true } });
+  await until(() => mac.host.status() === 'online' && relay.dials.length === 2, 'back online');
+  const gap = relay.dials[1] - relay.closes[0];
+  assert.ok(gap >= 280 && gap < 300 * 1.4 + 150, `waited ${gap} ms`);
+});
+
+test('a relay that drops the host right after ready keeps backing off: ready alone does not reset the backoff', async t => {
+  const bridge = await startFakeBridge(t);
+  const relay = await scriptedRelay(t, index => index < 3 && (ws => setTimeout(() => ws.close(1011), 10)));
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20, 150, 400], stableMs: 10_000, jitter: false } });
+  await until(() => mac.host.status() === 'online' && relay.dials.length === 4, 'the fourth dial', 8000);
+  const gaps = [0, 1, 2].map(i => relay.dials[i + 1] - relay.closes[i]);
+  assert.ok(gaps[1] >= 140 && gaps[2] >= 380, `gaps grew: ${gaps.join(', ')} ms`);
+});
+
+test('a session that stays up for stableMs resets the backoff', async t => {
+  const bridge = await startFakeBridge(t);
+  // First session flaps (attempt 1), the second stays up past stableMs and then drops.
+  const relay = await scriptedRelay(t, index => index === 0 ? (ws => setTimeout(() => ws.close(1011), 10)) : index === 1 ? (ws => setTimeout(() => ws.close(1011), 250)) : null);
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20, 600], stableMs: 100, jitter: false } });
+  await until(() => mac.host.status() === 'online' && relay.dials.length === 3, 'the third dial');
+  const gap = relay.dials[2] - relay.closes[1];
+  assert.ok(gap < 300, `after a stable session the host redialed in ${gap} ms`);
+});
+
+test('a 4409 before ready keeps the short backoff: a replaced pending socket is no sign of a twin Mac', async t => {
+  const bridge = await startFakeBridge(t);
+  const dials = [], closes = [];
+  // Anyone who knows the hostId can open pending sockets and knock the Mac's pending one off with 4409.
+  const relay = await startRelay(t, {
+    hostBehavior: (ws, index) => {
+      dials.push(Date.now());
+      ws.on('close', () => closes.push(Date.now()));
+      if (index > 0) return false;
+      ws.send(JSON.stringify({ t: 'challenge', nonce: b64url(random(32)) }));
+      ws.once('message', () => ws.close(4409, 'replaced'));
+      return true;
+    },
+  });
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20], replacedMs: 400, jitter: false } });
+  await until(() => mac.host.status() === 'online' && dials.length === 2, 'back online');
+  const gap = dials[1] - closes[0];
+  assert.ok(gap < 300, `a pending 4409 waited only ${gap} ms`);
+});

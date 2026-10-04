@@ -38,6 +38,10 @@
       "types": "./src/git-codes.d.mts",
       "default": "./src/git-codes.mjs"
     },
+    "./relay-crypto": {
+      "types": "./src/relay-crypto.d.mts",
+      "default": "./src/relay-crypto.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
     "./reconcile": {
@@ -68,10 +72,13 @@
     "src/usage.ts"
   ],
   "scripts": {
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "tweetnacl": "1.0.3"
   }
 }

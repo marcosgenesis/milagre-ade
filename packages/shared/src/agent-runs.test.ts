@@ -38,6 +38,28 @@ test("chat keys name a project and a session, even when the path contains #", ()
   assert.equal(chatInProject("/tmp/a#b", chatKey("/tmp/a", 12)), false);
 });
 
+test("a turn keeps its start time through events and steering; the next turn starts fresh", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100_000 });
+  let state = base();
+  let runs = startRun({}, key(1), "gpt-6-sol");
+  assert.equal(runs[key(1)].startedAt, 100_000);
+  t.mock.timers.tick(20_000);
+  for (const event of [
+    { type: "turn-started" },
+    { type: "text-delta", messageId: "m", text: "Working" },
+    { type: "subagents-waiting", waiting: true },
+    { type: "message-sent", model: "gpt-6-sol" },
+    { type: "answers-sent" },
+  ] as AgentEvent[]) {
+    ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), event));
+    assert.equal(runs[key(1)].startedAt, 100_000);
+  }
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-completed" }));
+  assert.equal(runs[key(1)], undefined);
+  ({ runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-started" }));
+  assert.equal(runs[key(1)].startedAt, 120_000);
+});
+
 test("saves and forgets the agent's native session id", () => {
   const started = applyAgentEvent(base(), {}, PROJECT, key(1), { type: "session-started", nativeId: "thread-1" });
   assert.equal(started.changed, true);
@@ -131,10 +153,11 @@ test("an unknown event type changes nothing", () => {
 
 const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
 
-test("turn-started opens a run for a turn this window didn't start", () => {
+test("turn-started opens a run for a turn this window didn't start", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100_000 });
   const state = { ...base(), messages: [{ id: 5, session_id: 2, body: "One more thing", context: null, role: "user" as const, model: "claude-opus-5-5" }] };
   const opened = applyAgentEvent(state, {}, PROJECT, key(2), { type: "turn-started", turnId: "t-2" });
-  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", approvals: [], steps: [], questions: [], answered: {} });
+  assert.deepEqual(opened.runs[key(2)], { text: "", model: "claude-opus-5-5", startedAt: 100_000, approvals: [], steps: [], questions: [], answered: {} });
   assert.equal(opened.changed, false);
 
   const running = startRun({}, key(2), "claude-sonnet-5-5");

@@ -28,7 +28,7 @@ async function resolveStartRef(projectPath, baseBranch) {
     // Offline: the last fetched upstream is still newer than nothing.
   }
   try {
-    await git(projectPath, ["merge-base", "--is-ancestor", baseBranch, trackingRef]);
+    await git(projectPath, ["merge-base", "--is-ancestor", "--end-of-options", baseBranch, trackingRef]);
     return trackingRef;
   } catch {
     return baseBranch;
@@ -58,14 +58,21 @@ function slugify(text) {
     .replace(/-+$/, "");
 }
 
+// The base comes from a client (a phone, a window): it must name an existing commit and can never be read as an option.
+async function checkBase(projectPath, baseBranch) {
+  const valid = typeof baseBranch === "string" && baseBranch !== "" && !baseBranch.startsWith("-") && !/[\0\n]/.test(baseBranch);
+  if (!valid || !(await client.read.refExists(projectPath, baseBranch))) throw new Error(`The base branch ${JSON.stringify(String(baseBranch))} is missing from this project.`);
+}
+
 async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEFAULT_WORKTREE_ROOT, suffix = Math.random().toString(36).slice(2, 6), copyPatterns, copyLimits }) {
+  await checkBase(projectPath, baseBranch);
   const name = `${slugify(prompt) || "chat"}-${suffix}`;
   const branch = `milagre/${name}`;
   const worktreePath = path.join(root, path.basename(projectPath), name);
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
   const start = await resolveStartRef(projectPath, baseBranch);
   // --no-track: the chat's branch must not push to, or pull from, the branch it started on.
-  await client.write.checked(projectPath, ["worktree", "add", "--no-track", "-b", branch, worktreePath, start]);
+  await client.write.checked(projectPath, ["worktree", "add", "--no-track", "-b", branch, "--end-of-options", worktreePath, start]);
   // Ignored files the project needs (env files) come along; a failed copy never fails the worktree.
   const copy = await copyFilesToWorktree({ projectPath, worktreePath, setting: copyPatterns, limits: copyLimits });
   // `base` is what the chat's changes are measured against (see diffstat.cjs).

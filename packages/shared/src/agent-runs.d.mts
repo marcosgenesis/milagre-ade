@@ -7,6 +7,8 @@ export type SentAnswer = PermissionDecision | "answered" | "dismissed";
 export interface AgentRun {
   text: string;
   model: string;
+  /** When this turn began, in milliseconds since epoch. Older hosts may omit it. */
+  startedAt?: number;
   /** Tool steps in the order they started; each one's offset is where it sits in `text`. */
   steps: ChatStep[];
   /** Approval requests the turn waits on, oldest first. */

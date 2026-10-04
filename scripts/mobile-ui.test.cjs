@@ -838,7 +838,7 @@ test('subagent details stay expanded across live updates and collapse through th
 
 test('tool disclosure reveals late output, while its chat action opens Activity without expanding', () => {
   const item = activityItemHost();
-  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: true, waiting: false };
+  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: false, waiting: false };
   let tree = item.tool(props);
   find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
   assert.ok(find(item.tool(props), node => node.type === 'Text' && node.props.children === 'Loading output…'));
@@ -851,6 +851,34 @@ test('tool disclosure reveals late output, while its chat action opens Activity 
   find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
   assert.equal(opened, 1);
   assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
+});
+
+test('a live turn\'s step whose output the phone left out does not expand, while saved and clipped steps do', () => {
+  const pending = 'Output appears when the turn finishes.';
+  const note = tree => find(tree, node => node.type === 'Text' && node.props.children === pending);
+  const button = tree => find(tree, node => node.props?.accessibilityRole === 'button');
+  const step = { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'done', hasDetail: true };
+  // Live and slimmed: a muted line, no disclosure, and nothing that loads.
+  const item = activityItemHost();
+  let tree = item.tool({ step, live: true, waiting: false });
+  assert.ok(note(tree));
+  assert.equal(button(tree), undefined, 'not expandable');
+  assert.equal(find(tree, node => node.type === 'Text' && node.props.children === 'Loading output…'), undefined);
+  // In the chat the row opens Activity, which says it, so the chat row stays as it was.
+  const chat = activityItemHost().tool({ step, live: true, waiting: false, onPress: () => {} });
+  assert.equal(note(chat), undefined);
+  // Live with its clipped tail kept: expands and shows it.
+  const kept = activityItemHost();
+  tree = kept.tool({ step: { ...step, hasDetail: undefined, detail: '…tail of the log' }, live: true, waiting: false });
+  assert.equal(note(tree), undefined);
+  button(tree).props.onPress();
+  assert.ok(find(kept.tool({ step: { ...step, hasDetail: undefined, detail: '…tail of the log' }, live: true, waiting: false }), node => node.type === 'Text' && node.props.children === '…tail of the log'));
+  // Saved message: hasDetail still means "fetch", shown as loading while it does.
+  const saved = activityItemHost();
+  tree = saved.tool({ step, live: false, waiting: false });
+  assert.equal(note(tree), undefined);
+  button(tree).props.onPress();
+  assert.ok(find(saved.tool({ step, live: false, waiting: false }), node => node.type === 'Text' && node.props.children === 'Loading output…'));
 });
 
 test('relay transports: one per Mac, replaced by a new code, closed in the background and on forget', async () => {

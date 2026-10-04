@@ -49,7 +49,8 @@
     "./pr-blockers": "./src/pr-blockers.ts",
     "./diff-parse": "./src/diff-parse.ts",
     "./diff-tree": "./src/diff-tree.ts",
-    "./diff-layout": "./src/diff-layout.ts"
+    "./diff-layout": "./src/diff-layout.ts",
+    "./usage": "./src/usage.ts"
   },
   "files": [
     "src/*.mjs",
@@ -63,7 +64,8 @@
     "src/pr-blockers.ts",
     "src/diff-parse.ts",
     "src/diff-tree.ts",
-    "src/diff-layout.ts"
+    "src/diff-layout.ts",
+    "src/usage.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts",

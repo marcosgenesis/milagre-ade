@@ -1,8 +1,8 @@
 import React from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { Button as NativeButton, Host, Picker, Switch } from '@expo/ui';
-import { Button as IOSButton, Host as IOSHost, Menu as IOSMenu, Picker as IOSPicker, Rectangle, Section as IOSSection, Text as IOSText, Toggle as IOSToggle } from '@expo/ui/swift-ui';
-import { accessibilityLabel, contentShape, disabled as nativeDisabled, foregroundStyle, menuOrder, pickerStyle, shapes, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
+import { Button as IOSButton, HStack as IOSHStack, Host as IOSHost, Image as IOSImage, Menu as IOSMenu, Picker as IOSPicker, Rectangle, Section as IOSSection, Text as IOSText, Toggle as IOSToggle } from '@expo/ui/swift-ui';
+import { accessibilityLabel, contentShape, disabled as nativeDisabled, font, foregroundStyle, frame, lineLimit, menuOrder, padding, tint, pickerStyle, shapes, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 import * as Haptics from 'expo-haptics';
 import { ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon } from '@hugeicons/core-free-icons';
@@ -99,6 +99,7 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
 }
 export type MenuItem = { id: string; title: string; systemImage?: string; checked?: boolean; destructive?: boolean; disabled?: boolean; subtitle?: string };
 export type MenuSection = { title?: string; items: MenuItem[] };
+type NativeMenuTrigger = { title?: string; systemImage: string; disabled?: boolean; maxWidth?: number };
 /**
  * A system action sheet for a row's actions or a short list of choices. It draws its own buttons, so no React view is
  * hosted inside a native menu: those hosted views crashed Fabric when their content changed while a menu was up.
@@ -119,7 +120,24 @@ export function showActions({ title, actions, onSelect }: { title?: string; acti
  * A native pull-down menu on its trigger. With `onPress`, a tap runs it and a long press opens the menu (a Chat row);
  * without it, a tap opens the menu (the header switchers, a row's ⋯ button).
  */
-export function PullDown({ title, sections, onSelect, children, label, onPress, style }: { title?: string; sections: MenuSection[]; onSelect: (id: string) => void; children: React.ReactNode; label: string; onPress?: () => void; style?: StyleProp<ViewStyle> }) {
+export function PullDown({ title, sections, onSelect, children, label, onPress, style, nativeTrigger }: { title?: string; sections: MenuSection[]; onSelect: (id: string) => void; children: React.ReactNode; label: string; onPress?: () => void; style?: StyleProp<ViewStyle>; nativeTrigger?: NativeMenuTrigger }) {
+  if (Platform.OS === 'ios' && nativeTrigger && !onPress) {
+    // Composer menus use only SwiftUI views. No React child is handed to SwiftUI, avoiding the Fabric reparenting crash.
+    const select = (id: string) => { tap(); setTimeout(() => onSelect(id), 250); };
+    const body = sections.map((section, index) => <IOSSection key={index} title={section.title}>{section.items.map(item => item.checked !== undefined
+      ? <IOSToggle key={item.id} label={item.title} systemImage={item.systemImage as never} isOn={item.checked} onIsOnChange={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />
+      : <IOSButton key={item.id} label={item.title} systemImage={item.systemImage as never} role={item.destructive ? 'destructive' : undefined} onPress={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />)}</IOSSection>);
+    const trigger = nativeTrigger.title
+      ? <IOSHStack spacing={6} modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: nativeTrigger.maxWidth ?? 260, alignment: 'leading' })]}>
+        <IOSImage systemName={nativeTrigger.systemImage as never} size={14} color={colors.ink2} />
+        <IOSText modifiers={[font({ size: 13, weight: 'medium' }), foregroundStyle(colors.ink2), lineLimit(1)]}>{nativeTrigger.title}</IOSText>
+        <IOSImage systemName="chevron.up.chevron.down" size={13} color={colors.ink3} />
+      </IOSHStack>
+      : <IOSImage systemName={nativeTrigger.systemImage as never} size={21} color={colors.ink2} modifiers={[frame({ width: 36, height: 36 })]} />;
+    return <View style={style} onTouchStart={() => Keyboard.dismiss()}><IOSHost matchContents seedColor={colors.ink2} testID={label} ignoreSafeArea="all">
+      <IOSMenu label={trigger} modifiers={[accessibilityLabel(label), menuOrder('fixed'), tint(colors.ink2), nativeDisabled(!!nativeTrigger.disabled)]}>{title ? <IOSSection title={title}>{body}</IOSSection> : body}</IOSMenu>
+    </IOSHost></View>;
+  }
   if (Platform.OS === 'ios') {
     // A SwiftUI menu laid over the trigger, its label an invisible shape. Hosting the React trigger inside the menu
     // (RNHostView) crashed Fabric when SwiftUI re-attached a view React had already recycled (TestFlight build 9,

@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { resolveProject } = require("./project-identity.cjs");
+const { createLink, pruneLinks } = require("./project-links.cjs");
 
 const DEFAULT_ROOTS = [path.join(os.homedir(), "Developer"), path.join(os.homedir(), ".milagre", "worktrees")];
 const SKIP = new Set([".git", "node_modules", ".next", ".cache"]);
@@ -47,17 +48,17 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
     let data;
     try { data = JSON.parse(await fs.readFile(file, "utf8")); }
     catch (error) {
-      if (error.code === "ENOENT" || error instanceof SyntaxError) return { scanned: false, projects: [] };
+      if (error.code === "ENOENT" || error instanceof SyntaxError) return { scanned: false, projects: [], links: [], worktreePositions: {} };
       throw error;
     }
-    if (!data || !Array.isArray(data.projects)) return { scanned: false, projects: [] };
+    if (!data || !Array.isArray(data.projects)) return { scanned: false, projects: [], links: [], worktreePositions: {} };
     const seen = new Set();
     const projects = data.projects.filter((entry) => {
       if (!validEntry(entry) || seen.has(entry.id)) return false;
       seen.add(entry.id);
       return true;
     });
-    return { scanned: data.scanned === true, projects };
+    return { scanned: data.scanned === true, projects, links: Array.isArray(data.links) ? data.links : [], worktreePositions: data.worktreePositions && typeof data.worktreePositions === "object" ? data.worktreePositions : {} };
   }
 
   async function write(data) {
@@ -76,7 +77,8 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
     const next = queue.catch(() => {}).then(async () => {
       const previous = await read();
       const projects = (await Promise.all(previous.projects.map(async (entry) => await present(entry) ? { ...entry } : null))).filter(Boolean);
-      const current = { ...previous, projects };
+      const current = { ...previous, projects, worktreePositions: structuredClone(previous.worktreePositions) };
+      current.links = current.links.filter(link => projects.some(project => project.id === link.a?.project_id) && projects.some(project => project.id === link.b?.project_id));
       const result = await change(current);
       if (JSON.stringify(result) !== JSON.stringify(previous)) await write(result);
       return result.projects;
@@ -112,6 +114,35 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
       const entry = data.projects.find((project) => project.id === id);
       if (!entry) throw new Error("Project is not in the registry.");
       entry.position = { x: position.x, y: position.y };
+      return data;
+    }),
+    snapshot: async () => {
+      await queue;
+      const data = await read();
+      return { projects: data.projects, links: data.links, worktreePositions: data.worktreePositions };
+    },
+    setWorktreePosition: (id, worktreePath, position) => update(async (data) => {
+      if (!data.projects.some(project => project.id === id) || typeof worktreePath !== "string" || !path.isAbsolute(worktreePath)
+        || !position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) throw new Error("Invalid Worktree position.");
+      data.worktreePositions[id] ??= {};
+      data.worktreePositions[id][worktreePath] = { x: position.x, y: position.y };
+      return data;
+    }),
+    addLink: (a, b, active) => update(async (data) => {
+      data.links.push(createLink(data.links, a, b, data.projects, active, now));
+      return data;
+    }),
+    removeLink: (id) => update(async (data) => {
+      if (!data.links.some(link => link.id === id)) throw new Error("Link does not exist.");
+      data.links = data.links.filter(link => link.id !== id);
+      return data;
+    }),
+    pruneLinks: (active) => update(async (data) => {
+      data.links = pruneLinks(data.links, data.projects, active);
+      for (const [id, positions] of Object.entries(data.worktreePositions)) {
+        if (!data.projects.some(project => project.id === id)) { delete data.worktreePositions[id]; continue; }
+        for (const worktreePath of Object.keys(positions)) if (!active[id]?.includes(worktreePath)) delete positions[worktreePath];
+      }
       return data;
     }),
   };

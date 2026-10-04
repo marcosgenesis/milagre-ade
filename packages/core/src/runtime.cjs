@@ -281,6 +281,7 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
+    if (result.removed) await projectRegistry().pruneLinks(await canvasActiveWorktrees());
     return result;
   });
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -568,7 +569,14 @@ function createRuntime(options) {
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
   let registryStore = null;
-  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json")));
+  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json"), options.registryRoots ? { roots: options.registryRoots } : {}));
+  async function canvasActiveWorktrees() {
+    const projects = await projectRegistry().list();
+    return Object.fromEntries(await Promise.all(projects.map(async project => [
+      project.id,
+      (await activeWorktrees(project.path)).map(worktree => worktree.path),
+    ])));
+  }
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
   // `takeNotice`: this open is a desktop window's, which shows the restored-chats notice. Over the daemon only the
   // desktop asks for it, so the phone's bridge opening the project first doesn't use the notice up.
@@ -607,6 +615,27 @@ function createRuntime(options) {
   }
   commands.handle("project:registry", () => projectRegistry().list());
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
+  commands.handle("canvas:snapshot", async () => {
+    const projects = await projectRegistry().list();
+    const active = await canvasActiveWorktrees();
+    await projectRegistry().pruneLinks(active);
+    const registry = await projectRegistry().snapshot();
+    const statesByPath = await Promise.all(projects.map(async project => ({ path: project.path, state: (await readProject(project.path)).state })));
+    return { ...registry, states: statesByPath };
+  });
+  commands.handle("canvas:link-add", async (_event, a, b) => {
+    await projectRegistry().addLink(a, b, await canvasActiveWorktrees());
+    return (await projectRegistry().snapshot()).links;
+  });
+  commands.handle("canvas:link-remove", async (_event, id) => {
+    await projectRegistry().removeLink(id);
+    return (await projectRegistry().snapshot()).links;
+  });
+  commands.handle("canvas:worktree-position", (_event, id, worktreePath, position) => projectRegistry().setWorktreePosition(id, worktreePath, position));
+  commands.handle("canvas:open-project", async (_event, requested) => {
+    if (!(await projectRegistry().list()).some(project => project.path === requested)) throw new Error("Project is not in the registry.");
+    return openProject(requested);
+  });
   commands.handle("project:recent", () => recentProjects().list());
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");

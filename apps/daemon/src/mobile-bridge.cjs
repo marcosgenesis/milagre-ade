@@ -13,7 +13,7 @@ const { connect } = require('./client.cjs');
 
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
-  'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
 // Subagent entries the phone shows under each agent.

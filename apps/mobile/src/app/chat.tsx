@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Reanimated from 'react-native-reanimated';
-import { Pressable, Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
-import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
+import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
+import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { sessionForWorktree } from '@milagre/shared/model';
+import type { Client, OpenProject } from '../client';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { useComposer, useSession } from '../session';
@@ -22,7 +24,7 @@ import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
 import { SlideOver } from '../slide-over';
 import { ChangesView } from './changes';
-import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, showActions, styles } from '../ui';
+import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
 const PAGE = 40;
 
@@ -35,6 +37,11 @@ export default function ChatScreen() {
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState('');
+  const [isolation, setIsolation] = useState<'local' | 'worktree'>('local');
+  const [baseBranch, setBaseBranch] = useState('');
+  const [branchList, setBranchList] = useState<{ client: Client; path: string; items: string[]; error?: string } | null>(null);
+  // A failed send can retry in the checkout already created for this draft.
+  const preparedTarget = useRef<{ client: Client; path: string; base: string; worktreeId: number; sessionId: number } | null>(null);
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
@@ -45,6 +52,17 @@ export default function ChatScreen() {
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
   const connected = session.client;
   const projectPath = session.snapshot?.project.path;
+  const focused = useRef<object | null>(null);
+  useFocusEffect(useCallback(() => { focused.current = { client: connected, projectPath, id: params.id, worktreeId: params.worktreeId }; return () => { focused.current = null; }; }, [connected, projectPath, params.id, params.worktreeId]));
+  useEffect(() => {
+    let cancelled = false;
+    if (connected && projectPath && !params.id) void connected.call<string[]>('project:branches', [projectPath]).then(items => {
+      if (!cancelled) setBranchList({ client: connected, path: projectPath, items });
+    }).catch(error => {
+      if (!cancelled) setBranchList({ client: connected, path: projectPath, items: [], error: (error as Error).message });
+    });
+    return () => { cancelled = true; };
+  }, [connected, projectPath, params.id]);
   const allMessages = session.snapshot?.project.state.messages;
   const media = useCallback((path: string) => connected!.media(projectPath!, path), [connected, projectPath]);
   const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
@@ -68,12 +86,20 @@ export default function ChatScreen() {
   const chatId = `${project.path}#${params.id ?? `new:${params.worktreeId}`}`;
   const draft = composer.drafts[chatId] || '';
   const attachments = composer.attachments[chatId] || [];
+  const attachmentDisabled = busy || picking || attachments.length >= 4;
   const run = chat ? runs.runs[chatId] : undefined;
   const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ''), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
+  const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
+  const base = baseBranch && branches?.items.includes(baseBranch) ? baseBranch
+    : worktree?.name && branches?.items.includes(worktree.name) ? worktree.name : branches?.items[0] || '';
+  const newWorktree = !params.id && isolation === 'worktree';
+  const targetDisabled = busy || picking;
+  const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
+  const branchName = newWorktree ? base || 'Choose branch' : worktree?.name || 'Choose branch';
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== 'ready';
   const title = chat?.title || chat?.generatedTitle || 'New Chat';
   async function action(work: () => Promise<unknown>) {
@@ -84,7 +110,7 @@ export default function ChatScreen() {
     finally { setBusy(false); }
   }
   async function pick(kind: 'photos' | 'camera' | 'files') {
-    if (picking || busy) return;
+    if (attachmentDisabled) return;
     setPicking(true); setError('');
     try {
       const added = await pickAttachments(kind);
@@ -96,9 +122,26 @@ export default function ChatScreen() {
   async function send(body = draft, withAttachments = true) {
     const sent = body;
     const sending = withAttachments ? attachments : [];
+    const focus = focused.current;
+    const current = () => focus !== null && focused.current === focus && session.isSelected();
     await action(async () => {
       const media = await prepareAttachments(client, project.path, sending);
-      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, sessionId: params.id ? Number(params.id) : null, worktreeId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...sendOptions(model, preferences) }]);
+      let target = { sessionId: params.id ? Number(params.id) : null as number | null, worktreeId };
+      if (newWorktree) {
+        if (!base) throw new Error(branches?.error || 'Choose a base branch before sending.');
+        let ready = preparedTarget.current;
+        if (!ready || ready.client !== client || ready.path !== project.path || ready.base !== base) {
+          const created = await client.call<{ project: OpenProject; worktreeId: number }>('worktree:create', [{ projectPath: project.path, baseBranch: base, prompt: sent }]);
+          const chat = sessionForWorktree(created.project.state, created.worktreeId);
+          if (!chat) throw new Error('No Chat was created for the new worktree.');
+          ready = { client, path: project.path, base, worktreeId: created.worktreeId, sessionId: chat.id };
+          preparedTarget.current = ready;
+        }
+        if (!current()) return;
+        target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
+      }
+      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, ...target, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...sendOptions(model, preferences) }]);
+      if (newWorktree && !current()) return;
       const destination = `${project.path}#${result.sessionId}`;
       if (sent === draft) composer.setDrafts(current => {
         const remaining = current[chatId] === sent ? '' : current[chatId] || '';
@@ -171,7 +214,8 @@ export default function ChatScreen() {
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
-      {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>Your agent runs in {worktree?.name || 'this Worktree'} on your computer.</Text></View>}
+      {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
+      {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
       {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
       {run && <ChatReply run={run} media={media} onActivity={openActivity} />}
@@ -193,15 +237,25 @@ export default function ChatScreen() {
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}
       {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
+        {!params.id && <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+          <PullDown label="Choose isolation" nativeTrigger={{ title: isolation === 'local' ? 'Local' : 'New worktree', systemImage: isolation === 'local' ? 'laptopcomputer' : 'arrow.triangle.branch', disabled: targetDisabled }} sections={[{ title: 'Isolation', items: [{ id: 'local', title: 'Local', systemImage: 'laptopcomputer', checked: isolation === 'local', disabled: targetDisabled }, { id: 'worktree', title: 'New worktree', systemImage: 'arrow.triangle.branch', checked: isolation === 'worktree', disabled: targetDisabled }] }]} onSelect={id => { if (!targetDisabled) setIsolation(id === 'worktree' ? 'worktree' : 'local'); }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, opacity: targetDisabled ? 0.35 : 1 }}><Icon icon={isolation === 'local' ? LaptopIcon : GitForkIcon} tone="ink2" size={14} /><Text style={styles.label}>{isolation === 'local' ? 'Local' : 'New worktree'}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
+          </PullDown>
+          <PullDown label="Choose branch" nativeTrigger={{ title: branchName, systemImage: 'arrow.triangle.branch', disabled: branchDisabled, maxWidth: 180 }} sections={[{ title: newWorktree ? 'Branch from' : 'Choose a branch', items: newWorktree ? (branches?.items || []).map(item => ({ id: item, title: item, checked: item === base, systemImage: 'arrow.triangle.branch', disabled: branchDisabled })) : Object.values(project.state.worktrees).map(item => ({ id: String(item.id), title: item.name, checked: item.id === worktreeId, systemImage: 'arrow.triangle.branch', disabled: targetDisabled })) }]} onSelect={id => { if (!branchDisabled) { if (newWorktree) setBaseBranch(id); else router.setParams({ worktreeId: id }); } }}>
+            <View style={{ maxWidth: 180, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, opacity: branchDisabled ? 0.35 : 1 }}><Icon icon={GitBranchIcon} tone="ink2" size={14} /><Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>{branchName}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
+          </PullDown>
+        </View>}
         {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
         <Field label="Message" hideLabel placeholder="Message the agent" multiline autoCorrect spellCheck autoCapitalize="sentences" value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Add photos or files" disabled={busy || picking || attachments.length >= 4} onPress={() => showActions({ actions: [{ id: 'photos', title: 'Photo Library' }, { id: 'camera', title: 'Take Photo' }, { id: 'files', title: 'Choose Files' }], onSelect: kind => void pick(kind as 'photos' | 'camera' | 'files') })} style={({ pressed }) => ({ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : pressed ? 0.6 : 1 })}><Icon icon={Add01Icon} tone="ink2" size={21} /></Pressable>
+          <PullDown label="Add photos or files" nativeTrigger={{ systemImage: 'plus', disabled: attachmentDisabled }} sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle', disabled: attachmentDisabled }, { id: 'camera', title: 'Take Photo', systemImage: 'camera', disabled: attachmentDisabled }, { id: 'files', title: 'Choose Files', systemImage: 'folder', disabled: attachmentDisabled }] }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
+            <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: attachmentDisabled ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>
+          </PullDown>
           <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
           <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
-          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
+          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
         </View>
       </View>}
     </View>

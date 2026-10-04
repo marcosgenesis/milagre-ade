@@ -208,6 +208,36 @@ test('linked Worktrees resolve to one registered Project without losing saved Ch
   assert.deepEqual(registered.position, { x: 30, y: 40 });
 });
 
+test('canvas Links survive runtime restart and worktree:remove clears their endpoints', async t => {
+  const { project, make } = await fixture(t);
+  const commit = folder => execFileSync('git', ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  commit(project);
+  const other = path.join(path.dirname(project), 'other');
+  await fs.mkdir(other);
+  execFileSync('git', ['init', '-b', 'main', other], { stdio: 'ignore' });
+  commit(other);
+  const root = path.join(path.dirname(project), 'worktrees');
+  await fs.mkdir(root);
+  const linked = path.join(root, 'linked');
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'milagre/linked', linked], { stdio: 'ignore' });
+  const first = make({ worktreeRoot: root, registryRoots: [] });
+  await first.openProject(project);
+  await first.openProject(other);
+  const before = await first.invoke('canvas:snapshot');
+  assert.equal(before.projects.length, 2);
+  assert.ok(before.states.find(entry => entry.path === project).state.worktrees);
+  const a = before.projects.find(entry => entry.path === project).id;
+  const b = before.projects.find(entry => entry.path === other).id;
+  await first.invoke('canvas:link-add', [{ project_id: a, worktree_path: linked }, { project_id: b }]);
+  assert.equal((await first.invoke('canvas:snapshot')).links.length, 1);
+  await first.close();
+  const second = make({ worktreeRoot: root, registryRoots: [] });
+  assert.equal((await second.invoke('canvas:snapshot')).links.length, 1);
+  const seen = await second.invoke('worktree:status', [linked, 'main']);
+  await second.invoke('worktree:remove', [linked, { projectPath: project, base: 'main', seen, force: false }]);
+  assert.deepEqual((await second.invoke('canvas:snapshot')).links, []);
+});
+
 test('opening a saved Codex Chat starts outcome recovery and shutdown drains its provider read', async t => {
   const { project, make } = await fixture(t);
   const first = make();

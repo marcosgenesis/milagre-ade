@@ -85,6 +85,7 @@ const SettingsPanel = lazyView(() => import("./components/Settings").then((modul
 const CommandPalette = lazyView(() => import("./components/CommandPalette").then((module) => module.CommandPalette));
 const PermissionCard = lazyView(() => import("./components/agents/PermissionCard").then((module) => module.PermissionCard));
 const QuestionCard = lazyView(() => import("./components/agents/QuestionCard").then((module) => module.QuestionCard));
+const CanvasView = lazyView(() => import("./components/CanvasView").then((module) => module.CanvasView));
 const LAZY_VIEWS = [DiffView, GitActionsDialog, SettingsNav, CommandPalette, MediaLightbox, PermissionCard, QuestionCard];
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
@@ -152,7 +153,7 @@ function App() {
   const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); updateSettings({ defaultModelId: model.id }); };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
-  const [view, setView] = useState<"chat" | "settings">("chat");
+  const [view, setView] = useState<"chat" | "canvas" | "settings">("chat");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   useEffect(() => {
@@ -613,6 +614,12 @@ function App() {
 
   const openProject = () => replaceProject(() => window.milagre.openProject());
   const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
+  async function openCanvasChat(projectPath: string, sessionId: number) {
+    try {
+      if (projectRef.current?.path !== projectPath) adoptProject(await window.milagre.openCanvasProject(projectPath));
+      openChat(sessionId);
+    } catch (error) { setNotice(ipcErrorMessage(error)); }
+  }
 
   // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
   // from the main process, and a new chat in "New worktree" isolation gets its own worktree first.
@@ -761,6 +768,10 @@ function App() {
         } else if (event.key.toLowerCase() === "d" && changesAvailableRef.current) {
           event.preventDefault();
           changes.toggle();
+        } else if (event.key.toLowerCase() === "l") {
+          event.preventDefault();
+          changes.closeDiff();
+          setView("canvas");
         }
         return;
       }
@@ -796,7 +807,7 @@ function App() {
         setFindOpen(false);
         return;
       }
-      if (view === "settings") {
+      if (view === "settings" || view === "canvas") {
         event.preventDefault();
         setView("chat");
         return;
@@ -846,6 +857,7 @@ function App() {
   const openProjectFromSidebar = useEvent(() => void openProject());
   const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
   const openSettings = useEvent(() => setView("settings"));
+  const openCanvas = useEvent(() => { changes.closeDiff(); setView("canvas"); });
   const openProjectSettings = useEvent(() => { setSettingsSection("project"); setView("settings"); });
   const openCommandPalette = useEvent(() => setCommandPaletteOpen(true));
   const sidebarUsage = useMemo(
@@ -887,6 +899,7 @@ function App() {
     const commands: Command[] = [
       { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
       { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => openProject() },
+      { id: "canvas", label: "Projects and Links", group: "Actions", icon: "git", shortcut: `${modifier}⇧L`, keywords: "canvas linked worktrees", run: openCanvas },
       { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
       { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
       { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
@@ -946,7 +959,7 @@ function App() {
         className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
         onAnimationEnd={(event) => { if (event.animationName === "app-enter-main") setAppEntered(true); }}
       >
-      <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" ? "flex" : "hidden"}`}>
+      <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
       <SidebarNav
         key={project.path}
         fill
@@ -954,11 +967,13 @@ function App() {
         workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
         onOpenProject={openProjectFromSidebar}
         recents={chats}
-        activeId={selectedSession ? String(selectedSession.id) : null}
+        activeId={view === "chat" && selectedSession ? String(selectedSession.id) : null}
         onPick={pickChat}
         chatActions={chatActions}
         onNewChat={startNewChatFromSidebar}
         onOpenSettings={openSettings}
+        onOpenCanvas={openCanvas}
+        canvasActive={view === "canvas"}
         onOpenCommands={openCommandPalette}
         hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
         projectPath={project.path}
@@ -984,6 +999,7 @@ function App() {
             <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
           </div>
         )}
+        {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}
         {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
         <div data-chat-pane className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out" }}>
           <EditorLinks root={selectedWorktree?.path ?? project.path}>

@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 import { Stack, router } from 'expo-router';
-import { Notification01Icon } from '@hugeicons/core-free-icons';
+import { ChartBarLineIcon, Notification01Icon } from '@hugeicons/core-free-icons';
 import { usePush } from '../push';
 import { Icon } from '../icons';
 import { ListRow, PageScroll, styles } from '../ui';
@@ -13,6 +13,8 @@ export default function SettingsScreen() {
       <View style={styles.card}>
         <ListRow title="Notifications" subtitle={push.state ? push.state.enabled ? 'On' : 'Off' : undefined}
           leading={<Icon icon={Notification01Icon} tone="ink" size={22} />} onPress={() => router.push('/notifications')} />
+        <View style={styles.separator} />
+        <ListRow title="Plan usage" leading={<Icon icon={ChartBarLineIcon} tone="ink" size={22} />} onPress={() => router.push('/usage')} />
       </View>
     </PageScroll>
   </>;

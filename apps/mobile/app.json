@@ -8,7 +8,7 @@
     ],
     "version": "0.1.0",
     "orientation": "portrait",
-    "icon": "./assets/milagre.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "plugins": [
       "expo-router",
@@ -49,6 +49,12 @@
           "cameraPermission": "Milagre uses the camera to take a photo for a Chat.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "chats"
+        }
       ]
     ],
     "ios": {
@@ -70,6 +76,12 @@
         "projectId": "53a87eea-769e-4d7c-a818-b9e2440cc065"
       }
     },
-    "owner": "victorlucss"
+    "owner": "victorlucss",
+    "updates": {
+      "url": "https://u.expo.dev/53a87eea-769e-4d7c-a818-b9e2440cc065"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    }
   }
 }

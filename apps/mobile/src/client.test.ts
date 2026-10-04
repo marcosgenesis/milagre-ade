@@ -52,3 +52,23 @@ test('a Cloudflare Access token goes on every request and image, and only over H
   assert.equal(client.media('/p', '/p/a.png').headers['CF-Access-Client-Secret'], access.secret);
   assert.throws(() => createClient('http://127.0.0.1:8797', 'token', fetch, 30000, access), /HTTPS/);
 });
+
+test('an HTML page from Cloudflare becomes a plain message instead of a JSON parse error', async () => {
+  const page = (status: number) => createClient('https://mac.example.cloud', 'token', async () => new Response('<!doctype html><title>Error</title>', { status, headers: { 'Content-Type': 'text/html' } }));
+  await assert.rejects(page(502).call('daemon:status'), /isn't answering/);
+  await assert.rejects(page(530).call('daemon:status'), /isn't answering/);
+  await assert.rejects(page(401).call('daemon:status'), /access was refused/);
+  await assert.rejects(page(200).call('daemon:status'), /Unexpected response/);
+});
+
+test('an unchanged snapshot comes back as a 304 and reuses the last one', async () => {
+  const sent: (string | undefined)[] = [];
+  let calls = 0;
+  const client = createClient('http://127.0.0.1:8787', 'token', async (_url, init) => {
+    sent.push((init?.headers as Record<string, string>)['If-None-Match']);
+    return ++calls === 1 ? new Response(JSON.stringify({ v: 1, result: { project: 'p' } }), { headers: { etag: '"abc"' } }) : new Response(null, { status: 304, headers: { etag: '"abc"' } });
+  });
+  const first = await client.snapshot('/p');
+  assert.equal(await client.snapshot('/p'), first);
+  assert.deepEqual(sent, [undefined, '"abc"']);
+});

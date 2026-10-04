@@ -113,6 +113,14 @@ const bridge = {
     ipcRenderer.on("update:state", listener);
     return () => ipcRenderer.removeListener("update:state", listener);
   },
+  getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
+  setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
+  resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
+  onPhoneStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("phone:status", listener);
+    return () => ipcRenderer.removeListener("phone:status", listener);
+  },
   readUsage: () => ipcRenderer.invoke("usage:read"),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),

@@ -8,7 +8,7 @@ import { usePreventRemove } from 'expo-router/react-navigation';
 import { Cancel01Icon, FlashIcon, Tick02Icon, UserMultipleIcon } from '@hugeicons/core-free-icons';
 import type { ModelProvider } from '@milagre/shared/model';
 import { useComposer, useSession } from '../session';
-import { defaultPreferences, modelsFor, selectedModel, type TurnPreferences } from '../turn-options';
+import { modelsFor, selectedModel, type TurnPreferences } from '../turn-options';
 import { EffortMeter, Icon, ProviderLogo } from '../icons';
 import { CircleButton, colors, styles } from '../ui';
 
@@ -18,7 +18,7 @@ export default function ModelSheet() {
   const session = useSession();
   const composer = useComposer();
   const navigation = useNavigation();
-  const saved = composer.preferences[params.chatId] || defaultPreferences;
+  const saved = composer.preferences[params.chatId] || composer.defaults;
   const locked = params.locked as ModelProvider | undefined;
   const initial: TurnPreferences = { ...saved, provider: locked || saved.provider, model: params.model || saved.model };
   const [draft, setDraft] = useState<TurnPreferences>(initial);

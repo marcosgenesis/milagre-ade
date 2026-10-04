@@ -32,6 +32,7 @@
     "test:chat-order": "node scripts/test-chat-order.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
     "test:archive-enter": "node scripts/test-archive-enter.cjs",
+    "test:phone": "node scripts/test-phone.cjs",
     "test:ui": "npm run test:ui --workspace milagre",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",
@@ -49,7 +50,7 @@
     "mobile:host": "node scripts/mobile-host.cjs",
     "mobile:cloudflare": "node scripts/mobile-cloudflare.cjs",
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
-    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs"
+    "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",

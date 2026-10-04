@@ -5,14 +5,43 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const zlib = require('node:zlib');
+const { WebSocketServer, WebSocket } = require('ws');
+const { chatInProject } = require('@milagre/shared/agent-runs');
 const { connect } = require('./client.cjs');
 
-const METHODS = new Set(['daemon:status', 'project:recent', 'project:open', 'chat:runs',
+const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
-  'agent:answer-question', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
+// Subagent entries the phone shows under each agent.
+const TRANSCRIPT_TAIL = 4;
+
+// Characters of each subagent entry the phone shows (six lines at most).
+const TRANSCRIPT_TEXT = 600;
+
+/**
+ * A Project as the phone lists it. Tool output and subagent transcripts make up most of a large Project's state (in
+ * one, 6.8 of 8 MB) and the phone shows neither until asked: steps keep `hasDetail` and the full message comes from
+ * /message. A reply keeps the detail of its last thinking step, which it can show in place of an answer; each subagent
+ * keeps the start of its last few transcript entries.
+ */
+function forPhone(project) {
+  const state = project?.state;
+  if (!state) return project;
+  const slimSteps = steps => {
+    const thought = steps.findLastIndex(step => step.kind === 'thinking' && step.detail?.trim());
+    return steps.map((step, index) => step.detail && index !== thought ? { ...step, detail: undefined, hasDetail: true } : step);
+  };
+  const messages = state.messages.map(message => message.steps?.some(step => step.detail) ? { ...message, steps: slimSteps(message.steps) } : message);
+  const clip = text => typeof text === 'string' && text.length > TRANSCRIPT_TEXT ? `${text.slice(0, TRANSCRIPT_TEXT)}…` : text;
+  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id, session.subagents?.length
+    ? { ...session, subagents: session.subagents.map(agent => ({ ...agent, latestActivity: clip(agent.latestActivity), transcript: (agent.transcript || []).slice(-TRANSCRIPT_TAIL).map(item => ({ ...item, text: clip(item.text) })) })) }
+    : session]));
+  return { ...project, state: { ...state, messages, sessions } };
+}
 const MAX_MEDIA = 15 * MAX_BODY;
 const MEDIA_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heic' };
 const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
@@ -25,12 +54,21 @@ function sniffsAs(type, head) {
   if (type === 'image/webp') return head.subarray(0, 4).toString('latin1') === 'RIFF' && head.subarray(8, 12).toString('latin1') === 'WEBP';
   return head.subarray(4, 8).toString('latin1') === 'ftyp' && HEIC_BRANDS.has(head.subarray(8, 12).toString('latin1'));
 }
+// React Native's WebSocket always sends an Origin (Android derives one from the URL, iOS's SocketRocket too) and only
+// lets the app replace it, so the phone sends this one. No web page has it, and a browser cannot set the bearer header
+// on a WebSocket anyway.
+const LIVE_ORIGIN = 'milagre-app://phone';
+const MAX_LIVE = 8;
+// A turn's events arrive many times a second; one signal per window is enough for the phone to fetch once.
+const LIVE_DELAY = { runs: 150, project: 400 };
+/** The turns streaming now in one Project's Chats; the daemon holds every Project's. */
+const projectRuns = ({ runs, seq }, projectPath) => ({ runs: Object.fromEntries(Object.entries(runs ?? {}).filter(([key]) => chatInProject(projectPath, key))), seq });
 const realOrNull = async file => { try { return await fs.realpath(file); } catch { return null; } };
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
 // A native-client bridge behind loopback or an explicitly configured TLS proxy. All state stays in the Unix-socket
 // daemon; closing this listener must never stop that runtime or its turns.
-async function startMobileBridge({ dataDir, port = 8787, token }) {
+async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000 }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('Bridge token must be 32 random bytes encoded as hex');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid bridge port');
   const expected = Buffer.from(`Bearer ${token}`);
@@ -38,6 +76,67 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
   let active = 0;
   let closed;
   let url;
+  // Every route, the live socket included, checks the token, a loopback Host and no web Origin before anything else.
+  function admit(req, allowedOrigin) {
+    const received = Buffer.from(req.headers.authorization ?? '');
+    if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw failure(401, 'Connection token is missing or incorrect');
+    const address = new URL(url);
+    // Android's emulator maps 10.0.2.2 to this host's loopback interface.
+    if ((req.headers.origin && req.headers.origin !== allowedOrigin) || ![address.host, `10.0.2.2:${address.port}`].includes(req.headers.host)) throw failure(403, 'Only a native localhost client is supported');
+    if (closed) throw failure(503, 'Bridge is closing');
+  }
+  // Live sockets carry no state, only "fetch again" signals, so the phone stops polling a Project that is not changing.
+  const live = new Set();
+  const wss = new WebSocketServer({ noServer: true, clientTracking: false, perMessageDeflate: false, maxPayload: 4096 });
+  function signal(entry, type, delay = LIVE_DELAY[type]) {
+    entry.kinds.add(type);
+    // Later events join the pending signal instead of pushing it back, so a busy turn still signals every window.
+    const due = Date.now() + delay;
+    if (entry.timer && entry.due <= due) return;
+    clearTimeout(entry.timer);
+    entry.due = due;
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      // A snapshot carries the runs too, so "project" covers "runs".
+      const type = entry.kinds.has('project') ? 'project' : 'runs';
+      entry.kinds.clear();
+      if (entry.socket.readyState === WebSocket.OPEN) entry.socket.send(JSON.stringify({ type }));
+    }, delay);
+  }
+  function drop(entry) {
+    live.delete(entry);
+    clearTimeout(entry.timer);
+    clearInterval(entry.heartbeat);
+  }
+  function accept(socket, projectPath) {
+    if (closed) { socket.close(1001, 'Mobile host stopped'); return; }
+    // The newest socket is the one someone is looking at; the oldest is likely a phone that changed networks.
+    if (live.size >= MAX_LIVE) { const [oldest] = live; drop(oldest); oldest.socket.close(1013, 'Too many live connections'); }
+    const entry = { socket, projectPath, kinds: new Set(), timer: null, due: 0, alive: true };
+    // A ping finds sockets whose phone vanished (the server ends them); the JSON one lets the phone notice a dead
+    // socket too, as React Native does not show protocol pings.
+    entry.heartbeat = setInterval(() => {
+      if (!entry.alive) { drop(entry); socket.terminate(); return; }
+      entry.alive = false;
+      socket.ping();
+      socket.send(JSON.stringify({ type: 'ping' }));
+    }, pingMs);
+    socket.on('pong', () => { entry.alive = true; });
+    socket.on('error', () => {});
+    socket.on('close', () => drop(entry));
+    live.add(entry);
+  }
+  client.on('event', ({ channel, payload } = {}) => {
+    for (const entry of live) {
+      if (channel === 'project:state' && payload?.path === entry.projectPath) signal(entry, 'project');
+      else if (channel === 'agent:event' && typeof payload?.chatId === 'string' && chatInProject(entry.projectPath, payload.chatId)) {
+        // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs
+        // fetch first would hide the reply until the Project caught up. Subagents live only in the Project state.
+        if (payload.state) signal(entry, 'project', LIVE_DELAY.runs);
+        else signal(entry, payload.event?.type === 'subagent-update' ? 'project' : 'runs');
+      }
+    }
+  });
   // Images the paired app may show: the Project's Worktrees, its persisted attachments (<Project>/.milagre/images),
   // files uploaded from mobile, and the folders where agents save generated images. Everything is checked after
   // realpath, so a symlink cannot lead out.
@@ -83,17 +182,25 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
     }
   }
   const server = http.createServer({ requestTimeout: 15000, headersTimeout: 10000, maxHeaderSize: 8192 }, (req, res) => {
-    const reply = (status, value) => {
-      res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      res.end(JSON.stringify({ v: 1, ...value }));
+    // A Project's state runs to megabytes, and a phone polls it every few seconds over cellular: snapshots carry an
+    // ETag so an unchanged one costs a 304, and large bodies go out gzipped.
+    const reply = (status, value, { etag = false } = {}) => {
+      const body = JSON.stringify({ v: 1, ...value });
+      const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+      if (etag && status === 200) {
+        headers.etag = `"${createHash('sha1').update(body).digest('base64url')}"`;
+        if (req.headers['if-none-match'] === headers.etag) { res.writeHead(304, headers); res.end(); return; }
+      }
+      if (body.length < compressAbove || !/\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) { res.writeHead(status, headers); res.end(body); return; }
+      zlib.gzip(body, { level: 6 }, (error, zipped) => {
+        if (res.destroyed) return;
+        if (error) { res.writeHead(status, headers); res.end(body); return; }
+        res.writeHead(status, { ...headers, 'content-encoding': 'gzip', vary: 'accept-encoding' });
+        res.end(zipped);
+      });
     };
     void (async () => {
-      const received = Buffer.from(req.headers.authorization ?? '');
-      if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw failure(401, 'Connection token is missing or incorrect');
-      const address = new URL(url);
-      // Android's emulator maps 10.0.2.2 to this host's loopback interface.
-      if (req.headers.origin || ![address.host, `10.0.2.2:${address.port}`].includes(req.headers.host)) throw failure(403, 'Only a native localhost client is supported');
-      if (closed) throw failure(503, 'Bridge is closing');
+      admit(req);
       if (active >= 16) throw failure(429, 'Too many pending requests');
       active++;
       try {
@@ -106,7 +213,22 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          result = { project, runs };
+          reply(200, { result: { project: forPhone(project), runs: projectRuns(runs, projectPath) } }, { etag: true });
+          return;
+        }
+        // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.
+        if (req.method === 'GET' && target.pathname === '/runs') {
+          const projectPath = target.searchParams.get('projectPath');
+          if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
+          reply(200, { result: projectRuns(await client.call('chat:runs'), projectPath) }, { etag: true });
+          return;
+        }
+        if (req.method === 'GET' && target.pathname === '/message') {
+          const project = await client.call('project:snapshot', [target.searchParams.get('projectPath')]);
+          const message = project.state.messages.find(item => item.id === Number(target.searchParams.get('id')));
+          if (!message) throw failure(404, 'That message is no longer in this Project.');
+          reply(200, { result: message });
+          return;
         } else if (req.method === 'POST' && ['/rpc', '/attachments'].includes(target.pathname)) {
           if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw failure(415, 'Use application/json');
           const limit = target.pathname === '/attachments' ? 7 * MAX_BODY : MAX_BODY;
@@ -145,26 +267,51 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
           if (request?.v !== 1 || typeof request.method !== 'string' || !Array.isArray(request.args)) throw failure(400, 'Expected version 1, method and args array');
           if (!METHODS.has(request.method)) throw failure(403, 'Command is not available from mobile');
           result = await client.call(request.method, request.args);
+          // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
+          if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
           }
         } else throw failure(404, 'Unknown endpoint');
         reply(200, { result: result ?? null });
       } finally { active--; }
     })().catch(error => { if (!res.headersSent && !res.destroyed) reply(error.status ?? 409, { error: { message: error.message } }); });
   });
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => {});
+    let projectPath;
+    try {
+      admit(req, LIVE_ORIGIN);
+      const target = new URL(req.url, url);
+      if (target.pathname !== '/live') throw failure(404, 'Unknown endpoint');
+      projectPath = target.searchParams.get('projectPath');
+      if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
+    } catch (error) {
+      const status = error.status ?? 400;
+      const body = JSON.stringify({ v: 1, error: { message: error.message } });
+      socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, ws => accept(ws, projectPath));
+  });
   async function close() {
     closed ??= new Promise(resolve => {
       server.close(resolve);
       server.closeAllConnections();
+      // Upgraded sockets are no longer the HTTP server's to close; one that ignores the close frame is cut after a second.
+      const sockets = [...live].map(entry => { drop(entry); entry.socket.close(1001, 'Mobile host stopped'); return entry.socket; });
+      if (sockets.length) setTimeout(() => sockets.forEach(socket => socket.terminate()), 1000).unref();
       client.close();
     });
     return closed;
   }
-  client.once('close', () => { void close(); });
+  // The daemon connection dropping (daemon restarted or stopped) ends this bridge; `lost` tells the owner to restart it.
+  let lostConnection;
+  const lost = new Promise(resolve => { lostConnection = resolve; });
+  client.once('close', () => { lostConnection(); void close(); });
   try {
     server.listen(port, '127.0.0.1');
     await once(server, 'listening');
     url = `http://127.0.0.1:${server.address().port}`;
   } catch (error) { await close(); throw error; }
-  return { url, close };
+  return { url, close, lost };
 }
-module.exports = { startMobileBridge };
+module.exports = { startMobileBridge, forPhone };

@@ -2,11 +2,12 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
-import { savedHosts } from './hosts-native';
+import { syncProject } from './live';
+import { readPermission, savedHosts, savePermission } from './hosts-native';
 import type { SavedHost } from './hosts-store';
-import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
+import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/shared/model';
 import type { Attachment } from './attachments';
-import type { TurnPreferences } from './turn-options';
+import { defaultPreferences, type TurnPreferences } from './turn-options';
 
 const hostOf = (url: string) => String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 
@@ -24,6 +25,10 @@ function useSessionState() {
   const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
+  // The last snapshot of each Project this session saw, so reopening one shows its Chats at once while it refreshes.
+  const seen = useRef(new Map<string, Snapshot>());
+  /** The Project being opened, and whether its last copy is already on screen. */
+  const [opening, setOpening] = useState<{ path: string; cached: boolean } | null>(null);
   // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
   const autoOpen = useRef(true);
   const claimAutoOpen = () => { const first = autoOpen.current; autoOpen.current = false; return first; };
@@ -69,21 +74,49 @@ function useSessionState() {
       throw error;
     }
   };
+  const openNotificationTarget = async (host: SavedHost, projectPath: string, sessionId: number) => {
+    autoOpen.current = false;
+    const current = ++generation.current;
+    const next = createClient(host.address, host.token, undefined, undefined, host.access);
+    try {
+      await next.call('daemon:status');
+      if (current !== generation.current) return false;
+      const projects = await next.call<RecentProject[]>('project:recent');
+      const project = await next.call<OpenProject>('project:open', [projectPath]);
+      const state = await next.snapshot(project.path);
+      if (current !== generation.current) return false;
+      if (!state.project.state.sessions[sessionId]) throw new Error('This Chat is no longer available on your computer.');
+      selection.current = { client: next, path: project.path };
+      seen.current.set(`${next.url}|${projectPath}`, state).set(`${next.url}|${project.path}`, state);
+      setOpening(null);
+      setModels(null); setCliStatus(null); setProviderError('');
+      setClient(next); setRecent(projects); setSnapshot(state); setError(''); setHostName(host.name);
+      return true;
+    } catch (error) { if (current !== generation.current) return false; throw error; }
+  };
+  const navigationVersion = useCallback(() => generation.current, []);
+  const cancelNavigation = useCallback(() => { generation.current++; }, []);
   const open = async (projectPath: string) => {
     if (!client) throw new Error('Connect to your computer first.');
     const current = ++generation.current;
     const previous = selection.current;
     selection.current = null;
+    const cached = seen.current.get(`${client.url}|${projectPath}`);
+    setOpening({ path: projectPath, cached: !!cached });
+    if (cached) setSnapshot(cached);
     try {
       const project = await client.call<OpenProject>('project:open', [projectPath]);
       const state = await client.snapshot(project.path);
       if (current === generation.current) {
         selection.current = { client, path: project.path };
+        seen.current.set(`${client.url}|${projectPath}`, state).set(`${client.url}|${project.path}`, state);
         setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
       }
     } catch (error) {
       if (current === generation.current) selection.current = previous;
       throw error;
+    } finally {
+      if (current === generation.current) setOpening(null);
     }
   };
   const projectPath = snapshot?.project.path;
@@ -92,36 +125,45 @@ function useSessionState() {
     if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
     try {
       const state = await client.snapshot(projectPath);
-      if (current === selection.current) { setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError(''); }
+      if (current === selection.current) { seen.current.set(`${client.url}|${projectPath}`, state); setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError(''); }
     } catch (error) {
       if (current === selection.current) throw error;
     }
   }, [client, projectPath]);
-  const live = useRef(false);
-  const running = !!snapshot && Object.keys(snapshot.runs.runs).length > 0;
-  useEffect(() => { live.current = running; }, [running]);
+  /** Fetches only the Project's streaming turns and puts them into the snapshot on screen. */
+  const refreshRuns = useCallback(async () => {
+    const current = selection.current;
+    if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
+    try {
+      const runs = await client.runs(projectPath);
+      // A snapshot that landed meanwhile may already hold later runs.
+      if (current === selection.current) { setSnapshot(previous => previous?.project.path === projectPath && (runs.seq ?? 0) >= (previous.runs.seq ?? 0) ? reconcileState(previous, { ...previous, runs }) : previous); setError(''); }
+    } catch (error) {
+      if (current === selection.current) throw error;
+    }
+  }, [client, projectPath]);
+  const running = useRef(false);
+  const anyRunning = !!snapshot && Object.keys(snapshot.runs.runs).length > 0;
+  useEffect(() => { running.current = anyRunning; }, [anyRunning]);
   /** Poll quickly for a while after the user acts, so a new turn shows up before its first event arrives. */
   const expectActivity = () => { busyUntil.current = Date.now() + 15000; };
+  // The bridge's live socket says when to fetch; polling is the fallback while it is down or the bridge predates it.
   useEffect(() => {
     if (!client || !projectPath) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    let inFlight = false;
-    async function poll() {
-      if (cancelled || inFlight || AppState.currentState !== 'active') return;
-      inFlight = true;
-      try { await refresh(); } catch (e) { if (!cancelled) setError((e as Error).message); }
+    return syncProject({
+      connect: options => client.live(projectPath, options),
+      snapshot: refresh, runs: refreshRuns,
+      onError: error => setError(error.message),
+      active: () => AppState.currentState === 'active',
+      watchActive: listener => { const subscription = AppState.addEventListener('change', state => listener(state === 'active')); return () => subscription.remove(); },
       // Live turns refresh every second; an idle Project only needs a slower check for changes made elsewhere.
-      finally { inFlight = false; if (!cancelled) timer = setTimeout(poll, live.current || Date.now() < busyUntil.current ? 1000 : 4000); }
-    }
-    void poll();
-    const subscription = AppState.addEventListener('change', state => { clearTimeout(timer); if (state === 'active') void poll(); });
-    return () => { cancelled = true; clearTimeout(timer); subscription.remove(); };
-  }, [client, projectPath, refresh]);
+      pollDelay: () => running.current || Date.now() < busyUntil.current ? 1000 : 4000,
+    });
+  }, [client, projectPath, refresh, refreshRuns]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { booted, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders
@@ -131,10 +173,15 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
-  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences }), [drafts, attachments, preferences]);
+  // Like desktop's default permission mode: the last one picked starts every Chat, and survives a relaunch.
+  const [permission, setPermission] = useState<PermissionMode>('ask');
+  useEffect(() => { void readPermission().then(saved => { if (saved) setPermission(saved); }); }, []);
+  const defaults = useMemo(() => ({ ...defaultPreferences, permissionMode: permission }), [permission]);
+  const setDefaultPermission = useCallback((mode: PermissionMode) => { setPermission(mode); void savePermission(mode); }, []);
+  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission }), [drafts, attachments, preferences, defaults, setDefaultPermission]);
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
-type Composer = { drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
+type Composer = { defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
 const ComposerContext = createContext<Composer | null>(null);
 export function useComposer() {
   const composer = useContext(ComposerContext);

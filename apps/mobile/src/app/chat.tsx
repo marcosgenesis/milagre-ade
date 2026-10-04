@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type Reanimated from 'react-native-reanimated';
-import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
+import { Pressable, Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { useComposer, useSession } from '../session';
+import { isListedChat } from '@milagre/shared/chats';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
@@ -17,9 +18,11 @@ import { BottomFade, EdgeFade } from '../bottom-fade';
 import { useDotBackground } from '../dot-background';
 import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
-import { defaultPreferences, selectedModel, sendOptions } from '../turn-options';
+import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
-import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { SlideOver } from '../slide-over';
+import { ChangesView } from './changes';
+import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, showActions, styles } from '../ui';
 
 const PAGE = 40;
 
@@ -53,6 +56,9 @@ export default function ChatScreen() {
   }, [allMessages]);
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
+  // The Changes panel that slides in from the right; its files load the first time it is pulled.
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changesMounted, setChangesMounted] = useState(false);
   const visible = shown.id === params.id ? shown.count : PAGE;
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
@@ -63,7 +69,7 @@ export default function ChatScreen() {
   const draft = composer.drafts[chatId] || '';
   const attachments = composer.attachments[chatId] || [];
   const run = chat ? runs.runs[chatId] : undefined;
-  const preferences = composer.preferences[chatId] || defaultPreferences;
+  const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ''), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
@@ -120,20 +126,21 @@ export default function ChatScreen() {
     });
   }
   function headerAction(id: string) {
-    if (id === 'changes') router.push({ pathname: '/changes', params: { worktreeId: String(worktreeId) } });
+    if (id === 'changes') { setChangesMounted(true); setChangesOpen(true); }
     else if (id === 'pr' && pr && /^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {});
     else if (id === 'agents' && chat) router.push({ pathname: '/agents', params: { id: String(chat.id) } });
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
     else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(done => { if (done && !chat.archived) router.back(); });
   }
-  const recent = Object.values(project.state.sessions).filter(item => !item.archived).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
+  const recent = Object.values(project.state.sessions).filter(item => !item.archived && (item.id === chat?.id || lastMessage.has(item.id) || isListedChat(item, 0))).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
-  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
+  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { session.cancelNavigation(); if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
-      {worktree && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree.name}</Text>{diff && (diff.added > 0 || diff.removed > 0) && <Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>+{diff.added}</Text> <Text style={{ color: colors.red }}>−{diff.removed}</Text></Text>}</View>}
+      {/* The label lives in a native menu: its views keep one shape (text changes only), so nothing mounts or unmounts inside it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: worktree ? 1 : 0 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree?.name ?? ''}</Text><Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>{diff && (diff.added > 0 || diff.removed > 0) ? `+${diff.added}` : ''}</Text>{diff && (diff.added > 0 || diff.removed > 0) ? ' ' : ''}<Text style={{ color: colors.red }}>{diff && (diff.added > 0 || diff.removed > 0) ? `−${diff.removed}` : ''}</Text></Text></View>
     </View>
   </PullDown>;
   const more = <Stack.Toolbar placement="right">
@@ -151,9 +158,15 @@ export default function ChatScreen() {
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
+  // While Changes is open the back swipe stays off: a rightward drag closes the panel instead of leaving the Chat.
+  const changesPanel = changesMounted && worktree ? <ChangesView worktreeId={worktreeId} header={<View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <Text accessibilityRole="header" style={{ color: colors.ink, fontSize: 22, fontWeight: '700' }}>Changes</Text>
+    <IconButton label="Close Changes" icon={Cancel01Icon} onPress={() => setChangesOpen(false)} />
+  </View>} /> : null;
   return <View style={[styles.screen, dots]}>
-    <Stack.Screen options={{ title, headerTitle: () => header }} />
+    <Stack.Screen options={{ title, headerTitle: () => header, gestureEnabled: !changesOpen }} />
     {more}
+    <SlideOver open={changesOpen} onOpenChange={setChangesOpen} onPull={() => setChangesMounted(true)} panel={changesPanel} enabled={!!worktree}>
     <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
@@ -181,13 +194,11 @@ export default function ChatScreen() {
       {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
         {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
-        <Field label="Message" hideLabel placeholder="Message the agent" multiline value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
+        <Field label="Message" hideLabel placeholder="Message the agent" multiline autoCorrect spellCheck autoCapitalize="sentences" value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <PullDown label="Add photos or files" sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle' }, { id: 'camera', title: 'Take Photo', systemImage: 'camera' }, { id: 'files', title: 'Choose Files', systemImage: 'folder' }].map(item => ({ ...item, disabled: busy || picking || attachments.length >= 4 })) }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
-            <View accessibilityRole="button" accessibilityLabel="Add photos or files" style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>
-          </PullDown>
+          <Pressable accessibilityRole="button" accessibilityLabel="Add photos or files" disabled={busy || picking || attachments.length >= 4} onPress={() => showActions({ actions: [{ id: 'photos', title: 'Photo Library' }, { id: 'camera', title: 'Take Photo' }, { id: 'files', title: 'Choose Files' }], onSelect: kind => void pick(kind as 'photos' | 'camera' | 'files') })} style={({ pressed }) => ({ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : pressed ? 0.6 : 1 })}><Icon icon={Add01Icon} tone="ink2" size={21} /></Pressable>
           <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
-          <PermissionChip mode={preferences.permissionMode} onChange={permissionMode => composer.setPreferences(current => ({ ...current, [chatId]: { ...preferences, permissionMode } }))} />
+          <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
           {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
@@ -195,5 +206,6 @@ export default function ChatScreen() {
       </View>}
     </View>
     </KeyboardStickyView>
+    </SlideOver>
   </View>;
 }

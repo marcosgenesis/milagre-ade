@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { ArrowDown01Icon, ArrowRight01Icon, File01Icon } from '@hugeicons/core-free-icons';
@@ -12,24 +12,34 @@ import { ErrorNotice, PageScroll, Segmented, colors, styles } from '../ui';
 
 const MODES = [{ value: 'uncommitted', title: 'Uncommitted' }, { value: 'committed', title: 'Committed' }];
 
-/** Desktop's ChangesPanel: the Worktree's changed files as a folder tree with counts and status boxes. */
+/** Desktop's ChangesPanel as a page; the Chat screen shows the same view in the panel that slides in from the right. */
 export default function Changes() {
   const { worktreeId } = useLocalSearchParams<{ worktreeId: string }>();
   const session = useSession();
-  const worktree = session.snapshot?.project.state.worktrees[Number(worktreeId)];
+  if (!session.client || !session.snapshot?.project.state.worktrees[Number(worktreeId)]) return <Redirect href="/" />;
+  return <>
+    <Stack.Screen options={{ title: 'Changes' }} />
+    <ChangesView worktreeId={Number(worktreeId)} />
+  </>;
+}
+
+/** The Worktree's changed files as a folder tree with counts and status boxes; a file opens its diff. */
+export function ChangesView({ worktreeId, header }: { worktreeId: number; header?: React.ReactNode }) {
+  const session = useSession();
+  const worktree = session.snapshot?.project.state.worktrees[worktreeId];
   const [mode, setMode] = useState<DiffMode>('uncommitted');
   const [refreshing, setRefreshing] = useState(false);
   const { data: result, error, refresh } = useRpc<DiffFilesResult>(worktree ? session.client : null, 'git:diff-files', [{ cwd: worktree?.path, base: worktree?.base, mode }]);
   const files = result?.isRepo ? result.files : undefined;
   const tree = useMemo(() => buildDiffTree(files ?? []), [files]);
-  if (!session.client || !session.snapshot || !worktree) return <Redirect href="/" />;
+  if (!worktree) return null;
   const added = files?.reduce((sum, file) => sum + file.added, 0) ?? 0;
   const removed = files?.reduce((sum, file) => sum + file.removed, 0) ?? 0;
   const base = result?.isRepo ? result.base : null;
-  const open = (file: DiffFileEntry) => router.push({ pathname: '/diff', params: { worktreeId, mode, path: file.path, status: file.status, added: String(file.added), removed: String(file.removed), ...(file.oldPath ? { oldPath: file.oldPath } : {}), untracked: file.untracked ? '1' : '0', binary: file.binary ? '1' : '0', ...(base ? { base } : {}) } });
+  const open = (file: DiffFileEntry) => router.push({ pathname: '/diff', params: { worktreeId: String(worktreeId), mode, path: file.path, status: file.status, added: String(file.added), removed: String(file.removed), ...(file.oldPath ? { oldPath: file.oldPath } : {}), untracked: file.untracked ? '1' : '0', binary: file.binary ? '1' : '0', ...(base ? { base } : {}) } });
   const empty = !result ? 'Reading changes…' : !result.isRepo ? result.message : mode === 'committed' && base === null ? 'No base branch to compare with.' : files?.length ? '' : result.message || (mode === 'uncommitted' ? 'No uncommitted changes.' : 'Nothing committed since the base branch.');
   return <PageScroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); refresh(); setTimeout(() => setRefreshing(false), 400); }} />} contentContainerStyle={{ gap: 12 }}>
-    <Stack.Screen options={{ title: 'Changes' }} />
+    {header}
     <Segmented label="Changes mode" value={mode} options={MODES} onChange={value => setMode(value as DiffMode)} />
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 }}>
       <Text numberOfLines={1} style={[styles.caption, { flex: 1 }]}>{worktree.name}{mode === 'committed' && base ? ` · since ${base}` : ''}</Text>

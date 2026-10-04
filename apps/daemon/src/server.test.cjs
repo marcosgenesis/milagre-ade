@@ -194,3 +194,86 @@ test('paged snapshots preserve one immutable watermark across Projects above the
   assert.notEqual(captured.projects.find(item => item.path === project).state.sessions[session.id].title, 'Changed after capture');
   await assert.rejects(client.call('daemon:snapshot-page', [manifest.snapshotId, 0]), /expired|snapshot/i);
 });
+
+const phoneStatus = async (client, state) => waitFor(async () => { const next = await client.call('phone:status'); return next.state === state && next; });
+const unreachable = url => waitFor(() => fetch(url).then(() => false, () => true));
+
+test('phone methods are advertised to desktop, drive a real bridge, and stay out of the mobile bridge', async t => {
+  const { dataDir, client } = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const desktop = await client();
+  const status = await desktop.call('daemon:status');
+  for (const method of ['phone:status', 'phone:set-enabled', 'phone:reset']) assert.ok(status.methods.includes(method), method);
+  assert.deepEqual(await desktop.call('phone:status'), { enabled: false, state: 'off', remote: 'none' });
+  const changes = [];
+  desktop.on('event', event => { if (event.channel === 'phone:status') changes.push(event.payload.state); });
+  assert.equal((await desktop.call('phone:set-enabled', [true])).state, 'starting');
+  const on = await phoneStatus(desktop, 'on');
+  assert.match(on.localUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.match(on.qrSvg, /^<svg/);
+  const token = new URL(on.pairingLink).searchParams.get('token');
+  await waitFor(() => changes.includes('on'));
+  assert.deepEqual(changes.slice(0, 2), ['starting', 'on']);
+  // The phone's own bridge serves daemon methods but never the ones that manage its access.
+  const call = (method, args = [], url = on.localUrl, bearer = token) => fetch(url + '/rpc', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method, args }) });
+  assert.equal((await call('daemon:status')).status, 200);
+  for (const [method, args] of [['phone:status'], ['phone:set-enabled', [false]], ['phone:reset']]) assert.equal((await call(method, args)).status, 403, method);
+  assert.equal((await desktop.call('phone:status')).state, 'on');
+  await assert.rejects(desktop.call('phone:set-enabled', ['yes']), /true or false/);
+  assert.equal((await desktop.call('phone:reset')).state, 'starting');
+  const again = await phoneStatus(desktop, 'on');
+  assert.notEqual(new URL(again.pairingLink).searchParams.get('token'), token);
+  assert.equal((await call('daemon:status', [], again.localUrl)).status, 401, 'the old token stops working');
+  assert.equal((await desktop.call('phone:set-enabled', [false])).state, 'off');
+  await unreachable(again.localUrl + '/rpc');
+  assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile.json'), 'utf8')).enabled, false);
+});
+
+test('an enabled phone comes back when the daemon restarts, and stopping the daemon closes its bridge', async t => {
+  const first = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const desktop = await first.client();
+  await desktop.call('phone:set-enabled', [true]);
+  const on = await phoneStatus(desktop, 'on');
+  await first.daemon.close();
+  await unreachable(on.localUrl + '/rpc');
+  const second = await startDaemon({ dataDir: first.dataDir, version: '9.8.7', phoneOptions: { localPort: 0 }, runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }) } });
+  const client = await connect({ dataDir: first.dataDir });
+  try {
+    const back = await phoneStatus(client, 'on');
+    assert.equal(new URL(back.pairingLink).searchParams.get('token'), new URL(on.pairingLink).searchParams.get('token'));
+  } finally { client.close(); await second.close(); }
+});
+
+test('daemon delivers push after clients leave and Phone reset/disable revokes registrations', async t => {
+  const messages = [];
+  let emit;
+  const { dataDir, project, client } = await fixture(t, {
+    pushOptions: { fetcher: async (url, options) => { assert.ok(url.endsWith('/send')); messages.push(JSON.parse(options.body)); return new Response(JSON.stringify({ data: { status: 'ok', id: 'ticket' } })); } },
+    runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: '/fake/codex' }), { invalidate() {} }),
+      createSession(_provider, options) {
+        emit = options.emit;
+        return { async startTurn() { emit({ type: 'turn-started', turnId: 'turn' }); emit({ type: 'permission-request', requestId: 'approval', title: 'Run?', tool: 'Shell', kind: 'command', command: 'ls' }); return { turnId: 'turn' }; }, async close() { emit({ type: 'turn-cancelled' }); } };
+      },
+    },
+  });
+  const c = await client();
+  assert.ok((await c.call('daemon:status')).capabilities.includes('mobile-push-v1'));
+  const registration = { deviceId: 'b6e2df4b-972b-4e7b-bc65-6cda0a173798', token: 'ExpoPushToken[test]', hostId: 'https://mac.example', notifyWhenWaiting: true, notifyOnCompletion: true };
+  await c.call('push:register', [registration]);
+  const opened = await c.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  await c.call('chat:send', [{ projectPath: project, sessionId: session.id, body: 'Hello', provider: 'codex', model: 'test', permissionMode: 'ask' }]);
+  await waitFor(() => messages.length === 1);
+  c.close();
+  emit({ type: 'permission-resolved', requestId: 'approval' });
+  emit({ type: 'text-delta', text: 'Completed on the daemon.' });
+  emit({ type: 'turn-completed' });
+  await waitFor(() => messages.length === 2);
+  assert.match(messages[1].title, /Turn completed/);
+  assert.equal(messages[1].body, 'Completed on the daemon.');
+  const second = await client();
+  await second.call('phone:reset');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile-push.json'), 'utf8')), []);
+  await second.call('push:register', [registration]);
+  await second.call('phone:set-enabled', [false]);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile-push.json'), 'utf8')), []);
+});

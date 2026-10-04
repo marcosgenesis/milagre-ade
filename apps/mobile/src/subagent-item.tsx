@@ -20,7 +20,7 @@ export function SubagentItem({ agent }: { agent: Subagent }) {
         <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}><Icon icon={ArrowDown01Icon} tone="ink3" size={12} /></View>
       </Pressable>
     </View>
-    {expanded && <View style={{ gap: 8, paddingBottom: 8 }}>
+    {expanded && <View style={{ gap: 8, padding: 12, marginBottom: 8, backgroundColor: colors.field, borderRadius: 12 }}>
       {!!agent.latestActivity && <Text selectable style={styles.caption}>{agent.latestActivity}</Text>}
       {agent.transcript.slice(-4).map(item => <Text key={item.id} selectable style={item.kind === 'tool' ? [styles.code, { fontSize: 12, color: colors.ink2 }] : { color: colors.ink2, fontSize: 13, lineHeight: 18 }}>{item.text}</Text>)}
     </View>}

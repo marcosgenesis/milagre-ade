@@ -4,7 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { RefreshIcon } from '@hugeicons/core-free-icons';
 import type { ProviderUsage, UsageWindow } from '@milagre/shared/model';
 import { providerName } from '@milagre/shared/providers';
-import { formatPercent, formatResetsIn, formatUpdatedAgo, usageTone } from '@milagre/shared/usage';
+import { formatPercent, formatResetsIn, formatUpdatedAgo } from '@milagre/shared/usage';
 import { ProviderLogo, SpinnerRing } from './icons';
 import { colors, IconButton, styles } from './ui';
 import { useSession } from './session';
@@ -12,7 +12,6 @@ import { useUsage } from './use-usage';
 
 function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
   const percent = Math.max(0, Math.min(100, window.usedPercent));
-  const tone = usageTone(percent);
   const reset = formatResetsIn(window.resetsAt, now);
   return <View style={{ gap: 7 }}>
     <View style={[styles.row, { justifyContent: 'space-between', gap: 4 }]}>
@@ -20,7 +19,7 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
       <Text selectable style={{ color: colors.ink, fontSize: 14, fontWeight: '500', fontVariant: ['tabular-nums'] }}>{formatPercent(percent)} used</Text>
     </View>
     <View accessible accessibilityRole="progressbar" accessibilityLabel={`${window.label} usage`} accessibilityValue={{ min: 0, max: 100, now: percent, text: `${formatPercent(percent)} used${reset ? `, ${reset}` : ''}` }} style={{ height: 5, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.lineStrong }}>
-      <View style={{ width: `${percent}%`, height: '100%', borderRadius: 3, backgroundColor: tone === 'critical' ? colors.red : tone === 'warning' ? colors.orange : colors.ink2 }} />
+      <View style={{ width: `${percent}%`, height: '100%', borderRadius: 3, backgroundColor: colors.ink }} />
     </View>
     {reset ? <Text selectable style={styles.caption}>{reset}</Text> : null}
   </View>;
@@ -43,7 +42,7 @@ function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number 
   </View>;
 }
 
-/** Settings' usage group, sourced only from the currently connected computer. */
+/** Plan usage, sourced only from the currently connected computer. */
 export function UsageSection() {
   const session = useSession();
   const usage = useUsage(session.client);

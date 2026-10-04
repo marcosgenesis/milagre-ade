@@ -14,6 +14,32 @@ const METHODS = new Set(['daemon:status', 'project:recent', 'project:open', 'cha
   'agent:answer-question', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
+// Subagent entries the phone shows under each agent.
+const TRANSCRIPT_TAIL = 4;
+
+// Characters of each subagent entry the phone shows (six lines at most).
+const TRANSCRIPT_TEXT = 600;
+
+/**
+ * A Project as the phone lists it. Tool output and subagent transcripts make up most of a large Project's state (in
+ * one, 6.8 of 8 MB) and the phone shows neither until asked: steps keep `hasDetail` and the full message comes from
+ * /message. A reply keeps the detail of its last thinking step, which it can show in place of an answer; each subagent
+ * keeps the start of its last few transcript entries.
+ */
+function forPhone(project) {
+  const state = project?.state;
+  if (!state) return project;
+  const slimSteps = steps => {
+    const thought = steps.findLastIndex(step => step.kind === 'thinking' && step.detail?.trim());
+    return steps.map((step, index) => step.detail && index !== thought ? { ...step, detail: undefined, hasDetail: true } : step);
+  };
+  const messages = state.messages.map(message => message.steps?.some(step => step.detail) ? { ...message, steps: slimSteps(message.steps) } : message);
+  const clip = text => typeof text === 'string' && text.length > TRANSCRIPT_TEXT ? `${text.slice(0, TRANSCRIPT_TEXT)}…` : text;
+  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id, session.subagents?.length
+    ? { ...session, subagents: session.subagents.map(agent => ({ ...agent, latestActivity: clip(agent.latestActivity), transcript: (agent.transcript || []).slice(-TRANSCRIPT_TAIL).map(item => ({ ...item, text: clip(item.text) })) })) }
+    : session]));
+  return { ...project, state: { ...state, messages, sessions } };
+}
 const MAX_MEDIA = 15 * MAX_BODY;
 const MEDIA_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heic' };
 const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
@@ -120,7 +146,14 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          reply(200, { result: { project, runs } }, { etag: true });
+          reply(200, { result: { project: forPhone(project), runs } }, { etag: true });
+          return;
+        }
+        if (req.method === 'GET' && target.pathname === '/message') {
+          const project = await client.call('project:snapshot', [target.searchParams.get('projectPath')]);
+          const message = project.state.messages.find(item => item.id === Number(target.searchParams.get('id')));
+          if (!message) throw failure(404, 'That message is no longer in this Project.');
+          reply(200, { result: message });
           return;
         } else if (req.method === 'POST' && ['/rpc', '/attachments'].includes(target.pathname)) {
           if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw failure(415, 'Use application/json');
@@ -187,4 +220,4 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   } catch (error) { await close(); throw error; }
   return { url, close, lost };
 }
-module.exports = { startMobileBridge };
+module.exports = { startMobileBridge, forPhone };

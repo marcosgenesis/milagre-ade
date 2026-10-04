@@ -66,7 +66,7 @@ export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live
   const [open, setOpen] = useState(false);
   const running = live && step.status === 'running';
   const failed = step.status === 'failed';
-  const expandable = !onPress && !!step.detail;
+  const expandable = !onPress && (!!step.detail || !!step.hasDetail);
   return <View style={{ gap: 8 }}><Pressable accessibilityRole={onPress || expandable ? 'button' : 'text'} accessibilityState={expandable ? { expanded: open } : undefined} accessibilityLabel={`${step.title.replace(/`/g, '')}${failed ? ', Failed' : running ? waiting ? ', Waiting for approval' : ', Running' : ''}`} disabled={!onPress && !expandable} onPress={() => onPress ? onPress() : setOpen(!open)} style={({ pressed }) => ({ minHeight: 36, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.5 : 1 })}>
     <Icon icon={failed ? Alert02Icon : icons[step.kind]} tone={failed ? 'red' : running ? 'ink2' : 'ink3'} size={16} />
     <View style={{ flex: 1, gap: 2 }}>
@@ -76,7 +76,7 @@ export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live
     {(onPress || expandable) && <Icon icon={onPress ? ArrowRight01Icon : open ? ArrowUp01Icon : ArrowDown01Icon} tone="ink3" size={12} />}
   </Pressable>{open && step.detail && <PageScroll nestedScrollEnabled style={{ maxHeight: 320, backgroundColor: colors.field, borderRadius: 12 }} contentContainerStyle={{ padding: 12, paddingBottom: 12 }}>
     {step.kind === 'thinking' ? <Markdown text={step.detail} streaming={running} /> : <Text selectable style={styles.code}>{step.detail}</Text>}
-  </PageScroll>}</View>;
+  </PageScroll>}{open && !step.detail && step.hasDetail && <Text style={[styles.muted, { paddingVertical: 6 }]}>Loading output…</Text>}</View>;
 }
 const SPARKLE = 'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z';
 /** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */

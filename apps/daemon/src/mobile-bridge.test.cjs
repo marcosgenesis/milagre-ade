@@ -7,7 +7,7 @@ const { randomBytes } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const http = require('node:http');
 const { startDaemon } = require('./server.cjs');
-const { startMobileBridge } = require('./mobile-bridge.cjs');
+const { forPhone, startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
 
 async function fixture(t) {
@@ -217,4 +217,15 @@ test('snapshots carry an ETag, an unchanged one is a 304, and large bodies are g
   });
   assert.equal(zipped.encoding, 'gzip');
   assert.equal(JSON.parse(require('node:zlib').gunzipSync(zipped.body)).v, 1);
+});
+
+test('the phone snapshot leaves out tool output and old subagent transcript, keeping thinking', () => {
+  const steps = [{ id: 't', kind: 'thinking', title: 'Thought', status: 'done', detail: 'first' }, { id: 'a', kind: 'shell', title: 'Ran', status: 'done', detail: 'x'.repeat(5000) }, { id: 'b', kind: 'thinking', title: 'Thought', status: 'done', detail: 'why' }, { id: 'c', kind: 'read', title: 'Read', status: 'done' }];
+  const transcript = Array.from({ length: 9 }, (_, i) => ({ id: String(i), kind: 'message', text: i === 8 ? 'y'.repeat(2000) : `line ${i}` }));
+  const project = { path: '/p', state: { messages: [{ id: 1, session_id: 1, body: 'hi', steps }], sessions: { 1: { id: 1, subagents: [{ id: 's', transcript }] } } } };
+  const phone = forPhone(project);
+  assert.deepEqual(phone.state.messages[0].steps.map(step => [step.id, step.detail, step.hasDetail]), [['t', undefined, true], ['a', undefined, true], ['b', 'why', undefined], ['c', undefined, undefined]]);
+  assert.deepEqual(phone.state.sessions[1].subagents[0].transcript.map(item => item.id), ['5', '6', '7', '8']);
+  assert.equal(phone.state.sessions[1].subagents[0].transcript.at(-1).text.length, 601);
+  assert.equal(project.state.messages[0].steps[1].detail.length, 5000, 'the daemon\'s state is untouched');
 });

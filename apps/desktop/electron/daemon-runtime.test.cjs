@@ -290,3 +290,24 @@ test('a host without result pages still serves the desktop, says so, and can be 
   hostStarted = false;
   await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' }, 'the new host stopped');
 });
+
+test('a restart whose new host fails to start says why, and its retries start one', async t => {
+  const { dataDir } = await fakeHost(t, {
+    capabilities: ['desktop-v1', 'snapshot-pages-v1'],
+    onStop: async (connection, server) => { await new Promise(resolve => setTimeout(resolve, 20)); connection.end(); server.close(); },
+  });
+  const events = [];
+  const options = { dataDir, version: 'test', cwd: dataDir, reconnectMs: 20, executable: '/milagre/no-such-host', startupTimeoutMs: 2000, emit: (channel, payload) => events.push({ channel, payload }) };
+  const desktop = await connectDesktopRuntime(options);
+  let hostStarted = false;
+  t.after(async () => { if (hostStarted) await desktop.close({ stopHost: true }).catch(() => {}); else await desktop.close().catch(() => {}); });
+  await assert.rejects(desktop.restartHost(), /ENOENT|no-such-host/);
+  assert.ok(events.some(event => event.channel === 'runtime:connection' && /^Host unavailable/.test(event.payload.message ?? '')));
+  // The next retry starts a host again instead of only trying to connect.
+  hostStarted = true;
+  options.executable = process.execPath;
+  await waitFor(() => events.some(event => event.channel === 'runtime:connection' && event.payload.connected === true && !event.payload.hostOutdated), 1500);
+  await desktop.close({ stopHost: true });
+  hostStarted = false;
+  await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' }, 'the new host stopped');
+});

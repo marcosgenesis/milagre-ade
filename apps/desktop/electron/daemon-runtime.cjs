@@ -115,12 +115,14 @@ async function connectDesktopRuntime(options) {
     timer = setTimeout(() => { timer = null; void reconnect(); }, reconnectMs);
   }
   // A reconnect never starts or stops a daemon: an explicit host stop must stay stopped, and the next desktop launch
-  // can start it again. Only restartHost passes `open` to start the new one.
-  async function reconnect(open = () => compatibleClient(dataDir)) {
+  // can start it again. The exception is a restart whose new host didn't come up: its retries keep starting one.
+  let startOnRetry = false;
+  /** Resolves with the error when it couldn't connect (it then retries by itself), or nothing once connected. */
+  async function reconnect() {
     let connection;
     try {
-      connection = await open();
-      if (closed) { connection.close(); return; }
+      connection = await (startOnRetry ? ensureDaemon(options) : compatibleClient(dataDir));
+      if (closed) { connection.close(); return undefined; }
       adopt(connection.status ?? await connection.call('daemon:status'));
       client = connection;
       recovering = true; capturingSnapshot = false; buffered = []; bufferedBytes = 0;
@@ -148,7 +150,9 @@ async function connectDesktopRuntime(options) {
       emit('runtime:snapshot', snapshot);
       for (const event of buffered) if (event.seq > snapshot.eventSeq) deliver(connection, event);
       buffered = []; recovering = false;
+      startOnRetry = false;
       emit('runtime:connection', connectedState());
+      return undefined;
     } catch (error) {
       recovering = false; buffered = [];
       if (client === connection) client = null;
@@ -157,6 +161,7 @@ async function connectDesktopRuntime(options) {
         emit('runtime:connection', { connected: false, message: `Host unavailable: ${error instanceof Error ? error.message : String(error)}` });
         scheduleReconnect();
       }
+      return error;
     }
   }
   attach(client);
@@ -189,7 +194,7 @@ async function connectDesktopRuntime(options) {
     methods,
     environmentReady: Promise.resolve(),
     invoke,
-    openProject: projectPath => invoke('project:open', [projectPath]),
+    openProject: projectPath => invoke('project:open', [projectPath, { takeNotice: true }]),
     resumeRecentProjects: async () => {}, // The daemon resumes once, before it announces startup.
     focused: () => invoke('daemon:focus', [{ focused: true }]),
     setFocused(value) { focused = value === true; return invoke('daemon:focus', [{ focused }]); },
@@ -203,7 +208,10 @@ async function connectDesktopRuntime(options) {
         emit('runtime:connection', { connected: false, message: 'Restarting the background host…' });
         await stopHost(connection, 'The background host has not stopped. Try again.');
         clearTimeout(timer); timer = null;
-        await reconnect(() => ensureDaemon(options));
+        // A new host that fails to start is reported to the window; the retries that follow keep starting one.
+        startOnRetry = true;
+        const failure = await reconnect();
+        if (failure) throw failure;
       } catch (error) {
         if (client === connection) emit('runtime:connection', connectedState());
         throw error;

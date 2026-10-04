@@ -75,6 +75,10 @@ const callsAt = (target, demo) => [
   ['worktree:create', [{ projectPath: target, baseBranch: 'main', prompt: 'Escape' }]],
   ['git:diff-files', [{ cwd: target, mode: 'uncommitted' }]],
   ['git:diff-file', [{ cwd: target, mode: 'uncommitted', path: 'secret.png' }]],
+  ['worktree:status', [target, 'main']],
+  ['worktree:remove', [target, { force: true, base: 'main', projectPath: demo, chatId: `${demo}#1`, seen: null }]],
+  ['worktree:remove', [demo, { force: true, base: 'main', projectPath: target, chatId: `${demo}#1`, seen: null }]],
+  ['worktree:remove', [demo, { force: true, base: 'main', projectPath: demo, chatId: `${target}#1`, seen: null }]],
 ];
 const routesAt = (target, demo) => [
   `/snapshot?projectPath=${encodeURIComponent(target)}`,
@@ -169,6 +173,33 @@ test('inside the folder the phone browses, reads changes, sends and sees images;
   const worktree = created.body.result.project.state.worktrees[created.body.result.worktreeId].path;
   assert.ok(worktree.startsWith(f.demo + path.sep));
   assert.equal((await f.rpc('git:diff-files', [{ cwd: worktree, mode: 'uncommitted' }])).status, 200);
+});
+
+test('a confined phone archives with the worktree check: roots inside the folder only, status, and removal', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.rpc('project:open', [f.demo])).status, 200);
+  const created = await f.rpc('worktree:create', [{ projectPath: f.demo, baseBranch: 'main', prompt: 'Archive me' }]);
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const { project, worktreeId } = created.body.result;
+  const worktree = project.state.worktrees[worktreeId];
+  const chat = Object.values(project.state.sessions).find(session => session.worktree_id === worktreeId);
+  // Only the canonical root inside the folder comes back; the owner's side gets every root.
+  const roots = (await f.rpc('worktree:roots')).body.result;
+  assert.deepEqual(roots, [path.join(f.demo, '.milagre', 'worktrees')]);
+  assert.ok(worktree.path.startsWith(roots[0] + path.sep));
+  const status = await f.rpc('worktree:status', [worktree.path, worktree.base]);
+  assert.equal(status.status, 200, JSON.stringify(status.body));
+  assert.equal(status.body.result.removable, true);
+  const removed = await f.rpc('worktree:remove', [worktree.path, { force: false, base: worktree.base, projectPath: f.demo, chatId: `${f.demo}#${chat.id}`, seen: status.body.result }]);
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  await assert.rejects(fs.stat(worktree.path), { code: 'ENOENT' });
+});
+
+test('a confined phone gets no worktree root outside its folder', async t => {
+  const f = await fixture(t, { runtime: options => ({ ...options, worktreeRoot: path.join(path.dirname(options.cwd), 'elsewhere') }) });
+  await fs.mkdir(path.join(f.root, 'elsewhere'));
+  assert.deepEqual((await f.rpc('worktree:roots')).body.result, []);
+  assert.equal((await f.owner.call('worktree:roots')).length > 0, true);
 });
 
 test('the demo daemon reports only the demo agent, whichever provider the phone picks', async t => {

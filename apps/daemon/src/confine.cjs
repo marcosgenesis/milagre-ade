@@ -47,6 +47,11 @@ const PATHS = Object.freeze({
   'worktree:create': ([value]) => [value?.projectPath],
   'git:diff-files': ([value]) => [value?.cwd],
   'git:diff-file': ([value]) => [value?.cwd],
+  // The roots name no path the phone sent; the answer is cut down to the folder (filterResult).
+  'worktree:roots': none,
+  'worktree:status': ([worktreePath]) => [worktreePath],
+  // The worktree, its project, and the Chat whose agent the daemon closes before it looks again.
+  'worktree:remove': ([worktreePath, options]) => [worktreePath, options?.projectPath, ...(options?.chatId === undefined ? [] : [chatProject(options.chatId)])],
 });
 
 /**
@@ -97,8 +102,8 @@ function createConfinement({ allowedRoot, uploadsDir }) {
   }
 
   /**
-   * What a command answers, cut down to the folder: the recent list, the turns running elsewhere and what the daemon
-   * says about the Mac. A project:open that landed outside the folder (a subfolder of a bigger repository) is refused.
+   * What a command answers, cut down to the folder: the recent list, the turns running elsewhere, the worktree roots
+   * outside it and what the daemon says about the Mac. A project:open that landed outside the folder (a subfolder of a bigger repository) is refused.
    */
   async function filterResult(method, result) {
     if (method === 'daemon:status' && result && typeof result === 'object') {
@@ -107,6 +112,10 @@ function createConfinement({ allowedRoot, uploadsDir }) {
       return kept;
     }
     if (method === 'project:open' && !(await allows(result?.path))) throw refused();
+    if (method === 'worktree:roots' && Array.isArray(result)) {
+      const kept = await Promise.all(result.map(root => allows(root)));
+      return result.filter((_root, index) => kept[index]);
+    }
     if (method === 'project:recent' && Array.isArray(result)) {
       const kept = await Promise.all(result.map(entry => allows(entry?.path)));
       return result.filter((_entry, index) => kept[index]);

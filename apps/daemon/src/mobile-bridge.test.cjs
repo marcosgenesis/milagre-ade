@@ -61,7 +61,9 @@ test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported r
     req.end(JSON.stringify({ v: 1, method: 'daemon:status', args: [] }));
   });
   assert.equal(androidHost, 200);
-  assert.equal((await rpc('worktree:remove', ['/tmp/nope'])).status, 403);
+  assert.equal((await rpc('git:commit', ['/tmp/nope'])).status, 403);
+  // The phone may ask for a removal, but the daemon refuses one outside a Project it has open.
+  assert.equal((await rpc('worktree:remove', ['/tmp/nope'])).status, 409);
   assert.equal((await rpc('daemon:stop')).status, 403);
   assert.equal((await request('/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })).status, 400);
   assert.equal((await request('/rpc', { method: 'POST', body: JSON.stringify({ v: 1, method: 'daemon:status', args: [] }) })).status, 415);
@@ -90,7 +92,47 @@ test('mobile can manage Chat metadata and create Worktrees, and read changes onl
   assert.match(diff.patch, /\+A change from the computer/);
   assert.equal((await rpc('git:diff-files', [{ cwd: os.homedir(), mode: 'uncommitted' }])).status, 409);
   assert.equal((await rpc('git:diff-file', [{ cwd: project, mode: 'uncommitted', path: '../outside' }])).status, 409);
-  for (const method of ['git:commit', 'git:push', 'git:open-pr', 'worktree:remove', 'daemon:stop']) assert.equal((await rpc(method)).status, 403);
+  for (const method of ['git:commit', 'git:push', 'git:open-pr', 'daemon:stop']) assert.equal((await rpc(method)).status, 403);
+});
+
+test('the phone checks a Chat\'s worktree and removes a clean Milagre worktree, and a changed one is refused', async t => {
+  const { project, request, rpc } = await fixture(t);
+  execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  await rpc('project:open', [project]);
+  const json = async response => {
+    const body = await response.json();
+    assert.equal(response.status, 200, body.error?.message);
+    return body.result;
+  };
+  const roots = await json(await rpc('worktree:roots'));
+  assert.ok(Array.isArray(roots) && roots.length > 0);
+  const create = async prompt => {
+    const created = await json(await rpc('worktree:create', [{ projectPath: project, baseBranch: 'main', prompt }]));
+    const worktree = created.project.state.worktrees[created.worktreeId];
+    const chat = Object.values(created.project.state.sessions).find(session => session.worktree_id === worktree.id);
+    assert.ok(roots.some(root => worktree.path.startsWith(root + '/')), 'a created worktree is under a root the phone was given');
+    return { worktree, chatId: `${project}#${chat.id}` };
+  };
+  const removal = ({ worktree, chatId }, seen, force = false) => rpc('worktree:remove', [worktree.path, { force, base: worktree.base, projectPath: project, chatId, seen }]);
+
+  const clean = await create('Clean');
+  const status = await json(await rpc('worktree:status', [clean.worktree.path, clean.worktree.base]));
+  assert.deepEqual({ ...status, head: typeof status.head }, { uncommitted: 0, unpushed: 0, branch: clean.worktree.name, head: 'string', removable: true });
+  assert.equal((await json(await removal(clean, status))).removed, true);
+  await assert.rejects(fs.stat(clean.worktree.path), { code: 'ENOENT' });
+  const snapshot = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.equal(snapshot.project.state.worktrees[clean.worktree.id], undefined, 'the removed worktree and its Chats leave the Project');
+
+  // Work lands after the phone looked: neither the safe nor the forced removal goes ahead.
+  const changed = await create('Changed');
+  const seen = await json(await rpc('worktree:status', [changed.worktree.path, changed.worktree.base]));
+  await fs.writeFile(path.join(changed.worktree.path, 'late.txt'), 'written after the check\n');
+  for (const force of [false, true]) {
+    const refused = await removal(changed, seen, force);
+    assert.equal(refused.status, 409);
+    assert.match((await refused.json()).error.message, /^WORKTREE_CHANGED: /);
+  }
+  assert.equal(await fs.readFile(path.join(changed.worktree.path, 'late.txt'), 'utf8'), 'written after the check\n');
 });
 
 test('mobile uploads are private, bounded and scoped to an open Project', async t => {

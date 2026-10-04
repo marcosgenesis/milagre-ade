@@ -9,7 +9,8 @@ import { useSession } from '../session';
 import { chatMark, type ChatMark } from '../indicators';
 import { isListedChat } from '@milagre/shared/chats';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
-import { Icon, ProviderLogo, SpinnerRing } from '../icons';
+import { Icon, ProviderLogo } from '../icons';
+import { LoadingLogo } from '../loading-logo';
 import { ErrorNotice, PullDown, colors, styles, type MenuSection } from '../ui';
 import { archiveFromPhone } from '../archive';
 
@@ -78,9 +79,9 @@ export default function ChatsScreen() {
       .sort((a, b) => b.chat.id - a.chat.id);
   }, [snapshot, show, worktreeFilter, query]);
   // Opened from Projects before it loaded: a loading state, unless its last copy is already showing.
-  if (session.client && session.opening && !session.opening.cached) return <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
+  if (session.client && session.opening && !session.opening.cached) return <View accessible accessibilityRole="progressbar" accessibilityLabel={`Opening ${session.opening.path.split('/').at(-1)}…`} style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
     <Stack.Screen options={{ title: session.opening.path.split('/').at(-1) || 'Project' }} />
-    <SpinnerRing size={22} />
+    <LoadingLogo />
     <Text style={styles.muted}>Opening {session.opening.path.split('/').at(-1)}…</Text>
   </View>;
   if (!session.client || !snapshot) return <Redirect href="/" />;

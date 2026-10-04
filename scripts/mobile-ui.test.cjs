@@ -328,7 +328,7 @@ test('New Chat opens the composer directly when there are multiple Worktrees', (
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push: route => pushed.push(route) } },
     '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
-    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
   });
   react.begin();
   const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
@@ -365,7 +365,7 @@ test('a Chat row Archive asks with the worktree choice, then stops, hides and de
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: { alert: pressDanger(alerts) }, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push() {} } },
     '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
-    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
   });
   react.begin();
   const list = find(ChatsScreen(), node => node.type === 'FlatList');

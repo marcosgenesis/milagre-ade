@@ -1,8 +1,8 @@
 import React from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { Button as NativeButton, Host, Picker, Switch } from '@expo/ui';
-import { Button as IOSButton, Host as IOSHost, Menu as IOSMenu, Picker as IOSPicker, RNHostView, Section as IOSSection, Text as IOSText, Toggle as IOSToggle } from '@expo/ui/swift-ui';
-import { accessibilityLabel, disabled as nativeDisabled, menuOrder, pickerStyle, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
+import { Picker as IOSPicker, Text as IOSText } from '@expo/ui/swift-ui';
+import { accessibilityLabel, disabled as nativeDisabled, pickerStyle, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 import * as Haptics from 'expo-haptics';
 import { ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon } from '@hugeicons/core-free-icons';
@@ -99,7 +99,6 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
 }
 export type MenuItem = { id: string; title: string; systemImage?: string; checked?: boolean; destructive?: boolean; disabled?: boolean; subtitle?: string };
 export type MenuSection = { title?: string; items: MenuItem[] };
-/** A native pull-down menu (UIMenu on iOS) anchored to its trigger. Items use SF Symbols because the system menu draws them. */
 /**
  * A system action sheet for a row's actions or a short list of choices. It draws its own buttons, so no React view is
  * hosted inside a native menu: those hosted views crashed Fabric when their content changed while a menu was up.
@@ -117,20 +116,16 @@ export function showActions({ title, actions, onSelect }: { title?: string; acti
   Alert.alert(title || '', undefined, [...enabled.map(action => ({ text: action.title, style: action.destructive ? 'destructive' as const : 'default' as const, onPress: () => onSelect(action.id) })), { text: 'Cancel', style: 'cancel' as const }]);
 }
 export function PullDown({ title, sections, onSelect, children, label, longPress = false, style }: { title?: string; sections: MenuSection[]; onSelect: (id: string) => void; children: React.ReactNode; label: string; longPress?: boolean; style?: StyleProp<ViewStyle> }) {
-  // Like Paseo: on iOS the choice runs once the menu has gone, so the re-render it causes never races the menu's teardown.
-  const select = (id: string) => { tap(); if (Platform.OS === 'ios') setTimeout(() => onSelect(id), 250); else onSelect(id); };
+  if (Platform.OS === 'ios') {
+    // A SwiftUI menu has to host its trigger, and Fabric crashed when SwiftUI re-attached a React view it had already
+    // recycled (TestFlight build 9, -[RCTViewComponentView unmountChildComponentView:index:]). The action sheet draws
+    // its own buttons, so the trigger stays an ordinary React view. The current item is skipped: the trigger shows it.
+    const actions = sections.flatMap(section => section.items.filter(item => !item.checked).map(item => ({ id: item.id, title: item.title, destructive: item.destructive, disabled: item.disabled })));
+    const open = () => showActions({ title, actions, onSelect });
+    return <Pressable accessibilityRole="button" accessibilityLabel={label} testID={label} style={({ pressed }) => [style, { opacity: pressed ? 0.6 : 1 }]} onPress={longPress ? undefined : open} onLongPress={longPress ? open : undefined}>{children}</Pressable>;
+  }
   // The system draws menus below the keyboard, so a touch on the trigger lowers it first.
   const trigger = <View accessibilityLabel={label} onTouchStart={() => Keyboard.dismiss()}>{children}</View>;
-  if (Platform.OS === 'ios' && !longPress) {
-    // A tap menu keeps the order it is given (desktop's order), instead of iOS reversing it when it opens upward.
-    const item = (entry: MenuItem) => entry.checked !== undefined
-      ? <IOSToggle key={entry.id} label={entry.title} systemImage={entry.systemImage as never} isOn={entry.checked} onIsOnChange={() => select(entry.id)} modifiers={entry.disabled ? [nativeDisabled(true)] : undefined} />
-      : <IOSButton key={entry.id} label={entry.title} systemImage={entry.systemImage as never} role={entry.destructive ? 'destructive' : undefined} onPress={() => select(entry.id)} modifiers={entry.disabled ? [nativeDisabled(true)] : undefined} />;
-    const body = sections.map((section, index) => <IOSSection key={index} title={section.title}>{section.items.map(item)}</IOSSection>);
-    return <IOSHost matchContents style={style} testID={label} ignoreSafeArea="all">
-      <IOSMenu label={<RNHostView matchContents><>{trigger}</></RNHostView>} modifiers={[menuOrder('fixed')]}>{title ? <IOSSection title={title}>{body}</IOSSection> : body}</IOSMenu>
-    </IOSHost>;
-  }
   const actions: MenuAction[] = sections.map((section, index) => ({ id: `section-${index}`, title: section.title || '', displayInline: true, subactions: section.items.map(item => ({ id: item.id, title: item.subtitle ? `${item.title}\n${item.subtitle}` : item.title, image: item.systemImage as MenuAction['image'], state: item.checked ? 'on' : undefined, attributes: { destructive: item.destructive, disabled: item.disabled } })) }));
-  return <MenuView title={title} actions={actions} shouldOpenOnLongPress={longPress} onPressAction={({ nativeEvent }) => select(nativeEvent.event)} style={style} testID={label}>{trigger}</MenuView>;
+  return <MenuView title={title} actions={actions} shouldOpenOnLongPress={longPress} onPressAction={({ nativeEvent }) => { tap(); onSelect(nativeEvent.event); }} style={style} testID={label}>{trigger}</MenuView>;
 }

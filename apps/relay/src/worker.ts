@@ -27,6 +27,7 @@ export class Room implements DurableObject {
     const url = new URL(request.url);
     const id = url.searchParams.get('id')!;
     const role = url.pathname === '/v1/host' ? 'host' : 'phone';
+    // The room itself tells pending Mac sockets from the proven one, so the listeners just forward every event.
     const room = (this.room ??= createRoom({ id }));
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();

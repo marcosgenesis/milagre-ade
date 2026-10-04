@@ -19,31 +19,34 @@ export function unframe(bytes) {
 
 /** One Mac and its phones. Knows nothing about what the frames say. */
 export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8Array(32)) }) {
-  let host = null, challenge = null, ready = false, next = 0n;
+  let host = null, pending = null, challenge = null, next = 0n; // host: the proven Mac; pending: a newcomer still proving its key
   const phones = new Map(); // conn -> socket
   const connOf = new Map(); // socket -> conn
   const drop = (socket, code, reason) => { try { socket.close(code, reason); } catch { /* already closed */ } };
+  const proves = data => {
+    try {
+      const proof = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
+      const key = proof?.t === 'proof' ? fromB64url(String(proof.key)) : null;
+      return !!key && key.length === 32 && hostIdOf(key) === id && nacl.sign.detached.verify(challenge, fromB64url(String(proof.sig)), key);
+    } catch { return false; /* malformed proof */ }
+  };
+  const dropPhones = () => { for (const phone of phones.values()) drop(phone, 4410, 'host-gone'); phones.clear(); connOf.clear(); };
   return {
+    /** A new Mac socket waits as pending: the current host and its phones are untouched until the proof verifies. */
     hostOpened(socket) {
-      if (host) drop(host, 4409, 'replaced');
-      for (const phone of phones.values()) drop(phone, 4410, 'host-gone');
-      phones.clear(); connOf.clear();
-      host = socket; ready = false; challenge = nonce();
+      if (pending) drop(pending, 4409, 'replaced');
+      pending = socket; challenge = nonce();
       socket.send(JSON.stringify({ t: 'challenge', nonce: b64url(challenge) }));
     },
     hostMessage(socket, data) {
-      if (socket !== host) return drop(socket, 4409, 'replaced');
-      if (!ready) {
-        let valid = false;
-        try {
-          const proof = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
-          const key = proof?.t === 'proof' ? fromB64url(String(proof.key)) : null;
-          valid = !!key && key.length === 32 && hostIdOf(key) === id && nacl.sign.detached.verify(challenge, fromB64url(String(proof.sig)), key);
-        } catch { /* malformed proof */ }
-        if (!valid) return drop(socket, 4403, 'bad-proof');
-        ready = true;
+      if (socket === pending) {
+        if (!proves(data)) { pending = null; return drop(socket, 4403, 'bad-proof'); }
+        if (host) drop(host, 4409, 'replaced');
+        dropPhones();
+        host = socket; pending = null;
         return socket.send(JSON.stringify({ t: 'ready' }));
       }
+      if (socket !== host) return drop(socket, 4409, 'replaced');
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
       if (bytes.length > MAX_FRAME + 9) return drop(socket, 1009, 'too-big');
       const { type, conn, payload } = unframe(bytes);
@@ -53,13 +56,13 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       else if (type === CLOSE) { phones.delete(conn); connOf.delete(phone); drop(phone, 1000, 'closed-by-host'); }
     },
     hostClosed(socket) {
+      if (socket === pending) { pending = null; return; }
       if (socket !== host) return;
-      host = null; ready = false;
-      for (const phone of phones.values()) drop(phone, 4410, 'host-gone');
-      phones.clear(); connOf.clear();
+      host = null;
+      dropPhones();
     },
     phoneOpened(socket) {
-      if (!host || !ready) { drop(socket, 4404, 'host-offline'); return null; }
+      if (!host) { drop(socket, 4404, 'host-offline'); return null; }
       if (phones.size >= MAX_PHONES) { drop(socket, 4429, 'too-many-phones'); return null; }
       const conn = ++next;
       phones.set(conn, socket); connOf.set(socket, conn);

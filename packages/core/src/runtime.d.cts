@@ -17,6 +17,10 @@ export interface RuntimeOptions {
   readUsage?: () => Promise<{ providers: unknown[] }>;
   agentModels?: () => Promise<unknown>;
   agentCliStatus?: (() => Promise<unknown>) & { invalidate(provider: string): void };
+  /** false: `/skill` in a prompt is sent as typed, without the skill's text. */
+  expandSkills?: boolean;
+  /** worktree:pull-request; the default asks `gh`. */
+  readPullRequest?: (worktreePath: string) => Promise<unknown>;
 }
 export interface Runtime {
   readonly methods: readonly string[];

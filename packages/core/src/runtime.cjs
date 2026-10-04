@@ -355,7 +355,7 @@ function createRuntime(options) {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
     return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
   });
-  const readPullRequest = createPullRequestReader();
+  const readPullRequest = options.readPullRequest ?? createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);
@@ -414,7 +414,8 @@ function createRuntime(options) {
   async function startAgentTurn(request) {
     if (closing) return { turnId: null, steered: false };
     const images = decodeImages(request.images);
-    const prompt = await expandSkillPrompt(request.cwd, request.prompt);
+    // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
+    const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
     const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
     // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
     if (cli.problem) {

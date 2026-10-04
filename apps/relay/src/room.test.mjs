@@ -490,3 +490,15 @@ test('phoneRefusal says why a phone would be turned away, so the worker can refu
   assert.deepEqual(room.phoneRefusal(), { code: 4429, reason: 'too-many-phones' });
   assert.equal(host.sent.length, before + MAX_PHONES, 'asking sends nothing');
 });
+
+test('restore re-marks the host when restored conns move the counter past its mark', () => {
+  const { room, marks } = markedRoom();
+  const host = connectHost(room);
+  const phones = [fakeSocket(), fakeSocket()];
+  const conns = phones.map(phone => room.phoneOpened(phone));
+  marks.set(host, { role: 'host', next: '0' }); // a mark that fell behind
+  const { marks: after } = revive(marks, [host, ...phones]);
+  assert.deepEqual(after.get(host), { role: 'host', next: String(conns[1]) });
+  const untouched = revive(new Map([[host, { role: 'host', next: '5' }]]), [host]);
+  assert.equal(untouched.marks.has(host), false, 'a mark that is already right is not rewritten');
+});

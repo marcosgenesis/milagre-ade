@@ -33,7 +33,10 @@ export class Room implements DurableObject {
     server.accept();
     server.binaryType = 'arraybuffer'; // Workers hands binary over as a Blob by default, which cannot be read synchronously
     server.addEventListener('message', event => role === 'host' ? room.hostMessage(server, event.data) : room.phoneMessage(server, event.data));
-    server.addEventListener('close', () => role === 'host' ? room.hostClosed(server) : room.phoneClosed(server));
+    // A socket can end with 'error' and no 'close'; both forget it, and the room ignores a socket it already forgot.
+    const closed = () => role === 'host' ? room.hostClosed(server) : room.phoneClosed(server);
+    server.addEventListener('close', closed);
+    server.addEventListener('error', closed);
     if (role === 'host') room.hostOpened(server); else room.phoneOpened(server);
     return new Response(null, { status: 101, webSocket: client });
   }

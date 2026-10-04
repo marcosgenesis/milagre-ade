@@ -47,12 +47,17 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
     } catch { return false; /* malformed proof */ }
   };
   const dropPhones = () => { for (const phone of phones.values()) drop(phone, 4410, 'host-gone'); phones.clear(); connOf.clear(); };
+  // A send throws once a socket is closing. Every send is guarded, and a failed one counts as that socket closing.
+  const sent = (socket, data) => { try { socket.send(data); return true; } catch { return false; } };
+  const hostGone = () => { const old = host; host = null; dropPhones(); if (old) drop(old, 1011, 'send-failed'); };
+  const toHost = data => { if (host && !sent(host, data)) hostGone(); };
+  const forgetPhone = (conn, socket) => { phones.delete(conn); connOf.delete(socket); };
   return {
     /** A new Mac socket waits as pending: the current host and its phones are untouched until the proof verifies. */
     hostOpened(socket) {
       if (pending) drop(pending, 4409, 'replaced');
       pending = socket; challenge = nonce();
-      socket.send(JSON.stringify({ t: 'challenge', nonce: b64url(challenge) }));
+      if (!sent(socket, JSON.stringify({ t: 'challenge', nonce: b64url(challenge) }))) { pending = null; drop(socket, 1011, 'send-failed'); }
     },
     hostMessage(socket, data) {
       if (socket === pending) {
@@ -60,7 +65,7 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
         if (host) drop(host, 4409, 'replaced');
         dropPhones();
         host = socket; pending = null;
-        return socket.send(JSON.stringify({ t: 'ready' }));
+        return toHost(JSON.stringify({ t: 'ready' }));
       }
       if (socket !== host) return drop(socket, 4409, 'replaced');
       const bytes = toBytes(data, MAX_FRAME + 9);
@@ -69,8 +74,12 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       const { type, conn, payload } = unframe(bytes);
       const phone = phones.get(conn);
       if (!phone) return;
-      if (type === DATA) phone.send(payload);
-      else if (type === CLOSE) { phones.delete(conn); connOf.delete(phone); drop(phone, 1000, 'closed-by-host'); }
+      if (type === DATA) {
+        if (sent(phone, payload)) return;
+        forgetPhone(conn, phone);
+        drop(phone, 1011, 'send-failed');
+        toHost(frame(CLOSE, conn));
+      } else if (type === CLOSE) { forgetPhone(conn, phone); drop(phone, 1000, 'closed-by-host'); }
     },
     hostClosed(socket) {
       if (socket === pending) { pending = null; return; }
@@ -82,8 +91,9 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       if (!host) { drop(socket, 4404, 'host-offline'); return null; }
       if (phones.size >= MAX_PHONES) { drop(socket, 4429, 'too-many-phones'); return null; }
       const conn = ++next;
+      // The phone takes a slot only once the Mac has heard about it.
+      if (!sent(host, frame(OPEN, conn))) { hostGone(); drop(socket, 4404, 'host-offline'); return null; }
       phones.set(conn, socket); connOf.set(socket, conn);
-      host.send(frame(OPEN, conn));
       return conn;
     },
     phoneMessage(socket, data) {
@@ -92,13 +102,13 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       const bytes = toBytes(data, MAX_FRAME);
       if (bytes === TOO_BIG) return drop(socket, 1009, 'too-big');
       if (!bytes) return drop(socket, 1003, 'binary-only');
-      host.send(frame(DATA, conn, bytes));
+      toHost(frame(DATA, conn, bytes));
     },
     phoneClosed(socket) {
       const conn = connOf.get(socket);
       if (conn === undefined) return;
-      phones.delete(conn); connOf.delete(socket);
-      host?.send(frame(CLOSE, conn));
+      forgetPhone(conn, socket);
+      toHost(frame(CLOSE, conn));
     },
   };
 }

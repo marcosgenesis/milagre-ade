@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import nacl from 'tweetnacl';
-import { createRoom, frame, unframe } from './room.mjs';
+import { createRoom, frame, unframe, MAX_PHONES } from './room.mjs';
 import { hostIdOf, b64url, fromB64url } from '@milagre/shared/relay-crypto';
 
 function fakeSocket() { const s = { sent: [], closed: null }; s.send = d => s.sent.push(d); s.close = (code, reason) => { s.closed = { code, reason }; }; return s; }
@@ -249,4 +249,63 @@ test('look-alikes of an ArrayBuffer are still refused', () => {
     room.phoneMessage(phone, fake);
     assert.equal(phone.closed?.code, 1003, String(fake));
   }
+});
+
+test('a host whose send throws while a phone opens is dropped, and the phone takes no slot', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  host.send = () => { throw new Error('socket is closing'); };
+  const phone = fakeSocket();
+  let conn;
+  assert.doesNotThrow(() => { conn = room.phoneOpened(phone); });
+  assert.equal(conn, null);
+  assert.equal(phone.closed.code, 4404);
+  assert.ok(host.closed, 'the broken host is closed');
+  // The broken host no longer counts: a phone message goes nowhere and the next phone is offline.
+  assert.doesNotThrow(() => room.phoneMessage(phone, new Uint8Array([1])));
+  const late = fakeSocket();
+  assert.equal(room.phoneOpened(late), null);
+  assert.equal(late.closed.code, 4404);
+  // A new host gets all 16 slots.
+  const next = connectHost(room);
+  const phones = Array.from({ length: MAX_PHONES }, () => fakeSocket());
+  for (const each of phones) assert.notEqual(room.phoneOpened(each), null);
+  assert.equal(phones.filter(each => each.closed).length, 0);
+  assert.equal(next.closed, null);
+});
+
+test('a phone whose send throws is cleaned up, the host is told, and its slot is free again', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phones = Array.from({ length: MAX_PHONES }, () => fakeSocket());
+  const conns = phones.map(phone => room.phoneOpened(phone));
+  const broken = phones[3];
+  broken.send = () => { throw new Error('socket is closing'); };
+  assert.doesNotThrow(() => room.hostMessage(host, frame(2, conns[3], new Uint8Array([5]))));
+  assert.ok(broken.closed, 'the broken phone is closed');
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 3, conn: conns[3], payload: new Uint8Array() });
+  const before = host.sent.length;
+  room.phoneMessage(broken, new Uint8Array([1]));
+  room.phoneClosed(broken);
+  assert.equal(host.sent.length, before);
+  const extra = fakeSocket();
+  assert.notEqual(room.phoneOpened(extra), null);
+  assert.equal(extra.closed, null);
+  assert.equal(host.closed, null);
+});
+
+test('closing twice (an error then a close) is the same as closing once', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  room.phoneOpened(phone);
+  const before = host.sent.length;
+  room.phoneClosed(phone);
+  room.phoneClosed(phone);
+  assert.equal(host.sent.length, before + 1);
+  room.hostClosed(host);
+  assert.doesNotThrow(() => room.hostClosed(host));
+  const next = connectHost(room);
+  assert.notEqual(room.phoneOpened(fakeSocket()), null);
+  assert.equal(next.closed, null);
 });

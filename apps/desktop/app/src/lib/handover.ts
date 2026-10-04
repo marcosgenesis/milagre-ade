@@ -1,4 +1,5 @@
 import { providerName } from "@milagre/shared/providers";
+import { isHandoverChat } from "@milagre/shared/chats";
 import type { AgentSession, ChatMessage, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { modelForChat } from "./agent-runs.ts";
 import { chatTitle } from "./chat-list.ts";
@@ -18,10 +19,8 @@ export function handoverModel(selected: ModelOption, provider: ModelProvider, pr
   return model.provider === provider ? model : undefined;
 }
 
-/** A handed-over chat that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
-export function isHandoverChat(session: AgentSession | undefined): boolean {
-  return Boolean(session?.handoverPending) || session?.handoverDraft !== undefined;
-}
+// Shared with native Chats so both lists hide the same empty chats.
+export { isHandoverChat };
 
 export type HandoverLinks = { to?: { id: number; title: string; provider: ModelProvider }; from?: { id: number; title: string }; pending: boolean; live: boolean };
 

@@ -16,3 +16,11 @@ test("chatTitle prefers the user's name, then the first message's first line", (
   assert.equal(chatTitle(session, []), "main");
   assert.equal(chatTitle(session, [{ id: 3, session_id: 1, body: "x".repeat(80), context: null }]), `${"x".repeat(57)}…`);
 });
+
+test('chat lists hide a worktree\'s empty starter chat but keep chats with messages and handovers', async () => {
+  const { isListedChat } = await import('./chats.mjs');
+  assert.equal(isListedChat({} as never, 0), false);
+  assert.equal(isListedChat({} as never, 2), true);
+  assert.equal(isListedChat({ handoverPending: true } as never, 0), true);
+  assert.equal(isListedChat({ handoverDraft: '' } as never, 0), true);
+});

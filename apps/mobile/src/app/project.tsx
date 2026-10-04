@@ -6,9 +6,10 @@ import type { AgentSession, ChatMessage, Worktree } from '@milagre/shared/model'
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
 import { chatMark, chatRecency, type ChatMark } from '../indicators';
+import { isListedChat } from '@milagre/shared/chats';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
-import { Icon, ProviderLogo } from '../icons';
-import { ErrorNotice, PullDown, colors, styles } from '../ui';
+import { Icon, ProviderLogo, SpinnerRing } from '../icons';
+import { ErrorNotice, PullDown, colors, showActions, styles } from '../ui';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -16,8 +17,10 @@ const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unre
 function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentSession; worktree?: Worktree; run?: AgentRun; mark: ChatMark; onOpen: () => void; onAction: (action: string) => void }) {
   const pr = usePullRequest(worktree);
   const title = chat.title || chat.generatedTitle || 'New Chat';
-  return <PullDown label={`Actions for ${title}`} longPress sections={[{ items: [{ id: 'rename', title: 'Rename', systemImage: 'pencil' }, { id: 'archive', title: chat.archived ? 'Restore' : 'Archive', systemImage: chat.archived ? 'tray.and.arrow.up' : 'archivebox', disabled: !!run && !chat.archived }] }]} onSelect={onAction}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${title}${worktree ? `, ${worktree.name}` : ''}`} onPress={onOpen} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 20, backgroundColor: pressed ? colors.hover : 'transparent' })}>
+  // Long press opens a system action sheet: a native menu wrapped around the row crashed when its running mark changed.
+  const actions = () => showActions({ title, actions: [{ id: 'rename', title: 'Rename' }, { id: 'archive', title: chat.archived ? 'Restore' : 'Archive', disabled: !!run && !chat.archived }], onSelect: onAction });
+  return <View>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${title}${worktree ? `, ${worktree.name}` : ''}`} accessibilityActions={[{ name: 'longpress', label: 'Actions' }]} onAccessibilityAction={actions} onLongPress={actions} onPress={onOpen} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 20, backgroundColor: pressed ? colors.hover : 'transparent' })}>
       <ChatMarkIcon mark={mark} />
       <View style={{ flex: 1, gap: 3 }}>
         <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: mark === 'unread' ? '600' : '500' }}>{title}</Text>
@@ -32,7 +35,7 @@ function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentS
       {/* iOS disclosure indicator: the row opens the Chat. */}
       <Icon icon={ArrowRight01Icon} tone="ink3" size={15} />
     </Pressable>
-  </PullDown>;
+  </View>;
 }
 
 export default function ChatsScreen() {
@@ -55,14 +58,22 @@ export default function ChatsScreen() {
     return Object.values(project.state.sessions).map(chat => {
       const run = runs.runs[`${project.path}#${chat.id}`];
       const messages = byChat.get(chat.id) ?? [];
-      return { chat, run, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
-    }).filter(row => (show === 'archived') === !!row.chat.archived)
+      return { chat, run, messages, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
+    // Like desktop's sidebar: a worktree's empty starter chat stays out until it has a message (or a turn is starting).
+    }).filter(row => row.run || isListedChat(row.chat, row.messages.length))
+      .filter(row => (show === 'archived') === !!row.chat.archived)
       .filter(row => show !== 'needs' || NEEDS.includes(row.mark))
       .filter(row => show !== 'running' || row.mark === 'running')
       .filter(row => worktreeFilter === null || row.chat.worktree_id === worktreeFilter)
       .filter(row => !query.trim() || (row.chat.title || row.chat.generatedTitle || '').toLowerCase().includes(query.trim().toLowerCase()))
       .sort((a, b) => b.recency - a.recency);
   }, [snapshot, show, worktreeFilter, query]);
+  // Opened from Projects before it loaded: a loading state, unless its last copy is already showing.
+  if (session.client && session.opening && !session.opening.cached) return <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
+    <Stack.Screen options={{ title: session.opening.path.split('/').at(-1) || 'Project' }} />
+    <SpinnerRing size={22} />
+    <Text style={styles.muted}>Opening {session.opening.path.split('/').at(-1)}…</Text>
+  </View>;
   if (!session.client || !snapshot) return <Redirect href="/" />;
   const client = session.client;
   const { project } = snapshot;

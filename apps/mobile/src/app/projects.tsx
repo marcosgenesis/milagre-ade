@@ -13,10 +13,12 @@ export default function ProjectsScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!session.client) return <Redirect href="/" />;
+  // Like Paseo: go to the Chats right away (they show the last copy, or a loading state) while the Project opens.
   async function open(projectPath: string) {
     setBusy(true); setError('');
-    try { await session.open(projectPath); router.push('/project'); }
-    catch (e) { setError((e as Error).message); }
+    router.push('/project');
+    try { await session.open(projectPath); }
+    catch (e) { setError((e as Error).message); router.back(); }
     finally { setBusy(false); }
   }
   const folder = (icon: typeof Folder01Icon) => <View style={{ width: 36, height: 36, borderRadius: 9, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={icon} tone="ink" size={18} /></View>;

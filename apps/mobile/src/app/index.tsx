@@ -7,7 +7,7 @@ import { savedHosts } from '../hosts-native';
 import { createClient } from '../client';
 import type { SavedHost } from '../hosts-store';
 import { Icon } from '../icons';
-import { ErrorNotice, ListRow, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, ListRow, PageScroll, PillButton, colors, showActions, styles } from '../ui';
 
 type Reachability = 'online' | 'checking' | 'offline';
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
@@ -61,10 +61,8 @@ export default function ComputersScreen() {
       {session.hosts.length > 0 ? <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
         {session.hosts.map((host, index) => <View key={host.id}>
           {index > 0 && <View style={styles.separator} />}
-          <PullDown label={`Manage ${host.name}`} longPress sections={[{ items: [{ id: 'rename', title: 'Rename', systemImage: 'pencil' }, { id: 'forget', title: 'Forget', systemImage: 'trash', destructive: true }] }]} onSelect={action => manage(host, action)}>
-            <ListRow title={host.name} subtitle={`${label(status[host.id])} · ${host.address.replace(/^https?:\/\//, '')}`} disabled={!!busy} onPress={() => void open(host)}
+          <ListRow onLongPress={() => showActions({ title: host.name, actions: [{ id: 'rename', title: 'Rename' }, { id: 'forget', title: 'Forget', destructive: true }], onSelect: action => manage(host, action) })} title={host.name} subtitle={`${label(status[host.id])} · ${host.address.replace(/^https?:\/\//, '')}`} disabled={!!busy} onPress={() => void open(host)}
               leading={<View style={{ width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={/studio|mini|imac/i.test(host.name) ? ComputerIcon : LaptopIcon} tone="ink" size={20} /><View style={{ position: 'absolute', right: -2, bottom: -2, width: 11, height: 11, borderRadius: 6, backgroundColor: dot(status[host.id]), borderWidth: 2, borderColor: colors.surface }} /></View>} />
-          </PullDown>
         </View>)}
       </View> : <View style={{ gap: 16, paddingTop: 48, alignItems: 'center' }}>
         <Icon icon={LaptopIcon} tone="ink3" size={44} />

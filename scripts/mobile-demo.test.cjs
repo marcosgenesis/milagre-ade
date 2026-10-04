@@ -12,7 +12,7 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   const project = await client.call('project:open', [demo.project]);
   const changes = await client.call('git:diff-files', [{ cwd: demo.project, mode: 'uncommitted' }]);
   assert.ok(changes.files.some(file => file.path === 'README.md'));
-  const chat = Object.values(project.state.sessions)[0];
+  const chat = Object.values((await client.snapshot(project.path)).project.state.sessions)[0];
   const chatId = `${demo.project}#${chat.id}`;
   const send = body => client.call('chat:send', [{ projectPath: demo.project, sessionId: chat.id, body, provider: 'codex', model: 'demo', permissionMode: 'ask' }]);
   async function wait(predicate) {
@@ -42,7 +42,9 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   const reply = finished.project.state.messages.at(-1);
   assert.equal(reply.steps.length, 2);
   assert.equal(reply.steps[1].status, 'failed');
-  assert.match(reply.steps[1].detail, /demo assertion/);
+  // The snapshot leaves tool output out; the whole message carries it.
+  assert.equal(reply.steps[1].hasDetail, true);
+  assert.match((await client.message(demo.project, reply.id)).steps[1].detail, /demo assertion/);
   assert.match(reply.body, /## Preview ready/);
   await demo.close();
   await assert.rejects(fs.stat(`${demo.dataDir}/runtime.lock`), { code: 'ENOENT' });

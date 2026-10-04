@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Cancel01Icon } from '@hugeicons/core-free-icons';
 import { activitySummary, replyActivity } from '@milagre/shared/reply-parts';
+import type { ChatStep } from '@milagre/shared/model';
 import { ToolRow } from '../chat-reply';
 import { Markdown } from '../markdown';
 import { useSession } from '../session';
@@ -16,7 +18,16 @@ export default function ActivitySheet() {
   const run = message === 'run' ? session.snapshot?.runs.runs[chatId] : undefined;
   // When the live turn ends while the sheet is open, its saved reply takes over.
   const saved = message === 'run' ? (run ? undefined : project?.state.messages.filter(entry => entry.session_id === Number(id) && entry.role !== 'user').at(-1)) : project?.state.messages.find(entry => entry.id === Number(message));
-  const steps = run?.steps ?? saved?.steps ?? [];
+  // The snapshot leaves tool output out; the sheet fetches this message whole so each tool can expand.
+  const [full, setFull] = useState<{ id: number; steps: ChatStep[] } | null>(null);
+  const client = session.client, projectPath = project?.path, savedId = saved?.id, slim = !!saved?.steps?.some(step => step.hasDetail);
+  useEffect(() => {
+    if (!client || !projectPath || savedId === undefined || !slim) return;
+    let cancelled = false;
+    void client.message(projectPath, savedId).then(whole => { if (!cancelled) setFull({ id: savedId, steps: whole.steps ?? [] }); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [client, projectPath, savedId, slim]);
+  const steps = run?.steps ?? (full && full.id === savedId ? full.steps : saved?.steps) ?? [];
   const { setup, activity, images } = replyActivity(run?.text ?? saved?.body ?? '', steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);
   const summary = activitySummary(steps);

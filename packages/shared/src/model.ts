@@ -149,6 +149,8 @@ export interface ChatStep {
   status: "running" | "done" | "failed";
   /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
+  /** The phone's snapshot leaves a tool's detail out and sets this; the full message has it. */
+  hasDetail?: boolean;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. For an image step, the generated image. */
   file?: string;
   /** Muted text after the title, e.g. "3s" or "exited with code 1 after 4s". */

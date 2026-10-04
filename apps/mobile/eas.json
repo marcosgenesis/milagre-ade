@@ -13,6 +13,19 @@
       "node": "24.13.0",
       "env": {
         "ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
+      },
+      "channel": "testflight"
+    },
+    "apk": {
+      "distribution": "internal",
+      "channel": "testflight",
+      "node": "24.13.0",
+      "env": {
+        "ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
+      },
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
       }
     }
   },

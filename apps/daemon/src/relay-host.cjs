@@ -9,7 +9,8 @@ const LIVE_ORIGIN = 'milagre-app://phone';
 const MAX_LIVE = 8;
 const MAX_INFLIGHT = 16;
 const MAX_UPLOAD = 8 * 1024 * 1024;
-const REQUEST_TIMEOUT = 120_000;
+// Longer than the phone's own deadline for the slowest call (worktree:create, 330 s), so the phone gives up first.
+const REQUEST_TIMEOUT = 340_000;
 const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, backoff: [1000, 2000, 5000, 10_000, 30_000], jitter: true };
 // What the phone may set. Origin and Host belong to the bridge's own checks, and Authorization is ours.
 const BLOCKED_HEADERS = new Set(['host', 'origin', 'authorization', 'connection', 'content-length', 'transfer-encoding', 'upgrade', 'cookie']);

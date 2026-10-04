@@ -108,7 +108,8 @@ function createRuntime(options) {
     if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
   }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
-  const readUsage = createUsageReader({ ready: () => environmentReady, store: usageStore });
+  // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
+  const readUsage = options.readUsage ?? createUsageReader({ ready: () => environmentReady, store: usageStore });
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
@@ -522,7 +523,7 @@ function createRuntime(options) {
 
   // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
   // after 5 minutes, a problem on every call.
-  const agentCliStatus = createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
+  const agentCliStatus = options.agentCliStatus ?? createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
   commands.handle("agent:cli-status", () => agentCliStatus());
   commands.handle("agent:update-cli", async (_event, provider) => {
     const result = await runCliUpdate(provider);
@@ -532,7 +533,7 @@ function createRuntime(options) {
     return { ...result, status: status[provider] };
   });
 
-  const agentModels = createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
+  const agentModels = options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
   commands.handle("agent:models", () => agentModels());
 
   commands.handle("agent:interrupt", async (_event, chatId) => {

@@ -4,7 +4,7 @@ import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../session';
 import { ProjectNavigation } from '../project-navigation';
 import { ErrorNotice, styles } from '../ui';
-import { SpinnerRing } from '../icons';
+import { LoadingLogo } from '../loading-logo';
 
 export default function ProjectsScreen() {
   const session = useSession();
@@ -29,7 +29,7 @@ export default function ProjectsScreen() {
   if (!session.client) return <Redirect href="/" />;
   return <View style={styles.screen}>
     <Stack.Screen options={{ headerShown: false }} />
-    {restoring ? <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><SpinnerRing size={22} /><Text style={styles.muted}>Reopening your Chat...</Text></View> : <>
+    {restoring ? <View accessible accessibilityRole="progressbar" accessibilityLabel="Reopening your Chat..." style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><LoadingLogo size={64} /><Text style={styles.muted}>Reopening your Chat...</Text></View> : <>
       {error ? <View style={{ paddingHorizontal: 16, paddingTop: 60 }}><ErrorNotice message={error} /></View> : null}
       <ProjectNavigation key={session.client.url} onNavigate={(href, secondary) => secondary ? router.push(href) : router.replace(href)} />
     </>}

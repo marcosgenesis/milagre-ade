@@ -355,10 +355,46 @@ function resumeHost({ target = { hostId: 'mac', projectPath: '/last', chatId: 3 
   const { default: Screen } = load('app/projects.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View' },
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, router: { replace: route => routes.push(route) }, useLocalSearchParams: () => ({ resume: '1' }) },
-    '../session': { useSession: () => session }, '../project-navigation': { ProjectNavigation: 'ProjectNavigation' }, '../ui': { ErrorNotice: 'ErrorNotice', styles: {} }, '../icons': { SpinnerRing: 'SpinnerRing' },
+    '../session': { useSession: () => session }, '../project-navigation': { ProjectNavigation: 'ProjectNavigation' }, '../ui': { ErrorNotice: 'ErrorNotice', styles: {} }, '../icons': { SpinnerRing: 'SpinnerRing' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' },
   });
   return { routes, opened, render() { react.begin(); const tree = Screen(); react.flush(); return tree; }, unmount: react.cleanup };
 }
+
+test('launch restoration shows the splash animation while the saved Chat opens', () => {
+  const app = resumeHost();
+  const tree = app.render();
+  assert.ok(find(tree, node => node.type === 'LoadingLogo'));
+  assert.equal(find(tree, node => node.type === 'SpinnerRing'), undefined);
+  assert.ok(find(tree, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Reopening your Chat...'));
+});
+
+test('selecting a sidebar Chat shows the splash animation until navigation completes', async () => {
+  const react = hookHost();
+  const opening = deferred();
+  const routes = [];
+  const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = {};
+  const session = { client: { url: 'mac' }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: () => opening.promise };
+  const { ProjectNavigation } = load('project-navigation.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
+    '@hugeicons/core-free-icons': {}, 'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
+    '@milagre/shared/chats': { isListedChat: () => true }, './session': { useSession: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
+    './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
+    './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
+  });
+  const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
+  const list = find(render(), node => node.type === 'FlatList');
+  const row = list.props.renderItem({ item: list.props.data.find(item => item.kind === 'chat') });
+  row.props.onPress();
+  const busy = render();
+  assert.ok(find(busy, node => node.type === 'LoadingLogo'));
+  assert.equal(find(busy, node => node.type === 'SpinnerRing'), undefined);
+  assert.ok(find(busy, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Opening...'));
+  assert.equal(routes.length, 0);
+  opening.resolve(state); await settle();
+  assert.equal(find(render(), node => node.type === 'LoadingLogo'), undefined);
+  assert.equal(routes[0].pathname, '/chat');
+});
 
 test('launch restoration opens the saved computer/Project/Chat target directly', async () => {
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 };

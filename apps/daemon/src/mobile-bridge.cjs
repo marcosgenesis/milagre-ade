@@ -10,6 +10,7 @@ const zlib = require('node:zlib');
 const { WebSocketServer, WebSocket } = require('ws');
 const { chatInProject } = require('@milagre/shared/agent-runs');
 const { connect } = require('./client.cjs');
+const { createConfinement } = require('./confine.cjs');
 
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
@@ -90,12 +91,32 @@ const LIVE_DELAY = { runs: 150, project: 400 };
 const projectRuns = ({ runs, seq }, projectPath) => ({ runs: Object.fromEntries(Object.entries(runs ?? {}).filter(([key]) => chatInProject(projectPath, key))), seq });
 const realOrNull = async file => { try { return await fs.realpath(file); } catch { return null; } };
 const failure = (status, message) => Object.assign(new Error(message), { status });
+const ATTACHMENT_QUOTA = 200 * 1024 * 1024;
+/** Bytes of regular files under `folder`, symlinks not followed; 0 when it does not exist yet. */
+async function folderBytes(folder) {
+  let entries;
+  try { entries = await fs.readdir(folder, { recursive: true, withFileTypes: true }); } catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
+  let total = 0;
+  for (const entry of entries) if (entry.isFile()) total += (await fs.lstat(path.join(entry.parentPath, entry.name))).size;
+  return total;
+}
 
 // A native-client bridge behind loopback or an explicitly configured TLS proxy. All state stays in the Unix-socket
 // daemon; closing this listener must never stop that runtime or its turns.
-async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000 }) {
+// `allowedRoot` (the review demo sets it): every path a request names must resolve inside that folder, or it is a 403.
+// Confined, the phone's uploads may take up `attachmentQuota` bytes in all; past that /attachments answers 507.
+async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000, allowedRoot, attachmentQuota = ATTACHMENT_QUOTA }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('Bridge token must be 32 random bytes encoded as hex');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid bridge port');
+  const confine = allowedRoot === undefined ? null : createConfinement({ allowedRoot, uploadsDir: path.join(dataDir, 'mobile-attachments') });
+  if (!Number.isSafeInteger(attachmentQuota) || attachmentQuota < 0) throw new Error('Invalid attachment quota');
+  await confine?.root();
+  // Confined, the paths handed back must be canonical, or the phone could not attach what it uploaded.
+  const uploads = path.join(confine ? await fs.realpath(dataDir) : dataDir, 'mobile-attachments');
+  // Confined: the bytes already uploaded, read once, then counted as uploads land. Uploads take turns, so two at once
+  // cannot both fit in the room that is left for one.
+  let uploadedBytes = null;
+  let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
   let active = 0;
@@ -170,6 +191,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
     const projectPath = target.searchParams.get('projectPath');
     const requested = target.searchParams.get('path');
     if (!projectPath || !requested || !path.isAbsolute(projectPath) || !path.isAbsolute(requested)) throw failure(400, 'projectPath and path must be absolute');
+    if (confine) { await confine.check(projectPath); await confine.check(requested, { uploads: true }); }
     const type = MEDIA_TYPES[path.extname(requested).toLowerCase()];
     if (!type) throw failure(415, 'Only png, jpeg, gif, webp and heic images are served');
     // Only the worktree folders: a big Project's whole state would be read in pages for every image.
@@ -239,6 +261,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
         }
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
+          await confine?.check(projectPath);
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
           reply(200, { result: { project: forPhone(project), runs: runsForPhone(projectRuns(runs, projectPath)) } }, { etag: true });
           return;
@@ -247,10 +270,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
         if (req.method === 'GET' && target.pathname === '/runs') {
           const projectPath = target.searchParams.get('projectPath');
           if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
+          await confine?.check(projectPath);
           reply(200, { result: runsForPhone(projectRuns(await client.call('chat:runs'), projectPath)) }, { etag: true });
           return;
         }
         if (req.method === 'GET' && target.pathname === '/message') {
+          await confine?.check(target.searchParams.get('projectPath'));
           const project = await client.call('project:snapshot', [target.searchParams.get('projectPath')]);
           const message = project.state.messages.find(item => item.id === Number(target.searchParams.get('id')));
           if (!message) throw failure(404, 'That message is no longer in this Project.');
@@ -281,19 +306,35 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             const bytes = Buffer.from(base64, 'base64');
             if (bytes.length > 5 * MAX_BODY) throw failure(413, 'Each file must be 5 MiB or smaller');
             if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
+            await confine?.check(projectPath);
             await client.call('project:worktree-paths', [projectPath]);
-            const folder = path.join(dataDir, 'mobile-attachments', randomUUID());
+            const folder = path.join(uploads, randomUUID());
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
-            await fs.mkdir(folder, { recursive: true, mode: 0o700 });
-            const destination = path.join(folder, filename);
-            try { await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); }
-            catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
-            result = { path: destination, name: filename };
+            const save = async () => {
+              if (confine) {
+                uploadedBytes ??= await folderBytes(uploads);
+                if (uploadedBytes + bytes.length > attachmentQuota) throw failure(507, 'This demo computer is full.');
+              }
+              await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+              const destination = path.join(folder, filename);
+              try { await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); }
+              catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
+              if (confine) uploadedBytes += bytes.length;
+              return { path: destination, name: filename };
+            };
+            if (confine) {
+              const turn = uploadTurn.then(save);
+              uploadTurn = turn.catch(() => {});
+              result = await turn;
+            } else result = await save();
           } else {
           if (request?.v !== 1 || typeof request.method !== 'string' || !Array.isArray(request.args)) throw failure(400, 'Expected version 1, method and args array');
           if (!METHODS.has(request.method)) throw failure(403, 'Command is not available from mobile');
-          result = await client.call(request.method, request.args);
+          if (confine) {
+            const decided = await confine.checkCall(request.method, request.args);
+            result = 'result' in decided ? decided.result : await confine.filterResult(request.method, await client.call(request.method, decided.args));
+          } else result = await client.call(request.method, request.args);
           // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
           if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
           }
@@ -305,6 +346,11 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => {});
     let projectPath;
+    const refuse = error => {
+      const status = error.status ?? 400;
+      const body = JSON.stringify({ v: 1, error: { message: error.message } });
+      socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+    };
     try {
       admit(req, LIVE_ORIGIN);
       const target = new URL(req.url, url);
@@ -312,12 +358,14 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
       projectPath = target.searchParams.get('projectPath');
       if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
     } catch (error) {
-      const status = error.status ?? 400;
-      const body = JSON.stringify({ v: 1, error: { message: error.message } });
-      socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+      refuse(error);
       return;
     }
-    wss.handleUpgrade(req, socket, head, ws => accept(ws, projectPath));
+    if (!confine) { wss.handleUpgrade(req, socket, head, ws => accept(ws, projectPath)); return; }
+    confine.check(projectPath).then(() => {
+      if (closed) throw failure(503, 'Bridge is closing');
+      wss.handleUpgrade(req, socket, head, ws => accept(ws, projectPath));
+    }).catch(refuse);
   });
   async function close() {
     closed ??= new Promise(resolve => {
@@ -341,4 +389,4 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   } catch (error) { await close(); throw error; }
   return { url, close, lost };
 }
-module.exports = { startMobileBridge, forPhone, runsForPhone };
+module.exports = { startMobileBridge, forPhone, runsForPhone, METHODS };

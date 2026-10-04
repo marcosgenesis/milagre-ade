@@ -70,7 +70,7 @@ export const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: num
   </View>;
 });
 
-function useElapsed() {
+function useElapsed(startedAt?: number) {
   // Measured from the clock, so the time is still right after the ticks pause under another screen.
   const [start] = useState(() => Date.now());
   const [now, setNow] = useState(start);
@@ -80,22 +80,22 @@ function useElapsed() {
     const timer = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(timer);
   }, [active]);
-  const total = Math.floor((now - start) / 100) / 10;
+  const total = Math.floor(Math.max(0, now - (startedAt ?? start)) / 100) / 10;
   return total < 60 ? `${total.toFixed(1)}s` : `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
 }
 
 /** Desktop's ThinkingIndicator: the running mark and the elapsed time; the label is for screen readers unless shown. */
-export function ThinkingIndicator({ label, showLabel = false }: { label: string; showLabel?: boolean }) {
+export function ThinkingIndicator({ label, showLabel = false, startedAt }: { label: string; showLabel?: boolean; startedAt?: number }) {
   return <View accessible accessibilityRole="progressbar" accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4, paddingVertical: 4 }}>
     <RunningLogo />
     {showLabel && <Text numberOfLines={1} style={{ color: colors.ink3, fontSize: 12, flexShrink: 1 }}>{label}</Text>}
-    <Elapsed />
+    <Elapsed startedAt={startedAt} />
   </View>;
 }
 
 /** Only this Text re-renders on each tick. */
-function Elapsed() {
-  return <Text style={{ color: colors.ink3, fontSize: 12, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{useElapsed()}</Text>;
+function Elapsed({ startedAt }: { startedAt?: number }) {
+  return <Text style={{ color: colors.ink3, fontSize: 12, fontFamily: fonts.mono, fontVariant: ['tabular-nums'] }}>{useElapsed(startedAt)}</Text>;
 }
 
 // step-shimmer: a 320px tile (ink-3 to 110px, ink at 160px, ink-3 from 210px) slides one tile right every 1.2s.

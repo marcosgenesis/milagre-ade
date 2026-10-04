@@ -52,6 +52,19 @@ test("createWorktree falls back to a generic name and reports git errors", async
   await assert.rejects(createWorktree({ projectPath: project, baseBranch: "missing", prompt: "x", root: worktreeRoot, suffix: "q1" }), /missing/);
 });
 
+test("createWorktree refuses a base that is not an existing ref, so it can never pass git an option", async (t) => {
+  const { root, project, git } = await fixture(t);
+  const worktreeRoot = path.join(root, "worktrees");
+  for (const baseBranch of ["--lock", "--no-checkout", "-b", "--detach", "", "main\n--lock", 42, null]) {
+    await assert.rejects(createWorktree({ projectPath: project, baseBranch, prompt: "x", root: worktreeRoot, suffix: "op1" }), /missing from this project/, String(baseBranch));
+  }
+  assert.doesNotMatch(git("worktree", "list", "--porcelain"), /milagre\/x-op1|locked/);
+  await assert.rejects(fs.stat(worktreeRoot), { code: "ENOENT" });
+  // A tag or a commit still works: any existing ref, as resolveBase allows.
+  const commit = git("rev-parse", "HEAD").trim();
+  assert.equal((await createWorktree({ projectPath: project, baseBranch: commit, prompt: "x", root: worktreeRoot, suffix: "ok1" })).base, commit);
+});
+
 test("renameWorktreeBranch renames a running worktree's branch and keeps its folder", async (t) => {
   const { root, project, git } = await fixture(t);
   const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "the sidebar thing is broken", root: path.join(root, "worktrees"), suffix: "ef56" });

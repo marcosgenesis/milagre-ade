@@ -54,6 +54,7 @@ import SidebarNav from "./components/SidebarNav";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
+import { isListedChat } from "@milagre/shared/chats";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
@@ -377,7 +378,7 @@ function App() {
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
-      .filter(({ session, sessionMessages }) => sessionMessages.length > 0 || isHandoverChat(session));
+      .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
     const rows = orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];

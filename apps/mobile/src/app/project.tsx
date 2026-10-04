@@ -6,6 +6,7 @@ import type { AgentSession, ChatMessage, Worktree } from '@milagre/shared/model'
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
 import { chatMark, chatRecency, type ChatMark } from '../indicators';
+import { isListedChat } from '@milagre/shared/chats';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
 import { Icon, ProviderLogo } from '../icons';
 import { ErrorNotice, PullDown, colors, styles } from '../ui';
@@ -55,8 +56,10 @@ export default function ChatsScreen() {
     return Object.values(project.state.sessions).map(chat => {
       const run = runs.runs[`${project.path}#${chat.id}`];
       const messages = byChat.get(chat.id) ?? [];
-      return { chat, run, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
-    }).filter(row => (show === 'archived') === !!row.chat.archived)
+      return { chat, run, messages, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
+    // Like desktop's sidebar: a worktree's empty starter chat stays out until it has a message (or a turn is starting).
+    }).filter(row => row.run || isListedChat(row.chat, row.messages.length))
+      .filter(row => (show === 'archived') === !!row.chat.archived)
       .filter(row => show !== 'needs' || NEEDS.includes(row.mark))
       .filter(row => show !== 'running' || row.mark === 'running')
       .filter(row => worktreeFilter === null || row.chat.worktree_id === worktreeFilter)

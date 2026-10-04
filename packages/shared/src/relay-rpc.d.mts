@@ -4,7 +4,9 @@ export type RelayRequest = {
   method: 'GET' | 'POST';
   path: string;
   headers: Record<string, string>;
-  body?: string;
+  /** Base64 of this slice of the request body; '' when there is none. Every part repeats id, method, path and headers. */
+  chunk: string;
+  more: boolean;
 };
 export type RelayResponsePart = {
   t: 'res';

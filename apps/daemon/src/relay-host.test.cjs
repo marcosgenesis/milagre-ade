@@ -7,7 +7,7 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { WebSocket, WebSocketServer } = require('ws');
 const { b64url, boxKeyPair, phoneHello, phoneFinish } = require('@milagre/shared/relay-crypto');
-const { createAssembler, fromBase64 } = require('@milagre/shared/relay-rpc');
+const { createAssembler, fromBase64, splitBody } = require('@milagre/shared/relay-rpc');
 const { readIdentity, createPhones } = require('./relay-identity.cjs');
 const { startRelayHost } = require('./relay-host.cjs');
 
@@ -28,7 +28,7 @@ async function until(check, label = 'condition', ms = 5000) {
 }
 
 /** Plays the Cloudflare Worker: real sockets, the real room logic. */
-async function startRelay(t, { autoPong = true } = {}) {
+async function startRelay(t, { autoPong = true, hostBehavior } = {}) {
   const { createRoom } = await import('../../relay/src/room.mjs');
   const rooms = new Map();
   const roomFor = id => { if (!rooms.has(id)) rooms.set(id, createRoom({ id })); return rooms.get(id); };
@@ -42,7 +42,9 @@ async function startRelay(t, { autoPong = true } = {}) {
       const room = roomFor(id);
       const payload = (data, isBinary) => (isBinary ? data : data.toString());
       if (url.pathname === '/v1/host') {
+        const index = hostSockets.length;
         hostSockets.push(ws);
+        if (hostBehavior?.(ws, index)) return;
         ws.on('message', (data, isBinary) => room.hostMessage(ws, payload(data, isBinary)));
         ws.on('close', () => room.hostClosed(ws));
         room.hostOpened(ws);
@@ -60,7 +62,7 @@ async function startRelay(t, { autoPong = true } = {}) {
 
 /** What the Mac's loopback bridge looks like to the relay host. */
 async function startFakeBridge(t) {
-  const seen = { requests: [], liveHeaders: [], liveOpen: 0 };
+  const seen = { requests: [], liveHeaders: [], liveOpen: 0, uploads: [] };
   const held = [];
   const authorized = request => request.headers.authorization === `Bearer ${TOKEN}`;
   const server = http.createServer((request, response) => {
@@ -73,6 +75,11 @@ async function startFakeBridge(t) {
         seen.lastBody = Buffer.concat(chunks).toString();
         response.writeHead(200, { 'content-type': 'application/json', etag: '"abc"', 'x-secret': 'no', 'set-cookie': 'a=b' });
         response.end(JSON.stringify({ v: 1, result: 'pong' }));
+      } else if (request.url === '/attachments') {
+        const body = Buffer.concat(chunks);
+        seen.uploads.push({ body, type: request.headers['content-type'] });
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ v: 1, result: { size: body.length } }));
       } else if (request.url === '/media') {
         response.writeHead(200, { 'content-type': 'application/octet-stream' });
         response.end(Buffer.alloc(600_000, 7));
@@ -137,6 +144,11 @@ function connectPhone({ relayUrl, identity, token = TOKEN, key = boxKeyPair(rand
     },
     send(message) { ws.send(phone.channel.seal(message)); },
     async next(ms) { return phone.channel.open(await nextRaw(ms)); },
+    /** Sends a request as `req` parts: the body goes out as base64 chunks, `''` and no more when there is none. */
+    request(id, { method = 'GET', path, headers = {}, body }, size) {
+      const chunks = body ? splitBody(typeof body === 'string' ? new TextEncoder().encode(body) : body, size) : [''];
+      chunks.forEach((chunk, index) => phone.send({ t: 'req', id, method, path, headers, chunk, more: index < chunks.length - 1 }));
+    },
     /** Reads messages until a complete response for `id` arrives. */
     async response(id, ms) {
       const assembler = createAssembler();
@@ -172,7 +184,7 @@ const decode = bytes => new TextDecoder().decode(bytes);
 test('a paired phone calls /rpc through the relay', async t => {
   const { bridge, connect } = await paired(t);
   const phone = await connect();
-  phone.send({ t: 'req', id: 1, method: 'POST', path: '/rpc', headers: { 'content-type': 'application/json', origin: 'https://evil.example', authorization: 'Bearer nope' }, body: '{"v":1,"method":"daemon:status","args":[]}' });
+  phone.request(1, { method: 'POST', path: '/rpc', headers: { 'content-type': 'application/json', origin: 'https://evil.example', authorization: 'Bearer nope' }, body: '{"v":1,"method":"daemon:status","args":[]}' });
   const response = await phone.response(1);
   assert.equal(response.status, 200);
   assert.equal(decode(response.body), '{"v":1,"result":"pong"}');
@@ -188,7 +200,7 @@ test('a paired phone calls /rpc through the relay', async t => {
 test('a 600 KB media response arrives in 3 chunks and reassembles', async t => {
   const { connect } = await paired(t);
   const phone = await connect();
-  phone.send({ t: 'req', id: 7, method: 'GET', path: '/media', headers: {} });
+  phone.request(7, { path: '/media' });
   const parts = [];
   const assembler = createAssembler();
   let result;
@@ -259,7 +271,7 @@ test('the host reconnects after the relay drops it and phones can connect again'
   const second = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: first.key });
   t.after(() => second.close());
   assert.ok((await second.hello()).channel);
-  second.send({ t: 'req', id: 1, method: 'POST', path: '/rpc', headers: {}, body: '{}' });
+  second.request(1, { method: 'POST', path: '/rpc', body: '{}' });
   assert.equal(decode((await second.response(1)).body), '{"v":1,"result":"pong"}');
 });
 
@@ -314,7 +326,7 @@ test('a connection is limited to 8 live sockets and 16 requests in flight', asyn
   assert.deepEqual(refused, [{ t: 'live-close', id: 9, code: 1013 }]);
   assert.equal(bridge.seen.liveOpen, 8);
 
-  for (let id = 100; id < 117; id++) phone.send({ t: 'req', id, method: 'GET', path: '/slow', headers: {} });
+  for (let id = 100; id < 117; id++) phone.request(id, { path: '/slow' });
   const over = await phone.response(116);
   assert.equal(over.status, 429);
   assert.equal(decode(over.body), '{"v":1,"error":{"message":"Too many requests"}}');
@@ -341,4 +353,64 @@ test('closing the host closes its phones and stops reconnecting', async t => {
   await sleep(100);
   assert.equal(relay.hostSockets.length, 1);
   assert.equal(mac.host.status(), 'offline');
+});
+
+test('a relay that sends a malformed challenge cannot crash the host, which dials again', async t => {
+  const bad = ['!!', 'AAAA', ''];
+  const relay = await startRelay(t, { hostBehavior: (ws, index) => index < bad.length && (ws.send(JSON.stringify({ t: 'challenge', nonce: bad[index] })), true) });
+  const bridge = await startFakeBridge(t);
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20], jitter: false } });
+  await until(() => mac.host.status() === 'online' && relay.hostSockets.length === bad.length + 1, 'host online after the bad challenges');
+});
+
+test('a relay that accepts the socket but never sends a challenge, or never answers the proof, is abandoned', async t => {
+  const relay = await startRelay(t, { hostBehavior: (ws, index) => index === 0 || (index === 1 && (ws.send(JSON.stringify({ t: 'challenge', nonce: 'A'.repeat(43) })), true)) });
+  const bridge = await startFakeBridge(t);
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { idleMs: 100, pingMs: 60000, backoff: [20], jitter: false } });
+  await until(() => mac.host.status() === 'online' && relay.hostSockets.length === 3, 'host online on the third dial');
+});
+
+test('a relay that never answers the upgrade is abandoned at the handshake timeout', async t => {
+  const stalled = require('node:net').createServer(socket => { socket.on('error', () => {}); });
+  const port = await listen(stalled);
+  t.after(() => { stalled.close(); stalled.closeAllConnections?.(); });
+  let dials = 0;
+  stalled.on('connection', () => { dials += 1; });
+  const mac = await startMac(t, { relayUrl: `ws://127.0.0.1:${port}`, bridgeUrl: 'http://127.0.0.1:1', timing: { idleMs: 100, backoff: [20], jitter: false } });
+  await until(() => dials >= 2, 'a second dial after the handshake timeout');
+  assert.ok(mac.statuses.includes('offline'));
+});
+
+test('a 3 MB upload split into 256 KiB chunks reaches the bridge byte for byte', async t => {
+  const { bridge, connect } = await paired(t);
+  const phone = await connect();
+  const body = new Uint8Array(randomBytes(3_000_000));
+  phone.request(5, { method: 'POST', path: '/attachments', headers: { 'content-type': 'application/octet-stream' }, body });
+  const response = await phone.response(5);
+  assert.equal(response.status, 200);
+  assert.equal(decode(response.body), '{"v":1,"result":{"size":3000000}}');
+  assert.equal(bridge.seen.uploads.length, 1);
+  assert.equal(bridge.seen.uploads[0].type, 'application/octet-stream');
+  assert.deepEqual(new Uint8Array(bridge.seen.uploads[0].body), body);
+});
+
+test('an upload over 8 MiB is refused with 413 and the connection stays usable', async t => {
+  const { bridge, connect } = await paired(t);
+  const phone = await connect();
+  phone.request(6, { method: 'POST', path: '/attachments', body: new Uint8Array(9 * 1024 * 1024) });
+  const response = await phone.response(6);
+  assert.equal(response.status, 413);
+  assert.equal(decode(response.body), '{"v":1,"error":{"message":"Upload too large"}}');
+  assert.equal(bridge.seen.uploads.length, 0);
+  phone.request(7, { method: 'POST', path: '/rpc', body: '{}' });
+  assert.equal(decode((await phone.response(7)).body), '{"v":1,"result":"pong"}');
+});
+
+test('a GET with an empty chunk and an invalid part both behave', async t => {
+  const { connect } = await paired(t);
+  const phone = await connect();
+  phone.send({ t: 'req', id: 1, method: 'GET', path: '/media', headers: {}, chunk: '', more: false });
+  assert.equal((await phone.response(1)).status, 200);
+  phone.send({ t: 'req', id: 2, method: 'POST', path: '/attachments', headers: {}, chunk: '***', more: false });
+  assert.equal((await phone.closed).code, 1000);
 });

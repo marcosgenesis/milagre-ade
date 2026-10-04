@@ -1,13 +1,14 @@
 const nacl = require('tweetnacl');
 const { randomBytes } = require('node:crypto');
 const { b64url, fromB64url, hostAccept, RelayAuthError } = require('@milagre/shared/relay-crypto');
-const { splitBody, MAX_RESPONSE } = require('@milagre/shared/relay-rpc');
+const { splitBody, createAssembler, MAX_RESPONSE } = require('@milagre/shared/relay-rpc');
 
 const OPEN = 1, DATA = 2, CLOSE = 3;
 const ERROR_MARK = 0x04;
 const LIVE_ORIGIN = 'milagre-app://phone';
 const MAX_LIVE = 8;
 const MAX_INFLIGHT = 16;
+const MAX_UPLOAD = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT = 120_000;
 const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, backoff: [1000, 2000, 5000, 10_000, 30_000], jitter: true };
 // What the phone may set. Origin and Host belong to the bridge's own checks, and Authorization is ours.
@@ -24,6 +25,7 @@ function frame(type, conn, payload = new Uint8Array()) {
   return out;
 }
 
+const tooLarge = encoder.encode(JSON.stringify({ v: 1, error: { message: 'Upload too large' } }));
 const tooManyRequests = encoder.encode(JSON.stringify({ v: 1, error: { message: 'Too many requests' } }));
 const routeOk = path => typeof path === 'string' && path.startsWith('/') && !path.startsWith('//');
 
@@ -86,32 +88,68 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     sendFrame(current, DATA, conn, accepted.reply);
   }
 
-  async function request(current, conn, record, message) {
-    const { id } = message;
-    const respond = (status, headers, body) => {
-      const parts = splitBody(body);
-      parts.forEach((chunk, index) => sendMessage(current, conn, record, { t: 'res', id, status, headers, chunk, more: index < parts.length - 1 }));
-    };
-    if (record.inflight >= MAX_INFLIGHT) return respond(429, { 'content-type': 'application/json' }, tooManyRequests);
-    const method = message.method;
-    if ((method !== 'GET' && method !== 'POST') || !routeOk(message.path)) return respond(400, {}, new Uint8Array());
+  /** Sends a whole response as `res` parts. */
+  function respond(current, conn, record, id, status, headers, body) {
+    const parts = splitBody(body);
+    parts.forEach((chunk, index) => sendMessage(current, conn, record, { t: 'res', id, status, headers, chunk, more: index < parts.length - 1 }));
+  }
+  const JSON_HEADERS = { 'content-type': 'application/json' };
+
+  async function forward(current, conn, record, { id, method, path, headers: phoneHeaders }, body) {
     record.inflight += 1;
     try {
       const headers = {};
-      for (const [name, value] of Object.entries(message.headers ?? {})) {
+      for (const [name, value] of Object.entries(phoneHeaders ?? {})) {
         if (typeof value === 'string' && !BLOCKED_HEADERS.has(name.toLowerCase())) headers[name] = value;
       }
       headers.Authorization = `Bearer ${token}`;
-      const response = await fetchBridge(bridgeUrl + message.path, { method, headers, body: method === 'POST' ? message.body : undefined, signal: AbortSignal.timeout(REQUEST_TIMEOUT) });
-      const body = new Uint8Array(await response.arrayBuffer());
+      const response = await fetchBridge(bridgeUrl + path, { method, headers, body: method === 'POST' && body.length ? body : undefined, signal: AbortSignal.timeout(REQUEST_TIMEOUT) });
+      const bytes = new Uint8Array(await response.arrayBuffer());
       const forwarded = {};
       for (const name of FORWARDED_HEADERS) { const value = response.headers.get(name); if (value !== null) forwarded[name] = value; }
-      if (body.length > MAX_RESPONSE) respond(502, { 'content-type': 'application/json' }, encoder.encode(JSON.stringify({ v: 1, error: { message: 'Response too large' } })));
-      else respond(response.status, forwarded, body);
+      if (bytes.length > MAX_RESPONSE) respond(current, conn, record, id, 502, JSON_HEADERS, encoder.encode(JSON.stringify({ v: 1, error: { message: 'Response too large' } })));
+      else respond(current, conn, record, id, response.status, forwarded, bytes);
     } catch (error) {
       const timedOut = error?.name === 'TimeoutError';
-      respond(timedOut ? 504 : 502, { 'content-type': 'application/json' }, encoder.encode(JSON.stringify({ v: 1, error: { message: timedOut ? 'The computer took too long to answer' : 'The computer could not be reached' } })));
+      respond(current, conn, record, id, timedOut ? 504 : 502, JSON_HEADERS, encoder.encode(JSON.stringify({ v: 1, error: { message: timedOut ? 'The computer took too long to answer' : 'The computer could not be reached' } })));
     } finally { record.inflight -= 1; }
+  }
+
+  /**
+   * One part of a request. The first part carries the method, path and headers; the body arrives as
+   * base64 chunks, reassembled here and capped at MAX_UPLOAD. Throws on a malformed part: the caller closes the connection.
+   */
+  function requestPart(current, conn, record, message) {
+    const { id } = message;
+    if (!Number.isSafeInteger(id) || typeof message.chunk !== 'string' || typeof message.more !== 'boolean') throw new Error('Bad request part');
+    if (record.rejected.has(id)) { if (!message.more) record.rejected.delete(id); return; }
+    let upload = record.uploads.get(id);
+    if (!upload) {
+      if (record.inflight + record.uploads.size >= MAX_INFLIGHT) return refuseRequest(current, conn, record, message, 429, tooManyRequests);
+      if ((message.method !== 'GET' && message.method !== 'POST') || !routeOk(message.path)) return refuseRequest(current, conn, record, message, 400, new Uint8Array());
+      upload = { size: 0, meta: { id, method: message.method, path: message.path, headers: message.headers } };
+      record.uploads.set(id, upload);
+    }
+    upload.size += Math.floor(message.chunk.length * 3 / 4);
+    if (upload.size > MAX_UPLOAD) {
+      record.assembler.drop(id);
+      record.uploads.delete(id);
+      return refuseRequest(current, conn, record, message, 413, tooLarge);
+    }
+    let result;
+    try { result = record.assembler.add({ t: 'res', id, status: 0, headers: {}, chunk: message.chunk, more: message.more }); } catch (error) { record.assembler.drop(id); record.uploads.delete(id); throw error; }
+    if (!result.done) return;
+    record.uploads.delete(id);
+    void forward(current, conn, record, upload.meta, result.body);
+  }
+
+  /** Answers a request without forwarding it; the rest of its parts are skipped. */
+  function refuseRequest(current, conn, record, message, status, body) {
+    if (message.more) {
+      if (record.rejected.size >= 64) throw new Error('Too many abandoned uploads');
+      record.rejected.add(message.id);
+    }
+    respond(current, conn, record, message.id, status, JSON_HEADERS, body);
   }
 
   function liveOpen(current, conn, record, message) {
@@ -134,7 +172,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
   function handleMessage(current, conn, record, message) {
     if (!message || typeof message !== 'object') throw new Error('Not a message');
     switch (message.t) {
-      case 'req': void request(current, conn, record, message); break;
+      case 'req': requestPart(current, conn, record, message); break;
       case 'live-open': liveOpen(current, conn, record, message); break;
       case 'live': {
         const live = record.lives.get(message.id);
@@ -157,7 +195,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     const type = bytes[0];
     const conn = new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(1);
     const payload = bytes.subarray(9);
-    if (type === OPEN) { current.conns.set(conn, { state: 'hello', channel: null, lives: new Map(), inflight: 0 }); return; }
+    if (type === OPEN) { current.conns.set(conn, { state: 'hello', channel: null, lives: new Map(), inflight: 0, uploads: new Map(), rejected: new Set(), assembler: createAssembler() }); return; }
     if (type === CLOSE) { dropConn(current, conn, false); return; }
     if (type !== DATA) return;
     const record = current.conns.get(conn);
@@ -170,14 +208,15 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
   function connect() {
     if (closed) return;
     setStatus('connecting');
-    const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`);
-    const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, over: false };
+    const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`, { handshakeTimeout: idleMs });
+    const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, over: false };
     session = current;
 
     const finish = () => {
       if (current.over) return;
       current.over = true;
       clearInterval(current.timer);
+      clearTimeout(current.readyTimer);
       for (const conn of [...current.conns.keys()]) dropConn(current, conn, false);
       if (session === current) session = null;
       if (closed) { setStatus('offline'); return; }
@@ -189,28 +228,30 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     };
 
     ws.on('message', (data, isBinary) => {
-      current.lastHeard = Date.now();
-      if (!current.ready) {
+      // ws does not catch listener errors, and nothing a relay sends may take the daemon down.
+      try {
+        current.lastHeard = Date.now();
+        if (current.ready) { if (isBinary) onFrame(current, data); return; }
         if (isBinary) return;
-        let message;
-        try { message = JSON.parse(data.toString()); } catch { return; }
+        const message = JSON.parse(data.toString());
         if (message?.t === 'challenge') {
           const nonce = fromB64url(String(message.nonce));
+          if (nonce.length !== 32) throw new Error('Bad challenge');
           ws.send(JSON.stringify({ t: 'proof', key: b64url(identity.sign.publicKey), sig: b64url(nacl.sign.detached(nonce, identity.sign.secretKey)) }));
         } else if (message?.t === 'ready') {
           current.ready = true;
+          clearTimeout(current.readyTimer);
           attempt = 0;
           setStatus('online');
         }
-        return;
-      }
-      if (isBinary) onFrame(current, data);
+      } catch { ws.terminate(); }
     });
     ws.on('pong', () => { current.lastHeard = Date.now(); });
     ws.on('close', finish);
     ws.on('error', () => { /* close follows */ });
     ws.on('open', () => {
       current.lastHeard = Date.now();
+      current.readyTimer = setTimeout(() => { if (!current.ready) ws.terminate(); }, idleMs);
       current.timer = setInterval(() => {
         if (Date.now() - current.lastHeard > idleMs) { ws.terminate(); finish(); return; }
         try { ws.ping(); } catch { /* closing */ }

@@ -87,6 +87,8 @@ function useSessionState() {
       if (current !== generation.current) return false;
       if (!state.project.state.sessions[sessionId]) throw new Error('This Chat is no longer available on your computer.');
       selection.current = { client: next, path: project.path };
+      seen.current.set(`${next.url}|${projectPath}`, state).set(`${next.url}|${project.path}`, state);
+      setOpening(null);
       setModels(null); setCliStatus(null); setProviderError('');
       setClient(next); setRecent(projects); setSnapshot(state); setError(''); setHostName(host.name);
       return true;

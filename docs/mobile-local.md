@@ -149,7 +149,7 @@ Delivery is best effort. The daemon caps its outgoing queue at 256 notices and i
 
 Chat titles, previews and navigation identifiers pass through Expo and Apple or Google; push is not end-to-end encrypted. No bridge token or Cloudflare Access credentials are included in notification payloads. Registrations live in `mobile-push.json` in the daemon's profile, written atomically with mode 0600. Turning off desktop Phone access or resetting access clears registrations. Turning off mobile notifications or forgetting a computer unregisters that device. When that computer is offline, the app keeps a private unregister retry in secure storage, including the credentials needed for removal. Those credentials are deleted after the removal succeeds. The forgotten computer is immediately excluded from notification navigation. Reopen Milagre while the computer is online to finish removal; until then, it can still send alerts.
 
-Verification for this PR covers daemon delivery through a fake Expo HTTP boundary, real Unix-socket/bridge registration, mobile permission/token/navigation tests and a native simulator run. Live APNs/FCM delivery and Android runtime behavior require signed physical-device validation; no store build is published by this PR.
+Verification for this PR covers daemon delivery through a fake Expo HTTP boundary, real Unix-socket/bridge registration, mobile permission/token/navigation tests and a native simulator run. A simulator-injected notification opens its paired Chat from a cold start, and Back returns to All Chats. Injection bypasses Expo/APNs transport. Live APNs/FCM delivery and Android runtime behavior require signed physical-device validation; no store build is published by this PR.
 
 ## Images
 

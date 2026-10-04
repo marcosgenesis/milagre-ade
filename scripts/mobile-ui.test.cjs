@@ -441,7 +441,7 @@ function pushHost(t, initial = 'index') {
   const react = hookHost();
   react.useEffect = react.effect;
   react.useLayoutEffect = react.effect;
-  const { StackRouter, StackActions } = require('expo-router/build/react-navigation/routers');
+  const { StackRouter, StackActions } = require(require.resolve('expo-router/build/react-navigation/routers', { paths: [path.join(__dirname, '../apps/mobile')] }));
   const stack = StackRouter({ initialRouteName: initial });
   const options = { routeNames: ['index', 'projects', 'project', 'chat'], routeParamList: {}, routeGetIdList: {} };
   let navigation = stack.getInitialState(options);
@@ -524,4 +524,20 @@ test('route changes preserve a newer normal pairing while cancelling notificatio
   screen.opening.resolve();
   await settle();
   assert.equal(screen.routes().at(-1).name, 'index');
+});
+
+test('a notification target clears an older Project loading state', async () => {
+  const oldOpening = deferred();
+  const render = sessionHost({
+    call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? args[0] === '/old' ? oldOpening.promise : { path: args[0] } : {},
+    snapshot: async projectPath => ({ ...snapshot(projectPath), project: { path: projectPath, state: { sessions: { 2: { id: 2 } } } } }),
+  });
+  await render().connect('address', 'token');
+  const old = render().open('/old');
+  assert.equal(render().opening.path, '/old');
+  await render().openNotificationTarget({ address: 'new', token: 'new', name: 'Mac' }, '/target', 2);
+  oldOpening.resolve({ path: '/old' });
+  await old;
+  assert.equal(render().snapshot.project.path, '/target');
+  assert.equal(render().opening, null);
 });

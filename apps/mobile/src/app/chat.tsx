@@ -219,7 +219,7 @@ export default function ChatScreen() {
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
       {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} onActivity={openActivity} />)}
       {run && <ChatReply run={run} media={media} onActivity={openActivity} />}
-      {run && <ThinkingIndicator label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
+      {run && <ThinkingIndicator startedAt={run.startedAt} label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </KeyboardChatScrollView>

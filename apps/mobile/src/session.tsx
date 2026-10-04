@@ -24,6 +24,10 @@ function useSessionState() {
   const busyUntil = useRef(0);
   const generation = useRef(0);
   const selection = useRef<{ client: Client; path: string } | null>(null);
+  // The last snapshot of each Project this session saw, so reopening one shows its Chats at once while it refreshes.
+  const seen = useRef(new Map<string, Snapshot>());
+  /** The Project being opened, and whether its last copy is already on screen. */
+  const [opening, setOpening] = useState<{ path: string; cached: boolean } | null>(null);
   // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
   const autoOpen = useRef(true);
   const claimAutoOpen = () => { const first = autoOpen.current; autoOpen.current = false; return first; };
@@ -74,16 +78,22 @@ function useSessionState() {
     const current = ++generation.current;
     const previous = selection.current;
     selection.current = null;
+    const cached = seen.current.get(`${client.url}|${projectPath}`);
+    setOpening({ path: projectPath, cached: !!cached });
+    if (cached) setSnapshot(cached);
     try {
       const project = await client.call<OpenProject>('project:open', [projectPath]);
       const state = await client.snapshot(project.path);
       if (current === generation.current) {
         selection.current = { client, path: project.path };
+        seen.current.set(`${client.url}|${projectPath}`, state).set(`${client.url}|${project.path}`, state);
         setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
       }
     } catch (error) {
       if (current === generation.current) selection.current = previous;
       throw error;
+    } finally {
+      if (current === generation.current) setOpening(null);
     }
   };
   const projectPath = snapshot?.project.path;
@@ -92,7 +102,7 @@ function useSessionState() {
     if (!client || !projectPath || current?.client !== client || current.path !== projectPath) return;
     try {
       const state = await client.snapshot(projectPath);
-      if (current === selection.current) { setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError(''); }
+      if (current === selection.current) { seen.current.set(`${client.url}|${projectPath}`, state); setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError(''); }
     } catch (error) {
       if (current === selection.current) throw error;
     }
@@ -121,7 +131,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, claimAutoOpen, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { booted, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

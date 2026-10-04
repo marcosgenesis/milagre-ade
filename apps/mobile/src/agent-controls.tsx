@@ -1,10 +1,10 @@
 import { PERMISSION_MODES } from "@milagre/shared/model-copy";
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text } from 'react-native';
 import { ArrowDown01Icon, Shield01Icon, ShieldAlertIcon, SecurityCheckIcon } from '@hugeicons/core-free-icons';
 import type { PermissionMode } from '@milagre/shared/model';
 import type { MobileModel } from './turn-options';
 import { Icon, ProviderLogo } from './icons';
-import { PullDown, colors } from './ui';
+import { colors } from './ui';
 
 /** The composer's model chip: provider logo, model name and a chevron. Effort and fast mode live in the model sheet. */
 export function AgentControls({ model, disabled, onToggle }: { model: MobileModel; disabled?: boolean; onToggle: () => void }) {
@@ -16,14 +16,13 @@ export function AgentControls({ model, disabled, onToggle }: { model: MobileMode
 }
 
 const SHORT: Record<PermissionMode, string> = { ask: 'Ask', auto: 'Auto', full: 'Full' };
-// The same shields as the chip, as SF Symbols because the system draws the menu.
-const SYMBOL: Record<PermissionMode, string> = { ask: 'shield', auto: 'checkmark.shield', full: 'exclamationmark.shield' };
-/** Desktop's permission picker as a native pull-down: Ask approval, Auto mode, Full permission. */
-export function PermissionChip({ mode, disabled, onChange }: { mode: PermissionMode; disabled?: boolean; onChange: (mode: PermissionMode) => void }) {
-  return <PullDown label="Permissions" sections={[{ title: 'Permissions', items: PERMISSION_MODES.map(item => ({ id: item.id, title: item.name, systemImage: SYMBOL[item.id], checked: item.id === mode, disabled })) }]} onSelect={id => onChange(id as PermissionMode)}>
-    <View accessibilityRole="button" accessibilityLabel={`Permissions, ${PERMISSION_MODES.find(item => item.id === mode)?.name}`} style={{ minHeight: 34, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: disabled ? 0.45 : 1 }}>
-      <Icon icon={mode === 'full' ? ShieldAlertIcon : mode === 'auto' ? SecurityCheckIcon : Shield01Icon} tone={mode === 'full' ? 'orange' : 'ink2'} size={15} />
-      <Text style={{ color: mode === 'full' ? colors.orange : colors.ink2, fontSize: 13 }}>{SHORT[mode]}</Text>
-    </View>
-  </PullDown>;
+/** The composer's permission chip; it opens the permission sheet. A plain button, so nothing React sits in a native menu. */
+export function PermissionChip({ mode, disabled, onPress }: { mode: PermissionMode; disabled?: boolean; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Permissions, ${PERMISSION_MODES.find(item => item.id === mode)?.name}`} accessibilityHint="Opens permission modes" disabled={disabled} onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: disabled ? 0.45 : pressed ? 0.6 : 1 })}>
+    <PermissionIcon mode={mode} size={15} />
+    <Text style={{ color: mode === 'full' ? colors.orange : colors.ink2, fontSize: 13 }}>{SHORT[mode]}</Text>
+  </Pressable>;
+}
+export function PermissionIcon({ mode, size }: { mode: PermissionMode; size: number }) {
+  return <Icon icon={mode === 'full' ? ShieldAlertIcon : mode === 'auto' ? SecurityCheckIcon : Shield01Icon} tone={mode === 'full' ? 'orange' : 'ink2'} size={size} />;
 }

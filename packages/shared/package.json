@@ -18,6 +18,10 @@
       "types": "./src/chats.d.mts",
       "default": "./src/chats.mjs"
     },
+    "./archive": {
+      "types": "./src/archive.d.mts",
+      "default": "./src/archive.mjs"
+    },
     "./attention": {
       "types": "./src/attention.d.mts",
       "default": "./src/attention.mjs"

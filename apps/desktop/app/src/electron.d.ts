@@ -78,7 +78,7 @@ declare global {
        * and checks again against `seen`, the status the user saw. Rejects with git's message, or a message that
        * says the worktree changed after it was checked.
        */
-      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; branch: string | null; branchDeleted: boolean }>;
+      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; alreadyRemoved?: boolean; branch: string | null; branchDeleted: boolean }>;
       /** The project's saved "Files to copy" patterns, with what the effective patterns match now. */
       readFilesToCopy: (projectPath: string) => Promise<FilesToCopy & { filesToCopy: string[] }>;
       /** What patterns would match, without saving them. `.worktreeinclude` still wins. */

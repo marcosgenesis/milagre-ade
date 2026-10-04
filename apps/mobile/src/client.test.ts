@@ -30,19 +30,21 @@ test('errors and incompatible responses are explicit, and timeouts abort the fet
   await assert.rejects(client.call('daemon:status'), /Connection lost/);
 });
 
-test('creating a worktree gets the desktop deadline instead of the normal request timeout', async t => {
+test('creating or removing a worktree gets the desktop deadline instead of the normal request timeout', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  let signal: AbortSignal | null | undefined;
-  const client = createClient({ address: 'http://127.0.0.1:8787', token: 'token' }, (_url, init) => new Promise((_resolve, reject) => {
-    signal = init?.signal;
-    signal?.addEventListener('abort', () => reject(new Error('aborted')));
-  }));
-  const pending = assert.rejects(client.call('worktree:create', [{ projectPath: '/p', baseBranch: 'main', prompt: 'Preview' }]), /Connection lost/);
-  t.mock.timers.tick(30000);
-  assert.equal(signal?.aborted, false, 'creation can still be fetching or copying files after 30 seconds');
-  t.mock.timers.tick(300000);
-  assert.equal(signal?.aborted, true);
-  await pending;
+  for (const [method, args] of [['worktree:create', [{ projectPath: '/p', baseBranch: 'main', prompt: 'Preview' }]], ['worktree:remove', ['/wt/x', { force: false }]]] as const) {
+    let signal: AbortSignal | null | undefined;
+    const client = createClient({ address: 'http://127.0.0.1:8787', token: 'token' }, (_url, init) => new Promise((_resolve, reject) => {
+      signal = init?.signal;
+      signal?.addEventListener('abort', () => reject(new Error('aborted')));
+    }));
+    const pending = assert.rejects(client.call(method, [...args]), /Connection lost/);
+    t.mock.timers.tick(30000);
+    assert.equal(signal?.aborted, false, `${method} can still be working after 30 seconds`);
+    t.mock.timers.tick(300000);
+    assert.equal(signal?.aborted, true);
+    await pending;
+  }
 });
 
 

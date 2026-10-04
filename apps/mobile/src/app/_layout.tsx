@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 import { ThemeProvider, DarkTheme, DefaultTheme } from 'expo-router/react-navigation';
 import { StatusBar } from 'expo-status-bar';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SessionProvider, useSession } from '../session';
 import { PushProvider } from '../push';
 import { StartupSplash } from '../startup-splash';
@@ -16,7 +17,7 @@ export default function Layout() {
   const theme = { ...base, colors: { ...base.colors, primary: palette.accent, background: palette.page, card: palette.page, text: palette.ink, border: palette.line } };
   // Titles sit inline in a transparent top bar; content blurs softly as it scrolls under it (iOS 26 scroll edge effect).
   const sheet = { presentation: 'formSheet', sheetGrabberVisible: true, sheetCornerRadius: 28, headerShown: false, contentStyle: { backgroundColor: palette.page } } as const;
-  return <KeyboardProvider><SessionProvider><PushProvider><ThemeProvider value={theme}><StatusBar style="auto" /><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
+  return <GestureHandlerRootView style={{ flex: 1 }}><KeyboardProvider><SessionProvider><PushProvider><ThemeProvider value={theme}><StatusBar style="auto" /><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
     <Stack.Screen name="settings" options={{ title: 'Settings' }} />
     <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
@@ -34,7 +35,7 @@ export default function Layout() {
     <Stack.Screen name="new-worktree" options={{ title: 'New Worktree' }} />
     <Stack.Screen name="changes" options={{ title: 'Changes' }} />
     <Stack.Screen name="diff" options={{ title: 'Diff' }} />
-  </Stack><Splash /></ThemeProvider></PushProvider></SessionProvider></KeyboardProvider>;
+  </Stack><Splash /></ThemeProvider></PushProvider></SessionProvider></KeyboardProvider></GestureHandlerRootView>;
 }
 
 function Splash() {

@@ -16,9 +16,3 @@ export function chatMark(chat: AgentSession | undefined, run?: AgentRun, message
   return 'idle';
 }
 export const MARK_LABEL: Record<ChatMark, string> = { question: 'Has a question', waiting: 'Needs approval', interrupted: 'Interrupted', running: 'Running', failed: 'Last turn failed', unread: 'Unread', idle: '' };
-/** Newest activity first. Messages have increasing ids, so a Chat's last message orders it; an empty Chat sorts by its own id. */
-export function chatRecency(chatId: number, messages: ChatMessage[]) {
-  let last = 0;
-  for (const message of messages) if (message.session_id === chatId && message.id > last) last = message.id;
-  return last || chatId / 1e6;
-}

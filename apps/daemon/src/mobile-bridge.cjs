@@ -5,7 +5,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const zlib = require('node:zlib');
 const { connect } = require('./client.cjs');
 
 const METHODS = new Set(['daemon:status', 'project:recent', 'project:open', 'chat:runs',
@@ -30,7 +31,7 @@ const failure = (status, message) => Object.assign(new Error(message), { status 
 
 // A native-client bridge behind loopback or an explicitly configured TLS proxy. All state stays in the Unix-socket
 // daemon; closing this listener must never stop that runtime or its turns.
-async function startMobileBridge({ dataDir, port = 8787, token }) {
+async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024 }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('Bridge token must be 32 random bytes encoded as hex');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid bridge port');
   const expected = Buffer.from(`Bearer ${token}`);
@@ -83,9 +84,22 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
     }
   }
   const server = http.createServer({ requestTimeout: 15000, headersTimeout: 10000, maxHeaderSize: 8192 }, (req, res) => {
-    const reply = (status, value) => {
-      res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      res.end(JSON.stringify({ v: 1, ...value }));
+    // A Project's state runs to megabytes, and a phone polls it every few seconds over cellular: snapshots carry an
+    // ETag so an unchanged one costs a 304, and large bodies go out gzipped.
+    const reply = (status, value, { etag = false } = {}) => {
+      const body = JSON.stringify({ v: 1, ...value });
+      const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+      if (etag && status === 200) {
+        headers.etag = `"${createHash('sha1').update(body).digest('base64url')}"`;
+        if (req.headers['if-none-match'] === headers.etag) { res.writeHead(304, headers); res.end(); return; }
+      }
+      if (body.length < compressAbove || !/\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) { res.writeHead(status, headers); res.end(body); return; }
+      zlib.gzip(body, { level: 6 }, (error, zipped) => {
+        if (res.destroyed) return;
+        if (error) { res.writeHead(status, headers); res.end(body); return; }
+        res.writeHead(status, { ...headers, 'content-encoding': 'gzip', vary: 'accept-encoding' });
+        res.end(zipped);
+      });
     };
     void (async () => {
       const received = Buffer.from(req.headers.authorization ?? '');
@@ -106,7 +120,8 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          result = { project, runs };
+          reply(200, { result: { project, runs } }, { etag: true });
+          return;
         } else if (req.method === 'POST' && ['/rpc', '/attachments'].includes(target.pathname)) {
           if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw failure(415, 'Use application/json');
           const limit = target.pathname === '/attachments' ? 7 * MAX_BODY : MAX_BODY;
@@ -145,6 +160,8 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
           if (request?.v !== 1 || typeof request.method !== 'string' || !Array.isArray(request.args)) throw failure(400, 'Expected version 1, method and args array');
           if (!METHODS.has(request.method)) throw failure(403, 'Command is not available from mobile');
           result = await client.call(request.method, request.args);
+          // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
+          if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
           }
         } else throw failure(404, 'Unknown endpoint');
         reply(200, { result: result ?? null });

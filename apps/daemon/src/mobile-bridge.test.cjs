@@ -31,7 +31,8 @@ test('mobile bridge forwards commands to the existing owner and reads cached sna
   assert.equal((await rpc('daemon:status')).status, 200);
   assert.equal((await request('/snapshot?projectPath=' + encodeURIComponent(project))).status, 409);
   const opened = (await (await rpc('project:open', [project])).json()).result;
-  const session = Object.values(opened.state.sessions)[0];
+  assert.deepEqual(Object.keys(opened).sort(), ['name', 'path'], 'the phone reads state from /snapshot, not from open');
+  const session = Object.values((await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result.project.state.sessions)[0];
   const client = await connect({ dataDir });
   t.after(() => client.close());
   await client.call('chat:patch', [project, session.id, { title: 'Updated from socket' }]);
@@ -69,8 +70,8 @@ test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported r
 test('mobile can manage Chat metadata and create Worktrees, and read changes only in open Projects', async t => {
   const { project, rpc, request } = await fixture(t);
   execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
-  const opened = (await (await rpc('project:open', [project])).json()).result;
-  const chat = Object.values(opened.state.sessions)[0];
+  await rpc('project:open', [project]);
+  const chat = Object.values((await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result.project.state.sessions)[0];
   assert.equal((await rpc('chat:patch', [project, chat.id, { title: 'Mobile name', archived: true }])).status, 200);
   let state = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
   assert.equal(state.project.state.sessions[chat.id].title, 'Mobile name');
@@ -188,4 +189,32 @@ test('the bridge reports a lost daemon and stops listening, so its owner can res
   await daemon.close();
   await bridge.lost;
   await assert.rejects(fetch(bridge.url + '/rpc', { method: 'POST' }));
+});
+
+test('snapshots carry an ETag, an unchanged one is a 304, and large bodies are gzipped', async t => {
+  const { project, rpc, request, token, dataDir } = await fixture(t);
+  await rpc('project:open', [project]);
+  const route = '/snapshot?projectPath=' + encodeURIComponent(project);
+  const first = await request(route);
+  const etag = first.headers.get('etag');
+  assert.match(etag, /^"[\w-]+"$/);
+  const body = await first.json();
+  assert.equal(body.v, 1);
+  const again = await request(route, { headers: { 'if-none-match': etag } });
+  assert.equal(again.status, 304);
+  assert.equal(await again.text(), '');
+  await rpc('chat:patch', [project, Object.values(body.result.project.state.sessions)[0].id, { title: 'Changed' }]);
+  assert.equal((await request(route, { headers: { 'if-none-match': etag } })).status, 200);
+  // The test Project is tiny, so a second bridge compresses everything.
+  const eager = await startMobileBridge({ dataDir, port: 0, token, compressAbove: 0 });
+  t.after(() => eager.close());
+  const zipped = await new Promise((resolve, reject) => {
+    require('node:http').get(new URL(route, eager.url), { headers: { authorization: `Bearer ${token}`, 'accept-encoding': 'gzip' } }, res => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({ encoding: res.headers['content-encoding'], body: Buffer.concat(chunks) }));
+    }).on('error', reject);
+  });
+  assert.equal(zipped.encoding, 'gzip');
+  assert.equal(JSON.parse(require('node:zlib').gunzipSync(zipped.body)).v, 1);
 });

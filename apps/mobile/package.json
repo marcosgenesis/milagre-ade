@@ -50,7 +50,7 @@
     "test": "node --test src/*.test.ts",
     "export:ios": "expo export --platform ios",
     "lint": "eslint .",
-    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform ios --non-interactive"
+    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
   },
   "private": true,
   "type": "module"

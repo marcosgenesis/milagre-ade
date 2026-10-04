@@ -60,3 +60,15 @@ test('an HTML page from Cloudflare becomes a plain message instead of a JSON par
   await assert.rejects(page(401).call('daemon:status'), /access was refused/);
   await assert.rejects(page(200).call('daemon:status'), /Unexpected response/);
 });
+
+test('an unchanged snapshot comes back as a 304 and reuses the last one', async () => {
+  const sent: (string | undefined)[] = [];
+  let calls = 0;
+  const client = createClient('http://127.0.0.1:8787', 'token', async (_url, init) => {
+    sent.push((init?.headers as Record<string, string>)['If-None-Match']);
+    return ++calls === 1 ? new Response(JSON.stringify({ v: 1, result: { project: 'p' } }), { headers: { etag: '"abc"' } }) : new Response(null, { status: 304, headers: { etag: '"abc"' } });
+  });
+  const first = await client.snapshot('/p');
+  assert.equal(await client.snapshot('/p'), first);
+  assert.deepEqual(sent, [undefined, '"abc"']);
+});

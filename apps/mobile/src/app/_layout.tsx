@@ -25,7 +25,7 @@ export default function Layout() {
     <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
     <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
-    <Stack.Screen name="viewer" options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
+    <Stack.Screen name="viewer" options={{ presentation: 'transparentModal', headerShown: false, animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
     <Stack.Screen name="chat-details" options={{ title: 'Rename Chat' }} />
     <Stack.Screen name="new-worktree" options={{ title: 'New Worktree' }} />
     <Stack.Screen name="changes" options={{ title: 'Changes' }} />

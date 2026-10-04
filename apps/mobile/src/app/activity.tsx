@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Cancel01Icon } from '@hugeicons/core-free-icons';
 import { activitySummary, replyActivity } from '@milagre/shared/reply-parts';
 import type { ChatStep } from '@milagre/shared/model';
-import { ToolRow } from '../chat-reply';
+import { ToolRow } from '../tool-row';
 import { Markdown } from '../markdown';
 import { useSession } from '../session';
-import { CircleButton, colors, styles } from '../ui';
+import { CircleButton, PageScroll, colors, styles } from '../ui';
 
 /** A reply's tools and notes, like desktop's expanded ActivityBlock; live while the turn runs. Each tool expands to its output. */
 export default function ActivitySheet() {
@@ -31,7 +31,7 @@ export default function ActivitySheet() {
   const { setup, activity, images } = replyActivity(run?.text ?? saved?.body ?? '', steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);
   const summary = activitySummary(steps);
-  return <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 40 }}>
+  return <PageScroll style={styles.screen} contentContainerStyle={{ padding: 0, gap: 0, paddingBottom: 40 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 }}>
       <CircleButton label="Close" icon={Cancel01Icon} onPress={() => router.back()} />
       <View style={{ alignItems: 'center', flexShrink: 1 }}>
@@ -46,5 +46,5 @@ export default function ActivitySheet() {
       {activity.map((entry, index) => entry.type === 'step' ? <ToolRow key={entry.step.id} step={entry.step} live={!!run} waiting={waiting} /> : <View key={`text-${index}`} style={{ paddingVertical: 6 }}><Markdown text={entry.text} /></View>)}
       {images.map(step => <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} />)}
     </View>
-  </ScrollView>;
+  </PageScroll>;
 }

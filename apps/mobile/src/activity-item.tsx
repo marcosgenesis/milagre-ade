@@ -1,0 +1,49 @@
+import { useState, type ReactNode } from 'react';
+import { Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Alert02Icon, ArrowDown01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+import { titleSpans } from '@milagre/shared/reply-parts';
+import { Icon, type IconData } from './icons';
+import { ShimmerText } from './running-logo';
+import { fonts } from './theme';
+import { PageScroll, colors, styles } from './ui';
+
+type ActivityState = 'idle' | 'running' | 'waiting' | 'failed';
+
+/** Activity titles share code chips and the running shimmer, including reduced-motion handling. */
+export function ActivityTitle({ title, shimmer, numberOfLines = 1, style = { color: colors.ink2, fontSize: 14 } }: { title: string; shimmer: boolean; numberOfLines?: number; style?: TextStyle }) {
+  const spans = titleSpans(title).map((span, index) => span.code ? <Text key={index} style={{ fontFamily: fonts.mono, fontSize: (style.fontSize || 14) * 0.92, backgroundColor: shimmer ? undefined : colors.field, color: colors.ink }}>{span.text}</Text> : span.text);
+  return shimmer ? <ShimmerText style={style} numberOfLines={numberOfLines}>{spans}</ShimmerText> : <Text selectable numberOfLines={numberOfLines} style={style}>{spans}</Text>;
+}
+
+/** Shared tool/subagent disclosure. Adapters supply their data and output; presentation lives here. */
+export function ActivityItem({ title, icon, state = 'idle', status, note, children, loading = false, onPress, disclosureOnly = false }: {
+  title: string; icon: IconData; state?: ActivityState; status?: string; note?: string;
+  children?: ReactNode; loading?: boolean; onPress?: () => void; disclosureOnly?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const expandable = !onPress && (children != null || loading);
+  const failed = state === 'failed';
+  const stateLabel = status || (failed ? 'Failed' : state === 'waiting' ? 'Waiting for approval' : state === 'running' ? 'Running' : '');
+  const label = [title.replace(/`/g, ''), stateLabel, note].filter(Boolean).join(', ');
+  const action = () => onPress ? onPress() : setExpanded(value => !value);
+  const accessibilityState = expandable ? { expanded } : undefined;
+  const headerStyle: ViewStyle = { minHeight: 36, paddingVertical: disclosureOnly ? 0 : 8, flexDirection: 'row', alignItems: 'center', gap: 10 };
+  const heading = <>
+    <Icon icon={failed ? Alert02Icon : icon} tone={failed ? 'red' : state === 'idle' ? 'ink3' : 'ink2'} size={16} />
+    <View style={{ flex: 1, gap: 2 }}>
+      <ActivityTitle title={title} shimmer={state === 'running'} numberOfLines={disclosureOnly && expanded ? 0 : 1} style={{ color: failed ? colors.red : colors.ink2, fontSize: 14 }} />
+      {!!note && <Text style={styles.label}>{note}</Text>}
+    </View>
+  </>;
+  const trailing = <>
+    {!!status && <Text style={{ color: failed ? colors.red : state === 'waiting' ? colors.orange : colors.ink3, fontSize: 12 }}>{status}</Text>}
+    {(onPress || expandable) && (onPress ? <Icon icon={ArrowRight01Icon} tone="ink3" size={12} /> : <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}><Icon icon={ArrowDown01Icon} tone="ink3" size={12} /></View>)}
+  </>;
+  return <View style={{ gap: 8 }}>
+    {disclosureOnly ? <View style={headerStyle}>{heading}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? 'Hide' : 'Show'} details for ${label}`} accessibilityState={accessibilityState} disabled={!expandable} onPress={action} hitSlop={4} style={({ pressed }) => ({ flexDirection: 'row', gap: 4, paddingLeft: 4, minWidth: 44, minHeight: 36, alignItems: 'center', justifyContent: 'flex-end', opacity: pressed ? 0.5 : 1 })}>{trailing}</Pressable></View>
+      : <Pressable accessibilityRole={onPress || expandable ? 'button' : 'text'} accessibilityLabel={label} accessibilityState={accessibilityState} disabled={!onPress && !expandable} onPress={action} style={({ pressed }) => [headerStyle, { opacity: pressed ? 0.5 : 1 }]}>{heading}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>{trailing}</View></Pressable>}
+    {!onPress && expanded && expandable && <PageScroll nestedScrollEnabled style={{ maxHeight: 320, backgroundColor: colors.field, borderRadius: 12, marginBottom: 8 }} contentContainerStyle={{ padding: 12, paddingBottom: 12, gap: 8 }}>
+      {children ?? <Text style={styles.muted}>Loading output…</Text>}
+    </PageScroll>}
+  </View>;
+}

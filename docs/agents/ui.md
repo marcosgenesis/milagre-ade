@@ -26,3 +26,14 @@ Three blur strengths, all theme tokens in `apps/desktop/app/src/styles.css`:
 - `backdrop-blur-edge` (4px) where content scrolls under a window edge, faded out with a mask (`.chat-top-blur`, `.chat-bottom-blur`).
 
 Don't use Tailwind's own sizes (`backdrop-blur-sm` to `-3xl`) or a hand-written `backdrop-filter: blur(...)`; a stronger blur behind a full-window scrim also costs frames while something animates over it. CSS that needs the value uses the variable, e.g. `blur(var(--blur-overlay))`. `primitives/backdrop-blur.test.ts` enforces it.
+
+## Mobile activity and subagents
+
+Use `apps/mobile/src/activity-item.tsx` for an inline item with expandable activity output. `ToolRow` and `SubagentItem` adapt domain data to `ActivityItem`; keep their icon, title, shimmer, disclosure, status spacing, accessibility and output surface in the shared component. Do not recreate those styles in an adapter.
+
+- Pass the item icon and `state` (`idle`, `running`, `waiting`, `failed`). Running titles use the existing `ShimmerText`, which respects reduced motion and screen focus; waiting and terminal states stop it. Failures use the shared warning icon and color.
+- Pass `status` when a label is needed beside the arrow. Use `disclosureOnly` for subagents so the title stays selectable and the status/arrow control expands the details. Tool activity uses the whole row; `onPress` opens its sheet from the Chat.
+- Supply the output as children. The component owns its bounded, nested `PageScroll`, background, corners and padding; adapters only format content. `loading` keeps a disclosure available while tool output is fetched.
+- Reuse `ActivityTitle` for activity summaries that need the same code chips and running shimmer.
+
+Check both Activity and Subagents when changing this component: collapsed, expanded, running, waiting, failed and late-arriving output.

@@ -596,3 +596,66 @@ test('a notification target clears an older Project loading state', async () => 
   assert.equal(render().snapshot.project.path, '/target');
   assert.equal(render().opening, null);
 });
+
+// Render the real activity adapters, disclosure and shimmer against native leaves.
+function activityItemHost() {
+  const hosts = new Map();
+  let current;
+  const react = Object.fromEntries(['useState', 'useRef', 'useMemo', 'useEffect'].map(name => [name, (...args) => current[name](...args)]));
+  react.memo = fn => fn;
+  const palette = { ink: '#fff', ink2: '#aaa', ink3: '#666', field: '#222', red: '#f00', orange: '#f80' };
+  const native = { Text: 'Text', View: 'View', Pressable: 'Pressable', useColorScheme: () => 'dark', AccessibilityInfo: {}, StyleSheet: { create: value => value, absoluteFill: {} }, Animated: { Value: class { interpolate() {} }, View: 'AnimatedView' }, Easing: { bezier: () => () => {}, linear() {} } };
+  const icons = new Proxy({}, { get: (_, key) => key });
+  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native, '@hugeicons/core-free-icons': icons, '@milagre/shared/reply-parts': require('@milagre/shared/reply-parts'), './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './ui': { colors: palette, styles: { code: {}, caption: {}, label: {}, muted: {} }, PageScroll: 'ScrollView' } };
+  const running = load('running-logo.tsx', { ...common, 'react-native-svg': { default: 'Svg', Path: 'Path' }, '@react-native-masked-view/masked-view': { __esModule: true, default: 'MaskedView' }, 'expo-linear-gradient': { LinearGradient: 'LinearGradient' }, 'expo-router': { useIsFocused: () => false }, './logo': { LEFT: '', RIGHT: '', STAR: '', STAR_BOX: {} }, './theme': { colors: palette, fonts: { mono: 'mono' }, hex: () => palette } });
+  const shared = load('activity-item.tsx', { ...common, './running-logo': running, './theme': { fonts: { mono: 'mono' } } });
+  const SubagentItem = load('subagent-item.tsx', { ...common, './activity-item': shared }).SubagentItem;
+  const ToolRow = load('tool-row.tsx', { ...common, './activity-item': shared, './markdown': { Markdown: ({ text }) => jsx('Text', { children: text }) } }).ToolRow;
+  function visit(node, key) {
+    if (Array.isArray(node)) return node.map((child, index) => visit(child, `${key}.${child?.props?.id || index}`));
+    if (!node || typeof node !== 'object' || !node.type) return node;
+    if (typeof node.type === 'function') {
+      current = hosts.get(key) || hookHost();
+      hosts.set(key, current); current.begin();
+      return visit(node.type(node.props), `${key}.render`);
+    }
+    return { ...node, props: { ...node.props, children: visit(node.props?.children, `${key}.children`) } };
+  }
+  return { subagent: agent => visit(jsx(SubagentItem, { agent }), 'agent'), tool: props => visit(jsx(ToolRow, props), 'tool') };
+}
+const sampleSubagent = { id: 'a', title: 'Check the phone connection', status: 'running', startedAt: 1, updatedAt: 1, latestActivity: 'Checking pairing', transcript: [{ id: 't', kind: 'message', text: 'Connection verified.' }] };
+
+test('subagent execution shimmers, while waiting, failure and completion stop it', () => {
+  const item = activityItemHost();
+  for (const status of ['initializing', 'running']) assert.ok(find(item.subagent({ ...sampleSubagent, status }), node => node.type === 'MaskedView'), status);
+  for (const status of ['waiting', 'failed', 'completed', 'cancelled']) assert.equal(find(item.subagent({ ...sampleSubagent, status }), node => node.type === 'MaskedView'), undefined, status);
+});
+
+test('subagent details stay expanded across live updates and collapse through the disclosure', () => {
+  const item = activityItemHost();
+  let tree = item.subagent(sampleSubagent);
+  assert.equal(find(tree, node => node.type === 'Text' && node.props.children === 'Connection verified.'), undefined);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  tree = item.subagent({ ...sampleSubagent, status: 'completed', transcript: [{ id: 't', kind: 'message', text: 'New live output' }] });
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children === 'New live output'));
+  assert.equal(find(tree, node => node.props?.accessibilityRole === 'button').props.accessibilityState.expanded, true);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.equal(find(item.subagent(sampleSubagent), node => node.type === 'Text' && node.props.children === 'Connection verified.'), undefined);
+});
+
+test('tool disclosure reveals late output, while its chat action opens Activity without expanding', () => {
+  const item = activityItemHost();
+  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: true, waiting: false };
+  let tree = item.tool(props);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.ok(find(item.tool(props), node => node.type === 'Text' && node.props.children === 'Loading output…'));
+  tree = item.tool({ ...props, step: { ...props.step, detail: '51 tests passed', status: 'done' }, live: false });
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children === '51 tests passed'));
+  assert.equal(find(tree, node => node.type === 'MaskedView'), undefined);
+  let opened = 0;
+  const navigated = activityItemHost();
+  tree = navigated.tool({ ...props, step: { ...props.step, detail: 'Tool output' }, onPress: () => { opened++; } });
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.equal(opened, 1);
+  assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
+});

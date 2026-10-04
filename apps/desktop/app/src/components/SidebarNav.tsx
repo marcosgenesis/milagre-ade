@@ -10,6 +10,7 @@ import {
   Copy01Icon,
   FolderAddIcon,
   FolderOpenIcon,
+  GitMergeIcon,
   Search01Icon,
   Settings01Icon,
   SidebarLeft01Icon,
@@ -85,6 +86,8 @@ type SidebarNavProps = {
   onNewChat?: () => void;
   onPick?: (id: string, label: string, prompt?: string) => void;
   onOpenSettings?: () => void;
+  onOpenCanvas?: () => void;
+  canvasActive?: boolean;
   onOpenCommands?: () => void;
   hintsEnabled?: boolean;
   /** The project folder, for the project menu's reveal and copy path. */
@@ -377,6 +380,8 @@ export default memo(function SidebarNav({
   onNewChat,
   onPick,
   onOpenSettings,
+  onOpenCanvas,
+  canvasActive = false,
   onOpenCommands,
   hintsEnabled = true,
   projectPath,
@@ -601,6 +606,7 @@ export default memo(function SidebarNav({
         </div>
 
         <ScrollArea className="sidebar-scroll flex-1 overflow-x-hidden">
+          {onOpenCanvas && <div className="mb-2"><GlideGroup><RailButton icon={<HugeIcon icon={GitMergeIcon} size={16} />} label="Canvas" active={canvasActive} onClick={onOpenCanvas} /></GlideGroup></div>}
           {onOpenCommands && (
             <Tooltip label="Search commands, chats, and projects" className="mx-2 mb-3 w-[calc(100%-16px)]" side="bottom" shortcut={`${shortcutModifier}K`}>
               <button type="button" aria-label="Command palette" aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} onClick={onOpenCommands}

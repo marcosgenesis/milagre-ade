@@ -570,7 +570,9 @@ function createRuntime(options) {
   let registryStore = null;
   const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json")));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
-  async function openProject(projectPath) {
+  // `takeNotice`: this open is a desktop window's, which shows the restored-chats notice. Over the daemon only the
+  // desktop asks for it, so the phone's bridge opening the project first doesn't use the notice up.
+  async function openProject(projectPath, { takeNotice = true } = {}) {
     const identity = await resolveProject(projectPath);
     const project = await readProject(identity.path);
     await projectRegistry().add(identity);
@@ -578,8 +580,8 @@ function createRuntime(options) {
     shownProjectPath = identity.path;
     // The first window to open the project after chats came back says so, once. A read at startup (resuming a turn)
     // or after removing a worktree keeps the notice for it.
-    const restored = restoredChats.get(identity.path);
-    restoredChats.delete(identity.path);
+    const restored = takeNotice ? restoredChats.get(identity.path) : undefined;
+    if (restored) restoredChats.delete(identity.path);
     return restored ? { ...project, restoredChats: restored } : project;
   }
 
@@ -659,7 +661,7 @@ function createRuntime(options) {
         return handlers.get(method)(null, ...args);
       });
     },
-    openProject: projectPath => accept(() => openProject(projectPath)),
+    openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
     // Synchronous capture: the socket serializes this before another event can

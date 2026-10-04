@@ -30,6 +30,8 @@ const PATHS = Object.freeze({
   'daemon:status': none,
   'project:recent': none,
   'project:open': ([projectPath]) => [projectPath],
+  // Takes a Project off the recent list; its folder is never touched.
+  'project:forget': ([projectPath]) => [projectPath],
   'chat:runs': none,
   'chat:send': ([request]) => [request?.projectPath, ...(request?.cwd === undefined ? [] : [request.cwd]), ...(Array.isArray(request?.files) ? request.files.map(attached) : [])],
   'chat:resume': ([projectPath]) => [projectPath],

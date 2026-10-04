@@ -369,40 +369,69 @@ test('launch restoration shows the splash animation while the saved Chat opens',
   assert.ok(find(tree, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Reopening your Chat...'));
 });
 
-function navigationHost(open) {
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [] } = {}) {
   const react = hookHost();
   const routes = [];
   const opened = [];
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
-  const session = { client: { url: 'mac' }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return open; } };
+  const session = { client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
+  const native = { Alert: { alert, prompt() {} } };
   const { ProjectNavigation } = load('project-navigation.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
+    'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), ...native, Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
+    'expo-clipboard': { setStringAsync: async () => {} },
     '@hugeicons/core-free-icons': {}, 'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/chats': { isListedChat: () => true }, './session': { useSession: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
+    './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts') }),
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
-  const row = kind => { const list = find(render(), node => node.type === 'FlatList'); return list.props.renderItem({ item: list.props.data.find(item => item.kind === kind) }); };
-  return { state, routes, opened, render, row };
+  const rows = () => find(render(), node => node.type === 'FlatList');
+  const row = (kind, index = 0) => { const list = rows(); return list.props.renderItem({ item: list.props.data.filter(item => item.kind === kind)[index] }); };
+  // A row's tap target is the menu that also has onPress; its ⋯ is the menu without one.
+  const open = node => find(node, child => child.type === 'PullDown' && child.props.onPress);
+  const more = node => find(node, child => child.type === 'PullDown' && !child.props.onPress);
+  const filter = () => find(render(), node => node.type === 'PullDown' && node.props.label === 'Filter Chats');
+  return { state, session, routes, opened, calls, render, rows, row, open, more, filter };
 }
 
 test('a sidebar Chat opens at once, leaving its Project to load in the Chat', () => {
   const nav = navigationHost(deferred().promise);
-  nav.row('chat').props.onPress();
+  nav.open(nav.row('chat')).props.onPress();
   assert.deepEqual(nav.opened, [], 'the navigation does not open the Project itself');
   assert.deepEqual(JSON.parse(JSON.stringify(nav.routes)), [{ pathname: '/chat', params: { projectPath: '/last', hostId: 'mac', id: '3' } }]);
   assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
 });
 
-test('a new Chat and a Project Chat list from the sidebar open at once too', () => {
+test('a new Chat from the sidebar opens at once too', () => {
   const nav = navigationHost(deferred().promise);
   find(nav.row('project'), node => node.type === 'IconButton').props.onPress();
-  nav.row('all').props.onPress();
   assert.deepEqual(nav.opened, []);
-  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: '/chat', params: { projectPath: '/last', hostId: 'mac' } }, { pathname: '/project', params: { projectPath: '/last', hostId: 'mac' } }]));
-  assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: '/chat', params: { projectPath: '/last', hostId: 'mac' } }]));
+  assert.equal(nav.rows().props.data.some(item => item.kind === 'all'), false, 'no separate Chats screen to go to');
+});
+
+test('the sidebar filter shows archived, running or waiting Chats across Projects', () => {
+  const nav = navigationHost(deferred().promise);
+  nav.state.project.state.sessions[4] = { id: 4, archived: true, title: 'Old work' };
+  const ids = () => JSON.stringify(nav.rows().props.data.filter(item => item.kind === 'chat').map(item => item.chat.id));
+  assert.equal(ids(), '[3]');
+  nav.filter().props.onSelect('archived');
+  assert.equal(ids(), '[4]');
+  assert.equal(nav.filter().props.sections[0].items.find(item => item.id === 'archived').checked, true);
+  nav.filter().props.onSelect('running');
+  assert.equal(ids(), '[]', 'chatMark is idle in this host, so nothing is running');
+});
+
+test('a sidebar Project can be removed from the list after confirming', async () => {
+  const alerts = [];
+  const nav = navigationHost(deferred().promise, { alert: pressDanger(alerts) });
+  nav.more(nav.row('project')).props.onSelect('remove');
+  await settleAll();
+  assert.equal(alerts[0].title, 'Remove last?');
+  assert.equal(JSON.stringify(alerts[0].buttons), JSON.stringify([['Cancel', 'cancel'], ['Remove', 'destructive']]));
+  assert.equal(JSON.stringify(nav.calls), JSON.stringify([['project:forget', ['/last']], ['reload']]));
 });
 
 test('a new Chat reached without a Worktree starts in the Project checkout once it loads', () => {
@@ -494,25 +523,6 @@ test('header switchers keep the shared native overlay without hosting React view
   assert.equal(sheets.length, 0);
 });
 
-test('New Chat opens the composer directly when there are multiple Worktrees', () => {
-  const react = hookHost();
-  const pushed = [];
-  const session = { client: {}, recent: [], snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: { 1: { id: 1, name: 'main' }, 2: { id: 2, name: 'feature' } } } }, runs: { runs: {} } } };
-  const { default: ChatsScreen } = load('app/project.tsx', {
-    'expo-clipboard': { setStringAsync: async () => {} },
-    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, useLocalSearchParams: () => ({}), router: { push: route => pushed.push(route) } },
-    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
-    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
-    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../use-open-project': { useOpenProject: () => ({ wanted: null, error: '', retry() {} }) },
-  });
-  react.begin();
-  const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
-  assert.equal(typeof button.props.onPress, 'function', 'one tap must navigate without choosing a Worktree first');
-  button.props.onPress();
-  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1', projectPath: '/p' } }]));
-});
-
 // A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.
 function archiveProject() {
   const calls = [];
@@ -531,25 +541,15 @@ function archiveProject() {
 const pressDanger = alerts => (title, message, buttons) => { alerts.push({ title, message, buttons: buttons.map(button => [button.text, button.style]) }); buttons.find(button => button.style === 'destructive').onPress(); };
 async function settleAll() { for (let i = 0; i < 10; i++) await settle(); }
 
-test('a Chat row Archive asks with the worktree choice, then stops, hides and deletes the worktree', async () => {
-  const react = hookHost();
+test('a sidebar Chat Archive asks with the worktree choice, then stops, hides and deletes the worktree', async () => {
   const alerts = [];
   const project = archiveProject();
-  const session = { client: project.client, recent: [], snapshot: project.snapshot, expectActivity() {}, refresh: async () => { project.calls.push(['refresh']); } };
-  const { default: ChatsScreen } = load('app/project.tsx', {
-    'expo-clipboard': { setStringAsync: async () => {} },
-    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: { alert: pressDanger(alerts) }, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, useLocalSearchParams: () => ({}), router: { push() {} } },
-    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
-    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
-    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../use-open-project': { useOpenProject: () => ({ wanted: null, error: '', retry() {} }) },
-  });
-  react.begin();
-  const list = find(ChatsScreen(), node => node.type === 'FlatList');
-  const row = list.props.renderItem({ item: list.props.data[0] });
-  const archiveItem = row.type(row.props).props.children[0].props.sections.at(-1).items[0];
+  const nav = navigationHost(deferred().promise, { alert: pressDanger(alerts), session: { client: { ...project.client, url: 'mac' }, recent: [{ path: '/p' }], snapshot: project.snapshot, expectActivity() {}, refresh: async () => { project.calls.push(['refresh']); } } });
+  const more = nav.more(nav.row('chat'));
+  const archiveItem = more.props.sections.at(-1).items[0];
+  assert.equal(archiveItem.id, 'archive');
   assert.equal(archiveItem.disabled, undefined, 'a running Chat can be archived: it is stopped first');
-  row.props.onAction('archive');
+  more.props.onSelect('archive');
   await settleAll();
   assert.deepEqual(alerts, [{ title: 'Archive this Chat?', message: '1 uncommitted file will be lost. Commit them first to keep them.', buttons: [['Cancel', 'cancel'], ['Stop, archive and delete worktree', 'destructive']] }]);
   assert.deepEqual(project.calls.map(([method]) => method), ['worktree:roots', 'worktree:status', 'agent:interrupt', 'chat:patch', 'worktree:remove', 'refresh']);
@@ -778,53 +778,6 @@ test('switching the requested diff hides old content and ignores its late respon
   await settle();
   assert.equal(render().data.patch, '+second');
   cleanup?.();
-});
-
-function worktreeFormHost() {
-  const creating = deferred();
-  const react = hookHost();
-  let active = true, cleanup, effect, focusEffect;
-  react.useEffect = fn => { effect = fn; };
-  const nav = [];
-  const session = {
-    client: { call: method => method === 'worktree:create' ? creating.promise : Promise.resolve(['main']) },
-    snapshot: { project: { path: '/A' } }, drafts: {},
-    isSelected: () => active,
-    open: async () => { session.snapshot.project.path = '/A'; },
-    refresh: async () => {},
-    setDrafts(fn) { this.drafts = fn(this.drafts); },
-  };
-  const { default: Form } = load('app/new-worktree.tsx', {
-    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
-    'expo-router': { Redirect: 'Redirect', router: { replace: route => nav.push(route) }, useFocusEffect: fn => { if (fn !== focusEffect) { cleanup?.(); cleanup = fn(); focusEffect = fn; } } },
-    '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' },
-    '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll', 'Select'].map(name => [name, name])), styles: {} },
-  });
-  const render = () => { react.begin(); return Form(); };
-  const field = () => find(render(), n => n.type === 'Field').props;
-  const initialize = async () => { render(); effect?.(); await settle(); find(render(), n => n.type === 'Select').props.onChange('main'); field().onChangeText('original task'); };
-  return { session, creating, nav, render, field, initialize,
-    create() { find(render(), n => n.type === 'Button').props.onPress(); },
-    leaveRoute() { cleanup?.(); },
-    changeProject() { active = false; session.snapshot = { project: { path: '/B' } }; },
-  };
-}
-
-test('late Worktree creation cannot select its old Project or navigate after context changes', async () => {
-  for (const transition of ['changeProject', 'leaveRoute']) {
-    const form = worktreeFormHost(); await form.initialize(); form.create(); form[transition]();
-    form.creating.resolve({ worktreeId: 42 }); await settle();
-    assert.equal(form.nav.length, 0, transition);
-    if (transition === 'changeProject') assert.equal(form.session.snapshot.project.path, '/B');
-  }
-});
-
-test('new Worktree Chat receives the latest prompt typed while creation is pending', async () => {
-  const form = worktreeFormHost(); await form.initialize(); form.create();
-  form.field().onChangeText('newer task details');
-  form.creating.resolve({ worktreeId: 42 }); await settle();
-  assert.equal(form.session.drafts['/A#new:42'], 'newer task details');
-  assert.equal(form.nav.length, 1);
 });
 
 test('late Chat rename cannot pop another screen after its form loses focus', async () => {

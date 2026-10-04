@@ -12,7 +12,7 @@ const { chatInProject } = require('@milagre/shared/agent-runs');
 const { connect } = require('./client.cjs');
 const { createConfinement } = require('./confine.cjs');
 
-const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'chat:runs',
+const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file',

@@ -87,7 +87,7 @@ export default function ChatScreen() {
   const starterId = (candidates.find(item => item.path === projectPath) || candidates[0])?.id;
   useEffect(() => {
     if (!needsWorktree || !loaded) return;
-    if (starterId === undefined) router.replace('/project'); else router.setParams({ worktreeId: String(starterId) });
+    if (starterId === undefined) router.replace('/projects'); else router.setParams({ worktreeId: String(starterId) });
   }, [needsWorktree, loaded, starterId]);
   const sidebar = <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show('left')} /></Stack.Toolbar>;
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;

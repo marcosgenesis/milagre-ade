@@ -28,7 +28,7 @@ test('persistent host keeps its token and saved Chat across restart with private
   const next = JSON.parse(await fs.readFile(host.connectionFile, 'utf8'));
   assert.equal(next.token, details.token);
   const { createClient } = await import('../apps/mobile/src/client.ts');
-  const mobile = createClient(next.url, next.token);
+  const mobile = createClient({ address: next.url, token: next.token });
   const reopened = await mobile.call('project:open', [project]);
   assert.equal((await mobile.snapshot(reopened.path)).project.state.messages.at(-1).body, 'Saved before restart');
   await assert.rejects(startMobileHost({ dataDir, port: 0 }), /owned/);
@@ -76,7 +76,7 @@ test('--desktop shares the app daemon: the phone sees its Projects and the host 
   const host = await startMobileHost({ dataDir: path.join(root, 'phone'), desktopDataDir: desktopDir, port: 0 });
   const { url, token } = JSON.parse(await fs.readFile(host.connectionFile, 'utf8'));
   const { createClient } = await import('../apps/mobile/src/client.ts');
-  const recent = await createClient(url, token).call('project:recent');
+  const recent = await createClient({ address: url, token }).call('project:recent');
   assert.deepEqual(recent.map(item => item.path), [project]);
   await host.close();
   const after = await connect({ dataDir: desktopDir });

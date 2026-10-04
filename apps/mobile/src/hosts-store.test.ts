@@ -78,3 +78,50 @@ test('a Cloudflare pairing link keeps its Access token through save and list', a
   assert.throws(() => parsePairing(`milagre://pair?address=${encodeURIComponent('http://127.0.0.1:8797')}&token=${token}&cfId=${access.id}&cfSecret=${access.secret}`), /HTTPS/);
   assert.throws(() => parsePairing(`milagre://pair?address=${encodeURIComponent('https://mac.example.cloud')}&token=${token}&cfId=bad&cfSecret=${access.secret}`), /Cloudflare/);
 });
+
+const hostId = 'H'.repeat(21) + 'g';
+const key = 'K'.repeat(42) + 'A';
+const relayLink = (params: Record<string, string> = {}) => 'milagre://pair?' + Object.entries({ relay: 'wss://relay.milagre.cloud', host: hostId, key, token, name: 'Studio', ...params })
+  .map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('&');
+
+test('a relay pairing link round trips into a saved computer', async () => {
+  const pairing = parsePairing(relayLink());
+  const relay = { url: 'wss://relay.milagre.cloud', hostId, key };
+  assert.deepEqual(pairing, { address: `relay://${hostId}`, token, name: 'Studio', relay });
+  const store = createHostsStore(storage(), () => 7);
+  const saved = await store.save(pairing);
+  assert.deepEqual(saved, { id: `relay://${hostId}`, name: 'Studio', address: `relay://${hostId}`, token, relay, lastUsed: 7 });
+  assert.deepEqual(await store.list(), [saved]);
+  assert.equal(parsePairing(relayLink({ name: '' })).name, 'Mac');
+  assert.equal((await createHostsStore(storage()).save({ ...pairing, name: '' })).name, 'Mac');
+});
+
+test('a relay link with a damaged key, host or relay address asks for a new scan', () => {
+  assert.throws(() => parsePairing(relayLink({ key: key.slice(1) })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ key: key + 'A' })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ host: 'short' })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ relay: 'https://relay.milagre.cloud' })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ relay: 'ws://relay.milagre.cloud' })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ address: 'https://mac.example.com' })), /Scan the code again/);
+  assert.throws(() => parsePairing(relayLink({ token: 'short' })), /valid token/);
+});
+
+test('address and relay computers coexist, and rename and forget work on either', async () => {
+  let clock = 1;
+  const driver = storage();
+  const store = createHostsStore(driver, () => clock++);
+  await store.save({ name: 'MacBook Pro', address: 'https://mac.example.com', token });
+  const relay = await store.save(parsePairing(relayLink()));
+  assert.deepEqual((await store.list()).map(host => host.id), [`relay://${hostId}`, 'https://mac.example.com']);
+  // Pairing the same Mac again replaces it rather than adding a second entry.
+  await store.save(parsePairing(relayLink({ token: 'b'.repeat(64), name: 'Studio (new code)' })));
+  assert.deepEqual((await store.list()).map(host => [host.name, host.token]), [['Studio (new code)', 'b'.repeat(64)], ['MacBook Pro', token]]);
+  await store.rename(relay.id, 'Office');
+  assert.equal((await store.list())[0].name, 'Office');
+  await store.forget(relay.id);
+  assert.deepEqual((await store.list()).map(host => host.id), ['https://mac.example.com']);
+  // A damaged relay entry is dropped like any other.
+  const stored = [...driver.values.keys()][0];
+  driver.values.set(stored, JSON.stringify([...JSON.parse(driver.values.get(stored)!), { name: 'Bad', address: 'relay://x', token, relay: { url: 'wss://relay.milagre.cloud', hostId, key: 'short' } }]));
+  assert.deepEqual((await store.list()).map(host => host.id), ['https://mac.example.com']);
+});

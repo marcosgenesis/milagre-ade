@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { Alert, AppState } from 'react-native';
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import { createClient } from './client';
+import { relayRuntime } from './relay-native';
 import { savedHosts } from './hosts-native';
 import { useSession } from './session';
 import { createPushController, notificationTarget, type PushView } from './push-controller';
@@ -34,7 +35,7 @@ function usePushState() {
   // The factory only stores forgetHost; it invokes it later from async refresh, never during render.
   // eslint-disable-next-line react-hooks/refs
   const [controller] = useState(() => createPushController({ store: pushStore, hosts: savedHosts.list, forgetHost,
-    native: pushNative, call: (host, method, args) => createClient(host.address, host.token, fetch, 5000, host.access).call(method, args), onError: setError }));
+    native: pushNative, call: (host, method, args) => createClient(host, fetch, 5000, relayRuntime).call(method, args), onError: setError }));
   const view: PushView = path === '/chat' && session.client && session.snapshot && params.id && /^\d+$/.test(String(params.id))
     ? { hostId: session.client.url, chatId: `${session.snapshot.project.path}#${params.id}` } : null;
   const viewRef = useRef(view);

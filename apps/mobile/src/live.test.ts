@@ -88,10 +88,10 @@ test('an older bridge refusing the upgrade is asked again only after minutes, an
 test('the client opens its live socket on the same address and headers as its requests', () => {
   const { made, create } = sockets();
   const access = { id: `${'c'.repeat(32)}.access`, secret: 'S'.repeat(43) };
-  createClient('https://mac.example.cloud', 'token', fetch, 30000, access).live('/Users/me/My Project', { onSignal() {}, onStatus() {}, create }).close();
+  createClient({ address: 'https://mac.example.cloud', token: 'token', access }, fetch, 30000).live('/Users/me/My Project', { onSignal() {}, onStatus() {}, create }).close();
   assert.equal(made[0].url, 'wss://mac.example.cloud/live?projectPath=%2FUsers%2Fme%2FMy%20Project');
   assert.deepEqual(made[0].headers, { Authorization: 'Bearer token', 'CF-Access-Client-Id': access.id, 'CF-Access-Client-Secret': access.secret, Origin: LIVE_ORIGIN });
-  createClient('http://127.0.0.1:8787', 'token').live('/p', { onSignal() {}, onStatus() {}, create }).close();
+  createClient({ address: 'http://127.0.0.1:8787', token: 'token' }).live('/p', { onSignal() {}, onStatus() {}, create }).close();
   assert.match(made[1].url, /^ws:\/\/127\.0\.0\.1:8787\/live\?/);
 });
 

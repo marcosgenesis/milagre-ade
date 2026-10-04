@@ -22,7 +22,7 @@ async function main() {
     const { createClient } = await import('../apps/mobile/src/client.ts');
     host = await startMobileHost(options);
     const details = JSON.parse(await fs.readFile(host.connectionFile, 'utf8'));
-    const client = createClient(details.url, details.token);
+    const client = createClient({ address: details.url, token: details.token });
     const opened = await client.call('project:open', [project]);
     const worktreeId = Number(Object.keys(opened.state.worktrees)[0]);
     const saved = [];
@@ -47,7 +47,7 @@ async function main() {
     host = await startMobileHost(options);
     const next = JSON.parse(await fs.readFile(host.connectionFile, 'utf8'));
     assert.equal(next.token, details.token);
-    const reopened = await createClient(next.url, next.token).snapshot(project);
+    const reopened = await createClient({ address: next.url, token: next.token }).snapshot(project);
     for (const entry of saved) {
       assert.deepEqual(reopened.project.state.sessions[entry.sessionId], entry.chat);
       assert.deepEqual(reopened.project.state.messages.find(m => m.id === entry.message.id), entry.message);

@@ -2,11 +2,11 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { createClient, type Access, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
-import { savedHosts } from './hosts-native';
+import { readPermission, savedHosts, savePermission } from './hosts-native';
 import type { SavedHost } from './hosts-store';
-import type { AgentCliStatus, AgentModels } from '@milagre/shared/model';
+import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/shared/model';
 import type { Attachment } from './attachments';
-import type { TurnPreferences } from './turn-options';
+import { defaultPreferences, type TurnPreferences } from './turn-options';
 
 const hostOf = (url: string) => String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 
@@ -141,10 +141,15 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
-  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences }), [drafts, attachments, preferences]);
+  // Like desktop's default permission mode: the last one picked starts every Chat, and survives a relaunch.
+  const [permission, setPermission] = useState<PermissionMode>('ask');
+  useEffect(() => { void readPermission().then(saved => { if (saved) setPermission(saved); }); }, []);
+  const defaults = useMemo(() => ({ ...defaultPreferences, permissionMode: permission }), [permission]);
+  const setDefaultPermission = useCallback((mode: PermissionMode) => { setPermission(mode); void savePermission(mode); }, []);
+  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission }), [drafts, attachments, preferences, defaults, setDefaultPermission]);
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
-type Composer = { drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
+type Composer = { defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
 const ComposerContext = createContext<Composer | null>(null);
 export function useComposer() {
   const composer = useContext(ComposerContext);

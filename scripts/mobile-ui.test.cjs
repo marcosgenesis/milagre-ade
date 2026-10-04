@@ -55,7 +55,8 @@ function sessionHost(client) {
   const react = hookHost();
   const { useSessionState } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState: {} }, './client': { createClient: () => client },
-    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] } },
+    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
+    './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
   }, '\nexport { useSessionState };');
   return () => { react.begin(); return useSessionState(); };
 }
@@ -111,7 +112,7 @@ function chatHost() {
     snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: {} } }, runs: { runs: {} } },
     drafts: { '/p#new:1': 'first message' },
     attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
-    preferences: {}, models: null, cliStatus: null,
+    preferences: {}, defaults: require('../apps/mobile/src/turn-options.ts').defaultPreferences, setDefaultPermission() {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {},

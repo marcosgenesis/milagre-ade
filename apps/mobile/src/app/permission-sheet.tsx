@@ -4,8 +4,7 @@ import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
 import { PERMISSION_MODES } from '@milagre/shared/model-copy';
 import type { PermissionMode } from '@milagre/shared/model';
 import { PermissionIcon } from '../agent-controls';
-import { useComposer } from '../session';
-import { defaultPreferences } from '../turn-options';
+import { useComposer, useSession } from '../session';
 import { Icon } from '../icons';
 import { CircleButton, colors, styles } from '../ui';
 
@@ -13,9 +12,14 @@ import { CircleButton, colors, styles } from '../ui';
 export default function PermissionSheet() {
   const { chatId, busy } = useLocalSearchParams<{ chatId: string; busy?: string }>();
   const composer = useComposer();
-  const current = (composer.preferences[chatId] || defaultPreferences).permissionMode;
+  const session = useSession();
+  const current = (composer.preferences[chatId] || composer.defaults).permissionMode;
+  // Like desktop: the pick becomes the default for new Chats and applies to this Chat's agent right away, including a
+  // turn that is running (its next tool request uses the new mode). A Chat not yet sent has no agent to tell.
   const pick = (mode: PermissionMode) => {
-    composer.setPreferences(all => ({ ...all, [chatId]: { ...(all[chatId] || defaultPreferences), permissionMode: mode } }));
+    composer.setPreferences(all => ({ ...all, [chatId]: { ...(all[chatId] || composer.defaults), permissionMode: mode } }));
+    composer.setDefaultPermission(mode);
+    if (session.client && !/#new:/.test(chatId)) void session.client.call('agent:set-permission-mode', [{ chatId, mode }]).catch(() => {});
     router.back();
   };
   return <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 32 }}>

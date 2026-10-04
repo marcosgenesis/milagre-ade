@@ -137,10 +137,22 @@ runtime = await connectDesktopRuntime({
   return;
 }
 const environmentReady = loadLoginEnvironment();
-for (const method of runtime.methods) {
-  if (method !== "app:version") ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+// The host's commands. A restarted host can bring more (an older one lacked some), so this runs again after a restart.
+const registered = new Set(["app:version"]);
+function registerHostMethods() {
+  for (const method of runtime.methods) {
+    if (registered.has(method)) continue;
+    registered.add(method);
+    ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+  }
 }
+registerHostMethods();
 ipcMain.handle("app:version", () => app.getVersion());
+// An older host can't load very large Projects; the window offers to replace it with this desktop's own.
+ipcMain.handle("runtime:restart-host", async () => {
+  await runtime.restartHost();
+  registerHostMethods();
+});
 ipcMain.handle("project:open", async () => {
   const result = await dialog.showOpenDialog({ title: "Open project", properties: ["openDirectory", "createDirectory"] });
   return result.canceled || !result.filePaths[0] ? null : runtime.openProject(result.filePaths[0]);

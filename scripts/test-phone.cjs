@@ -1,5 +1,5 @@
 // Run with npm run test:phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
-// directory and socket, port chosen by the OS): turn phone access on, see the QR code and the local-only status, copy the
+// directory and socket, port chosen by the OS): turn phone access on, see the QR code and the relay status, copy the
 // link, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
@@ -28,6 +28,7 @@ window.milagre = new Proxy({
   getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
   setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
+  openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);
@@ -46,12 +47,14 @@ async function browserChecks() {
   app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-ui-")));
   const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-host-")));
   await app.whenReady();
-  const daemon = await startDaemon({ dataDir, version: "test", phoneOptions: { localPort: 0 }, runtimeOptions: {
+  // The check never dials the public relay: this stand-in reports that it connected.
+  const startRelay = (options) => { setTimeout(() => options.onStatus("online"), 20); return { close: async () => {}, status: () => "online" }; };
+  const daemon = await startDaemon({ dataDir, version: "test", phoneOptions: { localPort: 0, startRelay }, runtimeOptions: {
     cwd: dataDir, environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
   } });
   const host = await connect({ dataDir });
   const window = new BrowserWindow({ width: 1100, height: 760, useContentSize: true, show: false, webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false } });
-  for (const method of ["phone:status", "phone:set-enabled", "phone:reset"]) ipcMain.handle(method, (_event, ...args) => host.call(method, args));
+  for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"]) ipcMain.handle(method, (_event, ...args) => host.call(method, args));
   host.on("event", ({ channel, payload }) => { if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload); });
   window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
   const evaluate = async (source) => {
@@ -92,19 +95,20 @@ async function browserChecks() {
     await screenshot("phone-off");
     console.log("PASS: Settings › Phone starts off, with nothing to pair");
 
-    // On: a QR image that decodes, the local-only status and the warning.
+    // On: a QR image that decodes, the relay status, the pairing window and the warning.
     await evaluate(`${toggle}.click()`);
     await waitFor(`!!document.querySelector('[data-phone-qr]')`);
     await waitFor(`(() => { const img = document.querySelector('[data-phone-qr]'); return img.complete && img.naturalWidth > 0; })()`);
     assert.equal(await evaluate(`${toggle}.getAttribute('aria-checked')`), "true");
     assert.equal(await evaluate(`document.querySelector('[data-phone-qr]').src.startsWith('data:image/svg+xml')`), true);
-    assert.match(await evaluate(`document.body.textContent`), /This Mac only — 127\.0\.0\.1/);
-    assert.equal(await evaluate(`!!document.querySelector('[data-phone-local-only]')`), true);
+    await waitFor(`document.body.textContent.includes('On, reachable from any network')`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-phone-local-only]')`), false);
+    await waitFor(`document.querySelector('[data-phone-pairing="open"]')?.textContent.includes('New phones can pair for 10 more minutes')`);
     assert.match(await evaluate(`document.querySelector('[data-phone-warning]').textContent`), /gives access to your agents/);
     const first = await token();
     assert.match(first, /^[a-f0-9]{64}$/);
     await screenshot("phone-on");
-    console.log("PASS: turning it on shows the QR code, the local-only status and the warning");
+    console.log("PASS: turning it on shows the QR code, the relay status, the pairing window and the warning");
 
     // Copy: the pairing link lands on the clipboard.
     window.webContents.focus();
@@ -112,7 +116,7 @@ async function browserChecks() {
     await waitFor(`[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Copied')`);
     const copied = await clipboard.readText();
     assert.equal(copied, (await host.call("phone:status")).pairingLink);
-    assert.match(copied, /^milagre:\/\/pair\?address=/);
+    assert.match(copied, /^milagre:\/\/pair\?relay=/);
     console.log("PASS: Copy pairing link copies the link");
 
     // Reset asks first, and cancelling changes nothing.

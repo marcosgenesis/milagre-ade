@@ -17,7 +17,8 @@ export interface RuntimeOptions {
 export interface Runtime {
   readonly methods: readonly string[];
   invoke(method: string, args?: unknown[]): Promise<unknown>;
-  openProject(projectPath: string): Promise<OpenProject>;
+  /** `takeNotice` (default true): a desktop window's open, which takes the restored-chats notice. */
+  openProject(projectPath: string, options?: { takeNotice?: boolean }): Promise<OpenProject>;
   resumeRecentProjects(): Promise<void>;
   environmentReady: Promise<unknown>;
   focused(): Promise<void>;

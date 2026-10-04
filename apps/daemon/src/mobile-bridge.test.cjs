@@ -364,6 +364,33 @@ test('live sockets are pinged, capped, and the oldest gives way to a new one', a
   assert.equal(sockets[1].socket.readyState, WebSocket.OPEN);
 });
 
+test('a Project over 16 MB reaches the phone: its snapshot, tool output on demand, and the signal at a turn\'s end', async t => {
+  const agent = scriptedAgent();
+  const { project, bridge, rpc, request, token } = await fixture(t, { runtimeOptions: agent.runtimeOptions });
+  const messages = Array.from({ length: 900 }, (_, index) => ({ id: 10 + index, session_id: 2, body: `Reply ${index}`, context: null, role: 'assistant',
+    steps: [{ id: `step-${index}`, kind: 'shell', title: 'Ran `npm test`', status: 'done', detail: `${index} `.padEnd(20_000, 'output line\n') }] }));
+  await fs.mkdir(path.join(project, '.milagre'));
+  await fs.writeFile(path.join(project, '.milagre/coordination.json'), JSON.stringify({ next_id: 5000, projects: { 1: { id: 1, name: 'project' } },
+    worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'main', status: 'Created', provider: 'codex', title: 'Long chat' } }, messages, tasks: {} }));
+  assert.equal((await rpc('project:open', [project])).status, 200);
+  // The daemon reads the whole state in pages; the phone gets it without tool output, and asks for one message's.
+  const snapshot = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.equal(snapshot.project.state.messages.length, 900);
+  assert.equal(snapshot.project.state.messages[0].steps[0].hasDetail, true);
+  const message = (await (await request(`/message?projectPath=${encodeURIComponent(project)}&id=10`)).json()).result;
+  assert.equal(message.steps[0].detail.length, 20_000);
+  // The daemon leaves a state this size out of agent events; a turn's end still signals a prompt snapshot.
+  const live = await openLive(bridge, project, { authorization: `Bearer ${token}` });
+  assert.equal((await rpc('chat:send', [{ projectPath: project, sessionId: 2, body: 'one more', provider: 'codex', model: 'm', permissionMode: 'ask' }])).status, 200);
+  await until(() => live.messages.includes('project'));
+  await delay(500);
+  const before = live.messages.length;
+  agent.sessions[0].turnActive = false;
+  agent.sessions[0].emit({ type: 'turn-completed' });
+  await until(() => live.messages.length > before);
+  assert.equal(live.messages.at(-1), 'project');
+});
+
 test('push registration is authenticated, validated and removable through mobile RPC', async t => {
   const { rpc, bridge } = await fixture(t);
   const device = { deviceId: 'b6e2df4b-972b-4e7b-bc65-6cda0a173798', token: 'ExpoPushToken[test]', hostId: bridge.url, notifyWhenWaiting: true, notifyOnCompletion: true };

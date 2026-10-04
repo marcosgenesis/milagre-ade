@@ -1,6 +1,7 @@
-import { localEndpoint, validAccess, type Access } from './client.ts';
+import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from './client.ts';
 
-export type SavedHost = { id: string; name: string; address: string; token: string; access?: Access; lastUsed: number };
+/** A paired computer. A relay computer's `address` and `id` are `relay://<hostId>`; it has no URL of its own. */
+export type SavedHost = { id: string; name: string; address: string; token: string; access?: Access; relay?: RelayLink; lastUsed: number };
 type SecureStorage = {
   getItemAsync(key: string): Promise<string | null>;
   setItemAsync(key: string, value: string): Promise<void>;
@@ -12,10 +13,16 @@ export const MAX_HOSTS = 12;
 
 function validate(value: unknown): SavedHost {
   const host = value as Partial<SavedHost>;
-  const address = localEndpoint(String(host?.address ?? ''));
   if (!/^[a-f0-9]{64}$/i.test(String(host?.token ?? ''))) throw new Error('A saved computer has no valid token.');
+  const lastUsed = Number(host.lastUsed) || 0;
+  if (host.relay) {
+    const relay = validRelay(host.relay);
+    const address = relayAddress(relay.hostId);
+    return { id: address, name: String(host.name || 'Mac').slice(0, 80), address, token: String(host.token), relay, lastUsed };
+  }
+  const address = localEndpoint(String(host?.address ?? ''));
   const access = validAccess(host.access);
-  return { id: address, name: String(host.name || new URL(address).hostname).slice(0, 80), address, token: String(host.token), ...(access ? { access } : {}), lastUsed: Number(host.lastUsed) || 0 };
+  return { id: address, name: String(host.name || new URL(address).hostname).slice(0, 80), address, token: String(host.token), ...(access ? { access } : {}), lastUsed };
 }
 const sorted = (hosts: SavedHost[]) => [...hosts].sort((a, b) => b.lastUsed - a.lastUsed);
 
@@ -47,7 +54,7 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
   }
   return {
     list: () => ordered(read),
-    save: (host: { name: string; address: string; token: string; access?: Access }) => ordered(async () => {
+    save: (host: { name: string; address: string; token: string; access?: Access; relay?: RelayLink }) => ordered(async () => {
       const saved = validate({ ...host, lastUsed: now() });
       await write([saved, ...(await read()).filter(item => item.id !== saved.id)]);
       return saved;

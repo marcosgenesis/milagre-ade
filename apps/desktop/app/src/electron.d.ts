@@ -26,8 +26,12 @@ export type PhoneStatus = {
   enabled: boolean;
   state: "off" | "starting" | "on" | "error";
   error?: string;
-  /** "cloudflare": reachable from any network at `publicUrl`. "none": only this Mac, at `localUrl`. */
-  remote: "cloudflare" | "none";
+  /** "cloudflare": reachable from any network at `publicUrl`. "relay": reachable from any network through relay.milagre.cloud. "none": only this Mac, at `localUrl`. */
+  remote: "cloudflare" | "relay" | "none";
+  /** Only with `remote: "relay"`: whether this Mac is connected to the relay. */
+  relay?: "connecting" | "online" | "offline";
+  /** Only with `remote: "relay"`: when (ms since the epoch) the window in which new phones may pair ends. */
+  pairingUntil?: number;
   localUrl?: string;
   publicUrl?: string;
   pairingLink?: string;
@@ -37,7 +41,8 @@ export type PhoneStatus = {
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
-export type RuntimeConnection = { connected: boolean; message?: string };
+/** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects. */
+export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean };
 export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
@@ -52,6 +57,8 @@ declare global {
   interface Window {
     milagre: {
       getRuntimeConnection: () => Promise<RuntimeConnection>;
+      /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
+      restartHost: () => Promise<void>;
       onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
       onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;
@@ -179,6 +186,8 @@ declare global {
       setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
       /** A new access token: phones paired before scan again. */
       resetPhoneAccess: () => Promise<PhoneStatus>;
+      /** Lets phones that have not paired yet do so for another ten minutes. */
+      openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */

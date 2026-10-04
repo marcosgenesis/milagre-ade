@@ -9,6 +9,8 @@ const MAX_DEVICES = 32;
 const MAX_CHATS = 500;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const TOKEN = /^(?:ExpoPushToken|ExponentPushToken)\[[A-Za-z0-9_-]{1,200}\]$/;
+// A Mac reached through the public relay has no URL; the phone names it by its relay host id.
+const RELAY_HOST = /^relay:\/\/[A-Za-z0-9_-]{22}$/;
 const capped = (value, limit) => String(value || '').trim().slice(0, limit);
 function validDevice(deviceId) {
   if (typeof deviceId !== 'string' || !UUID.test(deviceId)) throw new Error('Invalid push device ID');
@@ -17,10 +19,12 @@ function validDevice(deviceId) {
 function registration(value) {
   validDevice(value?.deviceId);
   if (typeof value.token !== 'string' || !TOKEN.test(value.token)) throw new Error('Invalid Expo push token');
-  let host;
-  try { host = new URL(value.hostId); } catch { throw new Error('Invalid push computer address'); }
-  if (host.origin !== value.hostId || host.username || host.password || value.hostId.length > 512 ||
-      (host.protocol !== 'https:' && !(host.protocol === 'http:' && ['127.0.0.1', '10.0.2.2'].includes(host.hostname)))) throw new Error('Invalid push computer address');
+  if (!(typeof value.hostId === 'string' && RELAY_HOST.test(value.hostId))) {
+    let host;
+    try { host = new URL(value.hostId); } catch { throw new Error('Invalid push computer address'); }
+    if (host.origin !== value.hostId || host.username || host.password || value.hostId.length > 512 ||
+        (host.protocol !== 'https:' && !(host.protocol === 'http:' && ['127.0.0.1', '10.0.2.2'].includes(host.hostname)))) throw new Error('Invalid push computer address');
+  }
   if (typeof value.notifyWhenWaiting !== 'boolean' || typeof value.notifyOnCompletion !== 'boolean') throw new Error('Invalid push preferences');
   return { deviceId: value.deviceId, token: value.token, hostId: value.hostId, notifyWhenWaiting: value.notifyWhenWaiting, notifyOnCompletion: value.notifyOnCompletion };
 }

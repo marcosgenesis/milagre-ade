@@ -8,7 +8,7 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   const demo = await startDemo({ port: 0 });
   t.after(async () => { await demo.close(); await fs.rm(demo.root, { recursive: true, force: true }); });
   const { createClient } = await import('../apps/mobile/src/client.ts');
-  let client = createClient(demo.url, demo.token);
+  let client = createClient({ address: demo.url, token: demo.token });
   const project = await client.call('project:open', [demo.project]);
   const changes = await client.call('git:diff-files', [{ cwd: demo.project, mode: 'uncommitted' }]);
   assert.ok(changes.files.some(file => file.path === 'README.md'));
@@ -23,7 +23,7 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   await wait(state => state.project.state.messages.some(message => message.body.includes('reply made it back')));
   await send('approval');
   const approval = await wait(state => state.runs.runs[chatId]?.approvals.length);
-  client = createClient(demo.url, demo.token); // New mobile connection sees the same pending turn.
+  client = createClient({ address: demo.url, token: demo.token }); // New mobile connection sees the same pending turn.
   assert.equal((await client.snapshot(demo.project)).runs.runs[chatId].approvals.length, 1);
   assert.equal(await client.call('agent:respond-permission', [{ chatId, requestId: approval.runs.runs[chatId].approvals[0].requestId, decision: 'allow' }]), true);
   await wait(state => !state.runs.runs[chatId]);

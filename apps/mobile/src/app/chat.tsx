@@ -64,7 +64,7 @@ export default function ChatScreen() {
     return () => { cancelled = true; };
   }, [connected, projectPath, params.id]);
   const allMessages = session.snapshot?.project.state.messages;
-  const media = useCallback((path: string) => connected!.media(projectPath!, path), [connected, projectPath]);
+  const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
   const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
   // Each Chat's newest message id, for the switcher's order; one pass instead of a scan per comparison.
   const lastMessage = useMemo(() => {

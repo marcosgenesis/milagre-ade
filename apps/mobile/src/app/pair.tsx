@@ -8,19 +8,21 @@ import { SpinnerRing } from '../icons';
 
 /** Opened by the milagre://pair link in the host's QR code when it is scanned with the Camera app. */
 export default function PairLink() {
-  const params = useLocalSearchParams<{ address?: string; token?: string; name?: string; cfId?: string; cfSecret?: string }>();
+  const params = useLocalSearchParams<{ address?: string; token?: string; name?: string; cfId?: string; cfSecret?: string; relay?: string; host?: string; key?: string }>();
   const session = useSession();
   const [error, setError] = useState('');
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const pairing = parsePairing(`milagre://pair?address=${encodeURIComponent(params.address || '')}&token=${params.token || ''}&name=${encodeURIComponent(params.name || '')}${params.cfId ? `&cfId=${encodeURIComponent(params.cfId)}&cfSecret=${encodeURIComponent(params.cfSecret || '')}` : ''}`);
-        if (await session.connect(pairing.address, pairing.token, true, pairing.name, pairing.access) && !cancelled) { router.dismissTo('/'); router.push('/projects'); }
+        // The link is rebuilt from the params expo-router parsed; only the ones it carried go back in.
+        const query = (['address', 'relay', 'host', 'key', 'token', 'name', 'cfId', 'cfSecret'] as const).flatMap(key => params[key] === undefined ? [] : [`${key}=${encodeURIComponent(params[key] || '')}`]);
+        const pairing = parsePairing(`milagre://pair?${query.join('&')}`);
+        if (await session.connect(pairing) && !cancelled) { router.dismissTo('/'); router.push('/projects'); }
       } catch (e) { if (!cancelled) setError((e as Error).message); }
     })();
     return () => { cancelled = true; };
-  }, [params.address, params.token, params.name, params.cfId, params.cfSecret]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params.address, params.token, params.name, params.cfId, params.cfSecret, params.relay, params.host, params.key]); // eslint-disable-line react-hooks/exhaustive-deps
   return <View style={[styles.screen, { padding: 24, justifyContent: 'center', gap: 16 }]}>
     <Stack.Screen options={{ title: 'Pairing' }} />
     {error ? <><ErrorNotice message={error} /><PillButton title="Back to computers" secondary onPress={() => router.replace('/')} /></>

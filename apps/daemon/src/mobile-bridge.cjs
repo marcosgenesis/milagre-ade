@@ -36,6 +36,18 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
   let active = 0;
+  // The phone polls /snapshot every second. Each Project's last answer is kept with its revision: while the state is
+  // the same, the daemon answers `unchanged` and the state is neither read in pages nor encoded again.
+  const snapshots = new Map();
+  async function snapshotJson(projectPath) {
+    const cached = snapshots.get(projectPath);
+    const project = await client.call('project:snapshot', [projectPath, cached ? { unlessRevision: cached.revision } : {}]);
+    if (project?.unchanged && cached) return cached.json;
+    const json = JSON.stringify(project);
+    snapshots.delete(projectPath);
+    if (typeof project?.revision === 'string') snapshots.set(projectPath, { revision: project.revision, json });
+    return json;
+  }
   let closed;
   let url;
   // Images the paired app may show: the Project's Worktrees, its persisted attachments (<Project>/.milagre/images),
@@ -47,9 +59,10 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
     if (!projectPath || !requested || !path.isAbsolute(projectPath) || !path.isAbsolute(requested)) throw failure(400, 'projectPath and path must be absolute');
     const type = MEDIA_TYPES[path.extname(requested).toLowerCase()];
     if (!type) throw failure(415, 'Only png, jpeg, gif, webp and heic images are served');
-    const snapshot = await client.call('project:snapshot', [projectPath]);
+    // Only the worktree folders: a big Project's whole state would be read in pages for every image.
+    const worktreePaths = await client.call('project:worktree-paths', [projectPath]);
     const candidates = [
-      ...Object.values(snapshot?.state?.worktrees ?? {}).map(worktree => worktree?.path),
+      ...(Array.isArray(worktreePaths) ? worktreePaths : []),
       path.join(projectPath, '.milagre', 'images'),
       path.join(dataDir, 'mobile-attachments'),
       path.join(os.tmpdir(), 'milagre-generated-images'),
@@ -105,8 +118,10 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
         }
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
-          const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          result = { project, runs };
+          const [project, runs] = await Promise.all([snapshotJson(projectPath), client.call('chat:runs')]);
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+          res.end(`{"v":1,"result":{"project":${project},"runs":${JSON.stringify(runs)}}}`);
+          return;
         } else if (req.method === 'POST' && ['/rpc', '/attachments'].includes(target.pathname)) {
           if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw failure(415, 'Use application/json');
           const limit = target.pathname === '/attachments' ? 7 * MAX_BODY : MAX_BODY;
@@ -132,7 +147,7 @@ async function startMobileBridge({ dataDir, port = 8787, token }) {
             const bytes = Buffer.from(base64, 'base64');
             if (bytes.length > 5 * MAX_BODY) throw failure(413, 'Each file must be 5 MiB or smaller');
             if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
-            await client.call('project:snapshot', [projectPath]);
+            await client.call('project:worktree-paths', [projectPath]);
             const folder = path.join(dataDir, 'mobile-attachments', randomUUID());
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');

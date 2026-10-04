@@ -6,23 +6,49 @@ const { socketPath: pathFor, prepareSocketDirectory } = require('./paths.cjs');
 const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, pageSize, wire } = require('./protocol.cjs');
 
 const PAGES_TTL_MS = 30000;
-const MAX_PAGED_RESPONSES = 4;
+// What one connection may hold in paged responses at once, in characters. A response larger than that alone is still
+// served when nothing else is held; the rest wait for a reader to finish rather than evict a response being read.
+const PAGES_BUDGET_CHARS = 64 * 1024 * 1024;
+// Their replies are sized to fit a frame already; paging them again would never end.
+const PAGE_METHODS = new Set(['daemon:result-page', 'daemon:snapshot-page']);
 
-// A response too large for one frame, kept per connection until its client has read every page in order.
-function createResultPages(maxFrameBytes) {
+// Responses too large to send whole, kept per connection until their client has read every page in order.
+function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = PAGES_BUDGET_CHARS } = {}) {
   const captures = new Map();
+  const waiting = [];
   const size = pageSize(maxFrameBytes);
+  let held = 0;
   let nextId = 0;
-  function release(id) { clearTimeout(captures.get(id)?.timer); captures.delete(id); }
+  let closed = false;
+  const fits = chars => captures.size === 0 || (captures.size < MAX_PENDING && held + chars <= budgetChars);
+  function admit() {
+    while (waiting.length && (closed || fits(waiting[0].chars))) waiting.shift().resolve();
+  }
+  function release(id) {
+    const capture = captures.get(id);
+    if (!capture) return;
+    clearTimeout(capture.timer);
+    captures.delete(id);
+    held -= capture.text.length;
+    admit();
+  }
+  // The time limit runs from the last page read, so a reader that keeps going never loses its response.
+  function arm(id, capture) {
+    clearTimeout(capture.timer);
+    capture.timer = setTimeout(() => release(id), ttlMs);
+    capture.timer.unref();
+  }
   return {
-    capture(text) {
-      if (captures.size >= MAX_PAGED_RESPONSES) release(captures.keys().next().value);
+    /** The page count for `text`, once the connection has room for it; null when the connection closed meanwhile. */
+    async capture(text) {
+      if (waiting.length || !fits(text.length)) await new Promise(resolve => waiting.push({ chars: text.length, resolve }));
+      if (closed) return null;
       const pageId = ++nextId;
-      const pageCount = Math.max(1, Math.ceil(text.length / size));
-      const timer = setTimeout(() => release(pageId), PAGES_TTL_MS);
-      timer.unref();
-      captures.set(pageId, { text, pageCount, nextPage: 0, timer });
-      return { pageId, pageCount };
+      const capture = { text, pageCount: Math.max(1, Math.ceil(text.length / size)), nextPage: 0, timer: null };
+      captures.set(pageId, capture);
+      held += text.length;
+      arm(pageId, capture);
+      return { pageId, pageCount: capture.pageCount };
     },
     page(pageId, index) {
       const capture = captures.get(pageId);
@@ -30,24 +56,50 @@ function createResultPages(maxFrameBytes) {
       if (!Number.isInteger(index) || index !== capture.nextPage || index >= capture.pageCount) throw new Error('This page is out of order. Read the pages from the first, or send the request again.');
       const text = capture.text.slice(index * size, (index + 1) * size);
       if (++capture.nextPage === capture.pageCount) release(pageId);
+      else arm(pageId, capture);
       return text;
     },
-    clear() { for (const id of [...captures.keys()]) release(id); },
+    clear() { closed = true; for (const id of [...captures.keys()]) release(id); admit(); },
   };
 }
 
-// An event whose project state is too large for one frame goes out without it; a client reads the state in pages.
-// Returns the event to send, serialized once for every client.
-function eventFrame(message, maxFrameBytes) {
-  const json = JSON.stringify(message);
-  const { payload } = message.event;
-  if (Buffer.byteLength(json) + 1 <= maxFrameBytes || !payload || typeof payload !== 'object' || !('state' in payload)) return { message, json };
-  const { state: _state, ...rest } = payload;
-  const slim = { ...message, event: { ...message.event, payload: { ...rest, stateTooLarge: true } } };
-  return { message: slim, json: JSON.stringify(slim) };
+// A project's state is encoded once per state object (states are replaced, never changed in place) and reused by every
+// event, reply and client, so a burst of events and the reads that follow them serialise it once.
+const encodedStates = new WeakMap();
+function encodeState(state) {
+  let encoded = encodedStates.get(state);
+  if (!encoded) {
+    const json = JSON.stringify(state);
+    encoded = { json, bytes: Buffer.byteLength(json) };
+    encodedStates.set(state, encoded);
+  }
+  return encoded;
+}
+const hasState = value => Boolean(value && typeof value === 'object' && !Array.isArray(value) && value.state && typeof value.state === 'object');
+/** JSON for `value`, with its `state` taken from the cache (written last). */
+function encode(value) {
+  if (!hasState(value)) return JSON.stringify(value ?? null);
+  const { state, ...rest } = value;
+  const head = JSON.stringify(rest);
+  return `${head === '{}' ? '{' : `${head.slice(0, -1)},`}"state":${encodeState(state).json}}`;
 }
 
-async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
+// An event, encoded once for every client. A state over `inlineLimit` (a quarter of a frame) is left out
+// (stateTooLarge) for the client to read in pages: a few events that size queued together would trip the
+// stalled-client guard, which allows two frames.
+function eventFrame(channel, payload, seq, inlineLimit) {
+  let body = payload;
+  if (hasState(payload) && encodeState(payload.state).bytes > inlineLimit) {
+    const { state: _state, ...rest } = payload;
+    body = { ...rest, stateTooLarge: true };
+  }
+  const json = `{"v":${VERSION},"event":{"channel":${JSON.stringify(channel)},"payload":${encode(body)},"seq":${seq}}}`;
+  return { json, bytes: Buffer.byteLength(json) + 1 };
+}
+
+async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, pagesTtlMs, pagesBudgetChars, onError = error => console.error(error) }) {
+  // Anything bigger travels in pages, or (a state in an event) is read in pages by the client.
+  const inlineLimit = Math.floor(maxFrameBytes / 4);
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
@@ -67,10 +119,10 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
   function broadcast(channel, payload) {
     const seq = ++eventSeq;
     if (!clients.size) return;
-    // Encoded once for every client. An event that still doesn't fit is skipped, never the connection.
-    const { message, json } = eventFrame({ v: VERSION, event: { channel, payload, seq } }, maxFrameBytes);
+    // An event that still doesn't fit is skipped, never the connection.
+    const { json, bytes } = eventFrame(channel, payload, seq, inlineLimit);
     for (const connection of clients.values()) {
-      try { connection.send(message, json); }
+      try { connection.send(null, json, bytes); }
       catch (error) { onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`)); }
     }
   }
@@ -80,7 +132,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
     let snapshotCapture;
     let snapshotTimer;
     let nextSnapshotId = 0;
-    const resultPages = createResultPages(maxFrameBytes);
+    const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
     function releaseSnapshot() {
       clearTimeout(snapshotTimer);
       snapshotCapture = null;
@@ -112,13 +164,16 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
       if (stopping) { fail('CLOSING', 'The daemon is closing'); return; }
       if (inflight.has(id) || inflight.size >= MAX_PENDING) { fail('TOO_MANY_REQUESTS', 'Request ID is in use or too many requests are pending'); socket.end(); return; }
       inflight.add(id);
-      // A client that reads pages (`pages: true`) gets a response too large for one frame as a page count instead.
-      function reply(result) {
-        try { connection.send({ v: VERSION, id, result }); }
-        catch (error) {
-          if (error.code !== 'FRAME_TOO_LARGE' || request.pages !== true) throw error;
-          connection.send({ v: VERSION, id, pages: resultPages.capture(JSON.stringify(result)) });
+      // Serialised once. A client that reads pages (`pages: true`) gets anything over a quarter of a frame as a page
+      // count; one that can't gets it whole up to the frame limit, and a clear FRAME_TOO_LARGE error past it.
+      async function reply(result) {
+        const resultJson = encode(result);
+        if (request.pages === true && !PAGE_METHODS.has(request.method) && resultJson.length > inlineLimit) {
+          const pages = await resultPages.capture(resultJson);
+          if (pages) connection.send({ v: VERSION, id, pages });
+          return;
         }
+        connection.send(null, `{"v":${VERSION},"id":${JSON.stringify(id)},"result":${resultJson}}`);
       }
       try {
         let result;
@@ -165,7 +220,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, maxFrameByte
         else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args);
         if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
-        reply(result ?? null);
+        await reply(result ?? null);
         if (request.method === 'daemon:stop') void close().catch(onError);
       } catch (error) {
         fail(typeof error.code === 'string' ? error.code : 'COMMAND_FAILED', error.message);

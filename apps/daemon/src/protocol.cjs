@@ -51,11 +51,11 @@ function wire(socket, { onMessage, onInvalid, maxFrameBytes = MAX_FRAME_BYTES })
     }
   });
   return {
-    /** `json`, when given, is `message` already serialized, so one event is encoded once for every client. */
-    send(message, json) {
+    /** `json`, when given, is `message` already serialized (and `bytes` its frame's length), so one event is encoded and measured once for every client. */
+    send(message, json, size) {
       if (socket.destroyed || socket.writableEnded) return false;
       const frame = (json ?? JSON.stringify(message)) + '\n';
-      const bytes = Buffer.byteLength(frame);
+      const bytes = size ?? Buffer.byteLength(frame);
       if (bytes > maxFrameBytes) throw Object.assign(protocolError('FRAME_TOO_LARGE', `The message is ${megabytes(bytes)}, over the local daemon's ${megabytes(maxFrameBytes)} frame limit`), { bytes });
       if (socket.writableLength + bytes > 2 * maxFrameBytes) {
         socket.destroy();

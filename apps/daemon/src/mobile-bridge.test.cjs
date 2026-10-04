@@ -38,6 +38,14 @@ test('mobile bridge forwards commands to the existing owner and reads cached sna
   const snapshot = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
   assert.equal(snapshot.project.state.sessions[session.id].title, 'Updated from socket');
   assert.deepEqual(snapshot.runs.runs, {});
+  // Polling an unchanged Project answers from the bridge's copy, with the same revision; a change replaces it.
+  const again = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.equal(again.project.revision, snapshot.project.revision);
+  assert.deepEqual(again.project.state, snapshot.project.state);
+  await client.call('chat:patch', [project, session.id, { title: 'Changed again' }]);
+  const changed = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  assert.notEqual(changed.project.revision, snapshot.project.revision);
+  assert.equal(changed.project.state.sessions[session.id].title, 'Changed again');
   await bridge.close();
   assert.equal((await client.call('daemon:status')).version, 'test');
 });

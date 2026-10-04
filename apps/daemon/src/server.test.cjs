@@ -302,3 +302,85 @@ test('chats brought back from a large old worktree file load through the daemon'
   assert.equal((await desktop.call('project:current')).restoredChats, undefined);
   await assert.rejects(fs.stat(path.join(linked, '.milagre/coordination.json')), { code: 'ENOENT' });
 });
+
+// A project whose state is a few pages at this fixture's 8 KB frames: two notes, each small enough to send.
+async function notedProject(first, project, letters = ['p', 'q']) {
+  const opened = await first.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  for (const letter of letters) await first.call('chat:git-note', [`${project}#${session.id}`, letter.repeat(5000)]);
+  return session;
+}
+
+test('many paged reads at once on one connection all finish, waiting instead of evicting one being read', async t => {
+  const { project, client } = await fixture(t, { pagesBudgetChars: 3000 });
+  const first = await client();
+  await notedProject(first, project);
+  const reads = await Promise.all(Array.from({ length: 8 }, () => first.call('project:snapshot', [project])));
+  for (const read of reads) assert.deepEqual(read.state.messages.map(item => item.body), ['p'.repeat(5000), 'q'.repeat(5000)]);
+});
+
+test('a paged response stays while its reader keeps going and expires once it stops', async t => {
+  const { dataDir, project, client } = await fixture(t, { pagesTtlMs: 300 });
+  await notedProject(await client(), project);
+  const socket = net.createConnection(require('./paths.cjs').socketPath(dataDir));
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  let id = 0;
+  const ask = (method, args, extra = {}) => rawRequest(socket, { v: 1, id: ++id, method, args, ...extra });
+  const steady = (await ask('project:snapshot', [project], { pages: true })).pages;
+  assert.ok(steady.pageCount >= 3);
+  const parts = [];
+  for (let index = 0; index < steady.pageCount; index++) {
+    if (index) await delay(200); // Each gap is under the limit; the whole read is well over it.
+    parts.push((await ask('daemon:result-page', [steady.pageId, index])).result);
+  }
+  assert.equal(JSON.parse(parts.join('')).state.messages.length, 2);
+  const stalled = (await ask('project:snapshot', [project], { pages: true })).pages;
+  assert.equal(typeof (await ask('daemon:result-page', [stalled.pageId, 0])).result, 'string');
+  await delay(500);
+  assert.match((await ask('daemon:result-page', [stalled.pageId, 1])).error.message, /expired/);
+});
+
+test('an event whose state is over a quarter of a frame is sent without it', async t => {
+  const { project, client } = await fixture(t);
+  const first = await client();
+  const observer = await client();
+  const events = [];
+  observer.on('event', event => events.push(event));
+  const session = await notedProject(first, project, ['r']);
+  await first.call('chat:patch', [project, session.id, { title: 'Quarter' }]);
+  const changed = await waitFor(() => events.find(event => event.channel === 'project:state' && event.payload.stateTooLarge));
+  assert.equal('state' in changed.payload, false);
+  assert.equal((await observer.call('project:snapshot', [project])).state.sessions[session.id].title, 'Quarter');
+});
+
+test('a daemon that resumes a turn at startup brings the chats back first and keeps the notice for the window', async t => {
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-daemon-resume-')));
+  const project = path.join(directory, 'project');
+  const linked = path.join(directory, 'linked');
+  const dataDir = path.join(directory, 'profile');
+  await fs.mkdir(project);
+  execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
+  execFileSync('git', ['-C', project, ...gitConfig, 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', project, 'worktree', 'add', '-b', 'linked', linked], { stdio: 'ignore' });
+  // A stale stopped turn makes startup load the project; a recent entry from before #117 names the linked worktree.
+  await writeState(project, { next_id: 20, projects: { 1: { id: 1, name: 'project' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } },
+    sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'main', status: 'Created', resumeTurn: { stoppedAt: 0 } } }, messages: [], tasks: {} });
+  await writeState(linked, { next_id: 9, projects: { 1: { id: 1, name: 'linked' } }, worktrees: { 1: { id: 1, project_id: 1, path: linked, name: 'linked' } },
+    sessions: { 3: { id: 3, worktree_id: 1, agent_name: 'linked', status: 'Created', native_session_id: 'from-linked', title: 'Linked chat' } }, messages: [{ id: 4, session_id: 3, body: 'Saved in linked', context: null }], tasks: {} });
+  await fs.mkdir(dataDir);
+  await fs.writeFile(path.join(dataDir, 'recent-projects.json'), JSON.stringify([{ path: linked, name: 'linked' }, { path: project, name: 'project' }]));
+  const daemon = await startDaemon({ dataDir, version: 'test', runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {} } });
+  const desktop = await connect({ dataDir });
+  t.after(async () => { desktop.close(); try { await daemon.close(); } finally { await fs.rm(directory, { recursive: true, force: true }); } });
+  // Startup already merged it: the old file is renamed, and no project was made of the linked worktree.
+  const left = await fs.readdir(path.join(linked, '.milagre'));
+  assert.equal(left.includes('coordination.json'), false);
+  assert.equal(left.filter(name => name.startsWith('coordination.json.migrated-')).length, 1);
+  const opened = await desktop.call('project:open', [project]);
+  assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 1 }]);
+  assert.equal(Object.values(opened.state.sessions).filter(session => session.title === 'Linked chat').length, 1);
+  assert.equal((await desktop.call('project:open', [project])).restoredChats, undefined);
+  await daemon.close();
+  assert.equal((await fs.readdir(path.join(linked, '.milagre'))).includes('coordination.json'), false, 'nothing recreated the old file');
+});

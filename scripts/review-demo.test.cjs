@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { startReviewDemo, PROJECT_NAME, LINK_FILE, PHONE_PORT, COMPUTER_NAME } = require('./review-demo.cjs');
+const { startReviewDemo, announce, DEFAULT_DATA_DIR, PROJECT_NAME, LINK_FILE, PHONE_PORT, COMPUTER_NAME } = require('./review-demo.cjs');
 const { demoSession, DEMO_MODEL } = require('../apps/daemon/src/demo-agent.cjs');
 const { REFUSED } = require('../apps/daemon/src/confine.cjs');
 
@@ -16,15 +16,21 @@ function fakeRelay() {
 }
 
 test('the review demo seeds a project, runs only the demo agent, and confines the phone to that project', async t => {
-  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-review-demo-')));
+  const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-review-demo-')));
+  // A data dir that does not exist yet, with a space in its name like the default.
+  const dataDir = path.join(parent, 'Milagre Review Demo');
   const relay = fakeRelay();
   const logs = [];
   let demo;
-  t.after(async () => { await demo?.close(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  t.after(async () => { await demo?.close(); await fs.rm(parent, { recursive: true, force: true }); });
   demo = await startReviewDemo({ dataDir, phoneOptions: { startRelay: relay.startRelay, localPort: 0 }, keepOpenMs: 50, log: line => logs.push(line) });
   const project = path.join(dataDir, PROJECT_NAME);
   assert.equal(demo.project, project);
   assert.equal(PHONE_PORT, 8899);
+  assert.equal(DEFAULT_DATA_DIR, '/Users/Shared/Milagre Review Demo', 'project paths never show the owner\'s home');
+  assert.equal((await fs.stat(dataDir)).mode & 0o777, 0o700);
+  assert.equal(demo.runtimeOptions.expandSkills, false);
+  await assert.rejects(demo.runtimeOptions.readPullRequest(project), /not available on the demo computer/);
 
   // Only the demo agent: no other session factory, no CLI, no account usage, and only its model.
   assert.notEqual(demo.runtimeOptions.createSession, undefined);
@@ -66,6 +72,8 @@ test('the review demo seeds a project, runs only the demo agent, and confines th
     return { status: response.status, body: await response.json() };
   };
   assert.deepEqual((await rpc('project:recent')).body.result.map(entry => entry.path), [project]);
+  const daemonStatus = (await rpc('daemon:status')).body.result;
+  assert.equal(JSON.stringify(daemonStatus).includes(dataDir), false, 'daemon:status names no Mac path');
   assert.deepEqual(await rpc('project:open', [__dirname]), { status: 403, body: { v: 1, error: { message: REFUSED } } });
   assert.deepEqual(await rpc('project:open', [`${project}/..`]), { status: 403, body: { v: 1, error: { message: REFUSED } } });
   assert.equal((await rpc('project:open', [project])).status, 200);
@@ -91,4 +99,18 @@ test('the review demo seeds a project, runs only the demo agent, and confines th
   assert.equal(new URL(demo.link).searchParams.get('token'), token);
   assert.equal((await demo.client.call('project:snapshot', [project])).state.messages.length, messages);
   assert.deepEqual(logs, []);
+});
+
+test('the start message names the link file, never the link; the QR only shows in a terminal', async () => {
+  const demo = { dataDir: '/data', project: '/data/p', linkFile: '/data/review-pairing-link.txt', link: `milagre://pair?token=${'a'.repeat(64)}` };
+  const logged = [];
+  let rendered = 0;
+  const renderQr = (text, done) => { rendered++; done(`QR(${text})`); };
+  await announce(demo, { log: line => logged.push(line), isTTY: false, renderQr });
+  assert.equal(rendered, 0);
+  assert.match(logged.join('\n'), /review-pairing-link\.txt/);
+  assert.doesNotMatch(logged.join('\n'), /token=/);
+  logged.length = 0;
+  await announce(demo, { log: line => logged.push(line), isTTY: true, renderQr });
+  assert.equal(rendered, 1);
 });

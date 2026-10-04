@@ -1,9 +1,9 @@
 // A demo computer for Apple's TestFlight Beta App Review: `npm run review:demo [-- --data-dir /absolute/path]`.
-// It runs its own daemon on its own data dir (default ~/.milagre-review-demo) with only the scripted demo agent, pairs
+// It runs its own daemon on its own data dir (default /Users/Shared/Milagre Review Demo, so no path shows the owner's
+// home) with only the scripted demo agent, pairs
 // through the public relay on port 8899, and confines every paired phone to one seeded Git project. The owner's Milagre
 // (its data dir and port 8797) is never touched.
 const fs = require('node:fs/promises');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { parseArgs } = require('node:util');
@@ -14,7 +14,7 @@ const { demoRuntimeOptions } = require('../apps/daemon/src/demo-agent.cjs');
 const { version } = require('../apps/daemon/package.json');
 
 const PROJECT_NAME = 'Milagre Demo Project';
-const DEFAULT_DATA_DIR = path.join(os.homedir(), '.milagre-review-demo');
+const DEFAULT_DATA_DIR = '/Users/Shared/Milagre Review Demo';
 const LINK_FILE = 'review-pairing-link.txt';
 // Never the owner's 8797: the demo's bridge listens on its own loopback port.
 const PHONE_PORT = 8899;
@@ -102,6 +102,7 @@ async function writeLink(dataDir, link) {
  */
 async function startReviewDemo({ dataDir = DEFAULT_DATA_DIR, phoneOptions = {}, keepOpenMs = KEEP_OPEN_MS, log = console.log } = {}) {
   if (!path.isAbsolute(dataDir)) throw new Error('Pass an absolute --data-dir');
+  // Made private when it is created; /Users/Shared itself is open to every user.
   await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
   dataDir = await fs.realpath(dataDir);
   const project = path.join(dataDir, PROJECT_NAME);
@@ -129,6 +130,17 @@ async function startReviewDemo({ dataDir = DEFAULT_DATA_DIR, phoneOptions = {}, 
   } catch (error) { await close().catch(() => {}); throw error; }
 }
 
+/**
+ * What the demo prints at start. The link carries the pairing token, so it never goes to a log: only its file is
+ * named, and the QR (which encodes the link) shows only in a terminal.
+ */
+async function announce(demo, { log = console.log, isTTY = process.stdout.isTTY, renderQr = (text, done) => require('qrcode-terminal').generate(text, { small: true }, done) } = {}) {
+  log(`Milagre review demo is running.\nData: ${demo.dataDir}\nProject: ${demo.project}\nPairing link for App Review: ${demo.linkFile}`);
+  if (!isTTY) return;
+  await new Promise(resolve => renderQr(demo.link, code => { log(code); resolve(); }));
+  log('This QR pairs a phone with this demo computer only, which opens nothing but its demo project.');
+}
+
 async function main() {
   const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   if (values.help) {
@@ -136,9 +148,7 @@ async function main() {
     return;
   }
   const demo = await startReviewDemo({ dataDir: values['data-dir'] ? path.resolve(values['data-dir']) : DEFAULT_DATA_DIR });
-  console.log(`Milagre review demo is running.\nData: ${demo.dataDir}\nProject: ${demo.project}\nPairing link (also in ${demo.linkFile}):\n${demo.link}\n`);
-  await new Promise(resolve => require('qrcode-terminal').generate(demo.link, { small: true }, code => { console.log(code); resolve(); }));
-  console.log('This link and QR are for App Review: they pair a phone with this demo computer only, which opens nothing but its demo project.');
+  await announce(demo);
   let stopping;
   const stop = code => stopping ??= (async () => {
     await demo.close().catch(error => { console.error(error.message); code = 1; });
@@ -151,4 +161,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(error => { console.error(error); process.exit(1); });
-module.exports = { startReviewDemo, seedProject, PROJECT_NAME, PHONE_PORT, COMPUTER_NAME, LINK_FILE, KEEP_OPEN_MS };
+module.exports = { startReviewDemo, seedProject, announce, DEFAULT_DATA_DIR, PROJECT_NAME, PHONE_PORT, COMPUTER_NAME, LINK_FILE, KEEP_OPEN_MS };

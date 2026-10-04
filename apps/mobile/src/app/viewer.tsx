@@ -4,14 +4,18 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Cancel01Icon } from '@hugeicons/core-free-icons';
 import { Icon } from '../icons';
-import { viewerImages, type ThumbRect } from '../viewer-store';
+import { useMedia } from '../chat-reply';
+import { viewerImages, type MediaValue, type ThumbRect } from '../viewer-store';
 
 // Desktop's SPRING_LAYOUT (lib/ease.ts), the spring its lightbox morphs with.
 const SPRING = { stiffness: 360, damping: 32, mass: 0.6, useNativeDriver: true } as const;
 const FILL = 0.78;
 
 /** The image's natural size, so the morph lines the fitted image up with its thumbnail. */
-function naturalSize(source: ImageSourcePropType): Promise<{ width: number; height: number } | null> {
+async function naturalSize(value: MediaValue | undefined): Promise<{ width: number; height: number } | null> {
+  let source: ImageSourcePropType | undefined;
+  // A relay image still loading does not hold up the opening morph; it fades in instead.
+  try { source = await Promise.race([value, new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1000))]); } catch { return null; }
   const remote = source as { uri?: string; headers?: Record<string, string> };
   if (!remote?.uri) return Promise.resolve(null);
   return new Promise(resolve => {
@@ -19,6 +23,12 @@ function naturalSize(source: ImageSourcePropType): Promise<{ width: number; heig
     if (remote.headers) Image.getSizeWithHeaders(remote.uri!, remote.headers, done, () => resolve(null));
     else Image.getSize(remote.uri!, done, () => resolve(null));
   });
+}
+
+/** One full-screen image; a relay image that is still loading leaves the space empty. */
+function Figure({ name, source, width, height }: { name: string; source: MediaValue; width: number; height: number }) {
+  const ready = useMedia(source);
+  return ready ? <Image accessibilityLabel={name} source={ready} resizeMode="contain" style={{ width, height }} /> : <View accessibilityLabel={name} style={{ width, height }} />;
 }
 
 /**
@@ -47,7 +57,7 @@ export default function Viewer() {
   const touch = useRef({ x: 0, y: 0, t: 0 });
 
   // Where the fitted image sits, scaled and moved onto a thumbnail: scale matches widths, the centers meet.
-  const toThumb = async (from: ThumbRect | undefined, source: ImageSourcePropType) => {
+  const toThumb = async (from: ThumbRect | undefined, source: MediaValue | undefined) => {
     if (!from) return null;
     const size = await naturalSize(source);
     const ratio = size ? size.width / size.height : from.width / from.height;
@@ -103,7 +113,7 @@ export default function Viewer() {
     <Animated.View style={[{ flex: 1 }, figure]}>
       <FlatList data={images} horizontal pagingEnabled initialScrollIndex={index} getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })} keyExtractor={(_, i) => String(i)} showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={({ nativeEvent }) => setPage(Math.round(nativeEvent.contentOffset.x / width))}
-        renderItem={({ item }) => <View style={{ width, height, justifyContent: 'center' }}><Image accessibilityLabel={item.name} source={item.source} resizeMode="contain" style={{ width, height: height * FILL }} /></View>} />
+        renderItem={({ item }) => <View style={{ width, height, justifyContent: 'center' }}><Figure name={item.name} source={item.source} width={width} height={height * FILL} /></View>} />
     </Animated.View>
     <Animated.View style={[{ position: 'absolute', top: insets.top + 6, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, chrome]}>
       <View style={{ width: 44 }} />

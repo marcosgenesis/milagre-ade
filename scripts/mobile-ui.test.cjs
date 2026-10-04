@@ -127,15 +127,28 @@ test('a broken Markdown image leaves a browser link, and unsafe sources never lo
 });
 const snapshot = projectPath => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
-function sessionHost(client, { effects = false, AppState = {} } = {}) {
+const relayRuntime = { name: 'relay runtime' };
+function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
   const react = hookHost({ effects });
   const { useSessionState } = load('session.tsx', {
-    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: () => client }, './live': require('../apps/mobile/src/live.ts'),
-    './hosts-native': { savedHosts: { save: async () => {}, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
+    react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
+    './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
   }, '\nexport { useSessionState };');
   return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount });
 }
+
+test('pairing through the relay builds the client from the pairing and saves the relay link', async () => {
+  const created = [], saved = [];
+  const relay = { url: 'wss://relay.milagre.cloud', hostId: 'H'.repeat(22), key: 'K'.repeat(43) };
+  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async method => method === 'project:recent' ? [] : {} }, { created, saved });
+  const pairing = { address: `relay://${relay.hostId}`, token: 'a'.repeat(64), name: '', relay };
+  assert.equal(await render().connect(pairing), true);
+  assert.equal(created[0][0], pairing);
+  assert.equal(created[0][3], relayRuntime);
+  assert.deepEqual(JSON.parse(JSON.stringify(saved)), [{ name: 'Mac', address: `relay://${relay.hostId}`, token: 'a'.repeat(64), relay }]);
+  assert.equal(render().hostName, 'Mac');
+});
 
 test('a poll from the previous Project cannot restore it after another Project opens', async () => {
   const openingB = deferred(), pollingA = deferred();
@@ -144,7 +157,7 @@ test('a poll from the previous Project cannot restore it after another Project o
     call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? (args[0] === 'B' ? openingB.promise : { path: 'A' }) : {},
     snapshot: async projectPath => projectPath === 'A' && delayA ? pollingA.promise : snapshot(projectPath),
   });
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   await render().open('A');
   const oldSession = render();
   delayA = true;
@@ -176,7 +189,7 @@ test('the session fetches on live signals and polls only while the live socket i
   }, { effects: true, AppState });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const snapshots = async (count, message) => { await settle(); assert.equal(fetched.snapshot, count, message); };
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   await render().open('A');
   render();
   assert.deepEqual(sockets.map(socket => socket.projectPath), ['A']);
@@ -212,7 +225,7 @@ test('the session fetches on live signals and polls only while the live socket i
 test('disconnect cancels a connection that is still loading recent Projects', async () => {
   const recent = deferred();
   const render = sessionHost({ call: async method => method === 'project:recent' ? recent.promise : {} });
-  const connecting = render().connect('address', 'token');
+  const connecting = render().connect({ address: 'address', token: 'token' });
   await Promise.resolve();
   render().disconnect();
   recent.resolve([]);
@@ -228,38 +241,218 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost() {
+function chatHost({ pickAttachments = async () => [], call, effects = false } = {}) {
   const sending = deferred();
+  const calls = [];
   const params = { worktreeId: '1' };
   const session = {
-    client: { call: () => sending.promise },
+    client: { call: (method, args) => { calls.push({ method, args }); return call ? call(method, args) : method === 'project:branches' ? Promise.resolve(['main']) : sending.promise; } },
     snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: {} } }, runs: { runs: {} } },
     drafts: { '/p#new:1': 'first message' },
     attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
     preferences: {}, defaults: require('../apps/mobile/src/turn-options.ts').defaultPreferences, setDefaultPermission() {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
-    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {},
+    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, isSelected: () => true,
   };
-  const react = hookHost();
+  const react = hookHost({ effects });
   const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: {}, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {} };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.useEffect(fn, [fn]) },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../slide-over': { SlideOver: ({ children }) => children }, './changes': { ChangesView: 'ChangesView' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
-    '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/model': require('@milagre/shared/model'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
   const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
-  return { session, sending, params, field, send, render, router };
+  return { session, sending, params, field, send, render, router, calls };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+function pullDownHost() {
+  const sheets = [];
+  const modifiers = new Proxy({}, { get: (_, name) => name === 'shapes' ? { rectangle: () => 'rectangle' } : value => ({ name, value }) });
+  const { PullDown } = load('ui.tsx', {
+    react: { forwardRef: fn => fn }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, ActionSheetIOS: { showActionSheetWithOptions: (options, select) => sheets.push({ options, select }) }, StyleSheet: { create: value => value }, Pressable: 'Pressable', View: 'View' },
+    '@expo/ui': {}, '@expo/ui/swift-ui': Object.fromEntries(['Button', 'Host', 'Menu', 'Picker', 'Section', 'Text', 'Toggle', 'HStack', 'Image', 'Rectangle'].map(name => [name, `IOS${name}`])), '@expo/ui/swift-ui/modifiers': modifiers, '@expo/ui/community/menu': { MenuView: 'MenuView' },
+    'expo-haptics': { selectionAsync: async () => {} }, '@hugeicons/core-free-icons': {}, './theme': { colors: { ink2: '#aaa', ink3: '#666' }, fonts: { mono: 'monospace' } }, './icons': { Icon: 'Icon' },
+  });
+  return { PullDown, sheets };
+}
+
+test('composer attachment choices stay in a native menu after the header action-sheet fix', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const kinds = [];
+  const screen = chatHost({ pickAttachments: async kind => { kinds.push(kind); return []; } });
+  const { PullDown, sheets } = pullDownHost();
+  const trigger = find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Add photos or files');
+  const rendered = PullDown(trigger.props);
+  const menu = find(rendered, node => node.type === 'IOSMenu');
+  assert.ok(menu, 'the attachment + must open a menu, not the header action sheet');
+  assert.equal(find(menu.props.label, node => node.type === 'View'), undefined, 'the SwiftUI trigger cannot host React Native views');
+  const files = find(menu, node => node.type === 'IOSButton' && node.props.label === 'Choose Files');
+  files.props.onPress();
+  t.mock.timers.tick(250);
+  await settle();
+  assert.deepEqual(kinds, ['files']);
+  assert.equal(sheets.length, 0);
+});
+
+test('header switchers keep the shared native overlay without hosting React views', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { PullDown, sheets } = pullDownHost();
+  const selected = [];
+  const header = PullDown({ label: 'Switch Chat', sections: [{ items: [{ id: 'current', title: 'Current Chat', checked: true }, { id: 'other', title: 'Other Chat' }] }], children: jsx('View', {}), onSelect: id => selected.push(id) });
+  const menu = find(header, node => node.type === 'IOSMenu');
+  assert.equal(menu.props.label.type, 'IOSRectangle');
+  assert.equal(find(menu, node => node.type === 'View'), undefined, 'React trigger stays outside SwiftUI');
+  find(menu, node => node.type === 'IOSButton' && node.props.label === 'Other Chat').props.onPress();
+  t.mock.timers.tick(250);
+  assert.deepEqual(selected, ['other']);
+  assert.equal(sheets.length, 0);
+});
+
+test('New Chat opens the composer directly when there are multiple Worktrees', () => {
+  const react = hookHost();
+  const pushed = [];
+  const session = { client: {}, recent: [], snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: { 1: { id: 1, name: 'main' }, 2: { id: 2, name: 'feature' } } } }, runs: { runs: {} } } };
+  const { default: ChatsScreen } = load('app/project.tsx', {
+    'expo-clipboard': { setStringAsync: async () => {} },
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push: route => pushed.push(route) } },
+    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} },
+  });
+  react.begin();
+  const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
+  assert.equal(typeof button.props.onPress, 'function', 'one tap must navigate without choosing a Worktree first');
+  button.props.onPress();
+  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1' } }]));
+});
+
+test('a new Chat can switch Worktrees and keep each Worktree draft', async () => {
+  const screen = chatHost();
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' }, 2: { id: 2, name: 'feature' } };
+  screen.session.drafts['/p#new:2'] = 'feature draft';
+  const menu = () => find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose branch');
+  assert.ok(menu(), 'the new Chat screen must let you choose a Worktree');
+  menu().props.onSelect('2');
+  assert.equal(screen.params.worktreeId, '2');
+  assert.equal(screen.field().value, 'feature draft');
+  menu().props.onSelect('1');
+  assert.equal(screen.field().value, 'first message');
+  screen.send();
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled), 'cannot change destination during a send');
+  menu().props.onSelect('2');
+  assert.equal(screen.params.worktreeId, '1');
+  screen.sending.resolve({ sessionId: 42 });
+  await settle();
+  assert.equal(menu(), undefined, 'a sent Chat stays bound to its Worktree');
+});
+
+test('new Chats offer Local/New worktree and branches even with one checkout', async () => {
+  const screen = chatHost({ effects: true, call: async () => ['main', 'release'] });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' } };
+  const menu = label => find(screen.render(), node => node.type === 'PullDown' && node.props.label === label);
+  assert.ok(menu('Choose isolation'));
+  assert.equal(menu('Choose branch').props.sections[0].items[0].title, 'main');
+  await settle();
+  menu('Choose isolation').props.onSelect('worktree');
+  const branch = menu('Choose branch');
+  assert.deepEqual(Array.from(branch.props.sections[0].items, item => item.title), ['main', 'release']);
+  branch.props.onSelect('release');
+  assert.equal(menu('Choose branch').props.nativeTrigger.title, 'release');
+  assert.equal(screen.field().value, 'first message', 'changing the base branch keeps the draft');
+  assert.equal(screen.calls.filter(call => call.method === 'project:branches').length, 1);
+});
+
+test('New worktree creates from the chosen branch on first send and keeps the selected model', async () => {
+  const screen = chatHost({ effects: true, call: async method => {
+    if (method === 'project:branches') return ['main', 'release'];
+    if (method === 'worktree:create') return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+    return { sessionId: 7 };
+  } });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' } };
+  screen.session.preferences['/p#new:1'] = { ...screen.session.defaults, model: 'gpt-6-astra' };
+  const menu = label => find(screen.render(), node => node.type === 'PullDown' && node.props.label === label);
+  menu('Choose isolation').props.onSelect('worktree');
+  await settle();
+  menu('Choose branch').props.onSelect('release');
+  screen.send();
+  assert.ok(menu('Choose isolation').props.nativeTrigger.disabled);
+  await settle();
+  const created = screen.calls.find(call => call.method === 'worktree:create');
+  assert.equal(created.args[0].baseBranch, 'release');
+  assert.equal(created.args[0].prompt, 'first message');
+  const sent = screen.calls.find(call => call.method === 'chat:send').args[0];
+  assert.equal(sent.worktreeId, 9);
+  assert.equal(sent.sessionId, 7);
+  assert.equal(sent.model, 'gpt-6-astra');
+  assert.equal(screen.params.id, '7');
+});
+
+test('retrying a failed first send reuses the created worktree and keeps the draft', async () => {
+  let sends = 0;
+  const screen = chatHost({ effects: true, call: async method => {
+    if (method === 'project:branches') return ['main'];
+    if (method === 'worktree:create') return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+    if (++sends === 1) throw new Error('Connection lost');
+    return { sessionId: 7 };
+  } });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' } };
+  find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose isolation').props.onSelect('worktree');
+  await settle();
+  screen.send(); await settle();
+  assert.equal(screen.field().value, 'first message');
+  assert.equal(screen.params.id, undefined);
+  screen.send(); await settle();
+  assert.equal(screen.calls.filter(call => call.method === 'worktree:create').length, 1);
+  assert.equal(screen.params.id, '7');
+});
+
+test('a late new-worktree creation cannot send or navigate after switching Projects', async () => {
+  const creating = deferred();
+  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : creating.promise });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' } };
+  find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose isolation').props.onSelect('worktree');
+  await settle();
+  screen.send(); await settle();
+  screen.session.snapshot.project.path = '/other';
+  screen.render();
+  creating.resolve({ worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } });
+  await settle();
+  assert.equal(screen.calls.filter(call => call.method === 'chat:send').length, 0);
+  assert.equal(screen.params.id, undefined);
+  assert.equal(screen.session.drafts['/p#new:1'], 'first message');
+});
+
+test('the attachment pull-down opens the selected picker and blocks a second pick', async () => {
+  const picking = deferred();
+  const kinds = [];
+  const screen = chatHost({ pickAttachments: kind => { kinds.push(kind); return picking.promise; } });
+  const menu = () => find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Add photos or files');
+  assert.ok(menu(), 'attachments must use a pull-down anchored to the +');
+  menu().props.onSelect('photos');
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled));
+  menu().props.onSelect('files');
+  assert.deepEqual(kinds, ['photos']);
+  picking.resolve([]);
+  await settle();
+  menu().props.onSelect('camera');
+  await settle();
+  assert.deepEqual(kinds, ['photos', 'camera']);
+  screen.session.attachments['/p#new:1'] = Array.from({ length: 4 }, (_, i) => ({ id: String(i), name: `${i}.txt`, uri: `file:///${i}.txt`, image: false }));
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled));
+  menu().props.onSelect('files');
+  assert.deepEqual(kinds, ['photos', 'camera'], 'four attachments block another picker');
+});
 
 test('text typed during the first send follows the created Chat into its composer', async () => {
   const screen = chatHost();
@@ -414,11 +607,11 @@ test('late Chat rename cannot pop another screen after its form loses focus', as
 
 test('selection guards expire when Project or connection changes', async () => {
   const render = sessionHost({ call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async p => snapshot(p) });
-  await render().connect('address', 'token'); await render().open('A');
+  await render().connect({ address: 'address', token: 'token' }); await render().open('A');
   const first = render(); assert.equal(first.isSelected(), true);
   await first.open('B'); assert.equal(first.isSelected(), false);
   const second = render(); assert.equal(second.isSelected(), true);
-  await second.connect('another-address', 'token'); assert.equal(second.isSelected(), false);
+  await second.connect({ address: 'another-address', token: 'token' }); assert.equal(second.isSelected(), false);
 });
 
 test('attachment drafts survive a failed send and move only after a successful first send', async () => {
@@ -518,7 +711,7 @@ function pushHost(t, initial = 'index') {
   const { usePushState } = load('push.tsx', {
     react, 'react/jsx-runtime': { jsx }, 'react-native': { Alert: { alert() {} }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
     'expo-router': { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
-    './client': {}, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
+    './client': {}, './relay-native': { relayRuntime: {} }, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
     './push-controller': require('../apps/mobile/src/push-controller.ts'),
     './push-native': { pushStore: { read: async () => ({ enabled: false, pending: [] }) }, pushNative: {
       available: () => 'Simulator', listen: async (_view, tap) => { receive = tap; return () => {}; },
@@ -587,7 +780,7 @@ test('a notification target clears an older Project loading state', async () => 
     call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? args[0] === '/old' ? oldOpening.promise : { path: args[0] } : {},
     snapshot: async projectPath => ({ ...snapshot(projectPath), project: { path: projectPath, state: { sessions: { 2: { id: 2 } } } } }),
   });
-  await render().connect('address', 'token');
+  await render().connect({ address: 'address', token: 'token' });
   const old = render().open('/old');
   assert.equal(render().opening.path, '/old');
   await render().openNotificationTarget({ address: 'new', token: 'new', name: 'Mac' }, '/target', 2);
@@ -595,4 +788,105 @@ test('a notification target clears an older Project loading state', async () => 
   await old;
   assert.equal(render().snapshot.project.path, '/target');
   assert.equal(render().opening, null);
+});
+
+// Render the real activity adapters, disclosure and shimmer against native leaves.
+function activityItemHost() {
+  const hosts = new Map();
+  let current;
+  const react = Object.fromEntries(['useState', 'useRef', 'useMemo', 'useEffect'].map(name => [name, (...args) => current[name](...args)]));
+  react.memo = fn => fn;
+  const palette = { ink: '#fff', ink2: '#aaa', ink3: '#666', field: '#222', red: '#f00', orange: '#f80' };
+  const native = { Text: 'Text', View: 'View', Pressable: 'Pressable', useColorScheme: () => 'dark', AccessibilityInfo: {}, StyleSheet: { create: value => value, absoluteFill: {} }, Animated: { Value: class { interpolate() {} }, View: 'AnimatedView' }, Easing: { bezier: () => () => {}, linear() {} } };
+  const icons = new Proxy({}, { get: (_, key) => key });
+  const common = { react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native, '@hugeicons/core-free-icons': icons, '@milagre/shared/reply-parts': require('@milagre/shared/reply-parts'), './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './ui': { colors: palette, styles: { code: {}, caption: {}, label: {}, muted: {} }, PageScroll: 'ScrollView' } };
+  const running = load('running-logo.tsx', { ...common, 'react-native-svg': { default: 'Svg', Path: 'Path' }, '@react-native-masked-view/masked-view': { __esModule: true, default: 'MaskedView' }, 'expo-linear-gradient': { LinearGradient: 'LinearGradient' }, 'expo-router': { useIsFocused: () => false }, './logo': { LEFT: '', RIGHT: '', STAR: '', STAR_BOX: {} }, './theme': { colors: palette, fonts: { mono: 'mono' }, hex: () => palette } });
+  const shared = load('activity-item.tsx', { ...common, './running-logo': running, './theme': { fonts: { mono: 'mono' } } });
+  const SubagentItem = load('subagent-item.tsx', { ...common, './activity-item': shared }).SubagentItem;
+  const ToolRow = load('tool-row.tsx', { ...common, './activity-item': shared, './markdown': { Markdown: ({ text }) => jsx('Text', { children: text }) } }).ToolRow;
+  function visit(node, key) {
+    if (Array.isArray(node)) return node.map((child, index) => visit(child, `${key}.${child?.props?.id || index}`));
+    if (!node || typeof node !== 'object' || !node.type) return node;
+    if (typeof node.type === 'function') {
+      current = hosts.get(key) || hookHost();
+      hosts.set(key, current); current.begin();
+      return visit(node.type(node.props), `${key}.render`);
+    }
+    return { ...node, props: { ...node.props, children: visit(node.props?.children, `${key}.children`) } };
+  }
+  return { subagent: agent => visit(jsx(SubagentItem, { agent }), 'agent'), tool: props => visit(jsx(ToolRow, props), 'tool') };
+}
+const sampleSubagent = { id: 'a', title: 'Check the phone connection', status: 'running', startedAt: 1, updatedAt: 1, latestActivity: 'Checking pairing', transcript: [{ id: 't', kind: 'message', text: 'Connection verified.' }] };
+
+test('subagent execution shimmers, while waiting, failure and completion stop it', () => {
+  const item = activityItemHost();
+  for (const status of ['initializing', 'running']) assert.ok(find(item.subagent({ ...sampleSubagent, status }), node => node.type === 'MaskedView'), status);
+  for (const status of ['waiting', 'failed', 'completed', 'cancelled']) assert.equal(find(item.subagent({ ...sampleSubagent, status }), node => node.type === 'MaskedView'), undefined, status);
+});
+
+test('subagent details stay expanded across live updates and collapse through the disclosure', () => {
+  const item = activityItemHost();
+  let tree = item.subagent(sampleSubagent);
+  assert.equal(find(tree, node => node.type === 'Text' && node.props.children === 'Connection verified.'), undefined);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  tree = item.subagent({ ...sampleSubagent, status: 'completed', transcript: [{ id: 't', kind: 'message', text: 'New live output' }] });
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children === 'New live output'));
+  assert.equal(find(tree, node => node.props?.accessibilityRole === 'button').props.accessibilityState.expanded, true);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.equal(find(item.subagent(sampleSubagent), node => node.type === 'Text' && node.props.children === 'Connection verified.'), undefined);
+});
+
+test('tool disclosure reveals late output, while its chat action opens Activity without expanding', () => {
+  const item = activityItemHost();
+  const props = { step: { id: 's', kind: 'shell', title: 'Ran `npm test`', status: 'running', hasDetail: true }, live: true, waiting: false };
+  let tree = item.tool(props);
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.ok(find(item.tool(props), node => node.type === 'Text' && node.props.children === 'Loading output…'));
+  tree = item.tool({ ...props, step: { ...props.step, detail: '51 tests passed', status: 'done' }, live: false });
+  assert.ok(find(tree, node => node.type === 'Text' && node.props.children === '51 tests passed'));
+  assert.equal(find(tree, node => node.type === 'MaskedView'), undefined);
+  let opened = 0;
+  const navigated = activityItemHost();
+  tree = navigated.tool({ ...props, step: { ...props.step, detail: 'Tool output' }, onPress: () => { opened++; } });
+  find(tree, node => node.props?.accessibilityRole === 'button').props.onPress();
+  assert.equal(opened, 1);
+  assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
+});
+
+test('relay transports: one per Mac, replaced by a new code, closed in the background and on forget', async () => {
+  const listeners = [], made = [];
+  const identity = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+  const phoneRandom = n => new Uint8Array(n);
+  const { relayRuntime } = load('relay-native.ts', {
+    'react-native': { AppState: { addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } } },
+    'expo-file-system': { Directory: class {}, File: class {}, Paths: {} },
+    './relay-transport': { createRelayTransport: options => { const transport = { options, closed: 0, close() { transport.closed++; } }; made.push(transport); return transport; } },
+    './phone-identity': { phoneIdentity: async () => identity, phoneRandom },
+  });
+  const link = (hostId, key = 'K'.repeat(43)) => ({ url: 'wss://relay.milagre.cloud', hostId, key });
+  const a = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) });
+  assert.equal(await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) }), a, 'one transport per Mac');
+  assert.equal(a.options.identity, identity);
+  assert.equal(a.options.random, phoneRandom);
+  assert.equal(a.options.hostId, 'A'.repeat(22));
+  const b = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b, a);
+  // A new pairing code for the same Mac replaces its transport.
+  const a2 = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'c'.repeat(64) });
+  assert.notEqual(a2, a);
+  assert.equal(a.closed, 1);
+  // The background closes every open transport; they stay in place to reopen on the next request.
+  for (const listener of listeners) listener('inactive');
+  assert.deepEqual([a2.closed, b.closed], [0, 0]);
+  for (const listener of listeners) listener('background');
+  assert.deepEqual([a2.closed, b.closed], [1, 1]);
+  assert.equal(await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) }), b);
+  // Forget closes the transport and drops it: the next use builds a new one.
+  relayRuntime.forget('B'.repeat(22));
+  assert.equal(b.closed, 2);
+  const b2 = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b2, b);
+  relayRuntime.forget('nobody');
+  for (const listener of listeners) listener('background');
+  assert.equal(b.closed, 2, 'a forgotten transport is not closed again');
 });

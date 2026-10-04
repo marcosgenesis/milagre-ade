@@ -38,6 +38,14 @@
       "types": "./src/git-codes.d.mts",
       "default": "./src/git-codes.mjs"
     },
+    "./relay-crypto": {
+      "types": "./src/relay-crypto.d.mts",
+      "default": "./src/relay-crypto.mjs"
+    },
+    "./relay-rpc": {
+      "types": "./src/relay-rpc.d.mts",
+      "default": "./src/relay-rpc.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
     "./reconcile": {
@@ -49,7 +57,8 @@
     "./pr-blockers": "./src/pr-blockers.ts",
     "./diff-parse": "./src/diff-parse.ts",
     "./diff-tree": "./src/diff-tree.ts",
-    "./diff-layout": "./src/diff-layout.ts"
+    "./diff-layout": "./src/diff-layout.ts",
+    "./usage": "./src/usage.ts"
   },
   "files": [
     "src/*.mjs",
@@ -63,13 +72,17 @@
     "src/pr-blockers.ts",
     "src/diff-parse.ts",
     "src/diff-tree.ts",
-    "src/diff-layout.ts"
+    "src/diff-layout.ts",
+    "src/usage.ts"
   ],
   "scripts": {
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "tweetnacl": "1.0.3"
   }
 }

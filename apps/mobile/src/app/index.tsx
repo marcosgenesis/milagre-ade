@@ -3,10 +3,11 @@ import { Alert, Platform, RefreshControl, Text, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { Add01Icon, ComputerIcon, LaptopIcon, Settings01Icon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSession } from '../session';
+import { useSession, type HostLink } from '../session';
 import { usePush } from '../push';
 import { savedHosts } from '../hosts-native';
 import { createClient } from '../client';
+import { relayRuntime } from '../relay-native';
 import type { SavedHost } from '../hosts-store';
 import { Icon } from '../icons';
 import { ErrorNotice, HeaderButton, IconButton, ListRow, PageScroll, colors, showActions, styles } from '../ui';
@@ -27,7 +28,7 @@ export default function ComputersScreen() {
     setStatus(Object.fromEntries(hosts.map(host => [host.id, 'checking'])));
     await Promise.all(hosts.map(async host => {
       let next: Reachability = 'offline';
-      try { await createClient(host.address, host.token, fetch, 5000, host.access).call('daemon:status'); next = 'online'; } catch { /* unreachable */ }
+      try { await createClient(host, fetch, 5000, relayRuntime).call('daemon:status'); next = 'online'; } catch { /* unreachable */ }
       setStatus(current => ({ ...current, [host.id]: next }));
     }));
   }, []);
@@ -35,9 +36,9 @@ export default function ComputersScreen() {
     try { const hosts = await session.loadHosts(); setError(''); void check(hosts); return hosts; }
     catch (e) { setError((e as Error).message); return []; }
   }, [session.loadHosts, check]); // eslint-disable-line react-hooks/exhaustive-deps
-  async function open(host: { address: string; token: string; name: string; access?: SavedHost['access'] }) {
+  async function open(host: HostLink) {
     setBusy(host.address); setError('');
-    try { if (await session.connect(host.address, host.token, !DEMO, host.name, host.access)) router.push('/projects'); }
+    try { if (await session.connect(host, !DEMO)) router.push('/projects'); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }
@@ -55,7 +56,7 @@ export default function ComputersScreen() {
   }, [session.hosts]); // eslint-disable-line react-hooks/exhaustive-deps
   function manage(host: SavedHost, action: string) {
     if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
-    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(load).catch(e => setError(e.message)); } }]);
+    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(() => { if (host.relay) relayRuntime.forget(host.relay.hostId); }).then(load).catch(e => setError(e.message)); } }]);
   }
   const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
   const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';
@@ -73,7 +74,7 @@ export default function ComputersScreen() {
       {session.hosts.length > 0 ? <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
         {session.hosts.map((host, index) => <View key={host.id}>
           {index > 0 && <View style={styles.separator} />}
-          <ListRow onLongPress={() => showActions({ title: host.name, actions: [{ id: 'rename', title: 'Rename' }, { id: 'forget', title: 'Forget', destructive: true }], onSelect: action => manage(host, action) })} title={host.name} subtitle={`${label(status[host.id])} · ${host.address.replace(/^https?:\/\//, '')}`} disabled={!!busy} onPress={() => void open(host)}
+          <ListRow onLongPress={() => showActions({ title: host.name, actions: [{ id: 'rename', title: 'Rename' }, { id: 'forget', title: 'Forget', destructive: true }], onSelect: action => manage(host, action) })} title={host.name} subtitle={`${label(status[host.id])} · ${host.relay ? host.relay.url.replace(/^wss:\/\//, '') : host.address.replace(/^https?:\/\//, '')}`} disabled={!!busy} onPress={() => void open(host)}
               leading={<View style={{ width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={/studio|mini|imac/i.test(host.name) ? ComputerIcon : LaptopIcon} tone="ink" size={20} /><View style={{ position: 'absolute', right: -2, bottom: -2, width: 11, height: 11, borderRadius: 6, backgroundColor: dot(status[host.id]), borderWidth: 2, borderColor: colors.surface }} /></View>} />
         </View>)}
       </View> : <View style={{ gap: 16, paddingTop: 48, alignItems: 'center' }}>

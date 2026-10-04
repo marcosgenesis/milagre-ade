@@ -49,6 +49,8 @@
     "mobile:demo": "node scripts/mobile-demo.cjs",
     "mobile:host": "node scripts/mobile-host.cjs",
     "mobile:cloudflare": "node scripts/mobile-cloudflare.cjs",
+    "test:relay": "npm run test --workspace @milagre/relay",
+    "typecheck:relay": "npm run typecheck --workspace @milagre/relay",
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs",
     "test:delegation": "node scripts/test-delegation.cjs"

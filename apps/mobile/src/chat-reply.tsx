@@ -1,21 +1,35 @@
-import { memo, useRef, useState } from 'react';
-import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType, type TextStyle } from 'react-native';
+import { memo, useEffect, useRef, useState } from 'react';
+import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
-import { AiBrainIcon, Alert02Icon, ArrowDown01Icon, ArrowRight01Icon, ArrowUp01Icon, CheckmarkCircle02Icon, CircleIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Maximize01Icon, Search01Icon, Wrench01Icon } from '@hugeicons/core-free-icons';
+import { Alert02Icon, ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon, Maximize01Icon } from '@hugeicons/core-free-icons';
 import type { AgentRun } from '@milagre/shared/agent-runs';
-import type { ChatMessage, ChatStep, StepKind } from '@milagre/shared/model';
-import { activitySummary, replyActivity, titleSpans, unspokenThought } from '@milagre/shared/reply-parts';
+import type { ChatMessage, ChatStep } from '@milagre/shared/model';
+import { activitySummary, replyActivity, unspokenThought } from '@milagre/shared/reply-parts';
 import { Markdown } from './markdown';
-import { Icon, type IconData } from './icons';
-import { ShimmerText } from './running-logo';
-import { fonts, hex } from './theme';
-import { showImages, type ViewerImage } from './viewer-store';
-import { PageScroll, colors, styles } from './ui';
+import { Icon } from './icons';
+import { ActivityTitle } from './activity-item';
+import { ToolRow } from './tool-row';
+import { hex } from './theme';
+import { showImages, type MediaValue, type ViewerImage } from './viewer-store';
+import { colors, styles } from './ui';
 
-const icons: Record<StepKind, IconData> = { shell: CommandLineIcon, setup: CommandLineIcon, read: File01Icon, edit: FileEditIcon, search: Search01Icon, thinking: AiBrainIcon, image: Image01Icon, other: Wrench01Icon };
-/** Resolves a saved file on the computer to an authenticated image source. */
-export type MediaSource = (path: string) => ImageSourcePropType;
+/** Resolves a saved file on the computer to an authenticated image source, or a cached file once it is fetched. */
+export type MediaSource = (path: string) => MediaValue;
+
+/** The image to show now: a ready source as is, a loading one once it arrives (null until then, or if it fails). */
+export function useMedia(source: MediaValue | null): ImageSourcePropType | null {
+  const pending = typeof (source as Promise<ImageSourcePropType> | null)?.then === 'function' ? source as Promise<ImageSourcePropType> : null;
+  const [loaded, setLoaded] = useState<{ from: Promise<ImageSourcePropType>; value: ImageSourcePropType | null } | null>(null);
+  useEffect(() => {
+    if (!pending) return;
+    let current = true;
+    pending.then(value => { if (current) setLoaded({ from: pending, value }); }, () => { if (current) setLoaded({ from: pending, value: null }); });
+    return () => { current = false; };
+  }, [pending]);
+  if (!pending) return source as ImageSourcePropType | null;
+  return loaded?.from === pending ? loaded.value : null;
+}
 /** Measures every thumbnail first, so the viewer morphs out of the tapped one and back into whichever is showing. */
 function open(images: ViewerImage[], index: number, thumbs: (View | null)[]) {
   void Promise.all(images.map((image, i) => new Promise<ViewerImage>(resolve => {
@@ -33,9 +47,15 @@ function Photos({ message, media }: { message: ChatMessage; media: MediaSource }
   const single = photos.length === 1;
   return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end', maxWidth: 264 }}>
     {photos.map((photo, index) => <Pressable key={index} ref={view => { thumbs.current[index] = view; }} accessibilityRole="imagebutton" accessibilityLabel={`${photo.name}. Open full screen`} onPress={() => open(photos, index, thumbs.current)}>
-      <Image source={photo.source} resizeMode="cover" style={{ width: single ? 220 : 130, height: single ? 220 : 130, borderRadius: 14, backgroundColor: colors.canvas }} />
+      <Thumbnail source={photo.source} size={single ? 220 : 130} />
     </Pressable>)}
   </View>;
+}
+/** One photo tile; a relay image shows the empty tile until its file is ready. */
+function Thumbnail({ source, size }: { source: MediaValue; size: number }) {
+  const ready = useMedia(source);
+  const style = { width: size, height: size, borderRadius: 14, backgroundColor: colors.canvas };
+  return ready ? <Image source={ready} resizeMode="cover" style={style} /> : <View style={style} />;
 }
 function FileChip({ path }: { path: string }) {
   const name = path.split(/[\\/]/).pop() || path;
@@ -49,34 +69,16 @@ function FileChip({ path }: { path: string }) {
 function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource }) {
   const [ratio, setRatio] = useState(4 / 5);
   const thumb = useRef<View>(null);
-  if (!step.file || step.status !== 'done') return null;
-  const image: ViewerImage = { source: media(step.file), name: step.file.split('/').pop() || 'Generated image' };
+  const shown = !!step.file && step.status === 'done';
+  const source = shown ? media(step.file!) : null;
+  const ready = useMedia(source);
+  if (!shown || !source) return null;
+  const image: ViewerImage = { source, name: step.file!.split('/').pop() || 'Generated image' };
   return <Pressable accessibilityRole="imagebutton" accessibilityLabel="Generated image. Open full screen" ref={thumb} onPress={() => open([image], 0, [thumb.current])} style={{ width: 240 }}>
-    <Image source={image.source} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width && height) setRatio(width / height); }} style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />
+    {ready ? <Image source={ready} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width && height) setRatio(width / height); }} style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />
+      : <View style={{ width: 240, aspectRatio: ratio, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.canvas }} />}
     <View style={{ position: 'absolute', right: 8, top: 8, width: 30, height: 30, borderRadius: 10, backgroundColor: '#ffffffcc', alignItems: 'center', justifyContent: 'center' }}><Icon icon={Maximize01Icon} tone="ink" size={15} /></View>
   </Pressable>;
-}
-/** A step title with its code spans as chips, like desktop's; a running step's title shimmers. */
-function StepTitle({ title, shimmer, style }: { title: string; shimmer: boolean; style: TextStyle }) {
-  const spans = titleSpans(title).map((span, index) => span.code ? <Text key={index} style={{ fontFamily: fonts.mono, fontSize: (style.fontSize || 14) * 0.92, backgroundColor: shimmer ? undefined : colors.field, color: colors.ink }}>{span.text}</Text> : span.text);
-  return shimmer ? <ShimmerText style={style}>{spans}</ShimmerText> : <Text numberOfLines={1} style={style}>{spans}</Text>;
-}
-/** One tool step. In the Chat a tap opens the activity sheet; in the sheet it expands to show the tool's output. */
-export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live: boolean; waiting: boolean; onPress?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const running = live && step.status === 'running';
-  const failed = step.status === 'failed';
-  const expandable = !onPress && (!!step.detail || !!step.hasDetail);
-  return <View style={{ gap: 8 }}><Pressable accessibilityRole={onPress || expandable ? 'button' : 'text'} accessibilityState={expandable ? { expanded: open } : undefined} accessibilityLabel={`${step.title.replace(/`/g, '')}${failed ? ', Failed' : running ? waiting ? ', Waiting for approval' : ', Running' : ''}`} disabled={!onPress && !expandable} onPress={() => onPress ? onPress() : setOpen(!open)} style={({ pressed }) => ({ minHeight: 36, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.5 : 1 })}>
-    <Icon icon={failed ? Alert02Icon : icons[step.kind]} tone={failed ? 'red' : running ? 'ink2' : 'ink3'} size={16} />
-    <View style={{ flex: 1, gap: 2 }}>
-      <StepTitle title={step.title} shimmer={running && !waiting} style={{ color: failed ? colors.red : colors.ink2, fontSize: 14 }} />
-      {(step.note || (running && waiting)) && <Text style={styles.label}>{[running && waiting ? 'Waiting for approval' : '', step.note].filter(Boolean).join(' · ')}</Text>}
-    </View>
-    {(onPress || expandable) && <Icon icon={onPress ? ArrowRight01Icon : open ? ArrowUp01Icon : ArrowDown01Icon} tone="ink3" size={12} />}
-  </Pressable>{open && step.detail && <PageScroll nestedScrollEnabled style={{ maxHeight: 320, backgroundColor: colors.field, borderRadius: 12 }} contentContainerStyle={{ padding: 12, paddingBottom: 12 }}>
-    {step.kind === 'thinking' ? <Markdown text={step.detail} streaming={running} /> : <Text selectable style={styles.code}>{step.detail}</Text>}
-  </PageScroll>}{open && !step.detail && step.hasDetail && <Text style={[styles.muted, { paddingVertical: 6 }]}>Loading output…</Text>}</View>;
 }
 const SPARKLE = 'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z';
 /** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */
@@ -87,7 +89,7 @@ function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; liv
   const label = current ? current.title : summary.text || 'Activity';
   return <Pressable accessibilityRole="button" accessibilityLabel={`${label.replace(/`/g, '')}${waiting ? ', waiting for approval' : ''}${!current && summary.failed ? `, ${summary.failed} failed` : ''}. Show activity`} onPress={onPress} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, opacity: pressed ? 0.5 : 1 })}>
     <Svg width={16} height={16} viewBox="0 0 24 24"><Path d={SPARKLE} fill={current ? palette.ink2 : palette.ink3} /></Svg>
-    <View style={{ flexShrink: 1 }}>{current ? <StepTitle title={current.title} shimmer={!waiting} style={{ color: colors.ink2, fontSize: 14 }} /> : <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 14 }}>{label}</Text>}</View>
+    <View style={{ flexShrink: 1 }}>{current ? <ActivityTitle title={current.title} shimmer={!waiting} style={{ color: colors.ink2, fontSize: 14 }} /> : <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 14 }}>{label}</Text>}</View>
     {waiting && <Text style={{ color: colors.ink3, fontSize: 12.5 }}>Waiting for approval</Text>}
     {!current && summary.failed > 0 && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon icon={Alert02Icon} tone="red" size={13} /><Text style={{ color: colors.red, fontSize: 12.5 }}>{summary.failed} failed</Text></View>}
     <View style={{ flex: 1 }} />

@@ -23,7 +23,7 @@ export default function AddComputer() {
     if (busy) return;
     setBusy(true); setError('');
     try {
-      if (await session.connect(pairing.address, pairing.token, true, pairing.name, pairing.access)) { router.dismissAll(); router.push('/projects'); }
+      if (await session.connect(pairing)) { router.dismissAll(); router.push('/projects'); }
     } catch (e) { setError((e as Error).message); setScanned(false); }
     finally { setBusy(false); }
   }
@@ -51,7 +51,7 @@ export default function AddComputer() {
           {permission?.granted ? <Text style={{ color: '#ffffffcc', fontSize: 14 }}>Point at the QR code on your Mac</Text>
             : <Pressable accessibilityRole="button" onPress={() => void (permission?.canAskAgain === false ? Linking.openSettings() : requestPermission())} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#ffffff26' }}><Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>{permission?.canAskAgain === false ? 'Allow camera access in Settings' : 'Allow camera to scan'}</Text></Pressable>}
         </View>
-        <View style={{ gap: 6 }}><Text style={styles.label}>On your Mac, run</Text><View style={{ backgroundColor: colors.field, borderRadius: 10, padding: 12 }}><Text selectable style={styles.code}>npm run mobile:host</Text></View></View>
+        <View style={{ gap: 6 }}><Text style={styles.label}>On your Mac</Text><Text style={styles.text}>Open Milagre, go to Settings → Phone, turn on phone access and scan the QR code it shows.</Text></View>
         <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
           {[{ icon: ClipboardPasteIcon, title: 'Paste pairing link', onPress: () => void Clipboard.getStringAsync().then(fromLink).catch(() => setError('Could not read the clipboard. Copy the pairing link again.')) }, { icon: KeyboardIcon, title: 'Enter address and token', onPress: () => { setManual(true); setError(''); } }].map((row, index) => <View key={row.title}>
             {index > 0 && <View style={styles.separator} />}

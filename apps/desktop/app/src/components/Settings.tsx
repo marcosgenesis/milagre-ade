@@ -15,7 +15,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { pairingWindow, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
@@ -292,6 +292,22 @@ function PhoneSettings() {
   };
 
   const on = status?.state === "on" && status.qrSvg && status.pairingLink;
+  // Showing the QR is what invites a new phone to pair, so it opens the window; a status that arrives later keeps the countdown honest.
+  const showingQr = Boolean(on) && status?.remote === "relay";
+  useEffect(() => {
+    if (!showingQr) return;
+    let live = true;
+    window.milagre.openPhonePairing().then((next) => { if (live) setStatus(next); }, () => {});
+    return () => { live = false; };
+  }, [showingQr, setStatus]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!showingQr) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [showingQr, status?.pairingUntil]);
+  const pairing = pairingWindow(status, now);
   return (
     <>
     <Group title="Phone access">
@@ -317,6 +333,14 @@ function PhoneSettings() {
               <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>{copied ? "Copied" : "Copy pairing link"}</button>
             </div>
             <p data-phone-warning className="text-[12px] text-ink-2">This code gives access to your agents. Don't share it or post a screenshot of it.</p>
+            {pairing && (
+              <div data-phone-pairing={pairing.open ? "open" : "closed"} className="flex flex-wrap items-center gap-3">
+                <span className="text-[12px] text-ink-3">
+                  {pairing.open ? `New phones can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}` : "Pairing is closed to new phones."}
+                </span>
+                {!pairing.open && <button type="button" disabled={busy} data-phone-allow-pairing onClick={() => run(() => window.milagre.openPhonePairing())} className={SECONDARY_BUTTON}>Allow pairing again</button>}
+              </div>
+            )}
           </div>
         </div>
       </Group>

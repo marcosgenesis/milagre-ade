@@ -318,3 +318,11 @@ test('path-taking commands refuse folders that are not open or recent', async t 
   assert.equal((await runtime.invoke('worktree-setup:read', [project])).setupCommand, '');
   await runtime.close();
 });
+
+test('an open project\'s worktree folders are read without its whole state', async t => {
+  const { project, make } = await fixture(t);
+  const runtime = make();
+  await runtime.openProject(project);
+  assert.deepEqual(await runtime.invoke('project:worktree-paths', [project]), [project]);
+  await assert.rejects(runtime.invoke('project:worktree-paths', [path.join(project, 'elsewhere')]), /Open the project/);
+});

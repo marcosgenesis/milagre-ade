@@ -13,7 +13,7 @@ const { connect } = require('./client.cjs');
 
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
-  'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file']);
 const MAX_BODY = 1024 * 1024;
 // Subagent entries the phone shows under each agent.
@@ -132,7 +132,8 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
       else if (channel === 'agent:event' && typeof payload?.chatId === 'string' && chatInProject(entry.projectPath, payload.chatId)) {
         // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs
         // fetch first would hide the reply until the Project caught up. Subagents live only in the Project state.
-        if (payload.state) signal(entry, 'project', LIVE_DELAY.runs);
+        // A large Project's state is left out of the event (stateTooLarge); the turn's end still needs the snapshot.
+        if (payload.state || payload.stateTooLarge) signal(entry, 'project', LIVE_DELAY.runs);
         else signal(entry, payload.event?.type === 'subagent-update' ? 'project' : 'runs');
       }
     }
@@ -146,9 +147,10 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
     if (!projectPath || !requested || !path.isAbsolute(projectPath) || !path.isAbsolute(requested)) throw failure(400, 'projectPath and path must be absolute');
     const type = MEDIA_TYPES[path.extname(requested).toLowerCase()];
     if (!type) throw failure(415, 'Only png, jpeg, gif, webp and heic images are served');
-    const snapshot = await client.call('project:snapshot', [projectPath]);
+    // Only the worktree folders: a big Project's whole state would be read in pages for every image.
+    const worktreePaths = await client.call('project:worktree-paths', [projectPath]);
     const candidates = [
-      ...Object.values(snapshot?.state?.worktrees ?? {}).map(worktree => worktree?.path),
+      ...(Array.isArray(worktreePaths) ? worktreePaths : []),
       path.join(projectPath, '.milagre', 'images'),
       path.join(dataDir, 'mobile-attachments'),
       path.join(os.tmpdir(), 'milagre-generated-images'),
@@ -254,7 +256,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             const bytes = Buffer.from(base64, 'base64');
             if (bytes.length > 5 * MAX_BODY) throw failure(413, 'Each file must be 5 MiB or smaller');
             if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
-            await client.call('project:snapshot', [projectPath]);
+            await client.call('project:worktree-paths', [projectPath]);
             const folder = path.join(dataDir, 'mobile-attachments', randomUUID());
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');

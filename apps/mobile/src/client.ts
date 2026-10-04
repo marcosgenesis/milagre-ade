@@ -1,4 +1,4 @@
-import type { CoordinatorState } from '@milagre/shared/model';
+import type { ChatMessage, CoordinatorState } from '@milagre/shared/model';
 import type { AgentRuns } from '@milagre/shared/agent-runs';
 
 export type OpenProject = { path: string; name: string; state: CoordinatorState };
@@ -66,6 +66,8 @@ export function createClient(address: string, token: string, fetcher: typeof fet
     call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }),
     /** An image file on the computer, served by the bridge only from the Project's Worktrees and Milagre's image folders. */
     media: (projectPath: string, path: string) => ({ uri: `${url}/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`, headers: auth }),
+    /** One message with its tools' full output; the snapshot leaves that out. */
+    message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
   };
 }

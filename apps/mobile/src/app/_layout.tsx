@@ -27,7 +27,6 @@ export default function Layout() {
     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
     <Stack.Screen name="pair" options={{ title: 'Pairing' }} />
     <Stack.Screen name="projects" options={{ title: 'Projects' }} />
-    <Stack.Screen name="project" options={{ title: 'Chats' }} />
     <Stack.Screen name="chat" options={{ title: 'Chat', headerTransparent: false, headerStyle: { backgroundColor: palette.page } }} />
     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
     <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
@@ -35,7 +34,6 @@ export default function Layout() {
     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
     <Stack.Screen name="viewer" options={{ presentation: 'transparentModal', headerShown: false, animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
     <Stack.Screen name="chat-details" options={{ title: 'Rename Chat' }} />
-    <Stack.Screen name="new-worktree" options={{ title: 'New Worktree' }} />
     <Stack.Screen name="changes" options={{ title: 'Changes' }} />
     <Stack.Screen name="diff" options={{ title: 'Diff' }} />
   </Stack><SidePanelsHost /></UpdateShell><Splash /></ThemeProvider></SidePanelsProvider></PushProvider></SessionProvider></KeyboardProvider></GestureHandlerRootView>;

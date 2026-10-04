@@ -42,7 +42,9 @@ test('demo sends, approves, answers, stops and reconnects through the real HTTP/
   const reply = finished.project.state.messages.at(-1);
   assert.equal(reply.steps.length, 2);
   assert.equal(reply.steps[1].status, 'failed');
-  assert.match(reply.steps[1].detail, /demo assertion/);
+  // The snapshot leaves tool output out; the whole message carries it.
+  assert.equal(reply.steps[1].hasDetail, true);
+  assert.match((await client.message(demo.project, reply.id)).steps[1].detail, /demo assertion/);
   assert.match(reply.body, /## Preview ready/);
   await demo.close();
   await assert.rejects(fs.stat(`${demo.dataDir}/runtime.lock`), { code: 'ENOENT' });

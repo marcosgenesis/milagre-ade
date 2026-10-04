@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import nacl from 'tweetnacl';
 import { boxKeyPair, signKeyPair, hostIdOf, phoneHello, hostAccept, phoneFinish, b64url, fromB64url } from './relay-crypto.mjs';
 
 const random = n => new Uint8Array(randomBytes(n));
@@ -81,4 +82,21 @@ test('tampering is rejected', () => {
   const frame = phoneSide.seal({ t: 'req', id: 1 });
   frame[frame.length - 1] ^= 1;
   assert.throws(() => accepted.channel.open(frame), /decrypt/);
+});
+
+test('a boxed null inner payload is refused as bad-hello, not a TypeError', () => {
+  const { host, phone } = pair();
+  const eph = boxKeyPair(random);
+  const nonce = random(24);
+  const box = nacl.box(new TextEncoder().encode('null'), nonce, host.publicKey, phone.secretKey);
+  const hello = new Uint8Array(89 + box.length);
+  hello[0] = 0x01; hello.set(eph.publicKey, 1); hello.set(phone.publicKey, 33); hello.set(nonce, 65); hello.set(box, 89);
+  assert.throws(() => hostAccept({ host, hello, isKnown: () => true, token, random }), { code: 'bad-hello' });
+});
+
+test('a hello that is not bytes is refused as bad-hello', () => {
+  const { host } = pair();
+  for (const hello of [undefined, null, 'hello', [1, 2, 3]]) {
+    assert.throws(() => hostAccept({ host, hello, isKnown: () => true, token, random }), { code: 'bad-hello' });
+  }
 });

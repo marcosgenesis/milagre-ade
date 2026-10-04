@@ -83,12 +83,13 @@ export function phoneHello({ phone, host, token, random }) {
 }
 
 export function hostAccept({ host, hello, isKnown, canPair = false, token, random }) {
-  if (hello[0] !== HELLO || hello.length < 89 + nacl.box.overheadLength) throw new RelayAuthError('bad-hello', 'Not a hello');
+  if (!(hello instanceof Uint8Array) || hello[0] !== HELLO || hello.length < 89 + nacl.box.overheadLength) throw new RelayAuthError('bad-hello', 'Not a hello');
   const eph = hello.slice(1, 33), phoneKey = hello.slice(33, 65), nonce = hello.slice(65, 89);
   const plain = nacl.box.open(hello.subarray(89), nonce, phoneKey, host.secretKey);
   if (!plain) throw new RelayAuthError('bad-hello', 'The hello was not for this computer');
   let inner;
   try { inner = parse(plain); } catch { throw new RelayAuthError('bad-hello', 'Unreadable hello'); }
+  if (!inner || typeof inner !== 'object') throw new RelayAuthError('bad-hello', 'Unreadable hello');
   if (inner.eph !== b64url(eph)) throw new RelayAuthError('bad-hello', 'The hello was altered');
   if (!sameToken(inner.token, token)) throw new RelayAuthError('bad-token', 'This phone was paired with an older code');
   const id = b64url(phoneKey);

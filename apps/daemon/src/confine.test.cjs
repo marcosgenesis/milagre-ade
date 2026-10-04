@@ -309,3 +309,43 @@ test('the demo sends /skill as typed and never asks gh about pull requests', asy
     if (!expandSkills) assert.deepEqual(await f.rpc('worktree:pull-request', [f.demo]), { status: 409, body: { v: 1, error: { message: NO_PULL_REQUESTS } } });
   }
 });
+
+test('a confined phone still gets streaming turns slimmed, on /runs and /snapshot', async t => {
+  // A turn that ran ten tools with long output and is still going.
+  const busy = (_provider, { emit }) => {
+    const session = { closed: false, turnActive: false, nativeId: 'busy',
+      async startTurn() {
+        session.turnActive = true;
+        emit({ type: 'session-started', nativeId: 'busy' });
+        emit({ type: 'turn-started', turnId: 'busy-1' });
+        for (let i = 0; i < 10; i++) {
+          emit({ type: 'step-started', step: { id: `s${i}`, kind: 'shell', title: `Step ${i}`, detail: 'x'.repeat(5000) } });
+          emit({ type: 'step-completed', id: `s${i}`, status: 'done', detail: 'x'.repeat(5000) });
+        }
+        return { turnId: 'busy-1' };
+      },
+      async interrupt() { if (session.turnActive) emit({ type: 'turn-cancelled' }); session.turnActive = false; },
+      async close() { await session.interrupt(); session.closed = true; },
+    };
+    return session;
+  };
+  const f = await fixture(t, { runtime: options => ({ ...options, createSession: busy }) });
+  await f.rpc('project:open', [f.demo]);
+  const chat = Object.values((await (await f.request(`/snapshot?projectPath=${encodeURIComponent(f.demo)}`)).json()).result.project.state.sessions)[0];
+  const chatId = `${f.demo}#${chat.id}`;
+  assert.equal((await f.rpc('chat:send', [{ projectPath: f.demo, sessionId: chat.id, body: 'go', provider: 'codex', model: 'demo', permissionMode: 'ask' }])).status, 200);
+  let steps;
+  for (let i = 0; steps?.length !== 10; i++) {
+    assert.ok(i < 200, 'the turn streamed its steps');
+    steps = (await (await f.request(`/runs?projectPath=${encodeURIComponent(f.demo)}`)).json()).result.runs[chatId]?.steps;
+    await delay(20);
+  }
+  for (const route of [`/runs?projectPath=${encodeURIComponent(f.demo)}`, `/snapshot?projectPath=${encodeURIComponent(f.demo)}`]) {
+    const body = (await (await f.request(route)).json()).result;
+    const run = (body.runs.runs ?? body.runs)[chatId];
+    assert.equal(run.steps[0].detail, undefined, route);
+    assert.equal(run.steps[0].hasDetail, true, route);
+    assert.ok(run.steps.at(-1).detail.length <= 4097, route);
+  }
+  await f.rpc('agent:interrupt', [chatId]);
+});

@@ -488,3 +488,23 @@ test('a session that stays up for stableMs resets the backoff', async t => {
   const gap = relay.dials[2] - relay.closes[1];
   assert.ok(gap < 300, `after a stable session the host redialed in ${gap} ms`);
 });
+
+test('a 4409 before ready keeps the short backoff: a replaced pending socket is no sign of a twin Mac', async t => {
+  const bridge = await startFakeBridge(t);
+  const dials = [], closes = [];
+  // Anyone who knows the hostId can open pending sockets and knock the Mac's pending one off with 4409.
+  const relay = await startRelay(t, {
+    hostBehavior: (ws, index) => {
+      dials.push(Date.now());
+      ws.on('close', () => closes.push(Date.now()));
+      if (index > 0) return false;
+      ws.send(JSON.stringify({ t: 'challenge', nonce: b64url(random(32)) }));
+      ws.once('message', () => ws.close(4409, 'replaced'));
+      return true;
+    },
+  });
+  const mac = await startMac(t, { relayUrl: relay.url, bridgeUrl: bridge.url, timing: { backoff: [20], replacedMs: 400, jitter: false } });
+  await until(() => mac.host.status() === 'online' && dials.length === 2, 'back online');
+  const gap = dials[1] - closes[0];
+  assert.ok(gap < 300, `a pending 4409 waited only ${gap} ms`);
+});

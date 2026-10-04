@@ -12,8 +12,8 @@ const MAX_UPLOAD = 8 * 1024 * 1024;
 // Longer than the phone's own deadline for the slowest call (worktree:create, 330 s), so the phone gives up first.
 const REQUEST_TIMEOUT = 340_000;
 // helloMs: a phone connection that has not finished its hello by then is closed, so idle sockets cannot fill the room.
-// replacedMs: the wait after the relay closes us as replaced (4409): another Mac holds the same identity (say, after
-// Migration Assistant), and redialing on the short backoff would have the two knock each other off every second.
+// replacedMs: the wait after the relay closes a ready session as replaced (4409): another Mac holds the same identity
+// (say, after Migration Assistant), and redialing on the short backoff would have the two knock each other off every second.
 // stableMs: how long a session must stay up before the backoff starts over, so a relay that drops us right after
 // ready still backs off.
 const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, helloMs: 15_000, backoff: [1000, 2000, 5000, 10_000, 30_000], replacedMs: 60_000, stableMs: 30_000, jitter: true };
@@ -237,7 +237,9 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
       if (closed) { setStatus('offline'); return; }
       setStatus('offline');
       let delay;
-      if (code === REPLACED) {
+      // Only a proven host being replaced means a twin Mac: replacing a pending socket takes no key, so anyone
+      // who knows the hostId could otherwise keep this Mac offline for a minute at a time.
+      if (code === REPLACED && current.ready) {
         // The usual 40% jitter spread, laid above replacedMs so the wait is never shorter than it.
         delay = jitter ? replacedMs * (1 + Math.random() * 0.4) : replacedMs;
       } else {

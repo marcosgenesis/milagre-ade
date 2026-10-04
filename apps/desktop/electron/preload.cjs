@@ -64,6 +64,13 @@ const bridge = {
   removeLink: (id) => ipcRenderer.invoke("canvas:link-remove", id),
   setWorktreePosition: (id, worktreePath, position) => ipcRenderer.invoke("canvas:worktree-position", id, worktreePath, position),
   openCanvasProject: (projectPath) => ipcRenderer.invoke("canvas:open-project", projectPath),
+  getLinkedWork: () => ipcRenderer.invoke("linked:snapshot"),
+  stopNegotiation: (id) => ipcRenderer.invoke("linked:stop-negotiation", id),
+  onLinkedWork: (callback) => {
+    const listener = (_event, work) => callback(work);
+    ipcRenderer.on("linked:changed", listener);
+    return () => ipcRenderer.removeListener("linked:changed", listener);
+  },
   switchProject: (projectPath) => ipcRenderer.invoke("project:switch", projectPath),
   forgetProject: (projectPath) => ipcRenderer.invoke("project:forget", projectPath),
   retryQuit: () => ipcRenderer.invoke("app:retry-quit"),

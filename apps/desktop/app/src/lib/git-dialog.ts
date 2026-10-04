@@ -180,7 +180,7 @@ export function prTargetLine(remotes: number, prRepo: string | null): string | n
 
 /** A line the dialog saved in the chat, as opposed to an agent's reply. */
 export function isGitNote(message: ChatMessage): boolean {
-  return (message.context as { kind?: string } | null)?.kind === "git-action";
+  return typeof message.context === "object" && message.context?.kind === "git-action";
 }
 
 const TEST_COMMAND = /\b(test|tests|spec|vitest|jest|pytest|mocha|playwright|rspec|phpunit|ctest)\b/i;

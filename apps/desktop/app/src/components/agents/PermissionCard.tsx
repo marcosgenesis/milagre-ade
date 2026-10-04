@@ -1,3 +1,4 @@
+import { NEGOTIATION_ROUNDS } from "@milagre/shared/limits";
 import type { PermissionDecision, PermissionRequest } from "../../model";
 import { ToolApproval, ToolApprovalCode } from "./tool-approval";
 import type { ToolApprovalParameter } from "./tool-approval";
@@ -12,6 +13,11 @@ export function PermissionCard({ request, waiting, answering, onAnswer }: {
   onAnswer: (decision: PermissionDecision) => void;
 }) {
   const parameters: ToolApprovalParameter[] = [];
+  // A Delegation's card: where it goes and what it says, as the receiving agent will read it.
+  if (request.delegation) {
+    parameters.push({ id: "target", label: "To", value: request.delegation.target });
+    parameters.push({ id: "message", label: "Message", value: <span className="whitespace-pre-wrap">{request.delegation.message}</span> });
+  }
   if (request.command) parameters.push({ id: "command", label: "Command", value: <ToolApprovalCode code={request.command} language="bash" /> });
   if (request.cwd) parameters.push({ id: "cwd", label: "Folder", value: <span className="font-mono">{request.cwd}</span> });
   if (request.files?.length) parameters.push({ id: "files", label: request.files.length === 1 ? "File" : "Files", value: <span className="whitespace-pre-wrap font-mono">{request.files.join("\n")}</span> });
@@ -19,7 +25,8 @@ export function PermissionCard({ request, waiting, answering, onAnswer }: {
   if (request.detail) parameters.push({ id: "detail", label: "Details", value: <ToolApprovalCode code={request.detail} language="json" /> });
   if (request.reason) parameters.push({ id: "reason", label: "Reason", value: request.reason });
   const queued = waiting > 0 ? `${waiting} more ${waiting === 1 ? "request is" : "requests are"} waiting after this one.` : "";
-  const description = [request.description, queued].filter(Boolean).join(" ");
+  const negotiation = request.delegation?.negotiation ? `Negotiation, up to ${NEGOTIATION_ROUNDS} rounds.` : "";
+  const description = [request.description, negotiation, queued].filter(Boolean).join(" ");
   return (
     <ToolApproval
       tool={request.tool}
@@ -30,7 +37,7 @@ export function PermissionCard({ request, waiting, answering, onAnswer }: {
       parameters={parameters}
       onApprove={() => onAnswer("allow")}
       onAlwaysAllow={request.allowForChat ? () => onAnswer("allow-for-chat") : undefined}
-      alwaysAllowLabel="Always allow in this chat"
+      alwaysAllowLabel={request.kind === "delegation" ? "Always allow for this Link in this chat" : "Always allow in this chat"}
       onDeny={() => onAnswer("deny")}
     />
   );

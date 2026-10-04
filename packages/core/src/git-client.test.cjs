@@ -102,3 +102,13 @@ test('Git process execution belongs only to the Git client', async () => {
   }
   assert.deepEqual(violations, []);
 });
+
+test('the read surface runs git grep but never its pager option, attached or not', async () => {
+  const { createGit } = require('./git/client.cjs');
+  const calls = [];
+  const git = createGit({ execFile: (command, args, options, done) => { calls.push(args); done(null, '', ''); } });
+  await assert.rejects(git.read.run('/repo', ['grep', '-Oless', '-e', 'x']), /write surface/);
+  await assert.rejects(git.read.run('/repo', ['grep', '--open-files-in-pager=sh', '-e', 'x']), /write surface/);
+  await git.read.run('/repo', ['grep', '-n', '-e', '-O', '--', '-Ofile']);
+  assert.deepEqual(calls.at(-1).slice(2), ['grep', '-n', '-e', '-O', '--', '-Ofile'], 'a pattern or path that looks like -O is searched for');
+});

@@ -423,3 +423,18 @@ test('background children prevent idle eviction after the parent finishes', asyn
  created[0].emit({type:'subagent-update',agent:{id:'child',status:'completed'}});
  await waitUntil(()=>created[0].closed);
 });
+
+test("Milagre's own tools ask through the chat's approval cards and read its permission mode", async () => {
+
+  const added = [];
+  const session = { turnActive: true, closed: false, permissions: { mode: "auto", add: (request, answer) => added.push({ request, answer }) }, startTurn: async () => ({ turnId: "t", steered: false }), close: async () => {} };
+  const manager = new SessionManager({ createSession: () => session, send: () => {} });
+  assert.equal(await manager.askApproval("p#1", { requestId: "r" }), "cancelled", "a chat without a session has nobody to ask");
+  assert.equal(manager.permissionMode("p#1"), "ask");
+  await manager.startTurn({ chatId: "p#1", provider: "claude", cwd: "/p" });
+  assert.equal(manager.permissionMode("p#1"), "auto");
+  assert.equal(manager.isTurnActive("p#1"), true);
+  const decision = manager.askApproval("p#1", { requestId: "r" });
+  added[0].answer("deny");
+  assert.equal(await decision, "deny");
+});

@@ -805,3 +805,23 @@ test("TLDR can be disabled when starting or resuming Claude", async (t) => {
     assert.equal(calls.options.resume, resumeId);
   }
 });
+
+test("a Chat's linked tools are served in-process and allowed without Claude's own approval", async (t) => {
+  const sdk = fakeSdk(scripts.reply);
+  const made = [];
+  const loadSdk = async () => ({
+    ...(await sdk.loadSdk()),
+    tool: (name, description, input, handler, extras) => ({ name, description, input, handler, extras }),
+    createSdkMcpServer: (options) => { made.push(options); return { type: "sdk", name: options.name, instance: {} }; },
+  });
+  const events = [];
+  const linked = { tools: [{ name: "linked_overview", description: "Summary", input: {}, readOnly: true, run: async () => "summary of web" }] };
+  const session = new ClaudeSession({ cwd: "/repo", command: "/usr/local/bin/claude", linked, emit: (event) => events.push(event), loadSdk });
+  t.after(() => session.close());
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(sdk.calls.options.mcpServers, { milagre: { type: "sdk", name: "milagre", instance: {} } });
+  assert.deepEqual(sdk.calls.options.allowedTools, ["mcp__milagre__linked_overview"]);
+  assert.equal(made[0].tools[0].extras.annotations.readOnlyHint, true);
+  assert.deepEqual(await made[0].tools[0].handler({}), { content: [{ type: "text", text: "summary of web" }], isError: false });
+});

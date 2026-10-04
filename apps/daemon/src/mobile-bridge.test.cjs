@@ -273,6 +273,8 @@ test('/runs and the snapshot\'s runs stay small while a turn streams a lot of to
   await rpc('project:open', [project]);
   const chat = Object.values((await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result.project.state.sessions)[0].id;
   assert.equal((await rpc('chat:send', [{ projectPath: project, sessionId: chat, body: 'go', provider: 'codex', model: 'm', permissionMode: 'ask' }])).status, 200);
+  // The message is saved before the turn starts in the background; wait for its agent session.
+  for (const start = Date.now(); !agent.sessions[0] && Date.now() - start < 3000; await delay(10));
   const session = agent.sessions[0];
   for (const step of longTurn().steps) {
     session.emit({ type: 'step-started', step: { id: step.id, kind: step.kind, title: step.title } });

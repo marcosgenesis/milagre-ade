@@ -30,7 +30,8 @@ function pruneLinks(links, projects, active) {
   return links.filter(link => canLink(link.a, link.b, projects, active));
 }
 
-function visibleWorktrees(source, links, active) {
+// Every Worktree the source reaches in one hop, each with the Link that reaches it (the first one, when several do).
+function linkedWorktrees(source, links, active) {
   if (!active[source.project_id]?.includes(source.worktree_path)) return [];
   const found = new Map();
   for (const link of links) {
@@ -42,10 +43,11 @@ function visibleWorktrees(source, links, active) {
     for (const worktree_path of paths) {
       if (!active[target.project_id]?.includes(worktree_path)) continue;
       if (target.project_id === source.project_id && worktree_path === source.worktree_path) continue;
-      found.set(`${target.project_id}\0${worktree_path}`, { project_id: target.project_id, worktree_path });
+      const key = `${target.project_id}\0${worktree_path}`;
+      if (!found.has(key)) found.set(key, { project_id: target.project_id, worktree_path, link_id: link.id });
     }
   }
   return [...found.values()];
 }
 
-module.exports = { canLink, createLink, pruneLinks, visibleWorktrees };
+module.exports = { canLink, createLink, linkedWorktrees, pruneLinks };

@@ -137,14 +137,21 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
       data.links = data.links.filter(link => link.id !== id);
       return data;
     }),
-    pruneLinks: (active) => update(async (data) => {
-      data.links = pruneLinks(data.links, data.projects, active);
-      for (const [id, positions] of Object.entries(data.worktreePositions)) {
-        if (!data.projects.some(project => project.id === id)) { delete data.worktreePositions[id]; continue; }
-        for (const worktreePath of Object.keys(positions)) if (!active[id]?.includes(worktreePath)) delete positions[worktreePath];
-      }
-      return data;
-    }),
+    /** Drops Links whose endpoints went away; resolves with the dropped ones. */
+    pruneLinks: async (active) => {
+      let removed = [];
+      await update(async (data) => {
+        const kept = pruneLinks(data.links, data.projects, active);
+        removed = data.links.filter(link => !kept.includes(link));
+        data.links = kept;
+        for (const [id, positions] of Object.entries(data.worktreePositions)) {
+          if (!data.projects.some(project => project.id === id)) { delete data.worktreePositions[id]; continue; }
+          for (const worktreePath of Object.keys(positions)) if (!active[id]?.includes(worktreePath)) delete positions[worktreePath];
+        }
+        return data;
+      });
+      return removed;
+    },
   };
 }
 

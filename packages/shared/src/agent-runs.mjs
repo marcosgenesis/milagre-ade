@@ -68,6 +68,12 @@ function savedSteps(text, steps, closeAs) {
   };
 }
 
+/** How a chat's turn stands: waiting on the user (an approval or a question), working, or idle (no run). */
+export function runStatus(run) {
+  if (!run) return "idle";
+  return run.approvals.length || run.questions.length ? "waiting" : "working";
+}
+
 const TURN_ENDS = new Set(["turn-completed", "turn-cancelled", "turn-failed"]);
 
 /** Whether the event ends a turn. */

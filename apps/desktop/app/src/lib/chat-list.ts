@@ -2,11 +2,13 @@ import type { ChatMessage } from "../model";
 export { chatTitle } from "@milagre/shared/chats";
 
 /** What the mark at the left of a chat row shows; the first that applies wins. */
-export type ChatMark = "question" | "waiting" | "running" | "unread" | "idle";
+export type ChatMark = "question" | "waiting" | "delegated" | "running" | "unread" | "idle";
 
-export function chatMark({ asking = false, waiting, running, unread }: { asking?: boolean; waiting: boolean; running: boolean; unread: boolean }): ChatMark {
+/** `delegated`: a Delegation from another Chat is queued or running here. */
+export function chatMark({ asking = false, waiting, delegated = false, running, unread }: { asking?: boolean; waiting: boolean; delegated?: boolean; running: boolean; unread: boolean }): ChatMark {
   if (asking) return "question";
   if (waiting) return "waiting";
+  if (delegated) return "delegated";
   if (running) return "running";
   if (unread) return "unread";
   return "idle";

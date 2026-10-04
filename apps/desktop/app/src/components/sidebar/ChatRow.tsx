@@ -16,6 +16,7 @@ import {
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  Link04Icon,
   LinkSquare02Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
@@ -84,6 +85,7 @@ const HIDE_ONLY: ArchivePlan = { milagreOwned: false, shared: false, status: nul
 const MARK_LABEL: Record<Exclude<ChatMark, "idle">, string> = {
   question: "Asking you",
   waiting: "Waiting for you",
+  delegated: "Working on a Delegation",
   running: "Running",
   unread: "Unread",
 };
@@ -112,6 +114,7 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
 const MARK_ICON = {
   question: { icon: BubbleChatIcon, tone: "text-accent" },
   waiting: { icon: ShieldAlertIcon, tone: "text-orange" },
+  delegated: { icon: Link04Icon, tone: "text-accent" },
 } satisfies Partial<Record<ChatMark, { icon: HugeIconData; tone: string }>>;
 
 function MarkIcon({ mark }: { mark: keyof typeof MARK_ICON }) {

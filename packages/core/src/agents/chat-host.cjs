@@ -21,6 +21,15 @@ const RESUME_PROMPT = "Milagre, the app running you, closed while you were worki
 // A message the user sends replaces the brief waiting as a draft and any resume a quit left.
 const withoutDraft = ({ handoverDraft, resumeTurn, ...rest }) => rest;
 
+// A new chat in a worktree takes its chat that has no messages yet, if there is one (not a handover still
+// waiting for its brief or holding it as a draft); otherwise one is made. Resolves the state with it.
+function starterChat(latest, worktree) {
+  const existing = Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id));
+  if (existing) return { state: latest, session: existing };
+  const session = { id: latest.next_id, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
+  return { state: { ...latest, next_id: latest.next_id + 1, sessions: { ...latest.sessions, [session.id]: session } }, session };
+}
+
 class ChatHost {
   /**
    * `startTurn(request)` starts or steers the agent's turn (see SessionManager.startTurn);
@@ -45,6 +54,27 @@ class ChatHost {
   /** The turns streaming now, in every project, and the number of the last event they hold. */
   snapshot() {
     return { runs: this.runs, seq: this.seq };
+  }
+
+  /** The settings of the chat's latest turn this run (provider, model, permission mode…), or null. */
+  turnSettings(chatId) {
+    if (!this.turns.has(chatId)) return null;
+    const { prompt: _prompt, ...settings } = this.turns.get(chatId);
+    return settings;
+  }
+
+  /** A worktree's chat with no messages yet, made when it has none: where a message Milagre sends opens a new chat. Resolves with its id. */
+  async emptyChat(projectPath, worktreeId) {
+    let sessionId;
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const worktree = latest.worktrees[worktreeId];
+      if (!worktree) throw new Error("That worktree is no longer in the project.");
+      const result = starterChat(latest, worktree);
+      sessionId = result.session.id;
+      return result.state;
+    });
+    if (changed) this.broadcast(projectPath, state);
+    return sessionId;
   }
 
   /** The chat on screen, by chat key, or null. A turn that ends in any other chat leaves it unread. */
@@ -171,7 +201,8 @@ class ChatHost {
   /**
    * Saves a message in its chat, a new one in the worktree when `sessionId` is null, then starts the
    * chat's turn, or steers the one running. Resolves with the chat's session id once the message is
-   * saved; the turn starts in the background, and a turn that can't start fails in the chat.
+   * saved, and with `started`: the turn starts in the background, and `started` resolves with what started it
+   * ({ turnId, steered }), or null when it couldn't start (that fails in the chat).
    */
   async send(request) {
     const { projectPath, body, images = [], files = [], provider, model } = request;
@@ -187,20 +218,19 @@ class ChatHost {
       // A chat runs in its own worktree; a new one goes to the worktree asked for.
       const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
-      let nextId = latest.next_id;
-      // A new chat takes the worktree's chat that has no messages yet, if there is one (not a handover still waiting for its brief or holding it as a draft).
-      session ??= Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id))
-        ?? { id: nextId++, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
+      const started = session ? { state: latest, session } : starterChat(latest, worktree);
+      session = started.session;
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
       // A handed-over chat's first message carries its brief; the body is only what the user typed.
       brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
-      const withSession = { ...latest, next_id: nextId, sessions: { ...latest.sessions, [session.id]: session } };
+      const withSession = started.state;
       // Persist the input before splitting or starting its run. Tokens keep flowing
       // while this save is pending; rejected input never changes a live run.
       const next = withSession;
       originalSession = session;
-      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: null, role: "user", model };
+      // `context` marks a message no person typed, such as a Delegation from another Chat.
+      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: request.context ?? null, role: "user", model };
       pendingId = message.id;
       stagedSession = { ...withoutDraft(session), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
@@ -248,8 +278,11 @@ class ChatHost {
       prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
     };
     this.turns.set(target.chatId, turn);
-    this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) }));
-    return { sessionId: target.sessionId };
+    const started = this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => {
+      void this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) });
+      return null;
+    });
+    return { sessionId: target.sessionId, started };
   }
 
   /**

@@ -18,6 +18,12 @@ class GitError extends Error {
 // Call sites select the read or write surface explicitly. This is not an API for untrusted raw Git arguments.
 function isRead(args) {
   if (args.some(arg => arg === '--output' || arg.startsWith('--output='))) return false;
+  // `git grep -O` hands its matches to a pager or editor. Only options count: a pattern follows -e, paths follow --.
+  if (args[0] === 'grep') {
+    const end = args.indexOf('--');
+    const options = args.slice(1, end === -1 ? undefined : end).filter((arg, index, list) => list[index - 1] !== '-e');
+    return !options.some(arg => arg.startsWith('-O') || arg.startsWith('--open-files-in-pager'));
+  }
   if (['status', 'diff', 'rev-parse', 'rev-list', 'merge-base', 'for-each-ref', 'ls-files', 'check-ignore', 'log', 'show', 'cat-file'].includes(args[0])) return true;
   if (args[0] === 'worktree') return args[1] === 'list';
   if (args[0] === 'remote') return args.length === 1 || args[1] === 'get-url';

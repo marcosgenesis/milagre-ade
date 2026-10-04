@@ -124,7 +124,7 @@ export interface ChatMessage {
   id: number;
   session_id: number;
   body: string;
-  context: unknown;
+  context: ChatContext;
   role?: "user" | "assistant";
   model?: string;
   images?: ImageAttachment[];
@@ -135,6 +135,48 @@ export interface ChatMessage {
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
+}
+
+/**
+ * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
+ * report coming back, a Negotiation's agreement, or a notice about one. `from` is the other Chat's key.
+ */
+/** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, or a handover note. */
+export type ChatContext = LinkedContext | { kind: "git-action" } | "handover" | null;
+
+export type LinkedContext =
+  | { kind: "delegation"; delegationId: string; from: string; fromLabel: string; negotiation?: { id: string; round: number } }
+  | { kind: "delegation-report"; delegationId: string; from: string | null; fromLabel: string; status: "done" | "cancelled" | "failed"; negotiation?: { id: string; round: number } }
+  | { kind: "negotiation-agreement"; negotiationId: string; with: string; by?: string }
+  | { kind: "linked-notice"; negotiationId?: string; delegationId?: string; with?: string };
+
+/** A Delegation still queued or running (see delegations.cjs in @milagre/core). */
+export interface OpenDelegation {
+  id: string;
+  link_id: string;
+  from_chat: string;
+  to_chat: string | null;
+  from_label: string;
+  to_label: string;
+  status: "queued" | "running";
+  negotiation_id?: string;
+  round?: number;
+  message: string;
+}
+
+export interface RunningNegotiation {
+  id: string;
+  link_id: string;
+  chats: [string, string | null];
+  labels: [string, string];
+  round: number;
+}
+
+/** The open work across Links (linked:snapshot, linked:changed). `receiveOnly` lists Codex Chats that can't use the linked tools. */
+export interface LinkedWork {
+  delegations: OpenDelegation[];
+  negotiations: RunningNegotiation[];
+  receiveOnly: string[];
 }
 
 export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image";
@@ -178,7 +220,7 @@ export interface ImageAttachment {
 /** What an agent asks to do, as shown on the approval card. */
 export interface PermissionRequest {
   requestId: string;
-  kind: "command" | "edit" | "other";
+  kind: "command" | "edit" | "other" | "delegation";
   /** Short name of the tool, e.g. "Bash", "Shell" or "Edit files". */
   tool: string;
   title: string;
@@ -195,6 +237,8 @@ export interface PermissionRequest {
   allowForChat: boolean;
   /** The tool step this request is about. */
   stepId?: string;
+  /** On a Delegation's card: where it goes ("Project / branch / Chat"), what it says, and whether it opens a Negotiation. */
+  delegation?: { target: string; message: string; negotiation: boolean };
 }
 
 export type PermissionDecision = "allow" | "allow-for-chat" | "deny";
@@ -288,7 +332,8 @@ export type AgentEvent =
   | { type: "tasks-updated"; tasks: AgentTask[] }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
-  | { type: "turn-started"; turnId: string | null }
+  /** `continues`: the turn whose steering message arrived as it ended, which this turn the agent started by itself takes. */
+  | { type: "turn-started"; turnId: string | null; continues?: string }
   | { type: "text-delta"; messageId: string | null; text: string }
   | { type: "step-started"; step: Pick<ChatStep, "id" | "kind" | "title" | "detail" | "file"> }
   | { type: "step-output"; id: string; text: string }

@@ -183,6 +183,28 @@ test('a reset that fails part way leaves no old host running and reports an erro
   assert.notEqual(JSON.parse(await fs.readFile(file, 'utf8')).token, oldToken);
 });
 
+test('reset gives the Mac a new relay identity, so the link carries a new host and key', async t => {
+  const { phone, relays } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const before = new URL(phone.status().pairingLink).searchParams;
+  await phone.reset();
+  await phone.settled();
+  const after = new URL(phone.status().pairingLink).searchParams;
+  assert.notEqual(after.get('host'), before.get('host'));
+  assert.notEqual(after.get('key'), before.get('key'));
+  assert.equal(relays[1].options.identity.hostId, after.get('host'));
+  assert.notEqual(relays[1].options.identity.hostId, relays[0].options.identity.hostId);
+});
+
+test('reset while off rotates the relay identity too', async t => {
+  const { phone, dataDir } = await fixture(t);
+  const { readIdentity } = require('./relay-identity.cjs');
+  const before = await readIdentity(dataDir);
+  await phone.reset();
+  assert.notEqual((await readIdentity(dataDir)).hostId, before.hostId);
+});
+
 test('reset while off forgets relay phones too', async t => {
   const { phone, dataDir } = await fixture(t);
   await createPhones(dataDir).add('phoneA');

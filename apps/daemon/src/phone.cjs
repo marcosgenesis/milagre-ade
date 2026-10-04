@@ -6,7 +6,7 @@ const { startMobileBridge } = require('./mobile-bridge.cjs');
 const { readCloudflare } = require('./mobile-cloudflare.cjs');
 const { pairingLink, relayPairingLink, computerName } = require('./mobile-pairing.cjs');
 const { startRelayHost } = require('./relay-host.cjs');
-const { readIdentity, createPhones } = require('./relay-identity.cjs');
+const { readIdentity, rotateIdentity, createPhones } = require('./relay-identity.cjs');
 const { b64url } = require('@milagre/shared/relay-crypto');
 const defaultTunnels = require('./mobile-tunnel.cjs');
 
@@ -200,6 +200,8 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
           await save();
           // Phones paired through the relay are bound to the old token, so they go with it.
           await (relayPhones ??= createPhones(dataDir)).clear();
+          // A new host id and key too: an old link can no longer reach this Mac or hold its relay room.
+          await rotateIdentity(dataDir);
           openPairing();
         } catch (failure) {
           set('error', message(failure));

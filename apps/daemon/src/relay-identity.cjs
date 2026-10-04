@@ -15,20 +15,29 @@ async function writePrivate(file, value) {
   } finally { await fs.rm(temporary, { force: true }); }
 }
 
+const identityFile = dataDir => path.join(dataDir, 'relay-identity.json');
+
 /** The Mac's relay identity: a signing key the relay checks, and a box key the phone pins from the QR. */
 async function readIdentity(dataDir) {
-  const file = path.join(dataDir, 'relay-identity.json');
   try {
-    const value = JSON.parse(await fs.readFile(file, 'utf8'));
+    const value = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8'));
     const sign = { publicKey: fromB64url(value.sign.publicKey), secretKey: fromB64url(value.sign.secretKey) };
     const box = { publicKey: fromB64url(value.box.publicKey), secretKey: fromB64url(value.box.secretKey) };
     return { hostId: hostIdOf(sign.publicKey), sign, box };
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  return rotateIdentity(dataDir);
+}
+
+/**
+ * New sign and box key pairs, replacing any saved ones. Reset calls it, so a host id that leaked with an old link
+ * no longer names this Mac on the relay.
+ */
+async function rotateIdentity(dataDir) {
   const sign = signKeyPair(random), box = boxKeyPair(random);
   const encode = pair => ({ publicKey: b64url(pair.publicKey), secretKey: b64url(pair.secretKey) });
-  await writePrivate(file, { sign: encode(sign), box: encode(box) });
+  await writePrivate(identityFile(dataDir), { sign: encode(sign), box: encode(box) });
   return { hostId: hostIdOf(sign.publicKey), sign, box };
 }
 
@@ -47,4 +56,4 @@ function createPhones(dataDir) {
   };
 }
 
-module.exports = { readIdentity, createPhones };
+module.exports = { readIdentity, rotateIdentity, createPhones };

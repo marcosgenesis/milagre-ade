@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test src/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy"
+    "deploy": "npx wrangler@4.147.0 deploy"
   },
   "dependencies": {
     "@milagre/shared": "0.1.0",
@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261004.1",
-    "typescript": "~6.0.3",
-    "wrangler": "^4.147.0"
+    "typescript": "~6.0.3"
   }
 }

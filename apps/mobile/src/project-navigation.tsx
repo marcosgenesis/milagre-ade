@@ -23,7 +23,7 @@ type Row = { key: string; path: string } & (
 const labels: Record<ChatMark, string> = { idle: '', running: 'Running', question: 'Needs reply', waiting: 'Needs approval', interrupted: 'Interrupted', failed: 'Failed', unread: 'Unread' };
 
 /** The same project tree is the first-run destination and the drawer over a Chat. */
-export function ProjectNavigation({ onNavigate, onClose, activeChatId, visible = true }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number; visible?: boolean }) {
+export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number }) {
   const session = useSession();
   const insets = useSafeAreaInsets();
   const { reloadProjects, previewProject } = session;
@@ -39,11 +39,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId, visible =
   const [refreshing, setRefreshing] = useState(false);
   const alive = useRef(true);
   const pending = useRef(new Map<string, Promise<void>>());
-  const selecting = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  // A Project still opening must not take over once the navigation is put away.
-  const { cancelNavigation } = session;
-  useEffect(() => { if (!visible && selecting.current) cancelNavigation(); }, [visible, cancelNavigation]);
   useEffect(() => { void reloadProjects().catch(e => setError(e.message)); }, [reloadProjects]);
   const load = useCallback((projectPath: string) => {
     const existing = pending.current.get(projectPath);
@@ -92,31 +88,25 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId, visible =
     return result;
   }, [copies, currentPath, expanded, failures, query, searching, session.recent, session.snapshot]);
 
-  async function select(projectPath: string, chatId?: number, all = false) {
-    if (selecting.current) return;
-    // A Chat opens at once; the Chat screen loads its Project behind the splash mark.
-    if (chatId !== undefined && session.client) {
-      if (projectPath === currentPath && chatId === activeChatId && onClose) onClose();
-      else onNavigate({ pathname: '/chat', params: { projectPath, hostId: session.client.url, id: String(chatId) } });
-      return;
-    }
-    selecting.current = true; setBusy(true); setError('');
+  // Choosing a Chat, a new Chat or a Project's Chat list goes there at once; that screen loads the Project behind the
+  // splash mark, so nothing waits here.
+  function select(projectPath: string, chatId?: number, all = false) {
+    if (busy || !session.client) return;
+    const params = { projectPath, hostId: session.client.url };
+    if (all) onNavigate({ pathname: '/project', params });
+    else if (chatId === undefined) onNavigate({ pathname: '/chat', params });
+    else if (projectPath === currentPath && chatId === activeChatId && onClose) onClose();
+    else onNavigate({ pathname: '/chat', params: { ...params, id: String(chatId) } });
+  }
+  // A typed path is checked here first, so a wrong one stays next to the field.
+  async function addProject(projectPath: string) {
+    if (busy || !session.client) return;
+    setBusy(true); setError('');
     try {
-      const copy = await session.open(projectPath, { background: true, chatId });
-      if (!copy || !alive.current) return;
-      if (all) { onNavigate('/project'); return; }
-      const params = { projectPath: copy.project.path, hostId: session.client!.url };
-      if (chatId !== undefined) {
-        if (!copy.project.state.sessions[chatId]) throw new Error('This Chat is no longer available. Choose another Chat.');
-        onNavigate({ pathname: '/chat', params: { ...params, id: String(chatId) } });
-      } else {
-        const worktrees = Object.values(copy.project.state.worktrees);
-        const worktree = worktrees.find(item => item.path === copy.project.path) || worktrees[0];
-        if (!worktree) { onNavigate('/project'); return; }
-        onNavigate({ pathname: '/chat', params: { ...params, worktreeId: String(worktree.id) } });
-      }
+      const copy = await session.open(projectPath, { background: true });
+      if (copy && alive.current) onNavigate({ pathname: '/chat', params: { projectPath: copy.project.path, hostId: session.client.url } });
     } catch (e) { if (alive.current) setError((e as Error).message); }
-    finally { selecting.current = false; if (alive.current) setBusy(false); }
+    finally { if (alive.current) setBusy(false); }
   }
   async function switchComputer(id: string) {
     if (busy) return;
@@ -160,18 +150,18 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId, visible =
           <Pressable accessibilityRole="button" accessibilityLabel={`${item.expanded ? 'Collapse' : 'Expand'} ${item.name}`} accessibilityState={{ expanded: item.expanded }} onPress={() => setExpanded(previous => { const next = new Set(previous); if (next.has(item.path)) next.delete(item.path); else next.add(item.path); return next; })} style={({ pressed }) => [s.projectTitle, { opacity: pressed ? 0.55 : 1 }]}>
             <View style={s.projectIcon}><Icon icon={Folder01Icon} tone="ink2" size={16} /></View><Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} />
           </Pressable>
-          <IconButton label={`New Chat in ${item.name}`} icon={Add01Icon} size={44} disabled={busy} onPress={() => void select(item.path)} />
+          <IconButton label={`New Chat in ${item.name}`} icon={Add01Icon} size={44} disabled={busy} onPress={() => select(item.path)} />
         </View>;
         if (item.kind === 'notice') return <Pressable accessibilityRole={item.failed ? 'button' : 'text'} disabled={!item.failed} onPress={() => void load(item.path)} style={s.notice}><Text style={[s.detail, item.failed && { color: colors.red }]}>{item.message}</Text></Pressable>;
-        if (item.kind === 'all') return <Pressable accessibilityRole="button" disabled={busy} onPress={() => void select(item.path, undefined, true)} style={s.notice}><Text style={s.detail}>All chats and filters</Text></Pressable>;
+        if (item.kind === 'all') return <Pressable accessibilityRole="button" disabled={busy} onPress={() => select(item.path, undefined, true)} style={s.notice}><Text style={s.detail}>All chats and filters</Text></Pressable>;
         const title = item.chat.title || item.chat.generatedTitle || 'New Chat';
         const selected = currentPath === item.path && activeChatId === item.chat.id;
-        return <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => void select(item.path, item.chat.id)} style={({ pressed }) => [s.chat, { backgroundColor: selected || pressed ? colors.hover : 'transparent' }]}>
+        return <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => select(item.path, item.chat.id)} style={({ pressed }) => [s.chat, { backgroundColor: selected || pressed ? colors.hover : 'transparent' }]}>
           <ChatMarkIcon mark={item.mark} />
           <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}><Icon icon={GitBranchIcon} tone="ink3" size={12} /><Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
         </Pressable>;
       }} />
-    {adding && <View style={{ padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line }}><Field label="Project path on your computer" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoFocus onSubmitEditing={() => { if (path.trim().startsWith('/')) void select(path.trim()); }} /><PillButton title="Open project" disabled={busy || !path.trim().startsWith('/')} onPress={() => void select(path.trim())} /></View>}
+    {adding && <View style={{ padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line }}><Field label="Project path on your computer" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoFocus onSubmitEditing={() => { if (path.trim().startsWith('/')) void addProject(path.trim()); }} /><PillButton title="Open project" disabled={busy || !path.trim().startsWith('/')} onPress={() => void addProject(path.trim())} /></View>}
     {footer}
   </KeyboardAvoidingView>;
 }

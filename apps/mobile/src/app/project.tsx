@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Alert, FlatList, RefreshControl, Text, View } from 'react-native';
-import { Redirect, Stack, router } from 'expo-router';
+import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { GitBranchIcon, MoreHorizontalIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import type { AgentSession, ChatMessage, Worktree } from '@milagre/shared/model';
@@ -14,6 +14,7 @@ import { LoadingLogo } from '../loading-logo';
 import { ErrorNotice, PullDown, colors, styles, type MenuSection } from '../ui';
 import { archiveFromPhone } from '../archive';
 import { PanelSwipe, useSidePanels } from '../side-panels';
+import { useOpenProject } from '../use-open-project';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -57,6 +58,8 @@ export default function ChatsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   // A rightward drag over the list opens the project navigation, as it does over a Chat.
   const panels = useSidePanels({});
+  // Reached from the navigation for another Project, the list loads it here behind the splash mark.
+  const { wanted, error: openError, retry: retryOpen } = useOpenProject(useLocalSearchParams<{ projectPath?: string; hostId?: string }>());
   const snapshot = session.snapshot;
   const rows = useMemo(() => {
     if (!snapshot) return [];
@@ -82,11 +85,14 @@ export default function ChatsScreen() {
       .sort((a, b) => b.chat.id - a.chat.id);
   }, [snapshot, show, worktreeFilter, query]);
   // Opened from Projects before it loaded: a loading state, unless its last copy is already showing.
-  if (session.client && session.opening && !session.opening.cached) return <View accessible accessibilityRole="progressbar" accessibilityLabel={`Opening ${session.opening.path.split('/').at(-1)}…`} style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
-    <Stack.Screen options={{ title: session.opening.path.split('/').at(-1) || 'Project' }} />
-    <LoadingLogo />
-    <Text style={styles.muted}>Opening {session.opening.path.split('/').at(-1)}…</Text>
-  </View>;
+  const loading = wanted ?? (session.opening && !session.opening.cached ? session.opening.path : null);
+  if (session.client && loading) {
+    const name = loading.split('/').at(-1) || 'Project';
+    return <View accessible={!openError} accessibilityRole="progressbar" accessibilityLabel={`Opening ${name}…`} style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }]}>
+      <Stack.Screen options={{ title: name }} />
+      {openError ? <ErrorNotice message={openError} retry={retryOpen} /> : <><LoadingLogo /><Text style={styles.muted}>Opening {name}…</Text></>}
+    </View>;
+  }
   if (!session.client || !snapshot) return <Redirect href="/" />;
   const client = session.client;
   const { project } = snapshot;

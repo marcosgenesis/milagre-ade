@@ -287,7 +287,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.useEffect(fn, [fn]) },
-    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
+    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../loading-logo': { LoadingLogo: 'LoadingLogo' },
+    '../use-open-project': load('use-open-project.ts', { react, 'expo-router': { router, useFocusEffect: fn => react.useEffect(fn, [fn]) }, './session': { useSession: () => session } }), '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': require('@milagre/shared/model'),
     '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'),
@@ -395,17 +396,22 @@ test('a sidebar Chat opens at once, leaving its Project to load in the Chat', ()
   assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
 });
 
-test('a new Chat from the sidebar shows the splash animation until its Project opens', async () => {
-  const opening = deferred();
-  const nav = navigationHost(opening.promise);
+test('a new Chat and a Project Chat list from the sidebar open at once too', () => {
+  const nav = navigationHost(deferred().promise);
   find(nav.row('project'), node => node.type === 'IconButton').props.onPress();
-  const busy = nav.render();
-  assert.ok(find(busy, node => node.type === 'LoadingLogo'));
-  assert.ok(find(busy, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Opening...'));
-  assert.equal(nav.routes.length, 0);
-  opening.resolve(nav.state); await settle();
+  nav.row('all').props.onPress();
+  assert.deepEqual(nav.opened, []);
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: '/chat', params: { projectPath: '/last', hostId: 'mac' } }, { pathname: '/project', params: { projectPath: '/last', hostId: 'mac' } }]));
   assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
-  assert.equal(nav.routes[0].pathname, '/chat');
+});
+
+test('a new Chat reached without a Worktree starts in the Project checkout once it loads', () => {
+  const host = chatHost({ effects: true });
+  delete host.params.worktreeId;
+  host.session.snapshot.project.state.worktrees = { 4: { id: 4, path: '/wt/feature' }, 5: { id: 5, path: '/p' } };
+  assert.ok(find(host.render(), node => node.type === 'LoadingLogo'));
+  assert.equal(host.params.worktreeId, '5');
+  assert.equal(find(host.render(), node => node.type === 'LoadingLogo'), undefined);
 });
 
 test('a Chat in another Project loads it behind the splash mark, and shows a failure with Retry', async () => {
@@ -495,10 +501,10 @@ test('New Chat opens the composer directly when there are multiple Worktrees', (
   const { default: ChatsScreen } = load('app/project.tsx', {
     'expo-clipboard': { setStringAsync: async () => {} },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push: route => pushed.push(route) } },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, useLocalSearchParams: () => ({}), router: { push: route => pushed.push(route) } },
     '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
     '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
-    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children },
+    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../use-open-project': { useOpenProject: () => ({ wanted: null, error: '', retry() {} }) },
   });
   react.begin();
   const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
@@ -533,10 +539,10 @@ test('a Chat row Archive asks with the worktree choice, then stops, hides and de
   const { default: ChatsScreen } = load('app/project.tsx', {
     'expo-clipboard': { setStringAsync: async () => {} },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: { alert: pressDanger(alerts) }, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push() {} } },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, useLocalSearchParams: () => ({}), router: { push() {} } },
     '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
     '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo' }, '../loading-logo': { LoadingLogo: 'LoadingLogo' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
-    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children },
+    '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../use-open-project': { useOpenProject: () => ({ wanted: null, error: '', retry() {} }) },
   });
   react.begin();
   const list = find(ChatsScreen(), node => node.type === 'FlatList');

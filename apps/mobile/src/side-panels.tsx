@@ -150,7 +150,7 @@ export function SidePanelsHost() {
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.backdrop }, shade]} />
     <GestureDetector gesture={close}><View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {mounted.left && <Animated.View {...hidden('left')} style={[StyleSheet.absoluteFill, { backgroundColor: colors.page }, left]}>
-        <ProjectNavigation key={session.client.url} activeChatId={screen.chatId} visible={open === 'left'} onClose={() => show(null)} onNavigate={navigate} />
+        <ProjectNavigation key={session.client.url} activeChatId={screen.chatId} onClose={() => show(null)} onNavigate={navigate} />
       </Animated.View>}
       {mounted.right && screen.worktreeId !== undefined && <Animated.View {...hidden('right')} style={[StyleSheet.absoluteFill, { backgroundColor: colors.page }, right]}>
         <ChangesPanel key={screen.worktreeId} worktreeId={screen.worktreeId} onClose={() => show(null)} />

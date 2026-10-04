@@ -386,3 +386,42 @@ test('reusing an empty Chat preserves its existing text and attachment drafts', 
   assert.equal(screen.session.attachments['/p#42'][0], photo);
   assert.equal(screen.field().value, 'unsent in existing Chat');
 });
+
+test('notification navigation reconnects and opens the target Chat only after loading current state', async () => {
+  const calls = [];
+  const target = { project: { path: '/target', name: 'Target', state: { sessions: { 7: { id: 7 } } } }, runs: { runs: {} } };
+  const render = sessionHost({ url: 'https://mac.example', call: async (method, args) => { calls.push({ method, args }); return method === 'project:recent' ? [] : method === 'project:open' ? { path: args[0] } : {}; }, snapshot: async () => target });
+  const opened = await render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  assert.equal(opened, true);
+  assert.equal(render().snapshot.project.path, '/target');
+  assert.equal(render().hostName, 'Mac');
+  assert.ok(calls.some(call => call.method === 'project:open' && call.args[0] === '/target'));
+});
+
+test('a later disconnect or navigation cancels an outstanding notification target', async () => {
+  const loaded = deferred();
+  const render = sessionHost({ url: 'https://mac.example', call: async () => [], snapshot: () => loaded.promise });
+  const opening = render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  await new Promise(resolve => setTimeout(resolve, 1));
+  render().cancelNavigation();
+  loaded.resolve({ project: { path: '/target', state: { sessions: { 7: { id: 7 } } } } });
+  assert.equal(await opening, false);
+  assert.equal(render().client, null);
+  assert.equal(render().snapshot, null);
+});
+
+test('notification navigation rejects a Chat that no longer exists', async () => {
+  const render = sessionHost({ call: async () => [], snapshot: async () => snapshot('/target') });
+  await assert.rejects(render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7), /no longer available/);
+  assert.equal(render().client, null);
+});
+
+test('a cancelled notification target ignores a later network failure', async () => {
+  const loaded = deferred();
+  const render = sessionHost({ call: async () => [], snapshot: () => loaded.promise });
+  const opening = render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  await new Promise(resolve => setTimeout(resolve, 1));
+  render().cancelNavigation();
+  loaded.reject(new Error('Connection lost'));
+  assert.equal(await opening, false);
+});

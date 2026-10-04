@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, RefreshControl, Text, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
-import { Add01Icon, ComputerIcon, LaptopIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ComputerIcon, LaptopIcon, Notification01Icon } from '@hugeicons/core-free-icons';
 import { useSession } from '../session';
+import { usePush } from '../push';
 import { savedHosts } from '../hosts-native';
 import { createClient } from '../client';
 import type { SavedHost } from '../hosts-store';
@@ -14,6 +15,7 @@ const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
 export default function ComputersScreen() {
   const session = useSession();
+  const push = usePush();
   const [status, setStatus] = useState<Record<string, Reachability>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -45,12 +47,13 @@ export default function ComputersScreen() {
       : session.hosts.length === 1 && !session.client ? session.hosts[0] : null;
     if (!target || !session.claimAutoOpen()) return;
     autoOpened.current = true;
-    const timer = setTimeout(() => void open(target), 0);
+    const version = session.navigationVersion();
+    const timer = setTimeout(() => { if (session.navigationVersion() === version) void open(target); }, 0);
     return () => clearTimeout(timer);
   }, [session.hosts]); // eslint-disable-line react-hooks/exhaustive-deps
   function manage(host: SavedHost, action: string) {
     if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
-    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { if (session.client?.url === host.address) session.disconnect(); void savedHosts.forget(host.id).then(load).catch(e => setError(e.message)); } }]);
+    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(load).catch(e => setError(e.message)); } }]);
   }
   const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
   const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';
@@ -70,6 +73,7 @@ export default function ComputersScreen() {
         <Text style={[styles.muted, { textAlign: 'center' }]}>Run <Text style={styles.code}>npm run mobile:host</Text> on your Mac, then scan the code it shows. Your agents keep working when you leave the app.</Text>
         <PillButton title="Add computer" icon={Add01Icon} onPress={() => router.push('/add-computer')} />
       </View>}
+      <View style={styles.card}><ListRow title="Notifications" subtitle={push.state?.enabled ? 'On' : 'Off'} leading={<Icon icon={Notification01Icon} tone="ink" size={22} />} onPress={() => router.push('/notifications')} /></View>
       {error ? <ErrorNotice message={error} /> : null}
     </PageScroll>
   </>;

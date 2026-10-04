@@ -29,6 +29,7 @@ function usePushState() {
         sessionRef.current.cancelNavigation();
         if (sessionRef.current.client?.url === host.id) sessionRef.current.disconnect();
         await savedHosts.forget(host.id);
+        if (host.relay) relayRuntime.forget(host.relay.hostId);
         await sessionRef.current.loadHosts();
       }
   }, []);

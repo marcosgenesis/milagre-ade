@@ -852,3 +852,41 @@ test('tool disclosure reveals late output, while its chat action opens Activity 
   assert.equal(opened, 1);
   assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
 });
+
+test('relay transports: one per Mac, replaced by a new code, closed in the background and on forget', async () => {
+  const listeners = [], made = [];
+  const identity = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+  const phoneRandom = n => new Uint8Array(n);
+  const { relayRuntime } = load('relay-native.ts', {
+    'react-native': { AppState: { addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } } },
+    'expo-file-system': { Directory: class {}, File: class {}, Paths: {} },
+    './relay-transport': { createRelayTransport: options => { const transport = { options, closed: 0, close() { transport.closed++; } }; made.push(transport); return transport; } },
+    './phone-identity': { phoneIdentity: async () => identity, phoneRandom },
+  });
+  const link = (hostId, key = 'K'.repeat(43)) => ({ url: 'wss://relay.milagre.cloud', hostId, key });
+  const a = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) });
+  assert.equal(await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'a'.repeat(64) }), a, 'one transport per Mac');
+  assert.equal(a.options.identity, identity);
+  assert.equal(a.options.random, phoneRandom);
+  assert.equal(a.options.hostId, 'A'.repeat(22));
+  const b = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b, a);
+  // A new pairing code for the same Mac replaces its transport.
+  const a2 = await relayRuntime.transport({ relay: link('A'.repeat(22)), token: 'c'.repeat(64) });
+  assert.notEqual(a2, a);
+  assert.equal(a.closed, 1);
+  // The background closes every open transport; they stay in place to reopen on the next request.
+  for (const listener of listeners) listener('inactive');
+  assert.deepEqual([a2.closed, b.closed], [0, 0]);
+  for (const listener of listeners) listener('background');
+  assert.deepEqual([a2.closed, b.closed], [1, 1]);
+  assert.equal(await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) }), b);
+  // Forget closes the transport and drops it: the next use builds a new one.
+  relayRuntime.forget('B'.repeat(22));
+  assert.equal(b.closed, 2);
+  const b2 = await relayRuntime.transport({ relay: link('B'.repeat(22)), token: 'a'.repeat(64) });
+  assert.notEqual(b2, b);
+  relayRuntime.forget('nobody');
+  for (const listener of listeners) listener('background');
+  assert.equal(b.closed, 2, 'a forgotten transport is not closed again');
+});

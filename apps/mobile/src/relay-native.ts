@@ -15,7 +15,7 @@ AppState.addEventListener('change', state => {
 const folder = () => new Directory(Paths.cache, 'relay-media');
 
 /** The phone's side of the relay: its Keychain key, native randomness and the image cache folder. */
-export const relayRuntime: RelayRuntime = {
+export const relayRuntime: RelayRuntime & { forget(hostId: string): void } = {
   async transport({ relay, token }) {
     let identity;
     try { identity = await phoneIdentity(); }
@@ -27,6 +27,11 @@ export const relayRuntime: RelayRuntime = {
     const transport = createRelayTransport({ relay: relay.url, hostId: relay.hostId, key: relay.key, token, identity, random: phoneRandom });
     open.set(relay.hostId, { pairing, transport });
     return transport;
+  },
+  /** A forgotten Mac's socket closes now, not when the app next goes to the background. */
+  forget(hostId) {
+    open.get(hostId)?.transport.close();
+    open.delete(hostId);
   },
   files: {
     async find(name) {

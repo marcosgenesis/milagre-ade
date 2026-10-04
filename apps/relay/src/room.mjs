@@ -64,6 +64,11 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
   const sent = (socket, data) => { try { socket.send(data); return true; } catch { return false; } };
   const hostGone = () => { const old = host; host = null; dropPhones(); if (old) drop(old, 1011, 'send-failed'); };
   const toHost = data => { if (host && !sent(host, data)) hostGone(); };
+  const phoneRefusal = () => {
+    if (!host) return { code: 4404, reason: 'host-offline' };
+    if (phones.size >= MAX_PHONES) return { code: 4429, reason: 'too-many-phones' };
+    return null;
+  };
   const forgetPhone = (conn, socket) => { phones.delete(conn); connOf.delete(socket); note(socket, null); };
   return {
     /** A new Mac socket waits as pending: the current host and its phones are untouched until the proof verifies. */
@@ -103,9 +108,11 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       note(socket, null);
       dropPhones();
     },
+    /** Why a new phone would be turned away right now, or null. Changes nothing. */
+    phoneRefusal,
     phoneOpened(socket) {
-      if (!host) { drop(socket, 4404, 'host-offline'); return null; }
-      if (phones.size >= MAX_PHONES) { drop(socket, 4429, 'too-many-phones'); return null; }
+      const refusal = phoneRefusal();
+      if (refusal) { drop(socket, refusal.code, refusal.reason); return null; }
       const conn = ++next;
       // The phone takes a slot only once the Mac has heard about it.
       if (!sent(host, frame(OPEN, conn))) { hostGone(); drop(socket, 4404, 'host-offline'); return null; }

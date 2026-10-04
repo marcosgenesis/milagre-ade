@@ -16,6 +16,8 @@ export interface Room {
   hostOpened(socket: RoomSocket): void;
   hostMessage(socket: RoomSocket, data: Payload): void;
   hostClosed(socket: RoomSocket): void;
+  /** Why a new phone would be turned away right now, or null. Changes nothing. */
+  phoneRefusal(): { code: number; reason: string } | null;
   phoneOpened(socket: RoomSocket): bigint | null;
   phoneMessage(socket: RoomSocket, data: Payload): void;
   phoneClosed(socket: RoomSocket): void;

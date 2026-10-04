@@ -477,3 +477,16 @@ test('a socket the room already closed is not restored as live, even if it is st
   const conn = revived.phoneOpened(late);
   assert.deepEqual(unframe(second.sent.at(-1)), { type: 1, conn, payload: new Uint8Array() });
 });
+
+test('phoneRefusal says why a phone would be turned away, so the worker can refuse it before accepting', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  assert.deepEqual(room.phoneRefusal(), { code: 4404, reason: 'host-offline' });
+  room.hostOpened(fakeSocket());
+  assert.deepEqual(room.phoneRefusal(), { code: 4404, reason: 'host-offline' });
+  const host = connectHost(room);
+  assert.equal(room.phoneRefusal(), null);
+  const before = host.sent.length;
+  for (let i = 0; i < MAX_PHONES; i++) room.phoneOpened(fakeSocket());
+  assert.deepEqual(room.phoneRefusal(), { code: 4429, reason: 'too-many-phones' });
+  assert.equal(host.sent.length, before + MAX_PHONES, 'asking sends nothing');
+});

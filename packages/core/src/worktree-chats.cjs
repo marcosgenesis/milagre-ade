@@ -166,7 +166,8 @@ async function migrateWorktreeChats({ projectPath, state, linkedWorktrees, liste
   if (restored.length) {
     try {
       merged = await migrateImages(projectPath, merged);
-      await save(projectPath, merged);
+      // Synced to disk: the old files are renamed next, so the main file must already hold their chats.
+      await save(projectPath, merged, { durable: true });
     } catch (error) {
       warn(`Milagre couldn't bring back the chats saved in ${done.map((item) => item.file).join(", ")}: ${error.message}`);
       return { state, restored: [] };

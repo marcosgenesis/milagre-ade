@@ -9,7 +9,7 @@ const http = require('node:http');
 const { setTimeout: delay } = require('node:timers/promises');
 const { WebSocket } = require('ws');
 const { startDaemon } = require('./server.cjs');
-const { forPhone, startMobileBridge } = require('./mobile-bridge.cjs');
+const { forPhone, runsForPhone, startMobileBridge } = require('./mobile-bridge.cjs');
 const { connect } = require('./client.cjs');
 
 async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
@@ -230,6 +230,82 @@ test('the phone snapshot leaves out tool output and old subagent transcript, kee
   assert.deepEqual(phone.state.sessions[1].subagents[0].transcript.map(item => item.id), ['5', '6', '7', '8']);
   assert.equal(phone.state.sessions[1].subagents[0].transcript.at(-1).text.length, 601);
   assert.equal(project.state.messages[0].steps[1].detail.length, 5000, 'the daemon\'s state is untouched');
+});
+
+function longTurn() {
+  const steps = Array.from({ length: 300 }, (_, i) => ({ id: `s${i}`, kind: i === 5 ? 'thinking' : 'shell', title: `Step ${i}`, status: i === 10 ? 'running' : 'done', note: `n${i}`, offset: i, detail: `${i % 10}`.repeat(19_990) + 'END' + i }));
+  return { text: 'working', model: 'm', steps, approvals: [{ id: 'a' }], questions: [], answered: {} };
+}
+
+test('runsForPhone keeps the end of live output and drops the rest of the tool output', () => {
+  const run = longTurn();
+  const runs = { runs: { 'p#1': run, 'p#2': { text: 'no steps', steps: [] } }, seq: 7 };
+  const phone = runsForPhone(runs);
+  const steps = phone.runs['p#1'].steps;
+  assert.equal(phone.seq, 7);
+  assert.deepEqual(phone.runs['p#2'], runs.runs['p#2']);
+  assert.deepEqual(steps.filter(step => step.detail).map(step => step.id), ['s5', 's10', 's297', 's298', 's299'], 'the thinking step, the running one and the last three');
+  for (const id of ['s10', 's297', 's298', 's299']) {
+    const step = steps.find(item => item.id === id);
+    assert.equal(step.detail.length, 4097);
+    assert.ok(step.detail.startsWith('…') && step.detail.endsWith(`END${id.slice(1)}`), 'the tail of the log');
+    assert.equal(step.hasDetail, undefined);
+  }
+  assert.equal(steps[5].detail, run.steps[5].detail, 'the latest thinking step is whole');
+  assert.ok(steps.filter(step => !step.detail).every(step => step.hasDetail === true));
+  assert.equal(steps.filter(step => step.hasDetail).length, 295);
+  assert.deepEqual({ ...steps[0], detail: undefined, hasDetail: undefined }, { ...run.steps[0], detail: undefined, hasDetail: undefined }, 'everything but detail is unchanged');
+  assert.equal(phone.runs['p#1'].text, 'working');
+  assert.deepEqual(phone.runs['p#1'].approvals, run.approvals);
+  assert.equal(run.steps[0].detail.length, 19_994, 'the daemon\'s runs are untouched');
+});
+
+test('runsForPhone keeps only the latest thinking step whole, and short or empty output as is', () => {
+  const step = (id, kind, status, detail) => ({ id, kind, title: id, status, ...(detail === undefined ? {} : { detail }) });
+  const steps = [step('t1', 'thinking', 'done', 'first'), step('t2', 'thinking', 'done', 'second'), step('a', 'shell', 'done', 'old'), step('b', 'read', 'done'), step('c', 'shell', 'done', 'new'), step('d', 'shell', 'done', 'short'), step('e', 'shell', 'running', 'z'.repeat(5000))];
+  const phone = runsForPhone({ runs: { k: { text: '', steps } }, seq: 1 }).runs.k.steps;
+  assert.deepEqual(phone.map(item => [item.id, item.detail?.length, item.hasDetail]), [['t1', undefined, true], ['t2', 6, undefined], ['a', undefined, true], ['b', undefined, undefined], ['c', 3, undefined], ['d', 5, undefined], ['e', 4097, undefined]]);
+});
+
+test('/runs and the snapshot\'s runs stay small while a turn streams a lot of tool output, and /runs answers 304 when unchanged', async t => {
+  const agent = scriptedAgent();
+  const { dataDir, project, rpc, request } = await fixture(t, { runtimeOptions: agent.runtimeOptions });
+  await rpc('project:open', [project]);
+  const chat = Object.values((await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result.project.state.sessions)[0].id;
+  assert.equal((await rpc('chat:send', [{ projectPath: project, sessionId: chat, body: 'go', provider: 'codex', model: 'm', permissionMode: 'ask' }])).status, 200);
+  const session = agent.sessions[0];
+  for (const step of longTurn().steps) {
+    session.emit({ type: 'step-started', step: { id: step.id, kind: step.kind, title: step.title } });
+    if (step.status === 'done') session.emit({ type: 'step-completed', id: step.id, status: 'done', detail: step.detail });
+    else session.emit({ type: 'step-output', id: step.id, text: step.detail });
+  }
+  const key = `${project}#${chat}`;
+  const direct = await connect({ dataDir });
+  t.after(() => direct.close());
+  let whole;
+  for (const start = Date.now(); Date.now() - start < 3000; await delay(20)) {
+    whole = (await direct.call('chat:runs')).runs[key];
+    if (whole?.steps.length === 300 && whole.steps.at(-1).status === 'done') break;
+  }
+  assert.equal(whole.steps.length, 300);
+  const route = '/runs?projectPath=' + encodeURIComponent(project);
+  const response = await request(route);
+  const text = await response.text();
+  const steps = JSON.parse(text).result.runs[key].steps;
+  assert.ok(JSON.stringify(whole).length > 5_000_000);
+  assert.ok(text.length < 100_000, `${text.length} bytes`);
+  assert.equal(steps.length, 300);
+  assert.deepEqual(steps.filter(step => step.detail).map(step => step.id), ['s5', 's10', 's297', 's298', 's299']);
+  assert.ok(steps.filter(step => step.detail && step.id !== 's5').every(step => step.detail.length === 4097));
+  assert.equal(steps.filter(step => step.hasDetail).length, 295);
+  const snapshot = await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).text();
+  assert.ok(snapshot.length < 120_000, `${snapshot.length} bytes`);
+  assert.deepEqual(JSON.parse(snapshot).result.runs.runs[key].steps.map(step => step.hasDetail), steps.map(step => step.hasDetail), 'the snapshot\'s runs are slimmed the same way');
+  const etag = response.headers.get('etag');
+  assert.ok(etag);
+  const again = await request(route, { headers: { 'if-none-match': etag } });
+  assert.equal(again.status, 304);
+  assert.equal(await again.text(), '');
 });
 
 test('the phone can change a Chat\'s permission mode, and only to a known one', async t => {

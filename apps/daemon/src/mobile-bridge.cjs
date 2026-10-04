@@ -42,6 +42,31 @@ function forPhone(project) {
     : session]));
   return { ...project, state: { ...state, messages, sessions } };
 }
+// Steps at the end of a streaming turn, and any still running, keep this much of the end of their output.
+const LIVE_STEPS = 3;
+const LIVE_DETAIL = 4096;
+
+/**
+ * The turns streaming now, as the phone fetches them on every live "runs" signal. A turn that has run for a while holds
+ * hundreds of steps of tool output (one measured 290 steps, 600 KB), so like forPhone this drops each step's `detail`
+ * and sets `hasDetail`. What the phone watches live is kept: the end of the output of the last few steps and of any
+ * running one, clipped to its tail since output grows at the end, and the latest thinking step whole, which a reply
+ * shows in place of an answer. Text, approvals, questions and the rest of each run are unchanged.
+ */
+function runsForPhone(runs) {
+  if (!runs?.runs) return runs;
+  const slimSteps = steps => {
+    const thought = steps.findLastIndex(step => step.kind === 'thinking' && step.detail?.trim());
+    return steps.map((step, index) => {
+      if (!step.detail || index === thought) return step;
+      if (index >= steps.length - LIVE_STEPS || step.status === 'running') {
+        return step.detail.length > LIVE_DETAIL ? { ...step, detail: `…${step.detail.slice(-LIVE_DETAIL)}` } : step;
+      }
+      return { ...step, detail: undefined, hasDetail: true };
+    });
+  };
+  return { ...runs, runs: Object.fromEntries(Object.entries(runs.runs).map(([key, run]) => [key, run?.steps?.some(step => step.detail) ? { ...run, steps: slimSteps(run.steps) } : run])) };
+}
 const MAX_MEDIA = 15 * MAX_BODY;
 const MEDIA_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heic' };
 const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
@@ -215,14 +240,14 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
           const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          reply(200, { result: { project: forPhone(project), runs: projectRuns(runs, projectPath) } }, { etag: true });
+          reply(200, { result: { project: forPhone(project), runs: runsForPhone(projectRuns(runs, projectPath)) } }, { etag: true });
           return;
         }
         // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.
         if (req.method === 'GET' && target.pathname === '/runs') {
           const projectPath = target.searchParams.get('projectPath');
           if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
-          reply(200, { result: projectRuns(await client.call('chat:runs'), projectPath) }, { etag: true });
+          reply(200, { result: runsForPhone(projectRuns(await client.call('chat:runs'), projectPath)) }, { etag: true });
           return;
         }
         if (req.method === 'GET' && target.pathname === '/message') {
@@ -316,4 +341,4 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   } catch (error) { await close(); throw error; }
   return { url, close, lost };
 }
-module.exports = { startMobileBridge, forPhone };
+module.exports = { startMobileBridge, forPhone, runsForPhone };

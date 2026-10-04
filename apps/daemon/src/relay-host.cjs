@@ -12,7 +12,12 @@ const MAX_UPLOAD = 8 * 1024 * 1024;
 // Longer than the phone's own deadline for the slowest call (worktree:create, 330 s), so the phone gives up first.
 const REQUEST_TIMEOUT = 340_000;
 // helloMs: a phone connection that has not finished its hello by then is closed, so idle sockets cannot fill the room.
-const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, helloMs: 15_000, backoff: [1000, 2000, 5000, 10_000, 30_000], jitter: true };
+// replacedMs: the wait after the relay closes a ready session as replaced (4409): another Mac holds the same identity
+// (say, after Migration Assistant), and redialing on the short backoff would have the two knock each other off every second.
+// stableMs: how long a session must stay up before the backoff starts over, so a relay that drops us right after
+// ready still backs off.
+const DEFAULT_TIMING = { pingMs: 20_000, idleMs: 45_000, helloMs: 15_000, backoff: [1000, 2000, 5000, 10_000, 30_000], replacedMs: 60_000, stableMs: 30_000, jitter: true };
+const REPLACED = 4409;
 // What the phone may set. Origin and Host belong to the bridge's own checks, and Authorization is ours.
 const BLOCKED_HEADERS = new Set(['host', 'origin', 'authorization', 'connection', 'content-length', 'transfer-encoding', 'upgrade', 'cookie']);
 const FORWARDED_HEADERS = ['content-type', 'etag'];
@@ -36,7 +41,7 @@ const routeOk = path => typeof path === 'string' && path.startsWith('/') && !pat
  * an encrypted channel per phone, with requests and live sockets forwarded to the loopback bridge.
  */
 function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair, WebSocket = require('ws').WebSocket, fetch: fetchBridge = globalThis.fetch, random = defaultRandom, onStatus, timing }) {
-  const { pingMs, idleMs, helloMs, backoff, jitter } = { ...DEFAULT_TIMING, ...timing };
+  const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter } = { ...DEFAULT_TIMING, ...timing };
   let status = 'connecting';
   let closed = false;
   let attempt = 0;
@@ -218,21 +223,30 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     if (closed) return;
     setStatus('connecting');
     const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`, { handshakeTimeout: idleMs });
-    const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, over: false };
+    const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, stableTimer: null, over: false };
     session = current;
 
-    const finish = () => {
+    const finish = code => {
       if (current.over) return;
       current.over = true;
       clearInterval(current.timer);
       clearTimeout(current.readyTimer);
+      clearTimeout(current.stableTimer);
       for (const conn of [...current.conns.keys()]) dropConn(current, conn, false);
       if (session === current) session = null;
       if (closed) { setStatus('offline'); return; }
       setStatus('offline');
-      const base = backoff[Math.min(attempt, backoff.length - 1)];
+      let delay;
+      // Only a proven host being replaced means a twin Mac: replacing a pending socket takes no key, so anyone
+      // who knows the hostId could otherwise keep this Mac offline for a minute at a time.
+      if (code === REPLACED && current.ready) {
+        // The usual 40% jitter spread, laid above replacedMs so the wait is never shorter than it.
+        delay = jitter ? replacedMs * (1 + Math.random() * 0.4) : replacedMs;
+      } else {
+        const base = backoff[Math.min(attempt, backoff.length - 1)];
+        delay = jitter ? base * (0.8 + Math.random() * 0.4) : base;
+      }
       attempt += 1;
-      const delay = jitter ? base * (0.8 + Math.random() * 0.4) : base;
       retryTimer = setTimeout(connect, delay);
     };
 
@@ -250,13 +264,13 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
         } else if (message?.t === 'ready') {
           current.ready = true;
           clearTimeout(current.readyTimer);
-          attempt = 0;
+          current.stableTimer = setTimeout(() => { attempt = 0; }, stableMs);
           setStatus('online');
         }
       } catch { ws.terminate(); }
     });
     ws.on('pong', () => { current.lastHeard = Date.now(); });
-    ws.on('close', finish);
+    ws.on('close', code => finish(code));
     ws.on('error', () => { /* close follows */ });
     ws.on('open', () => {
       current.lastHeard = Date.now();

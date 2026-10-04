@@ -11,7 +11,10 @@ const icons: Record<StepKind, IconData> = { shell: CommandLineIcon, setup: Comma
 /** Tool data adapted to the shared activity presentation; Chat taps open the sheet. */
 export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live: boolean; waiting: boolean; onPress?: () => void }) {
   const running = live && step.status === 'running';
-  return <ActivityItem title={step.title} icon={icons[step.kind]} state={step.status === 'failed' ? 'failed' : running ? waiting ? 'waiting' : 'running' : 'idle'} note={[running && waiting ? 'Waiting for approval' : '', step.note].filter(Boolean).join(' · ')} loading={!!step.hasDetail} onPress={onPress}>
+  // The phone left this step's output out, and while its turn streams there is no saved message to fetch it from:
+  // say so instead of offering a row that never fills. A saved message's step loads from the daemon.
+  const pending = live && !!step.hasDetail && !step.detail;
+  return <ActivityItem title={step.title} icon={icons[step.kind]} state={step.status === 'failed' ? 'failed' : running ? waiting ? 'waiting' : 'running' : 'idle'} note={[running && waiting ? 'Waiting for approval' : '', step.note, pending && !onPress ? 'Output appears when the turn finishes.' : ''].filter(Boolean).join(' · ')} loading={!!step.hasDetail && !pending} onPress={onPress}>
     {step.detail ? step.kind === 'thinking' ? <Markdown text={step.detail} streaming={running} /> : <Text selectable style={styles.code}>{step.detail}</Text> : undefined}
   </ActivityItem>;
 }

@@ -124,9 +124,9 @@ export function PullDown({ title, sections, onSelect, children, label, longPress
       ? <IOSToggle key={item.id} label={item.title} systemImage={item.systemImage as never} isOn={item.checked} onIsOnChange={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />
       : <IOSButton key={item.id} label={item.title} systemImage={item.systemImage as never} role={item.destructive ? 'destructive' : undefined} onPress={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />)}</IOSSection>);
     const trigger = nativeTrigger.title
-      ? <IOSHStack spacing={6} modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ width: 260, alignment: 'leading' })]}>
+      ? <IOSHStack spacing={6} modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: 260, alignment: 'leading' })]}>
         <IOSImage systemName={nativeTrigger.systemImage as never} size={14} color={colors.ink2} />
-        <IOSText modifiers={[font({ size: 13, weight: 'medium' }), foregroundStyle(colors.ink2), lineLimit(1), frame({ maxWidth: Infinity, alignment: 'leading' })]}>{nativeTrigger.title}</IOSText>
+        <IOSText modifiers={[font({ size: 13, weight: 'medium' }), foregroundStyle(colors.ink2), lineLimit(1)]}>{nativeTrigger.title}</IOSText>
         <IOSImage systemName="chevron.up.chevron.down" size={13} color={colors.ink3} />
       </IOSHStack>
       : <IOSImage systemName={nativeTrigger.systemImage as never} size={21} color={colors.ink2} modifiers={[frame({ width: 36, height: 36 })]} />;

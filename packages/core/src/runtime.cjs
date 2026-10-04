@@ -4,7 +4,6 @@ const { createGit } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
-const { randomUUID } = require("node:crypto");
 const path = require("node:path");
 const { migrateImages } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
@@ -137,8 +136,6 @@ function createRuntime(options) {
   }
 
   const projectName = (projectPath) => path.basename(projectPath) || "Untitled project";
-  // Revisions of one run never match another run's, so a client that outlives a host restart never trusts an old one.
-  const runId = randomUUID().slice(0, 8);
 
   // Chats brought back from linked worktrees' old files, per project, until a window opening it shows the notice.
   const restoredChats = new Map();
@@ -609,14 +606,9 @@ function createRuntime(options) {
   commands.handle("project:registry", () => projectRegistry().list());
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("project:recent", () => recentProjects().list());
-  // `revision` names the state returned; a caller that passes the one it holds as `unlessRevision` (the phone's bridge,
-  // polling) gets `unchanged: true` instead of the whole state again.
-  commands.handle("project:snapshot", async (_event, projectPath, options) => {
+  commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
-    const state = await states.get(projectPath);
-    const revision = `${runId}.${states.revisionOf(state)}`;
-    if (options?.unlessRevision === revision) return { path: projectPath, name: projectName(projectPath), revision, unchanged: true };
-    return { path: projectPath, name: projectName(projectPath), revision, state };
+    return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
   });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:worktree-paths", async (_event, projectPath) => {

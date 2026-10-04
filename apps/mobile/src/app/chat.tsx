@@ -23,6 +23,7 @@ import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
+import { useOpenProject } from '../use-open-project';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { archiveFromPhone } from '../archive';
 
@@ -78,34 +79,24 @@ export default function ChatScreen() {
   }, [canRemember, params.id, rememberChat]));
   const panels = useSidePanels({ chatId: params.id ? Number(params.id) : undefined, worktreeId: targetMatches && worktreeOf ? worktreeOf.id : undefined });
   // A Chat picked in another Project opens that Project here, behind the splash mark, rather than in the navigation.
-  // It loads on focus and on retry only: while this Chat is showing, another Project can take over just before a
-  // navigation leaves it, and reopening this one then would undo that.
-  const wanted = params.projectPath && params.projectPath !== projectPath && (!params.hostId || params.hostId === connected?.url) ? params.projectPath : null;
-  const wantedNow = useRef(wanted);
-  useEffect(() => { wantedNow.current = wanted; }, [wanted]);
-  const [opened, setOpened] = useState<{ path: string; error: string } | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  const { open: openProject } = session;
-  const openRef = useRef(openProject);
-  useEffect(() => { openRef.current = openProject; }, [openProject]);
-  useFocusEffect(useCallback(() => {
-    const target = wantedNow.current;
-    if (!target || !connected) return;
-    let live = true;
-    void openRef.current(target, { chatId: params.id ? Number(params.id) : undefined }).then(copy => {
-      if (live && copy && copy.project.path !== target) router.setParams({ projectPath: copy.project.path });
-    }).catch(e => { if (live) setOpened({ path: target, error: (e as Error).message }); });
-    return () => { live = false; };
-  }, [connected, params.id, attempt])); // eslint-disable-line react-hooks/exhaustive-deps -- `attempt` reloads after Retry
+  const { wanted, error: openError, retry: retryOpen } = useOpenProject(params);
+  // A new Chat picked without a Worktree starts in the Project's own checkout once the Project is here.
+  const loaded = targetMatches && !!session.snapshot;
+  const needsWorktree = !params.id && !params.worktreeId;
+  const candidates = loaded && needsWorktree ? Object.values(session.snapshot!.project.state.worktrees) : [];
+  const starterId = (candidates.find(item => item.path === projectPath) || candidates[0])?.id;
+  useEffect(() => {
+    if (!needsWorktree || !loaded) return;
+    if (starterId === undefined) router.replace('/project'); else router.setParams({ worktreeId: String(starterId) });
+  }, [needsWorktree, loaded, starterId]);
   const sidebar = <Stack.Toolbar placement="left"><Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show('left')} /></Stack.Toolbar>;
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;
-  if (!session.snapshot || !targetMatches) {
-    const failed = wanted && opened?.path === wanted ? opened.error : '';
+  if (!session.snapshot || !targetMatches || needsWorktree) {
     return <View style={styles.screen}>
       <Stack.Screen options={{ title: '', headerBackVisible: false, gestureEnabled: false }} />
       {sidebar}
-      <PanelSwipe panels={panels}><View accessible={!failed} accessibilityRole="progressbar" accessibilityLabel="Opening Chat…" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        {failed ? <ErrorNotice message={failed} retry={() => { setOpened(null); setAttempt(value => value + 1); }} /> : wanted ? <LoadingLogo /> : null}
+      <PanelSwipe panels={panels}><View accessible={!openError} accessibilityRole="progressbar" accessibilityLabel="Opening Chat…" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        {openError ? <ErrorNotice message={openError} retry={retryOpen} /> : wanted || needsWorktree ? <LoadingLogo /> : null}
       </View></PanelSwipe>
     </View>;
   }

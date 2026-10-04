@@ -26,15 +26,30 @@ async function writeState(folder, state) {
   await fs.mkdir(path.join(folder, '.milagre'), { recursive: true });
   await fs.writeFile(path.join(folder, '.milagre/coordination.json'), JSON.stringify(state));
 }
-// The raw replies to one request on a plain socket, skipping events.
-async function rawRequest(socket, request) {
-  let text = '';
-  const reply = new Promise((resolve) => socket.on('data', (chunk) => {
-    text += chunk;
-    for (const line of text.split('\n').slice(0, -1)) { const message = JSON.parse(line); if (message.id === request.id) resolve(message); }
-  }));
-  socket.write(JSON.stringify(request) + '\n');
-  return reply;
+// The raw reply to one request on a plain socket, skipping events. One reader per socket parses every frame from the
+// start, so a frame split across chunks is never read from its middle.
+const rawReaders = new WeakMap();
+function rawRequest(socket, request) {
+  let reader = rawReaders.get(socket);
+  if (!reader) {
+    reader = { text: '', waiters: new Map(), early: new Map() };
+    rawReaders.set(socket, reader);
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => {
+      const lines = (reader.text + chunk).split('\n');
+      reader.text = lines.pop();
+      for (const line of lines) {
+        const message = JSON.parse(line);
+        if (message.id == null) continue;
+        const waiter = reader.waiters.get(message.id);
+        if (waiter) { reader.waiters.delete(message.id); waiter(message); } else reader.early.set(message.id, message);
+      }
+    });
+  }
+  return new Promise(resolve => {
+    reader.waiters.set(request.id, resolve);
+    socket.write(JSON.stringify(request) + '\n');
+  });
 }
 
 async function waitFor(read) {

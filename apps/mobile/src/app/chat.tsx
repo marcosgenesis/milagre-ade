@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type Reanimated from 'react-native-reanimated';
-import { Pressable, Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
+import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
@@ -20,7 +20,7 @@ import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
 import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
-import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, showActions, styles } from '../ui';
+import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 
 const PAGE = 40;
 
@@ -63,6 +63,7 @@ export default function ChatScreen() {
   const chatId = `${project.path}#${params.id ?? `new:${params.worktreeId}`}`;
   const draft = composer.drafts[chatId] || '';
   const attachments = composer.attachments[chatId] || [];
+  const attachmentDisabled = busy || picking || attachments.length >= 4;
   const run = chat ? runs.runs[chatId] : undefined;
   const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
@@ -79,7 +80,7 @@ export default function ChatScreen() {
     finally { setBusy(false); }
   }
   async function pick(kind: 'photos' | 'camera' | 'files') {
-    if (picking || busy) return;
+    if (attachmentDisabled) return;
     setPicking(true); setError('');
     try {
       const added = await pickAttachments(kind);
@@ -182,10 +183,16 @@ export default function ChatScreen() {
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}
       {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
+        {!params.id && Object.keys(project.state.worktrees).length > 1 && <PullDown label="Choose Worktree" sections={[{ title: 'Worktree', items: Object.values(project.state.worktrees).map(item => ({ id: String(item.id), title: item.name, checked: item.id === worktreeId, systemImage: 'arrow.triangle.branch', disabled: busy || picking })) }]} onSelect={id => { if (!busy && !picking) router.setParams({ worktreeId: id }); }} style={{ alignSelf: 'flex-start' }}>
+          {/* A stable width keeps the native menu label from retaining the previous Worktree's shorter measurement. */}
+          <View style={{ width: 260, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, opacity: busy || picking ? 0.35 : 1 }}><Icon icon={GitBranchIcon} tone="ink2" size={14} /><Text numberOfLines={1} style={[styles.label, { flex: 1 }]}>{worktree?.name || 'Choose Worktree'}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
+        </PullDown>}
         {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
         <Field label="Message" hideLabel placeholder="Message the agent" multiline autoCorrect spellCheck autoCapitalize="sentences" value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Add photos or files" disabled={busy || picking || attachments.length >= 4} onPress={() => showActions({ actions: [{ id: 'photos', title: 'Photo Library' }, { id: 'camera', title: 'Take Photo' }, { id: 'files', title: 'Choose Files' }], onSelect: kind => void pick(kind as 'photos' | 'camera' | 'files') })} style={({ pressed }) => ({ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: busy || attachments.length >= 4 ? 0.35 : pressed ? 0.6 : 1 })}><Icon icon={Add01Icon} tone="ink2" size={21} /></Pressable>
+          <PullDown label="Add photos or files" sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle', disabled: attachmentDisabled }, { id: 'camera', title: 'Take Photo', systemImage: 'camera', disabled: attachmentDisabled }, { id: 'files', title: 'Choose Files', systemImage: 'folder', disabled: attachmentDisabled }] }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
+            <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: attachmentDisabled ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>
+          </PullDown>
           <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
           <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />

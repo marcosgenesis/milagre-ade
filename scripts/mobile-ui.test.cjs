@@ -228,7 +228,7 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost() {
+function chatHost({ pickAttachments = async () => [] } = {}) {
   const sending = deferred();
   const params = { worktreeId: '1' };
   const session = {
@@ -252,7 +252,7 @@ function chatHost() {
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
@@ -260,6 +260,64 @@ function chatHost() {
   return { session, sending, params, field, send, render, router };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('New Chat opens the composer directly when there are multiple Worktrees', () => {
+  const react = hookHost();
+  const pushed = [];
+  const session = { client: {}, recent: [], snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: { 1: { id: 1, name: 'main' }, 2: { id: 2, name: 'feature' } } } }, runs: { runs: {} } } };
+  const { default: ChatsScreen } = load('app/project.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push: route => pushed.push(route) } },
+    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} },
+  });
+  react.begin();
+  const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
+  assert.equal(typeof button.props.onPress, 'function', 'one tap must navigate without choosing a Worktree first');
+  button.props.onPress();
+  assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1' } }]));
+});
+
+test('a new Chat can switch Worktrees and keep each Worktree draft', async () => {
+  const screen = chatHost();
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' }, 2: { id: 2, name: 'feature' } };
+  screen.session.drafts['/p#new:2'] = 'feature draft';
+  const menu = () => find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose Worktree');
+  assert.ok(menu(), 'the new Chat screen must let you choose a Worktree');
+  menu().props.onSelect('2');
+  assert.equal(screen.params.worktreeId, '2');
+  assert.equal(screen.field().value, 'feature draft');
+  menu().props.onSelect('1');
+  assert.equal(screen.field().value, 'first message');
+  screen.send();
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled), 'cannot change destination during a send');
+  menu().props.onSelect('2');
+  assert.equal(screen.params.worktreeId, '1');
+  screen.sending.resolve({ sessionId: 42 });
+  await settle();
+  assert.equal(menu(), undefined, 'a sent Chat stays bound to its Worktree');
+});
+
+test('the attachment pull-down opens the selected picker and blocks a second pick', async () => {
+  const picking = deferred();
+  const kinds = [];
+  const screen = chatHost({ pickAttachments: kind => { kinds.push(kind); return picking.promise; } });
+  const menu = () => find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Add photos or files');
+  assert.ok(menu(), 'attachments must use a pull-down anchored to the +');
+  menu().props.onSelect('photos');
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled));
+  menu().props.onSelect('files');
+  assert.deepEqual(kinds, ['photos']);
+  picking.resolve([]);
+  await settle();
+  menu().props.onSelect('camera');
+  await settle();
+  assert.deepEqual(kinds, ['photos', 'camera']);
+  screen.session.attachments['/p#new:1'] = Array.from({ length: 4 }, (_, i) => ({ id: String(i), name: `${i}.txt`, uri: `file:///${i}.txt`, image: false }));
+  assert.ok(menu().props.sections[0].items.every(item => item.disabled));
+  menu().props.onSelect('files');
+  assert.deepEqual(kinds, ['photos', 'camera'], 'four attachments block another picker');
+});
 
 test('text typed during the first send follows the created Chat into its composer', async () => {
   const screen = chatHost();

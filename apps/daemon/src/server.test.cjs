@@ -242,3 +242,38 @@ test('an enabled phone comes back when the daemon restarts, and stopping the dae
     assert.equal(new URL(back.pairingLink).searchParams.get('token'), new URL(on.pairingLink).searchParams.get('token'));
   } finally { client.close(); await second.close(); }
 });
+
+test('daemon delivers push after clients leave and Phone reset/disable revokes registrations', async t => {
+  const messages = [];
+  let emit;
+  const { dataDir, project, client } = await fixture(t, {
+    pushOptions: { fetcher: async (url, options) => { assert.ok(url.endsWith('/send')); messages.push(JSON.parse(options.body)); return new Response(JSON.stringify({ data: { status: 'ok', id: 'ticket' } })); } },
+    runtimeOptions: { environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: '/fake/codex' }), { invalidate() {} }),
+      createSession(_provider, options) {
+        emit = options.emit;
+        return { async startTurn() { emit({ type: 'turn-started', turnId: 'turn' }); emit({ type: 'permission-request', requestId: 'approval', title: 'Run?', tool: 'Shell', kind: 'command', command: 'ls' }); return { turnId: 'turn' }; }, async close() { emit({ type: 'turn-cancelled' }); } };
+      },
+    },
+  });
+  const c = await client();
+  assert.ok((await c.call('daemon:status')).capabilities.includes('mobile-push-v1'));
+  const registration = { deviceId: 'b6e2df4b-972b-4e7b-bc65-6cda0a173798', token: 'ExpoPushToken[test]', hostId: 'https://mac.example', notifyWhenWaiting: true, notifyOnCompletion: true };
+  await c.call('push:register', [registration]);
+  const opened = await c.call('project:open', [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  await c.call('chat:send', [{ projectPath: project, sessionId: session.id, body: 'Hello', provider: 'codex', model: 'test', permissionMode: 'ask' }]);
+  await waitFor(() => messages.length === 1);
+  c.close();
+  emit({ type: 'permission-resolved', requestId: 'approval' });
+  emit({ type: 'text-delta', text: 'Completed on the daemon.' });
+  emit({ type: 'turn-completed' });
+  await waitFor(() => messages.length === 2);
+  assert.match(messages[1].title, /Turn completed/);
+  assert.equal(messages[1].body, 'Completed on the daemon.');
+  const second = await client();
+  await second.call('phone:reset');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile-push.json'), 'utf8')), []);
+  await second.call('push:register', [registration]);
+  await second.call('phone:set-enabled', [false]);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile-push.json'), 'utf8')), []);
+});

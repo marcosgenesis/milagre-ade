@@ -1,11 +1,36 @@
-import { memo, useMemo } from 'react';
-import { Alert, Linking, Text, View, type TextStyle } from 'react-native';
+import { memo, useMemo, useRef, useState } from 'react';
+import { Alert, Image, Linking, Pressable, Text, View, type TextStyle } from 'react-native';
+import { router } from 'expo-router';
 import type { Token } from 'markdown-it';
 import { markdownChunks, markdownTokens, safeLink } from './chat-presentation';
 import { PageScroll, colors, styles } from './ui';
+import { showImages, type ThumbRect } from './viewer-store';
 
 // Chat reading size: desktop uses 13px at 1.55; a phone reads best a little larger.
 const body = { color: colors.ink, fontSize: 15, lineHeight: 22 };
+
+function imageURL(src: string) {
+  try {
+    const url = new URL(src);
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? src : null;
+  } catch { return null; }
+}
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const url = imageURL(src);
+  const [ratio, setRatio] = useState(1);
+  const [failed, setFailed] = useState(false);
+  const thumb = useRef<View>(null);
+  if (!url) return <Text style={styles.muted}>[Image: {alt}]</Text>;
+  if (failed) return <Text accessibilityRole="link" style={[styles.muted, { color: colors.accent, textDecorationLine: 'underline' }]} onPress={() => void Linking.openURL(url).catch(() => Alert.alert('Cannot open image', 'Try opening this address in your browser.'))}>Cannot load {alt}. Open image</Text>;
+  const open = () => {
+    const show = (from?: ThumbRect) => { showImages([{ name: alt, source: { uri: url }, from }], 0); router.push('/viewer'); };
+    if (thumb.current) thumb.current.measureInWindow((x, y, width, height) => show(width && height ? { x, y, width, height } : undefined));
+    else show();
+  };
+  return <Pressable ref={thumb} accessibilityRole="imagebutton" accessibilityLabel={`${alt}. Open full screen`} onPress={open} style={{ width: '100%', maxWidth: 320, borderRadius: 14, borderCurve: 'continuous', overflow: 'hidden', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field }}>
+    <Image source={{ uri: url }} accessibilityLabel={alt} resizeMode="contain" onError={() => setFailed(true)} onLoad={({ nativeEvent }) => { const { width, height } = nativeEvent.source; if (width > 0 && height > 0) setRatio(width / height); }} style={{ width: '100%', aspectRatio: Math.max(1, ratio) }} />
+  </Pressable>;
+}
 
 type Node = { token: Token; children: Node[] };
 function tree(tokens: Token[]) {
@@ -21,10 +46,32 @@ function tree(tokens: Token[]) {
 function inline(tokens: Token[]) {
   return inlineNodes(tree(tokens));
 }
+/** Images need their own native View; split text runs while preserving open emphasis and links. */
+function inlineContent(tokens: Token[], style: TextStyle = body, heading = false) {
+  const parts: React.ReactNode[] = [];
+  const open: Token[] = [];
+  let text: Token[] = [];
+  const flush = () => {
+    if (text.some(token => token.nesting === 0 && token.content.trim())) parts.push(<Text key={`text-${parts.length}`} selectable accessibilityRole={heading ? 'header' : undefined} style={style}>{inline(text)}</Text>);
+  };
+  for (const token of tokens) {
+    if (token.type === 'image') {
+      flush();
+      const src = String(token.attrGet('src') || '');
+      parts.push(<MarkdownImage key={`image-${parts.length}-${src}`} src={src} alt={token.content || 'Image'} />);
+      text = [...open];
+    } else {
+      text.push(token);
+      if (token.nesting === 1) open.push(token);
+      else if (token.nesting === -1) open.pop();
+    }
+  }
+  flush();
+  return <View style={{ gap: 8 }}>{parts}</View>;
+}
 function inlineNodes(nodes: Node[]): React.ReactNode {
   return nodes.map(({ token, children }, i) => {
     if (token.type === 'softbreak' || token.type === 'hardbreak') return '\n';
-    if (token.type === 'image') return <Text key={i} style={styles.muted}>[Image: {token.content || 'attachment'}]</Text>;
     const text = children.length ? inlineNodes(children) : token.content;
     const style: TextStyle = token.type === 'strong_open' ? { fontWeight: '600' } : token.type === 'em_open' ? { fontStyle: 'italic' } : token.type === 's_open' ? { textDecorationLine: 'line-through' } : token.type === 'code_inline' ? { fontFamily: styles.code.fontFamily, backgroundColor: colors.field, fontSize: 13.5 } : {};
     const url = token.type === 'link_open' ? safeLink(String(token.attrGet('href') || '')) : null;
@@ -34,9 +81,9 @@ function inlineNodes(nodes: Node[]): React.ReactNode {
 function blocks(nodes: Node[]): React.ReactNode {
   return nodes.map(({ token, children }, index) => {
     const key = `${token.type}-${index}`;
-    if (token.type === 'inline') return <Text key={key} selectable style={body}>{inline(token.children || [])}</Text>;
+    if (token.type === 'inline') return <View key={key}>{inlineContent(token.children || [])}</View>;
     if (token.type === 'fence' || token.type === 'code_block') return <View key={key} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', overflow: 'hidden' }}>{token.info && <Text style={[styles.label, { paddingHorizontal: 12, paddingTop: 10 }]}>{token.info}</Text>}<PageScroll horizontal contentContainerStyle={{ padding: 12, paddingBottom: 12 }}><Text selectable style={styles.code}>{token.content.replace(/\n$/, '')}</Text></PageScroll></View>;
-    if (token.type === 'heading_open') return <Text key={key} accessibilityRole="header" selectable style={{ color: colors.ink, fontWeight: '600', lineHeight: 23, fontSize: token.tag === 'h1' ? 17 : token.tag === 'h2' ? 16 : 15 }}>{inline(children.flatMap(n => n.token.children || []))}</Text>;
+    if (token.type === 'heading_open') return <View key={key}>{inlineContent(children.flatMap(n => n.token.children || []), { color: colors.ink, fontWeight: '600', lineHeight: 23, fontSize: token.tag === 'h1' ? 17 : token.tag === 'h2' ? 16 : 15 }, true)}</View>;
     if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') return <View key={key} style={{ gap: 8 }}>{children.map((child, i) => <View key={i} style={{ flexDirection: 'row', gap: 10 }}><Text style={body}>{token.type === 'ordered_list_open' ? `${Number(token.attrGet('start') || 1) + i}.` : '•'}</Text><View style={{ flex: 1, gap: 8 }}>{blocks(child.children)}</View></View>)}</View>;
     if (token.type === 'blockquote_open') return <View key={key} style={{ borderLeftWidth: 3, borderColor: colors.line, paddingLeft: 14, gap: 8 }}>{blocks(children)}</View>;
     if (token.type === 'hr') return <View key={key} style={{ height: 1, backgroundColor: colors.line }} />;

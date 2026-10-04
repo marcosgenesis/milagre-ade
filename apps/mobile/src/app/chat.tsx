@@ -131,7 +131,7 @@ export default function ChatScreen() {
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
-  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
+  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { session.cancelNavigation(); if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
       {/* The label lives in a native menu: its views keep one shape (text changes only), so nothing mounts or unmounts inside it. */}

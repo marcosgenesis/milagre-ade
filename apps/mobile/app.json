@@ -49,6 +49,12 @@
           "cameraPermission": "Milagre uses the camera to take a photo for a Chat.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "chats"
+        }
       ]
     ],
     "ios": {

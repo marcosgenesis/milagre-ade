@@ -74,6 +74,28 @@ function useSessionState() {
       throw error;
     }
   };
+  const openNotificationTarget = async (host: SavedHost, projectPath: string, sessionId: number) => {
+    autoOpen.current = false;
+    const current = ++generation.current;
+    const next = createClient(host.address, host.token, undefined, undefined, host.access);
+    try {
+      await next.call('daemon:status');
+      if (current !== generation.current) return false;
+      const projects = await next.call<RecentProject[]>('project:recent');
+      const project = await next.call<OpenProject>('project:open', [projectPath]);
+      const state = await next.snapshot(project.path);
+      if (current !== generation.current) return false;
+      if (!state.project.state.sessions[sessionId]) throw new Error('This Chat is no longer available on your computer.');
+      selection.current = { client: next, path: project.path };
+      seen.current.set(`${next.url}|${projectPath}`, state).set(`${next.url}|${project.path}`, state);
+      setOpening(null);
+      setModels(null); setCliStatus(null); setProviderError('');
+      setClient(next); setRecent(projects); setSnapshot(state); setError(''); setHostName(host.name);
+      return true;
+    } catch (error) { if (current !== generation.current) return false; throw error; }
+  };
+  const navigationVersion = useCallback(() => generation.current, []);
+  const cancelNavigation = useCallback(() => { generation.current++; }, []);
   const open = async (projectPath: string) => {
     if (!client) throw new Error('Connect to your computer first.');
     const current = ++generation.current;
@@ -141,7 +163,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, refresh, isSelected, disconnect };
+  return { booted, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

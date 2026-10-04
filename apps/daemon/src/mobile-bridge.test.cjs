@@ -363,3 +363,14 @@ test('live sockets are pinged, capped, and the oldest gives way to a new one', a
   assert.equal((await silent.closed).code, 1006);
   assert.equal(sockets[1].socket.readyState, WebSocket.OPEN);
 });
+
+test('push registration is authenticated, validated and removable through mobile RPC', async t => {
+  const { rpc, bridge } = await fixture(t);
+  const device = { deviceId: 'b6e2df4b-972b-4e7b-bc65-6cda0a173798', token: 'ExpoPushToken[test]', hostId: bridge.url, notifyWhenWaiting: true, notifyOnCompletion: true };
+  assert.equal((await rpc('push:register', [device])).status, 200);
+  assert.equal((await rpc('push:register', [{ ...device, token: 'secret' }])).status, 409);
+  assert.equal((await rpc('push:focus', [{ deviceId: device.deviceId, chatId: '/project#1' }])).status, 200);
+  assert.equal((await rpc('push:unregister', [{ deviceId: device.deviceId }])).status, 200);
+  assert.equal((await rpc('push:focus', [{ deviceId: device.deviceId, chatId: null }])).status, 409);
+  assert.equal((await fetch(bridge.url + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method: 'push:register', args: [device] }) })).status, 401);
+});

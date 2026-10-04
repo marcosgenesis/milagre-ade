@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, Text, View } from 'react-native';
+import { Alert, Platform, RefreshControl, Text, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
-import { Add01Icon, ComputerIcon, LaptopIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ComputerIcon, LaptopIcon, Settings01Icon } from '@hugeicons/core-free-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../session';
+import { usePush } from '../push';
 import { savedHosts } from '../hosts-native';
 import { createClient } from '../client';
 import type { SavedHost } from '../hosts-store';
 import { Icon } from '../icons';
-import { ErrorNotice, ListRow, PageScroll, PillButton, colors, showActions, styles } from '../ui';
+import { ErrorNotice, HeaderButton, IconButton, ListRow, PageScroll, colors, showActions, styles } from '../ui';
 
 type Reachability = 'online' | 'checking' | 'offline';
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
 export default function ComputersScreen() {
   const session = useSession();
+  const push = usePush();
+  const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<Record<string, Reachability>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -45,18 +49,26 @@ export default function ComputersScreen() {
       : session.hosts.length === 1 && !session.client ? session.hosts[0] : null;
     if (!target || !session.claimAutoOpen()) return;
     autoOpened.current = true;
-    const timer = setTimeout(() => void open(target), 0);
+    const version = session.navigationVersion();
+    const timer = setTimeout(() => { if (session.navigationVersion() === version) void open(target); }, 0);
     return () => clearTimeout(timer);
   }, [session.hosts]); // eslint-disable-line react-hooks/exhaustive-deps
   function manage(host: SavedHost, action: string) {
     if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
-    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { if (session.client?.url === host.address) session.disconnect(); void savedHosts.forget(host.id).then(load).catch(e => setError(e.message)); } }]);
+    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(load).catch(e => setError(e.message)); } }]);
   }
   const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
   const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';
-  return <>
+  return <View style={styles.screen}>
     <Stack.Screen options={{ title: 'Computers' }} />
-    <Stack.Toolbar placement="right"><Stack.Toolbar.Button icon="plus" accessibilityLabel="Add computer" onPress={() => router.push('/add-computer')} /></Stack.Toolbar>
+    <Stack.Toolbar placement="right">{Platform.OS === 'ios'
+      ? <Stack.Toolbar.Button icon="gearshape" accessibilityLabel="Settings" onPress={() => router.push('/settings')} />
+      : <Stack.Toolbar.View><HeaderButton label="Settings" icon={Settings01Icon} onPress={() => router.push('/settings')} /></Stack.Toolbar.View>}
+    </Stack.Toolbar>
+    {Platform.OS === 'ios' && <Stack.Toolbar placement="bottom">
+      <Stack.Toolbar.Spacer />
+      <Stack.Toolbar.Button icon="plus" accessibilityLabel="Add computer" onPress={() => router.push('/add-computer')} />
+    </Stack.Toolbar>}
     <PageScroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}>
       {session.hosts.length > 0 ? <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
         {session.hosts.map((host, index) => <View key={host.id}>
@@ -68,9 +80,11 @@ export default function ComputersScreen() {
         <Icon icon={LaptopIcon} tone="ink3" size={44} />
         <Text style={[styles.subtitle, { textAlign: 'center' }]}>Pair your computer</Text>
         <Text style={[styles.muted, { textAlign: 'center' }]}>Run <Text style={styles.code}>npm run mobile:host</Text> on your Mac, then scan the code it shows. Your agents keep working when you leave the app.</Text>
-        <PillButton title="Add computer" icon={Add01Icon} onPress={() => router.push('/add-computer')} />
       </View>}
       {error ? <ErrorNotice message={error} /> : null}
     </PageScroll>
-  </>;
+    {Platform.OS !== 'ios' && <View style={{ alignItems: 'flex-end', paddingHorizontal: 20, paddingTop: 12, paddingBottom: Math.max(insets.bottom, 16) }}>
+      <IconButton label="Add computer" icon={Add01Icon} filled size={48} onPress={() => router.push('/add-computer')} />
+    </View>}
+  </View>;
 }

@@ -5,16 +5,26 @@ const { createRuntime } = require('@milagre/core');
 const { socketPath: pathFor, prepareSocketDirectory } = require('./paths.cjs');
 const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, wire } = require('./protocol.cjs');
 const { createPhone } = require('./phone.cjs');
+const { createMobilePush } = require('./mobile-push.cjs');
+const { createExpoPush } = require('./expo-push.cjs');
+const { attentionContext } = require('@milagre/shared/attention');
+const { projectOfKey, sessionIdFromKey } = require('@milagre/shared/agent-runs');
 
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
+const PUSH_METHODS = Object.freeze(['push:register', 'push:unregister', 'push:focus']);
 const PHONE_METHODS = Object.freeze(['phone:status', 'phone:set-enabled', 'phone:reset']);
 
-async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
+async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, pushOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, onError = error => console.error(error) }) {
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
   let stopping;
   let listening = false;
+  const sender = createExpoPush({ ...pushOptions, onError, onInvalid: token => push.invalidate(token) });
+  const push = createMobilePush({ dataDir, send: sender.send, onError, context: async chatId => {
+    const project = await runtime.invoke('project:snapshot', [projectOfKey(chatId)]);
+    return attentionContext(project.state, project.name || require('node:path').basename(project.path), sessionIdFromKey(chatId));
+  } });
   const runtime = createRuntime({ ...runtimeOptions, dataDir, version,
     isChatFocused: chatId => [...views.values()].some(view => view.focused && view.chatId === chatId),
     notifyWaiting(notice) {
@@ -27,6 +37,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     },
   });
   function broadcast(channel, payload) {
+    if (channel === 'agent:event') push.observe(payload.chatId, payload.event);
     const seq = ++eventSeq;
     for (const [socket, connection] of clients) {
       try { connection.send({ v: VERSION, event: { channel, payload, seq } }); }
@@ -74,10 +85,16 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
       inflight.add(id);
       try {
         let result;
-        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1'], methods: [...runtime.methods, ...PHONE_METHODS] };
+        if (request.method === 'daemon:status') result = { pid: process.pid, version, protocolVersion: VERSION, dataDir, socketPath, capabilities: ['desktop-v1', 'snapshot-pages-v1', 'mobile-push-v1'], methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS] };
         else if (request.method === 'phone:status') result = phone.status();
-        else if (request.method === 'phone:set-enabled') result = await phone.setEnabled(request.args[0]);
-        else if (request.method === 'phone:reset') result = await phone.reset();
+        else if (request.method === 'phone:set-enabled') {
+          result = await phone.setEnabled(request.args[0]);
+          if (request.args[0] === false) { await phone.settled(); await push.clear(); }
+        }
+        else if (request.method === 'phone:reset') { result = await phone.reset(); await phone.settled(); await push.clear(); }
+        else if (request.method === 'push:register') result = await push.register(request.args[0]);
+        else if (request.method === 'push:unregister') result = await push.unregister(request.args[0]);
+        else if (request.method === 'push:focus') result = push.focus(request.args[0]);
         else if (request.method === 'daemon:snapshot') {
           const snapshot = { ...runtime.snapshot(), eventSeq };
           if (request.args[0]?.paged === true) {
@@ -133,6 +150,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
       // Keep the listening socket available after a failed save so a client
       // can receive the error and retry stop after disk recovery.
       await phone.close();
+      await push.close();
+      await sender.close();
       await runtime.close();
       const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
       for (const socket of clients.keys()) socket.end();
@@ -151,6 +170,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     listening = true;
     await fs.chmod(socketPath, 0o600);
     server.on('error', onError);
+    await push.load();
     await phone.start();
     await runtime.resumeRecentProjects();
   } catch (error) {

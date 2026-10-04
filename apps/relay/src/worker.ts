@@ -30,6 +30,7 @@ type Role = 'host' | 'phone';
  */
 export class Room implements DurableObject {
   private room?: RoomLogic;
+  private roomId = ''; // the id the room in memory checks proofs against
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
@@ -39,6 +40,9 @@ export class Room implements DurableObject {
     // A hibernation wake has no request to read the id from, and the room needs it to check a Mac's proof.
     const kv = this.state.storage.kv;
     if (kv.get('id') !== id) kv.put('id', id);
+    // A room woken without its id (storage lost it) would refuse every proof until the next eviction:
+    // rebuild it from the marks, exactly as after an eviction, now that the request says which Mac this is.
+    if (this.room && this.roomId !== id) this.room = undefined;
     const room = this.live(); // before accepting, so a rebuild cannot mistake the new socket for one that lost its state
     const [client, server] = Object.values(new WebSocketPair());
     // A phone turned away at the door never becomes hibernatable: the runtime takes about 10 s to finish
@@ -86,10 +90,12 @@ export class Room implements DurableObject {
    */
   private live(ending?: WebSocket): RoomLogic {
     if (this.room) return this.room;
-    const room = createRoom({ id: this.state.storage.kv.get<string>('id') ?? '', mark: (socket, state) => (socket as WebSocket).serializeAttachment(state) });
+    const id = this.state.storage.kv.get<string>('id') ?? '';
+    const room = createRoom({ id, mark: (socket, state) => (socket as WebSocket).serializeAttachment(state) });
     const sockets = this.state.getWebSockets();
     if (ending && !sockets.includes(ending)) sockets.unshift(ending);
     room.restore(sockets.map(ws => ({ socket: ws, state: this.stateOf(ws) })));
+    this.roomId = id;
     return (this.room = room);
   }
 

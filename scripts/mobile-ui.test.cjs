@@ -241,7 +241,7 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost({ pickAttachments = async () => [], call, effects = false } = {}) {
+function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {} } = {}) {
   const sending = deferred();
   const calls = [];
   const params = { worktreeId: '1' };
@@ -257,16 +257,16 @@ function chatHost({ pickAttachments = async () => [], call, effects = false } = 
   };
   const react = hookHost({ effects });
   const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
-  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: {}, Linking: {}, StyleSheet: { absoluteFill: {} } };
+  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
-  const router = { setParams: values => Object.assign(params, values), push() {} };
+  const router = { setParams: values => Object.assign(params, values), push() {}, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.useEffect(fn, [fn]) },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../slide-over': { SlideOver: ({ children }) => children }, './changes': { ChangesView: 'ChangesView' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': require('@milagre/shared/model'),
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'),
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
@@ -328,13 +328,73 @@ test('New Chat opens the composer directly when there are multiple Worktrees', (
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: {}, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push: route => pushed.push(route) } },
     '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
-    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} },
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
   });
   react.begin();
   const button = find(ChatsScreen(), node => node.props?.accessibilityLabel === 'New Chat');
   assert.equal(typeof button.props.onPress, 'function', 'one tap must navigate without choosing a Worktree first');
   button.props.onPress();
   assert.equal(JSON.stringify(pushed), JSON.stringify([{ pathname: '/chat', params: { worktreeId: '1' } }]));
+});
+
+// A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.
+function archiveProject() {
+  const calls = [];
+  const dirty = { uncommitted: 1, unpushed: 0, branch: 'milagre/fix', head: 'h1', removable: false };
+  const worktrees = { 1: { id: 1, name: 'main', path: '/p' }, 2: { id: 2, name: 'milagre/fix', path: '/wt/p/fix', base: 'main' } };
+  const snapshot = { project: { path: '/p', name: 'P', state: { sessions: { 5: { id: 5, worktree_id: 2, title: 'Fix' } }, messages: [{ id: 1, session_id: 5, role: 'user', body: 'Fix it' }], worktrees } }, runs: { runs: { '/p#5': { questions: [], approvals: [], steps: [] } } } };
+  const call = async (method, args = []) => {
+    calls.push([method, ...args]);
+    if (method === 'worktree:roots') return ['/wt'];
+    if (method === 'worktree:status') return dirty;
+    return null;
+  };
+  return { calls, snapshot, call, client: { call, snapshot: async () => snapshot } };
+}
+// Presses the first destructive button, after recording what the alert showed.
+const pressDanger = alerts => (title, message, buttons) => { alerts.push({ title, message, buttons: buttons.map(button => [button.text, button.style]) }); buttons.find(button => button.style === 'destructive').onPress(); };
+async function settleAll() { for (let i = 0; i < 10; i++) await settle(); }
+
+test('a Chat row Archive asks with the worktree choice, then stops, hides and deletes the worktree', async () => {
+  const react = hookHost();
+  const alerts = [];
+  const project = archiveProject();
+  const session = { client: project.client, recent: [], snapshot: project.snapshot, expectActivity() {}, refresh: async () => { project.calls.push(['refresh']); } };
+  const { default: ChatsScreen } = load('app/project.tsx', {
+    'expo-clipboard': { setStringAsync: async () => {} },
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Alert: { alert: pressDanger(alerts) }, FlatList: 'FlatList', Pressable: 'Pressable', RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', SearchBar: 'SearchBar', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton', SearchBarSlot: 'SearchBarSlot', Spacer: 'Spacer' }) }, router: { push() {} } },
+    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }), '../session': { useSession: () => session }, '../indicators': require('../apps/mobile/src/indicators.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'),
+    '../status-indicators': { ChatMarkIcon: 'ChatMarkIcon', PullRequestLabel: 'PullRequestLabel', usePullRequest: () => null }, '../icons': { Icon: 'Icon', ProviderLogo: 'ProviderLogo', SpinnerRing: 'SpinnerRing' }, '../ui': { ErrorNotice: 'ErrorNotice', PullDown: 'PullDown', colors: {}, styles: {} }, '../archive': require('../apps/mobile/src/archive.ts'),
+  });
+  react.begin();
+  const list = find(ChatsScreen(), node => node.type === 'FlatList');
+  const row = list.props.renderItem({ item: list.props.data[0] });
+  const archiveItem = row.type(row.props).props.children[0].props.sections.at(-1).items[0];
+  assert.equal(archiveItem.disabled, undefined, 'a running Chat can be archived: it is stopped first');
+  row.props.onAction('archive');
+  await settleAll();
+  assert.deepEqual(alerts, [{ title: 'Archive this Chat?', message: '1 uncommitted file will be lost. Commit them first to keep them.', buttons: [['Cancel', 'cancel'], ['Stop, archive and delete worktree', 'destructive']] }]);
+  assert.deepEqual(project.calls.map(([method]) => method), ['worktree:roots', 'worktree:status', 'agent:interrupt', 'chat:patch', 'worktree:remove', 'refresh']);
+  assert.deepEqual(project.calls.find(([method]) => method === 'worktree:remove').slice(1), ['/wt/p/fix', { force: true, base: 'main', projectPath: '/p', chatId: '/p#5', seen: { uncommitted: 1, unpushed: 0, branch: 'milagre/fix', head: 'h1', removable: false } }]);
+});
+
+test('the Chat screen Archive falls back to a plain Archive on an older Mac, then leaves the Chat', async () => {
+  const alerts = [];
+  const project = archiveProject();
+  const screen = chatHost({ alert: pressDanger(alerts), call: async (method, args) => (['worktree:roots', 'worktree:status'].includes(method) ? Promise.reject(new Error('Command is not available from mobile')) : project.call(method, args)) });
+  screen.session.client.snapshot = project.client.snapshot;
+  screen.session.snapshot = { ...project.snapshot, runs: { runs: {} } };
+  screen.params.id = '5';
+  delete screen.params.worktreeId;
+  screen.render();
+  const archive = find(screen.render(), node => node.type === 'ToolbarMenuAction' && node.props.children === 'Archive');
+  archive.props.onPress();
+  await settleAll();
+  assert.deepEqual(alerts, [{ title: 'Archive this Chat?', message: undefined, buttons: [['Cancel', 'cancel'], ['Archive', 'destructive']] }]);
+  assert.deepEqual(screen.calls.map(call => call.method), ['worktree:roots', 'chat:patch']);
+  assert.deepEqual(screen.calls[1].args, ['/p', 5, { archived: true, unread: false }]);
+  assert.equal(screen.router.backs, 1);
 });
 
 test('a new Chat can switch Worktrees and keep each Worktree draft', async () => {

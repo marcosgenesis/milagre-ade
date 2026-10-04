@@ -11,6 +11,7 @@ import { isListedChat } from '@milagre/shared/chats';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
 import { Icon, ProviderLogo, SpinnerRing } from '../icons';
 import { ErrorNotice, PullDown, colors, styles, type MenuSection } from '../ui';
+import { archiveFromPhone } from '../archive';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -22,7 +23,7 @@ function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentS
   const sections: MenuSection[] = [
     { items: [{ id: 'copy-path', title: 'Copy path', systemImage: 'doc.on.doc', disabled: !worktree?.path }, { id: 'copy-branch', title: 'Copy branch name', systemImage: 'arrow.triangle.branch', disabled: !worktree?.name }] },
     { items: [{ id: 'rename', title: 'Rename chat', systemImage: 'pencil' }, chat.unread ? { id: 'read', title: 'Mark as read', systemImage: 'checkmark' } : { id: 'unread', title: 'Mark as unread', systemImage: 'circle' }] },
-    { items: [chat.archived ? { id: 'archive', title: 'Restore', systemImage: 'tray.and.arrow.up' } : { id: 'archive', title: 'Archive', systemImage: 'archivebox', destructive: true, disabled: !!run }] },
+    { items: [chat.archived ? { id: 'archive', title: 'Restore', systemImage: 'tray.and.arrow.up' } : { id: 'archive', title: 'Archive', systemImage: 'archivebox', destructive: true }] },
   ];
   return <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
     <PullDown label={`${title}${worktree ? `, ${worktree.name}` : ''}`} title={title} sections={sections} onSelect={onAction} onPress={onOpen} style={{ flex: 1 }}>
@@ -87,10 +88,15 @@ export default function ChatsScreen() {
   const { project } = snapshot;
   const worktrees = Object.values(project.state.worktrees);
   const newChatWorktree = worktreeFilter ?? rows[0]?.chat.worktree_id ?? worktrees[0]?.id;
-  async function act(chat: AgentSession, action: string) {
+  async function act(chat: AgentSession, action: string, run?: AgentRun) {
     setError('');
     try {
-      if (action === 'archive') await client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }]);
+      // Archive asks first, as desktop does, with what removing the Chat's worktree would lose; a running Chat is stopped.
+      if (action === 'archive' && !chat.archived) {
+        await archiveFromPhone({ client, alert: (...args) => Alert.alert(...args), projectPath: project.path, state: project.state, chat, running: !!run, onConfirm: session.expectActivity, notify: setError, refresh: session.refresh });
+        return;
+      }
+      if (action === 'archive') await client.call('chat:patch', [project.path, chat.id, { archived: false }]);
       if (action === 'read' || action === 'unread') await client.call('chat:patch', [project.path, chat.id, { unread: action === 'unread' }]);
       const worktree = project.state.worktrees[chat.worktree_id];
       if (action === 'copy-path' && worktree) await Clipboard.setStringAsync(worktree.path);
@@ -148,6 +154,6 @@ export default function ChatsScreen() {
       ListHeaderComponent={error || session.error ? <View style={{ padding: 16 }}><ErrorNotice message={error || session.error} retry={session.error ? () => router.dismissTo('/') : undefined} /></View> : null}
       ListEmptyComponent={<Text style={[styles.muted, { textAlign: 'center', paddingTop: 64, paddingHorizontal: 32 }]}>{empty}</Text>}
       contentContainerStyle={{ paddingBottom: 24 }}
-      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id) } })} onAction={action => void act(item.chat, action)} />} />
+      renderItem={({ item }) => <ChatRow chat={item.chat} run={item.run} mark={item.mark} worktree={project.state.worktrees[item.chat.worktree_id]} onOpen={() => router.push({ pathname: '/chat', params: { id: String(item.chat.id) } })} onAction={action => void act(item.chat, action, item.run)} />} />
   </View>;
 }

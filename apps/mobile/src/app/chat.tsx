@@ -25,6 +25,7 @@ import { Icon } from '../icons';
 import { SlideOver } from '../slide-over';
 import { ChangesView } from './changes';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { archiveFromPhone } from '../archive';
 
 const PAGE = 40;
 
@@ -173,7 +174,20 @@ export default function ChatScreen() {
     else if (id === 'pr' && pr && /^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {});
     else if (id === 'agents' && chat) router.push({ pathname: '/agents', params: { id: String(chat.id) } });
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
-    else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(done => { if (done && !chat.archived) router.back(); });
+    else if (id === 'archive' && chat?.archived) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]));
+    else if (id === 'archive' && chat) void archive(chat);
+  }
+  // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. The
+  // Chat is left once it is archived; one whose worktree stayed is brought back, and the notice shows here.
+  async function archive(target: NonNullable<typeof chat>) {
+    if (busy) return;
+    setError('');
+    try {
+      const result = await archiveFromPhone({ client, alert: (...args) => Alert.alert(...args), projectPath: project.path, state: project.state, chat: target, running: !!run,
+        onConfirm: () => { setBusy(true); session.expectActivity(); }, notify: setError, refresh: session.refresh });
+      if (result === 'hidden' || result === 'removed') router.back();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   }
   const recent = Object.values(project.state.sessions).filter(item => !item.archived && (item.id === chat?.id || lastMessage.has(item.id) || isListedChat(item, 0))).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
@@ -193,7 +207,7 @@ export default function ChatScreen() {
       {agents.length > 0 && <Stack.Toolbar.MenuAction icon="person.2" subtitle={String(agents.length)} onPress={() => headerAction('agents')}>Subagents</Stack.Toolbar.MenuAction>}
       {chat && <Stack.Toolbar.Menu inline>
         <Stack.Toolbar.MenuAction icon="pencil" onPress={() => headerAction('rename')}>Rename</Stack.Toolbar.MenuAction>
-        <Stack.Toolbar.MenuAction icon={chat.archived ? 'tray.and.arrow.up' : 'archivebox'} disabled={!!run && !chat.archived} onPress={() => headerAction('archive')}>{chat.archived ? 'Restore' : 'Archive'}</Stack.Toolbar.MenuAction>
+        <Stack.Toolbar.MenuAction icon={chat.archived ? 'tray.and.arrow.up' : 'archivebox'} disabled={busy} onPress={() => headerAction('archive')}>{chat.archived ? 'Restore' : 'Archive'}</Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>}
     </Stack.Toolbar.Menu>
   </Stack.Toolbar>;

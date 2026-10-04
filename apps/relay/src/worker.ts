@@ -31,6 +31,7 @@ export class Room implements DurableObject {
     const room = (this.room ??= createRoom({ id }));
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
+    server.binaryType = 'arraybuffer'; // Workers hands binary over as a Blob by default, which cannot be read synchronously
     server.addEventListener('message', event => role === 'host' ? room.hostMessage(server, event.data) : room.phoneMessage(server, event.data));
     server.addEventListener('close', () => role === 'host' ? room.hostClosed(server) : room.phoneClosed(server));
     if (role === 'host') room.hostOpened(server); else room.phoneOpened(server);

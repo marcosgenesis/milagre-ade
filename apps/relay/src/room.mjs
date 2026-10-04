@@ -18,10 +18,15 @@ export function unframe(bytes) {
 }
 
 const TOO_BIG = Symbol('too-big');
+// Brand check that works across realms (`instanceof ArrayBuffer` does not) and cannot be faked by a toStringTag.
+const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength').get;
+function isArrayBuffer(data) {
+  try { bufferLength.call(data); return true; } catch { return false; }
+}
 /** Binary payloads only, never copied: null for text and anything that is not an ArrayBuffer or a view, TOO_BIG past `max` bytes. */
 function toBytes(data, max) {
   let bytes;
-  if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+  if (isArrayBuffer(data)) bytes = new Uint8Array(data);
   else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   else return null;
   return bytes.byteLength > max ? TOO_BIG : bytes;

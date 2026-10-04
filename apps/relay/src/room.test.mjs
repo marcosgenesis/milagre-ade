@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import nacl from 'tweetnacl';
 import { createRoom, frame, unframe } from './room.mjs';
 import { hostIdOf, b64url, fromB64url } from '@milagre/shared/relay-crypto';
@@ -217,4 +218,35 @@ test('ArrayBuffer frames from the socket layer are forwarded', () => {
   assert.deepEqual(unframe(host.sent.at(-1)), { type: 2, conn, payload: new Uint8Array([4, 2]) });
   room.hostMessage(host, frame(2, conn, new Uint8Array([8])).buffer);
   assert.deepEqual(phone.sent.at(-1), new Uint8Array([8]));
+});
+
+test('binary from another realm (an ArrayBuffer or view that fails instanceof) is forwarded', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  const host = connectHost(room);
+  const phone = fakeSocket();
+  const conn = room.phoneOpened(phone);
+  const foreign = vm.runInNewContext('new Uint8Array([6, 7, 8])');
+  assert.equal(foreign.buffer instanceof ArrayBuffer, false);
+  room.phoneMessage(phone, foreign.buffer);
+  assert.equal(phone.closed, null);
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 2, conn, payload: new Uint8Array([6, 7, 8]) });
+  room.phoneMessage(phone, foreign);
+  assert.equal(phone.closed, null);
+  assert.deepEqual(unframe(host.sent.at(-1)), { type: 2, conn, payload: new Uint8Array([6, 7, 8]) });
+  const hostFrame = vm.runInNewContext('new Uint8Array(10)');
+  hostFrame[0] = 2; new DataView(hostFrame.buffer).setBigUint64(1, conn); hostFrame[9] = 5;
+  room.hostMessage(host, hostFrame.buffer);
+  assert.equal(host.closed, null);
+  assert.deepEqual(phone.sent.at(-1), new Uint8Array([5]));
+});
+
+test('look-alikes of an ArrayBuffer are still refused', () => {
+  const room = createRoom({ id, nonce: randomNonce });
+  connectHost(room);
+  for (const fake of [{ byteLength: 200000000 }, { byteLength: 4, [Symbol.toStringTag]: 'ArrayBuffer' }, 200000000, null, undefined, new Blob([new Uint8Array(4)])]) {
+    const phone = fakeSocket();
+    room.phoneOpened(phone);
+    room.phoneMessage(phone, fake);
+    assert.equal(phone.closed?.code, 1003, String(fake));
+  }
 });

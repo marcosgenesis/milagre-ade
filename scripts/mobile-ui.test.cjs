@@ -368,12 +368,12 @@ test('launch restoration shows the splash animation while the saved Chat opens',
   assert.ok(find(tree, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Reopening your Chat...'));
 });
 
-test('selecting a sidebar Chat shows the splash animation until navigation completes', async () => {
+function navigationHost(open) {
   const react = hookHost();
-  const opening = deferred();
   const routes = [];
-  const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = {};
-  const session = { client: { url: 'mac' }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: () => opening.promise };
+  const opened = [];
+  const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
+  const session = { client: { url: 'mac' }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return open; } };
   const { ProjectNavigation } = load('project-navigation.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
@@ -383,17 +383,45 @@ test('selecting a sidebar Chat shows the splash animation until navigation compl
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
-  const list = find(render(), node => node.type === 'FlatList');
-  const row = list.props.renderItem({ item: list.props.data.find(item => item.kind === 'chat') });
-  row.props.onPress();
-  const busy = render();
+  const row = kind => { const list = find(render(), node => node.type === 'FlatList'); return list.props.renderItem({ item: list.props.data.find(item => item.kind === kind) }); };
+  return { state, routes, opened, render, row };
+}
+
+test('a sidebar Chat opens at once, leaving its Project to load in the Chat', () => {
+  const nav = navigationHost(deferred().promise);
+  nav.row('chat').props.onPress();
+  assert.deepEqual(nav.opened, [], 'the navigation does not open the Project itself');
+  assert.deepEqual(JSON.parse(JSON.stringify(nav.routes)), [{ pathname: '/chat', params: { projectPath: '/last', hostId: 'mac', id: '3' } }]);
+  assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
+});
+
+test('a new Chat from the sidebar shows the splash animation until its Project opens', async () => {
+  const opening = deferred();
+  const nav = navigationHost(opening.promise);
+  find(nav.row('project'), node => node.type === 'IconButton').props.onPress();
+  const busy = nav.render();
   assert.ok(find(busy, node => node.type === 'LoadingLogo'));
-  assert.equal(find(busy, node => node.type === 'SpinnerRing'), undefined);
   assert.ok(find(busy, node => node.props.accessibilityRole === 'progressbar' && node.props.accessibilityLabel === 'Opening...'));
-  assert.equal(routes.length, 0);
-  opening.resolve(state); await settle();
-  assert.equal(find(render(), node => node.type === 'LoadingLogo'), undefined);
-  assert.equal(routes[0].pathname, '/chat');
+  assert.equal(nav.routes.length, 0);
+  opening.resolve(nav.state); await settle();
+  assert.equal(find(nav.render(), node => node.type === 'LoadingLogo'), undefined);
+  assert.equal(nav.routes[0].pathname, '/chat');
+});
+
+test('a Chat in another Project loads it behind the splash mark, and shows a failure with Retry', async () => {
+  const host = chatHost({ effects: true });
+  const opening = [];
+  host.session.open = (path, options) => { const next = deferred(); opening.push({ path, options, next }); return next.promise; };
+  Object.assign(host.params, { id: '3', projectPath: '/other' });
+  assert.ok(find(host.render(), node => node.type === 'LoadingLogo'));
+  assert.equal(JSON.stringify(opening.map(item => [item.path, item.options])), JSON.stringify([['/other', { chatId: 3 }]]));
+  opening[0].next.reject(new Error('This Chat is no longer available. Choose another Chat.')); await settle();
+  const failed = host.render();
+  assert.equal(find(failed, node => node.type === 'LoadingLogo'), undefined);
+  const notice = find(failed, node => node.type === 'ErrorNotice');
+  assert.match(notice.props.message, /no longer available/);
+  notice.props.retry(); host.render();
+  assert.equal(opening.length, 2, 'Retry opens the Project again');
 });
 
 test('launch restoration opens the saved computer/Project/Chat target directly', async () => {

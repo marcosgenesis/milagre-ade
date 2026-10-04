@@ -4,7 +4,7 @@ import { archiveChat, archiveChoices, isMilagreWorktree, worktreeShared, type Ar
 /** What archiving needs from the connection to the Mac. */
 export type ArchiveClient = {
   call<T>(method: string, args?: unknown[]): Promise<T>;
-  snapshot(projectPath: string): Promise<{ project: { state: CoordinatorState } }>;
+  snapshot(projectPath: string): Promise<{ project: { state: CoordinatorState }; runs: { runs: Record<string, unknown> } }>;
 };
 export type AlertButton = { text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void };
 /** React Native's Alert.alert, passed in so the dialog can be tested. */
@@ -56,7 +56,8 @@ export type ArchiveRequest = {
   projectPath: string;
   state: CoordinatorState;
   chat: AgentSession;
-  /** Whether a turn is running in the Chat: it is stopped first, and the choices say so. */
+  /** Whether a turn was running when Archive was tapped: the choices say "Stop and …". Whether to stop is read again
+   * from the Mac once the archive goes ahead. */
   running: boolean;
   /** Called once the Chat is confirmed, before anything changes (the Chat screen marks itself busy). */
   onConfirm?: () => void;
@@ -64,37 +65,64 @@ export type ArchiveRequest = {
   refresh: () => Promise<unknown>;
 };
 
+// Chats with an archive under way, from the tap to the end: another tap on one asks nothing and does nothing.
+const archiving = new Set<string>();
+
 /**
  * Archive from the phone: check the worktree, confirm natively, then desktop's archive steps with the phone's means:
- * stop the turn, hide the Chat, remove the worktree when the choice asks (the daemon closes the agent and checks again),
- * bring the Chat back with a notice when it stays, and read the Project again. A removed worktree's Chats leave the
- * Project's state on the Mac, so the refresh drops them here too.
+ * stop the turn if one runs now, hide the Chat, remove the worktree when the choice asks (the daemon closes the agent
+ * and checks again), bring the Chat back with a notice when it stays, and read the Project again. A removed worktree's
+ * Chats leave the Project's state on the Mac, so the refresh drops them here too.
  */
-export async function archiveFromPhone(request: ArchiveRequest): Promise<'cancelled' | 'hidden' | 'removed' | 'kept'> {
-  const { client, projectPath, chat, running } = request;
-  const plan = await checkArchive(client, request.state, chat.id);
-  const mode = await confirmArchive(request.alert, archiveDialog(plan, running));
-  if (!mode) return 'cancelled';
-  request.onConfirm?.();
+export async function archiveFromPhone(request: ArchiveRequest): Promise<'busy' | 'cancelled' | 'hidden' | 'removed' | 'kept'> {
+  const { client, projectPath, chat } = request;
   const chatId = `${projectPath}#${chat.id}`;
-  // Whether another Chat took up the worktree since the check is read from the Project as it is now.
-  const latest = mode !== 'hide' && plan?.status ? (await client.snapshot(projectPath).catch(() => null))?.project.state ?? request.state : request.state;
+  if (archiving.has(chatId)) return 'busy';
+  archiving.add(chatId);
   try {
-    return await archiveChat({
-      projectPath,
-      chatId,
-      getState: () => latest,
-      currentProjectPath: () => projectPath,
-      stop: () => (running ? client.call('agent:interrupt', [chatId]).catch(() => {}) : undefined),
-      hide: () => client.call('chat:patch', [projectPath, chat.id, { archived: true, unread: false }]),
-      restore: () => client.call('chat:patch', [projectPath, chat.id, { archived: false }]),
-      remove: (worktree, options) => client.call('worktree:remove', [worktree.path, options]),
-      // The refresh below brings the Project as the Mac has it now, without the removed worktree and its Chats.
-      applyRemoval: () => {},
-      refreshBranches: () => {},
-      notify: request.notify,
-    }, chat.id, mode, plan);
+    const plan = await checkArchive(client, request.state, chat.id);
+    const mode = await confirmArchive(request.alert, archiveDialog(plan, request.running));
+    if (!mode) return 'cancelled';
+    request.onConfirm?.();
+    // The Project as it is now: whether a turn runs in the Chat, read when the archive runs as desktop does, and
+    // whether another Chat took up the worktree since the check.
+    const now = await client.snapshot(projectPath).catch(() => null);
+    const latest = now?.project.state ?? request.state;
+    const running = now ? Boolean(now.runs.runs[chatId]) : request.running;
+    try {
+      return await archiveChat({
+        projectPath,
+        chatId,
+        getState: () => latest,
+        currentProjectPath: () => projectPath,
+        stop: () => (running ? client.call('agent:interrupt', [chatId]).catch(() => {}) : undefined),
+        hide: () => client.call('chat:patch', [projectPath, chat.id, { archived: true, unread: false }]),
+        restore: () => client.call('chat:patch', [projectPath, chat.id, { archived: false }]),
+        remove: (worktree, options) => removeOrFindGone(client, projectPath, worktree.path, options),
+        // The refresh below brings the Project as the Mac has it now, without the removed worktree and its Chats.
+        applyRemoval: () => {},
+        refreshBranches: () => {},
+        notify: request.notify,
+      }, chat.id, mode, plan);
+    } finally {
+      await request.refresh().catch(() => {});
+    }
   } finally {
-    await request.refresh().catch(() => {});
+    archiving.delete(chatId);
+  }
+}
+
+/**
+ * Asks the Mac to remove the worktree. A failed answer may only mean the connection dropped (the relay, a locked phone,
+ * the deadline) while the Mac went on removing it, so the Project is read again first: a worktree that is gone was
+ * removed, and nothing says otherwise. One still there, or a Project that can't be read, keeps the error.
+ */
+async function removeOrFindGone(client: ArchiveClient, projectPath: string, worktreePath: string, options: unknown) {
+  try {
+    return await client.call('worktree:remove', [worktreePath, options]);
+  } catch (error) {
+    const now = await client.snapshot(projectPath).catch(() => null);
+    if (now && !Object.values(now.project.state.worktrees).some(worktree => worktree.path === worktreePath)) return { removed: true };
+    throw error;
   }
 }

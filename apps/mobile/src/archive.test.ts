@@ -20,7 +20,7 @@ const state = (): CoordinatorState => ({
 
 const refusedByOldDaemon = () => Promise.reject(new Error('Command is not available from mobile'));
 
-function fakeClient(answers: Record<string, (args: unknown[]) => unknown> = {}, current = state()) {
+function fakeClient(answers: Record<string, (args: unknown[]) => unknown> = {}, current = state(), runs: Record<string, unknown> = {}) {
   const calls: { method: string; args: unknown[] }[] = [];
   const client: ArchiveClient = {
     async call<T>(method: string, args: unknown[] = []) {
@@ -31,7 +31,11 @@ function fakeClient(answers: Record<string, (args: unknown[]) => unknown> = {}, 
       if (method === 'worktree:status') return clean as T;
       return null as T;
     },
-    async snapshot() { calls.push({ method: 'snapshot', args: [] }); return { project: { state: current } }; },
+    async snapshot() {
+      calls.push({ method: 'snapshot', args: [] });
+      if (answers.snapshot) return await answers.snapshot([]) as Awaited<ReturnType<ArchiveClient['snapshot']>>;
+      return { project: { state: current }, runs: { runs } };
+    },
   };
   return { client, calls };
 }
@@ -99,8 +103,8 @@ test('an older daemon that refuses the check falls back to the plain hide-only a
   assert.equal(result, 'hidden');
   assert.deepEqual(shown[0].buttons.map(button => button.text), ['Cancel', 'Archive']);
   assert.equal(shown[0].message, undefined);
-  assert.deepEqual(calls.map(call => call.method), ['worktree:roots', 'chat:patch']);
-  assert.deepEqual(calls[1].args, ['/work/shop', 2, { archived: true, unread: false }]);
+  assert.deepEqual(calls.map(call => call.method), ['worktree:roots', 'snapshot', 'chat:patch']);
+  assert.deepEqual(calls[2].args, ['/work/shop', 2, { archived: true, unread: false }]);
   assert.deepEqual(notices, []);
 });
 
@@ -110,7 +114,7 @@ test('a running Chat is stopped, hidden, its worktree removed, then the Project 
     'agent:interrupt': () => { order.push('stop'); },
     'chat:patch': args => { order.push(`patch ${JSON.stringify((args as unknown[])[2])}`); },
     'worktree:remove': () => { order.push('remove'); return { removed: true }; },
-  });
+  }, state(), { '/work/shop#2': {} });
   const { alert } = fakeAlert('Stop, archive and remove worktree');
   let confirmed = false;
   const result = await archiveFromPhone({ client, alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: true, onConfirm: () => { confirmed = true; }, notify: () => {}, refresh: async () => { order.push('refresh'); } });
@@ -152,4 +156,52 @@ test('Cancel changes nothing', async () => {
   assert.equal(result, 'cancelled');
   assert.deepEqual(calls.map(call => call.method), ['worktree:roots', 'worktree:status']);
   assert.equal(refreshed, false);
+});
+
+test('whether to stop is read when the archive runs, not when Archive was tapped', async () => {
+  // Idle when tapped, running by the time it is confirmed: the turn is stopped.
+  const started = fakeClient({}, state(), { '/work/shop#2': {} });
+  await archiveFromPhone({ client: started.client, alert: fakeAlert('Archive and remove worktree').alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: false, notify: () => {}, refresh: async () => {} });
+  assert.equal(started.calls.some(call => call.method === 'agent:interrupt'), true);
+  // Running when tapped, finished since: nothing to stop.
+  const finished = fakeClient();
+  await archiveFromPhone({ client: finished.client, alert: fakeAlert('Stop, archive and remove worktree').alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: true, notify: () => {}, refresh: async () => {} });
+  assert.equal(finished.calls.some(call => call.method === 'agent:interrupt'), false);
+});
+
+test('a second tap while a Chat is archiving asks nothing and removes nothing', async () => {
+  const { client, calls } = fakeClient();
+  let press: (() => void) | undefined;
+  let shown = 0;
+  const alert: ShowAlert = (_title, _message, buttons) => { shown++; press = () => buttons.find(button => button.text === 'Archive and remove worktree')!.onPress!(); };
+  const request = { client, alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: false, notify: () => {}, refresh: async () => {} };
+  const first = archiveFromPhone(request);
+  for (let i = 0; i < 5 && !press; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await archiveFromPhone(request), 'busy');
+  press!();
+  assert.equal(await first, 'removed');
+  assert.equal(shown, 1);
+  assert.equal(calls.filter(call => call.method === 'worktree:remove').length, 1);
+  // Once it is over, the Chat can be archived again.
+  assert.notEqual(await archiveFromPhone({ ...request, alert: fakeAlert('Cancel').alert }), 'busy');
+});
+
+test('a dropped connection during the removal: a worktree that is gone counts as removed, one still there stays', async () => {
+  const lost = () => Promise.reject(new Error('Connection lost. Reconnect to your computer. Check the Chat before sending again.'));
+  // The Mac finished removing it: no restore, no notice.
+  const gone = state();
+  delete (gone.worktrees as Record<string, unknown>)[2];
+  let removing = false;
+  const finished = fakeClient({ 'worktree:remove': () => { removing = true; return lost(); }, snapshot: () => ({ project: { state: removing ? gone : state() }, runs: { runs: {} } }) });
+  const notices: string[] = [];
+  const result = await archiveFromPhone({ client: finished.client, alert: fakeAlert('Archive and remove worktree').alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: false, notify: message => { notices.push(message); }, refresh: async () => {} });
+  assert.equal(result, 'removed');
+  assert.deepEqual(notices, []);
+  assert.deepEqual(finished.calls.filter(call => call.method === 'chat:patch').map(call => call.args[2]), [{ archived: true, unread: false }]);
+  // Still there: the Chat comes back, and the notice says why.
+  const kept = fakeClient({ 'worktree:remove': lost });
+  const keptNotices: string[] = [];
+  assert.equal(await archiveFromPhone({ client: kept.client, alert: fakeAlert('Archive and remove worktree').alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: false, notify: message => { keptNotices.push(message); }, refresh: async () => {} }), 'kept');
+  assert.deepEqual(keptNotices, ["Couldn't remove the worktree: Connection lost. Reconnect to your computer. Check the Chat before sending again. The chat stays so you can find it."]);
+  assert.deepEqual(kept.calls.filter(call => call.method === 'chat:patch').map(call => call.args[2]), [{ archived: true, unread: false }, { archived: false }]);
 });

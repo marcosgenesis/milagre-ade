@@ -383,8 +383,9 @@ test('the Chat screen Archive falls back to a plain Archive on an older Mac, the
   const alerts = [];
   const project = archiveProject();
   const screen = chatHost({ alert: pressDanger(alerts), call: async (method, args) => (['worktree:roots', 'worktree:status'].includes(method) ? Promise.reject(new Error('Command is not available from mobile')) : project.call(method, args)) });
-  screen.session.client.snapshot = project.client.snapshot;
+  // The turn has ended on the Mac, so nothing is stopped.
   screen.session.snapshot = { ...project.snapshot, runs: { runs: {} } };
+  screen.session.client.snapshot = async () => screen.session.snapshot;
   screen.params.id = '5';
   delete screen.params.worktreeId;
   screen.render();

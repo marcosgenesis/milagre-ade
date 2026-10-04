@@ -42,6 +42,10 @@
       "types": "./src/relay-crypto.d.mts",
       "default": "./src/relay-crypto.mjs"
     },
+    "./relay-rpc": {
+      "types": "./src/relay-rpc.d.mts",
+      "default": "./src/relay-rpc.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
     "./reconcile": {

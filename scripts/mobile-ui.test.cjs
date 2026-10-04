@@ -839,3 +839,65 @@ test('tool disclosure reveals late output, while its chat action opens Activity 
   assert.equal(opened, 1);
   assert.equal(find(navigated.tool({ ...props, onPress: () => {} }), node => node.type === 'ScrollView'), undefined);
 });
+
+function updatesHost({ available = false, fail = false } = {}) {
+  const { createUpdateController } = require('../apps/mobile/src/update-controller.ts');
+  let reloads = 0;
+  const controller = createUpdateController({ enabled: true,
+    check: async () => { if (fail) throw new Error('Offline'); return { isAvailable: available, isRollBackToEmbedded: false }; },
+    fetch: async () => ({ isNew: true, isRollBackToEmbedded: false }), reload: async () => { reloads++; },
+  });
+  const native = { Text: 'Text', View: 'View', ActivityIndicator: 'ActivityIndicator' };
+  const runtime = { jsx, jsxs: jsx, Fragment: 'Fragment' };
+  const ui = { PageScroll: 'PageScroll', PillButton: 'PillButton', ListRow: 'ListRow', colors: {}, styles: { card: {}, subtitle: {}, muted: {}, text: {}, separator: {} } };
+  const actions = { onUpdate: () => controller.install(), onRetry: () => controller.check(true) };
+  const common = { 'react/jsx-runtime': runtime, 'react-native': native, '../ui': ui };
+  const updates = load('app/updates.tsx', { ...common,
+    'expo-router': { Stack: { Screen: 'Screen' } }, 'expo-constants': { __esModule: true, default: { nativeAppVersion: '1.0.0' } },
+    '../update-banner': { useAppUpdates: () => ({ state: controller.get(), check: controller.check, install: controller.install }) },
+  }).default;
+  const banner = load('update-banner.tsx', { react: { createContext: () => ({}) }, 'react/jsx-runtime': runtime, 'react-native': native,
+    'react-native-safe-area-context': {}, 'expo-updates': {}, './update-controller': { createUpdateController }, './theme': { colors: {} }, './ui': ui,
+  }).UpdateBanner;
+  return { controller, screen: updates, banner: () => banner({ state: controller.get(), ...actions }), reloads: () => reloads };
+}
+
+test('Settings opens the manual update screen', () => {
+  const routes = [];
+  const settings = load('app/settings.tsx', {
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': { View: 'View' },
+    'expo-router': { Stack: { Screen: 'Screen' }, router: { push: route => routes.push(route) } },
+    '@hugeicons/core-free-icons': {}, '../push': { usePush: () => ({}) }, '../icons': { Icon: 'Icon' },
+    '../ui': { ListRow: 'ListRow', PageScroll: 'PageScroll', styles: {} },
+  }).default;
+  find(settings(), node => node.type === 'ListRow' && node.props.title === 'App updates').props.onPress();
+  assert.deepEqual(routes, ['/updates']);
+});
+
+test('manual update UI shows its result while background checks keep the banner hidden', async () => {
+  for (const fail of [false, true]) {
+    const host = updatesHost({ fail });
+    assert.equal(host.banner(), null);
+    await find(host.screen(), node => node.type === 'PillButton').props.onPress();
+    // The screen's tap handler intentionally does not wait for the network.
+    await host.controller.check(true);
+    const screen = host.screen();
+    assert.ok(find(screen, node => node.type === 'Text' && node.props.children === (fail ? 'Could not check for updates. Check your connection and try again.' : 'Milagre is up to date.')));
+    assert.equal(host.banner(), null);
+  }
+});
+
+test('a pending update can be applied from either the top banner or Settings', async () => {
+  for (const fromBanner of [true, false]) {
+    const host = updatesHost({ available: true });
+    await host.controller.check(true);
+    assert.ok(find(host.banner(), node => node.type === 'Text' && node.props.children === 'Update available'));
+    const button = find(fromBanner ? host.banner() : host.screen(), node => node.type === 'PillButton');
+    assert.equal(button.props.title, 'Update now');
+    await button.props.onPress();
+    assert.equal(host.reloads(), 1);
+    assert.ok(find(host.banner(), node => node.type === 'ActivityIndicator'));
+    const pending = find(host.screen(), node => node.type === 'PillButton');
+    assert.equal(pending.props.disabled, true);
+  }
+});

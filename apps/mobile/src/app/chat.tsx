@@ -7,6 +7,7 @@ import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, Stop
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
 import { useComposer, useSession } from '../session';
+import { isListedChat } from '@milagre/shared/chats';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
@@ -126,7 +127,7 @@ export default function ChatScreen() {
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
     else if (id === 'archive' && chat) void action(() => client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }])).then(done => { if (done && !chat.archived) router.back(); });
   }
-  const recent = Object.values(project.state.sessions).filter(item => !item.archived).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
+  const recent = Object.values(project.state.sessions).filter(item => !item.archived && (item.id === chat?.id || lastMessage.has(item.id) || isListedChat(item, 0))).sort((a, b) => (lastMessage.get(b.id) || b.id / 1e6) - (lastMessage.get(a.id) || a.id / 1e6)).slice(0, 8);
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;

@@ -1,10 +1,10 @@
 import type { SavedHost } from './hosts-store.ts';
 
 export type PushPreferences = { notifyWhenWaiting: boolean; notifyOnCompletion: boolean };
-export type PushState = PushPreferences & { deviceId: string; enabled: boolean; token: string | null; registered: SavedHost[]; pending: SavedHost[] };
+export type PushState = PushPreferences & { deviceId: string; enabled: boolean; token: string | null; registered: SavedHost[]; pending: (SavedHost & { forgotten?: boolean })[] };
 type Storage = { getItemAsync(key: string): Promise<string | null>; setItemAsync(key: string, value: string): Promise<void> };
 const KEY = 'milagre.push.v1';
-const unique = (hosts: SavedHost[]) => [...new Map(hosts.map(host => [host.id, host])).values()];
+const unique = <T extends SavedHost>(hosts: T[]) => [...new Map(hosts.map(host => [host.id, host])).values()];
 
 /** Includes attempted registrations: even a lost RPC acknowledgement needs an unregister on Disable or Forget. */
 export function createPushStore(storage: Storage, newId: () => string) {
@@ -31,9 +31,9 @@ export function createPushStore(storage: Storage, newId: () => string) {
     read: () => ordered(read),
     update: (value: Partial<Pick<PushState, 'enabled' | 'token' | 'notifyWhenWaiting' | 'notifyOnCompletion'>>) => ordered(async () => write({ ...await read(), ...value })),
     registered: (host: SavedHost) => ordered(async () => { const old = await read(); return write({ ...old, registered: unique([...old.registered, host]) }); }),
-    forget: (host: SavedHost) => ordered(async () => { const old = await read(); return write({ ...old, registered: old.registered.filter(item => item.id !== host.id), pending: unique([...old.pending, host]) }); }),
+    forget: (host: SavedHost) => ordered(async () => { const old = await read(); return write({ ...old, registered: old.registered.filter(item => item.id !== host.id), pending: unique([...old.pending, { ...host, forgotten: true }]) }); }),
     unregistered: (host: SavedHost) => ordered(async () => { const old = await read(); return write({ ...old, pending: old.pending.filter(item => item.id !== host.id || item.token !== host.token) }); }),
-    disable: () => ordered(async () => { const old = await read(); return write({ ...old, enabled: false, registered: [], pending: unique([...old.pending, ...old.registered]) }); }),
+    disable: () => ordered(async () => { const old = await read(); return write({ ...old, enabled: false, registered: [], pending: unique([...old.registered, ...old.pending]) }); }),
   };
 }
 export type PushStore = ReturnType<typeof createPushStore>;

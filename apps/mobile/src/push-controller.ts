@@ -16,8 +16,8 @@ export function shouldPresentNotification(value: unknown, view: PushView) {
 }
 
 type Native = { available(): string; permission(): Promise<boolean>; requestPermission(): Promise<boolean>; token(): Promise<string> };
-type Dependencies = { store: PushStore; hosts(): Promise<SavedHost[]>; native: Native; call(host: SavedHost, method: string, args: unknown[]): Promise<unknown>; onError?(message: string): void };
-export function createPushController({ store, hosts, native, call, onError = () => {} }: Dependencies) {
+type Dependencies = { store: PushStore; hosts(): Promise<SavedHost[]>; forgetHost?(host: SavedHost): Promise<void>; native: Native; call(host: SavedHost, method: string, args: unknown[]): Promise<unknown>; onError?(message: string): void };
+export function createPushController({ store, hosts, forgetHost = async () => {}, native, call, onError = () => {} }: Dependencies) {
   let version = 0;
   let work: Promise<unknown> = Promise.resolve();
   const forgotten = new Map<string, SavedHost>();
@@ -26,7 +26,10 @@ export function createPushController({ store, hosts, native, call, onError = () 
   async function drain() {
     const state = await store.read();
     for (const host of state.pending) {
-      try { await call(host, 'push:unregister', [{ deviceId: state.deviceId }]); await store.unregistered(host); }
+      if (host.forgotten) await forgetHost(host);
+      // Re-pairing can rotate the bridge credential while keeping the same address.
+      const current = (await hosts()).find(item => item.id === host.id) || host;
+      try { await call(current, 'push:unregister', [{ deviceId: state.deviceId }]); await store.unregistered(host); }
       catch { onError(`Notifications may continue from ${host.name} until it reconnects. Removal will retry when you open Milagre.`); }
     }
   }
@@ -42,6 +45,7 @@ export function createPushController({ store, hosts, native, call, onError = () 
       if (state.pending.some(item => item.id === host.id)) continue;
       // Save before sending: a timeout can mean the daemon accepted registration but its reply was lost.
       await store.registered(host);
+      if (current !== version) return;
       try { await call(host, 'push:register', [{ deviceId: state.deviceId, token: state.token, hostId: host.id, notifyWhenWaiting: state.notifyWhenWaiting, notifyOnCompletion: state.notifyOnCompletion }]); }
       catch { onError(`Could not enable notifications from ${host.name}. Check that it is online and running the latest Milagre. Registration will retry.`); }
     }
@@ -74,10 +78,8 @@ export function createPushController({ store, hosts, native, call, onError = () 
     forget(host: SavedHost) {
       version++;
       forgotten.set(host.id, host);
-      return ordered(async () => {
-        const state = await store.read();
-        if (state.registered.some(item => item.id === host.id) || state.pending.some(item => item.id === host.id)) { await store.forget(host); await drain(); }
-      });
+      // Secure storage is ordered separately. Local Forget must never wait on a network call.
+      return store.forget(host);
     },
     focus(view: PushView) {
       return ordered(async () => {

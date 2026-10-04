@@ -27,7 +27,7 @@ test('forget keeps a private unregister tombstone and success removes its creden
   await store.forget(host);
   const state = await store.read();
   assert.deepEqual(state.registered, []);
-  assert.deepEqual(state.pending, [host]);
+  assert.deepEqual(state.pending, [{ ...host, forgotten: true }]);
   await store.unregistered(host);
   assert.deepEqual((await store.read()).pending, []);
   assert.ok(![...storage.values.values()].join().includes(host.token));

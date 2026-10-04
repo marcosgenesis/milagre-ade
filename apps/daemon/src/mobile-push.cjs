@@ -118,7 +118,7 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
     observe(chatId, event) {
       if (closed || !Number.isSafeInteger(sessionIdFromKey(chatId)) || !path.isAbsolute(projectOfKey(chatId))) return;
       let run = chats.get(chatId);
-      if (event.type === 'turn-started') {
+      if (event.type === 'turn-started' || (event.type === 'message-sent' && run?.ended)) {
         if (event.turnId && run?.turnId === event.turnId && !run.ended) return;
         run = { requests: new Set(), seen: new Set(), preview: '', ended: false, turnId: event.turnId };
         chats.delete(chatId); chats.set(chatId, run);

@@ -92,3 +92,51 @@ test('foreground alerts are suppressed for the current Chat only', () => {
   assert.equal(shouldPresentNotification(data, null), true);
   assert.equal(shouldPresentNotification(data, { hostId: 'https://other.example', chatId: '/project#1' }), true);
 });
+
+test('Forget persists removal without waiting for a suspended unregister', async () => {
+  let release!: () => void;
+  const network = new Promise<void>(resolve => { release = resolve; });
+  const { controller, store } = fixture({ call: async (_host: SavedHost, method: string) => { if (method === 'push:unregister') await network; } });
+  await controller.enable();
+  try {
+    await Promise.race([controller.forget(host), new Promise((_, reject) => setTimeout(() => reject(new Error('Forget waited for network')), 100))]);
+    assert.equal((await store.read()).pending[0].id, host.id);
+  } finally { release(); }
+});
+
+test('a new pairing credential removes an old tombstone before registration', async () => {
+  const repaired = { ...host, token: 'b'.repeat(64), lastUsed: 1 };
+  const calls: string[] = [];
+  const { controller, store } = fixture({ hosts: async () => [repaired], call: async (target: SavedHost, method: string) => {
+    calls.push(method);
+    if (target.token === host.token) throw new Error('401');
+  } });
+  await store.registered(host);
+  await store.disable();
+  await controller.enable();
+  assert.deepEqual(calls, ['push:unregister', 'push:register']);
+  assert.equal((await store.read()).pending.length, 0);
+});
+
+test('restart finishes local Forget before a suspended network cleanup and rejects its taps', async () => {
+  let saved = [host];
+  const { controller, store, native } = fixture();
+  await controller.enable();
+  await controller.forget(host);
+  // Simulate a process exit after the durable tombstone, before hosts-store removal.
+  let release!: () => void;
+  const network = new Promise<void>(resolve => { release = resolve; });
+  const methods: string[] = [];
+  const restarted = createPushController({ store, native, hosts: async () => saved,
+    forgetHost: async removed => { saved = saved.filter(item => item.id !== removed.id); },
+    call: async (_host, method) => { methods.push(method); await network; },
+  });
+  const refresh = restarted.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(notificationTarget(data, saved), null);
+  assert.equal(saved.length, 0);
+  assert.deepEqual(methods, ['push:unregister']);
+  release();
+  await refresh;
+  assert.deepEqual(methods, ['push:unregister']);
+});

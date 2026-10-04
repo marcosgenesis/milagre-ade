@@ -10,6 +10,32 @@ const token = 'ExpoPushToken[phone-one]';
 const chatId = '/project#1';
 const approval = { type: 'permission-request', requestId: 'request-1', kind: 'command', title: 'Run?', command: 'ls', tool: 'Shell' };
 const registration = (extra = {}) => ({ deviceId, token, hostId: 'https://mac.example.com', notifyWhenWaiting: true, notifyOnCompletion: true, ...extra });
+
+test('accepted input followed by a startup failure starts a fresh notification lifecycle', async t => {
+  const { push, messages } = await fixture(t);
+  await push.register(registration());
+  push.observe(chatId, { type: 'turn-started', turnId: 'old' });
+  push.observe(chatId, { type: 'turn-completed' });
+  await push.settled();
+  push.observe(chatId, { type: 'message-sent' });
+  push.observe(chatId, { type: 'turn-failed', message: 'CLI unavailable' });
+  push.observe(chatId, { type: 'turn-failed', message: 'CLI unavailable' });
+  await push.settled();
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].body, 'CLI unavailable');
+});
+
+test('steering an active turn preserves request deduplication', async t => {
+  const { push, messages } = await fixture(t);
+  await push.register(registration());
+  push.observe(chatId, { type: 'turn-started' });
+  push.observe(chatId, approval);
+  await push.settled();
+  push.observe(chatId, { type: 'message-sent' });
+  push.observe(chatId, approval);
+  await push.settled();
+  assert.equal(messages.length, 1);
+});
 async function fixture(t, options = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-push-'));
   const messages = [];

@@ -14,14 +14,25 @@ function usePushState() {
   const sessionRef = useRef(session);
   useLayoutEffect(() => { sessionRef.current = session; });
   const path = usePathname();
-  const params = useGlobalSearchParams<{ id?: string }>();
+  const params = useGlobalSearchParams<{ id?: string; worktreeId?: string }>();
   const [state, setState] = useState<PushState | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<{ data: unknown; ticket: number; navigationVersion: number } | null>(null);
   const ticket = useRef(0);
-  const handled = useRef(new Set<string>());
-  const [controller] = useState(() => createPushController({ store: pushStore, hosts: savedHosts.list,
+  const activeTap = useRef<string | null>(null);
+  const forgetHost = useCallback(async (host: SavedHost) => {
+      const current = (await savedHosts.list()).find(item => item.id === host.id);
+      if (current?.token === host.token && current.lastUsed === host.lastUsed) {
+        sessionRef.current.cancelNavigation();
+        if (sessionRef.current.client?.url === host.id) sessionRef.current.disconnect();
+        await savedHosts.forget(host.id);
+        await sessionRef.current.loadHosts();
+      }
+  }, []);
+  // The factory only stores forgetHost; it invokes it later from async refresh, never during render.
+  // eslint-disable-next-line react-hooks/refs
+  const [controller] = useState(() => createPushController({ store: pushStore, hosts: savedHosts.list, forgetHost,
     native: pushNative, call: (host, method, args) => createClient(host.address, host.token, fetch, 5000, host.access).call(method, args), onError: setError }));
   const view: PushView = path === '/chat' && session.client && session.snapshot && params.id && /^\d+$/.test(String(params.id))
     ? { hostId: session.client.url, chatId: `${session.snapshot.project.path}#${params.id}` } : null;
@@ -42,15 +53,19 @@ function usePushState() {
   };
   const hostKeys = session.hosts.map(host => `${host.id}:${host.lastUsed}`).join('|');
   useEffect(() => { void refresh(); }, [refresh, hostKeys]);
-  const previousPath = useRef(path);
+  const route = `${path}:${params.id || ''}:${params.worktreeId || ''}`;
+  const previousRoute = useRef(route);
   useEffect(() => {
-    if (previousPath.current !== path) { sessionRef.current.cancelNavigation(); previousPath.current = path; }
-  }, [path]);
-  const invalidatePending = useCallback(() => { ticket.current++; }, []);
+    if (previousRoute.current !== route) { sessionRef.current.cancelNavigation(); previousRoute.current = route; }
+  }, [route]);
+  const invalidatePending = useCallback(() => { ticket.current++; activeTap.current = null; }, []);
   useEffect(() => {
     let cancelled = false;
     let stop: (() => void) | undefined;
     void pushNative.listen(() => AppState.currentState === 'active' ? viewRef.current : null, data => {
+      const eventId = (data as { eventId?: unknown } | null)?.eventId;
+      if (typeof eventId === 'string' && eventId && activeTap.current === eventId) return;
+      activeTap.current = typeof eventId === 'string' ? eventId : null;
       sessionRef.current.claimAutoOpen();
       sessionRef.current.cancelNavigation();
       setPending({ data, ticket: ++ticket.current, navigationVersion: sessionRef.current.navigationVersion() });
@@ -67,18 +82,21 @@ function usePushState() {
   useEffect(() => {
     if (!pending || !session.booted) return;
     void (async () => {
-      const hosts = await savedHosts.list();
+      const saved = await savedHosts.list();
+      const removals = (await pushStore.read()).pending;
+      const hosts = saved.filter(host => !removals.some(item => item.forgotten && item.id === host.id && item.token === host.token && item.lastUsed === host.lastUsed));
       if (pending.ticket !== ticket.current || pending.navigationVersion !== sessionRef.current.navigationVersion()) return;
       const target = notificationTarget(pending.data, hosts);
       if (!target) throw new Error('This notification belongs to a computer that is no longer paired. Pair it again to open its Chat.');
-      if (handled.current.has(target.eventId)) return;
-      handled.current.add(target.eventId);
-      if (handled.current.size > 100) handled.current.delete(handled.current.values().next().value!);
-      try {
-        const opened = await sessionRef.current.openNotificationTarget(target.host, target.projectPath, target.sessionId);
-        if (opened && pending.ticket === ticket.current) router.replace({ pathname: '/chat', params: { id: String(target.sessionId) } });
-      } catch (e) { handled.current.delete(target.eventId); throw e; }
-    })().catch(e => { if (pending.ticket === ticket.current) Alert.alert('Could not open Chat', e.message); });
+      const opened = await sessionRef.current.openNotificationTarget(target.host, target.projectPath, target.sessionId);
+      if (opened && pending.ticket === ticket.current) {
+        router.dismissTo('/');
+        router.push('/projects');
+        router.push('/project');
+        router.push({ pathname: '/chat', params: { id: String(target.sessionId) } });
+      }
+    })().catch(e => { if (pending.ticket === ticket.current) Alert.alert('Could not open Chat', e.message); })
+      .finally(() => { if (pending.ticket === ticket.current) { activeTap.current = null; setPending(null); } });
   }, [pending, session.booted]);
   return { state, error, busy, unavailable: pushNative.available(), refresh,
     enable: () => run(() => controller.enable()), disable: () => run(() => controller.disable()),

@@ -15,13 +15,14 @@ const deferred = () => {
 // Effects are driven explicitly so request ordering is deterministic.
 function hookHost({ effects = false } = {}) {
   const slots = [];
+  const queuedEffects = [];
   let cursor = 0;
   return {
     begin() { cursor = 0; },
     unmount() { for (const slot of slots) slot?.cleanup?.(); },
     useState(initial) {
       const index = cursor++;
-      if (!(index in slots)) slots[index] = initial;
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
       return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
@@ -46,6 +47,16 @@ function hookHost({ effects = false } = {}) {
       previous?.cleanup?.();
       slots[index] = { deps, cleanup: fn() };
     }, createContext() { return {}; }, useContext() {},
+    effect(fn, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || !deps || deps.some((value, i) => value !== previous.deps?.[i])) {
+        slots[index] = { deps, cleanup: previous?.cleanup };
+        queuedEffects.push(() => { slots[index].cleanup?.(); slots[index].cleanup = fn(); });
+      }
+    },
+    flush() { for (const effect of queuedEffects.splice(0)) effect(); },
+    cleanup() { for (const slot of slots) slot?.cleanup?.(); },
   };
 }
 function load(file, modules, extra = '') {
@@ -55,7 +66,7 @@ function load(file, modules, extra = '') {
   vm.runInNewContext(compiled, { exports, require: id => {
     assert.ok(id in modules, `Unexpected import: ${id}`);
     return modules[id];
-  }, process: { env: {} }, setTimeout, clearTimeout });
+  }, process: { env: {} }, setTimeout, clearTimeout, setInterval, clearInterval });
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
@@ -424,4 +435,81 @@ test('a cancelled notification target ignores a later network failure', async ()
   render().cancelNavigation();
   loaded.reject(new Error('Connection lost'));
   assert.equal(await opening, false);
+});
+
+function pushHost(t, initial = 'index') {
+  const react = hookHost();
+  react.useEffect = react.effect;
+  react.useLayoutEffect = react.effect;
+  const { StackRouter, StackActions } = require('expo-router/build/react-navigation/routers');
+  const stack = StackRouter({ initialRouteName: initial });
+  const options = { routeNames: ['index', 'projects', 'project', 'chat'], routeParamList: {}, routeGetIdList: {} };
+  let navigation = stack.getInitialState(options);
+  let pathname = initial === 'index' ? '/' : '/chat';
+  let params = initial === 'chat' ? { id: '1' } : {};
+  const apply = action => { navigation = stack.getStateForAction(navigation, action, options) || navigation; };
+  const router = {
+    replace: route => apply(StackActions.replace(route.pathname.slice(1), route.params)),
+    dismissTo: path => apply(StackActions.popTo(path === '/' ? 'index' : path.slice(1))),
+    push: route => apply(StackActions.push(typeof route === 'string' ? route.slice(1) : route.pathname.slice(1), route.params)),
+  };
+  let generation = 0, receive;
+  const opening = deferred(), opens = [];
+  const host = { id: 'https://mac.example', address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac', lastUsed: 0 };
+  const session = { booted: true, hosts: [host], snapshot: snapshot('/project'), client: { url: host.id },
+    claimAutoOpen() {}, cancelNavigation() { generation++; }, navigationVersion: () => generation,
+    openNotificationTarget: async (...args) => { const current = generation; opens.push(args); await opening.promise; return current === generation; },
+  };
+  const { usePushState } = load('push.tsx', {
+    react, 'react/jsx-runtime': { jsx }, 'react-native': { Alert: { alert() {} }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
+    'expo-router': { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
+    './client': {}, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
+    './push-controller': require('../apps/mobile/src/push-controller.ts'),
+    './push-native': { pushStore: { read: async () => ({ enabled: false, pending: [] }) }, pushNative: {
+      available: () => 'Simulator', listen: async (_view, tap) => { receive = tap; return () => {}; },
+    } },
+  }, '\nexport { usePushState };');
+  const render = () => { react.begin(); const value = usePushState(); react.flush(); return value; };
+  t.after(() => react.cleanup());
+  render();
+  return { render, opens, opening, tap: (eventId = 'event') => { receive({ kind: 'milagre-chat', hostId: host.id, projectPath: '/project', sessionId: 2, eventId }); render(); },
+    switchChat: id => { params = { id }; pathname = '/chat'; render(); }, routes: () => navigation.routes, back: () => apply({ type: 'GO_BACK' }),
+  };
+}
+
+test('a same-screen Chat switch cancels a slow notification target', async t => {
+  const screen = pushHost(t, 'chat');
+  screen.tap();
+  await settle();
+  screen.switchChat('3');
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes()[0].name, 'chat');
+  assert.equal(screen.routes()[0].params, undefined);
+});
+
+test('a cold-start notification builds a route back to All Chats', async t => {
+  const screen = pushHost(t);
+  screen.tap();
+  await settle();
+  screen.opening.resolve();
+  await settle();
+  assert.deepEqual(screen.routes().map(route => route.name), ['index', 'projects', 'project', 'chat']);
+  screen.back();
+  assert.equal(screen.routes().at(-1).name, 'project');
+});
+
+test('duplicate in-flight taps share one opening and a later tap can open again', async t => {
+  const screen = pushHost(t);
+  screen.tap();
+  await settle();
+  screen.tap();
+  await settle();
+  assert.equal(screen.opens.length, 1);
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes().at(-1).name, 'chat');
+  screen.tap();
+  await settle();
+  assert.equal(screen.opens.length, 2);
 });

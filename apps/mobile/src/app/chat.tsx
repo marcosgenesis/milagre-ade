@@ -20,6 +20,8 @@ import { Approval, Questions } from '../questions';
 import { AgentControls, PermissionChip } from '../agent-controls';
 import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
+import { SlideOver } from '../slide-over';
+import { ChangesView } from './changes';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, showActions, styles } from '../ui';
 
 const PAGE = 40;
@@ -54,6 +56,9 @@ export default function ChatScreen() {
   }, [allMessages]);
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
+  // The Changes panel that slides in from the right; its files load the first time it is pulled.
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changesMounted, setChangesMounted] = useState(false);
   const visible = shown.id === params.id ? shown.count : PAGE;
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   if (!session.client || !session.snapshot) return <Redirect href="/" />;
@@ -121,7 +126,7 @@ export default function ChatScreen() {
     });
   }
   function headerAction(id: string) {
-    if (id === 'changes') router.push({ pathname: '/changes', params: { worktreeId: String(worktreeId) } });
+    if (id === 'changes') { setChangesMounted(true); setChangesOpen(true); }
     else if (id === 'pr' && pr && /^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {});
     else if (id === 'agents' && chat) router.push({ pathname: '/agents', params: { id: String(chat.id) } });
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
@@ -131,7 +136,7 @@ export default function ChatScreen() {
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
-  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
+  const header = <PullDown label="Switch Chat" title={project.name} sections={[{ title: 'Recent Chats', items: recent.map(item => ({ id: `chat:${item.id}`, title: item.title || item.generatedTitle || 'New Chat', checked: item.id === chat?.id })) }, { items: [{ id: 'all', title: 'All Chats', systemImage: 'list.bullet' }] }]} onSelect={id => { session.cancelNavigation(); if (id === 'all') router.back(); else router.setParams({ id: id.slice(5) }); }}>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
       {/* The label lives in a native menu: its views keep one shape (text changes only), so nothing mounts or unmounts inside it. */}
@@ -153,9 +158,15 @@ export default function ChatScreen() {
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
+  // While Changes is open the back swipe stays off: a rightward drag closes the panel instead of leaving the Chat.
+  const changesPanel = changesMounted && worktree ? <ChangesView worktreeId={worktreeId} header={<View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <Text accessibilityRole="header" style={{ color: colors.ink, fontSize: 22, fontWeight: '700' }}>Changes</Text>
+    <IconButton label="Close Changes" icon={Cancel01Icon} onPress={() => setChangesOpen(false)} />
+  </View>} /> : null;
   return <View style={[styles.screen, dots]}>
-    <Stack.Screen options={{ title, headerTitle: () => header }} />
+    <Stack.Screen options={{ title, headerTitle: () => header, gestureEnabled: !changesOpen }} />
     {more}
+    <SlideOver open={changesOpen} onOpenChange={setChangesOpen} onPull={() => setChangesMounted(true)} panel={changesPanel} enabled={!!worktree}>
     <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
@@ -195,5 +206,6 @@ export default function ChatScreen() {
       </View>}
     </View>
     </KeyboardStickyView>
+    </SlideOver>
   </View>;
 }

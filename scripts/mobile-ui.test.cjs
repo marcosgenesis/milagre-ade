@@ -15,13 +15,14 @@ const deferred = () => {
 // Effects are driven explicitly so request ordering is deterministic.
 function hookHost({ effects = false } = {}) {
   const slots = [];
+  const queuedEffects = [];
   let cursor = 0;
   return {
     begin() { cursor = 0; },
     unmount() { for (const slot of slots) slot?.cleanup?.(); },
     useState(initial) {
       const index = cursor++;
-      if (!(index in slots)) slots[index] = initial;
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
       return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
@@ -46,6 +47,16 @@ function hookHost({ effects = false } = {}) {
       previous?.cleanup?.();
       slots[index] = { deps, cleanup: fn() };
     }, createContext() { return {}; }, useContext() {},
+    effect(fn, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || !deps || deps.some((value, i) => value !== previous.deps?.[i])) {
+        slots[index] = { deps, cleanup: previous?.cleanup };
+        queuedEffects.push(() => { slots[index].cleanup?.(); slots[index].cleanup = fn(); });
+      }
+    },
+    flush() { for (const effect of queuedEffects.splice(0)) effect(); },
+    cleanup() { for (const slot of slots) slot?.cleanup?.(); },
   };
 }
 function load(file, modules, extra = '') {
@@ -55,10 +66,65 @@ function load(file, modules, extra = '') {
   vm.runInNewContext(compiled, { exports, require: id => {
     assert.ok(id in modules, `Unexpected import: ${id}`);
     return modules[id];
-  }, process: { env: {} }, setTimeout, clearTimeout });
+  }, process: { env: {} }, URL, setTimeout, clearTimeout, setInterval, clearInterval });
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
+
+function markdownHost() {
+  const react = { ...hookHost(), memo: fn => fn };
+  const viewer = require('../apps/mobile/src/viewer-store.ts');
+  const routes = [], links = [];
+  const { Markdown } = load('markdown.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Text: 'Text', View: 'View', Image: 'Image', Pressable: 'Pressable', Alert: {}, Linking: { openURL: async url => { links.push(url); } } },
+    'expo-router': { router: { push: route => routes.push(route) } }, './viewer-store': viewer,
+    './chat-presentation': require('../apps/mobile/src/chat-presentation.ts'),
+    './ui': { PageScroll: 'PageScroll', colors: {}, styles: { muted: {}, code: {} } },
+  });
+  function expand(node) {
+    if (Array.isArray(node)) return node.flatMap(expand);
+    if (!node || typeof node !== 'object') return node;
+    if (typeof node.type === 'function') return expand(node.type(node.props));
+    return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
+  }
+  return { render(text) { react.begin(); return expand(Markdown({ text })); }, routes, links, viewer };
+}
+
+test('Markdown screenshot links render image previews outside Text and open the image viewer', () => {
+  const screen = markdownHost();
+  const url = 'https://raw.githubusercontent.com/marcosgenesis/milagre-ade/22cc3932b99921b51318d869f617db4bfef45523/mobile-push/computers.jpg';
+  const rendered = screen.render(`Here is the **Computers screen**:\n\n![Computers with Settings and bottom +](${url})`);
+  const image = find(rendered, node => node.type === 'Image');
+  assert.ok(image, 'The screenshot must render as an image, not an alt-text placeholder');
+  assert.equal(image.props.source.uri, url);
+  assert.equal(find(rendered, node => node.type === 'Text' && [node.props.children].flat(Infinity).some(child => find(child, nested => nested.type === 'Image'))), undefined);
+  const preview = find(rendered, node => node.props?.accessibilityRole === 'imagebutton');
+  preview.props.onPress();
+  assert.equal(screen.routes.at(-1), '/viewer');
+  assert.equal(screen.viewer.viewerImages().images[0].source.uri, url);
+});
+
+test('images embedded in emphasis, links and tables keep their surrounding text', () => {
+  const screen = markdownHost();
+  const rendered = screen.render('Before **bold ![Preview](https://example.org/screen.png) after** end.\n\n| Screenshot |\n| --- |\n| [![Table preview](https://example.org/table.png)](https://example.org) |');
+  assert.ok(find(rendered, node => node.type === 'Image' && node.props.source.uri === 'https://example.org/screen.png'));
+  assert.ok(find(rendered, node => node.type === 'Image' && node.props.source.uri === 'https://example.org/table.png'));
+  assert.ok(find(rendered, node => node.type === 'Text' && Array.isArray(node.props.style) && node.props.style.some(style => style.fontWeight === '600') && [node.props.children].flat(Infinity).some(child => find(child, nested => nested.type === 'Text' && nested.props.children === ' after'))));
+});
+
+test('a broken Markdown image leaves a browser link, and unsafe sources never load', async () => {
+  const screen = markdownHost();
+  const text = '![Missing screenshot](https://example.org/missing.png)';
+  find(screen.render(text), node => node.type === 'Image').props.onError();
+  const fallback = find(screen.render(text), node => node.props?.accessibilityRole === 'link');
+  assert.ok(fallback);
+  await fallback.props.onPress();
+  assert.equal(screen.links.at(-1), 'https://example.org/missing.png');
+  for (const source of ['file:///etc/passwd', 'mailto:hello@example.org', 'milagre://pair', 'https://secret@example.org/image.png']) {
+    assert.equal(find(markdownHost().render(`![blocked](${source})`), node => node.type === 'Image'), undefined);
+  }
+});
 const snapshot = projectPath => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
 function sessionHost(client, { effects = false, AppState = {} } = {}) {
@@ -183,7 +249,7 @@ function chatHost() {
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params },
-    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
+    '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../slide-over': { SlideOver: ({ children }) => children }, './changes': { ChangesView: 'ChangesView' }, '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': { MODEL_CATALOG: [{ id: 'model', provider: 'codex' }] },
     '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'),
@@ -385,4 +451,148 @@ test('reusing an empty Chat preserves its existing text and attachment drafts', 
   assert.equal(screen.session.attachments['/p#42'].length, 1);
   assert.equal(screen.session.attachments['/p#42'][0], photo);
   assert.equal(screen.field().value, 'unsent in existing Chat');
+});
+
+test('notification navigation reconnects and opens the target Chat only after loading current state', async () => {
+  const calls = [];
+  const target = { project: { path: '/target', name: 'Target', state: { sessions: { 7: { id: 7 } } } }, runs: { runs: {} } };
+  const render = sessionHost({ url: 'https://mac.example', call: async (method, args) => { calls.push({ method, args }); return method === 'project:recent' ? [] : method === 'project:open' ? { path: args[0] } : {}; }, snapshot: async () => target });
+  const opened = await render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  assert.equal(opened, true);
+  assert.equal(render().snapshot.project.path, '/target');
+  assert.equal(render().hostName, 'Mac');
+  assert.ok(calls.some(call => call.method === 'project:open' && call.args[0] === '/target'));
+});
+
+test('a later disconnect or navigation cancels an outstanding notification target', async () => {
+  const loaded = deferred();
+  const render = sessionHost({ url: 'https://mac.example', call: async () => [], snapshot: () => loaded.promise });
+  const opening = render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  await new Promise(resolve => setTimeout(resolve, 1));
+  render().cancelNavigation();
+  loaded.resolve({ project: { path: '/target', state: { sessions: { 7: { id: 7 } } } } });
+  assert.equal(await opening, false);
+  assert.equal(render().client, null);
+  assert.equal(render().snapshot, null);
+});
+
+test('notification navigation rejects a Chat that no longer exists', async () => {
+  const render = sessionHost({ call: async () => [], snapshot: async () => snapshot('/target') });
+  await assert.rejects(render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7), /no longer available/);
+  assert.equal(render().client, null);
+});
+
+test('a cancelled notification target ignores a later network failure', async () => {
+  const loaded = deferred();
+  const render = sessionHost({ call: async () => [], snapshot: () => loaded.promise });
+  const opening = render().openNotificationTarget({ address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac' }, '/target', 7);
+  await new Promise(resolve => setTimeout(resolve, 1));
+  render().cancelNavigation();
+  loaded.reject(new Error('Connection lost'));
+  assert.equal(await opening, false);
+});
+
+function pushHost(t, initial = 'index') {
+  const react = hookHost();
+  react.useEffect = react.effect;
+  react.useLayoutEffect = react.effect;
+  const { StackRouter, StackActions } = require(require.resolve('expo-router/build/react-navigation/routers', { paths: [path.join(__dirname, '../apps/mobile')] }));
+  const stack = StackRouter({ initialRouteName: initial });
+  const options = { routeNames: ['index', 'projects', 'project', 'chat'], routeParamList: {}, routeGetIdList: {} };
+  let navigation = stack.getInitialState(options);
+  let pathname = initial === 'index' ? '/' : '/chat';
+  let params = initial === 'chat' ? { id: '1' } : {};
+  const apply = action => { navigation = stack.getStateForAction(navigation, action, options) || navigation; };
+  const router = {
+    replace: route => apply(StackActions.replace(route.pathname.slice(1), route.params)),
+    dismissTo: path => apply(StackActions.popTo(path === '/' ? 'index' : path.slice(1))),
+    push: route => apply(StackActions.push(typeof route === 'string' ? route.slice(1) : route.pathname.slice(1), route.params)),
+  };
+  let generation = 0, receive;
+  const opening = deferred(), opens = [];
+  const host = { id: 'https://mac.example', address: 'https://mac.example', token: 'a'.repeat(64), name: 'Mac', lastUsed: 0 };
+  const session = { booted: true, hosts: [host], snapshot: snapshot('/project'), client: { url: host.id },
+    claimAutoOpen() {}, cancelNavigation() { generation++; }, navigationVersion: () => generation,
+    openNotificationTarget: async (...args) => { const current = ++generation; opens.push(args); await opening.promise; return current === generation; },
+  };
+  const { usePushState } = load('push.tsx', {
+    react, 'react/jsx-runtime': { jsx }, 'react-native': { Alert: { alert() {} }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
+    'expo-router': { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
+    './client': {}, './hosts-native': { savedHosts: { list: async () => [host] } }, './session': { useSession: () => session },
+    './push-controller': require('../apps/mobile/src/push-controller.ts'),
+    './push-native': { pushStore: { read: async () => ({ enabled: false, pending: [] }) }, pushNative: {
+      available: () => 'Simulator', listen: async (_view, tap) => { receive = tap; return () => {}; },
+    } },
+  }, '\nexport { usePushState };');
+  const render = () => { react.begin(); const value = usePushState(); react.flush(); return value; };
+  t.after(() => react.cleanup());
+  render();
+  return { render, opens, opening, tap: (eventId = 'event') => { receive({ kind: 'milagre-chat', hostId: host.id, projectPath: '/project', sessionId: 2, eventId }); render(); },
+    switchChat: id => { params = { id }; pathname = '/chat'; render(); }, routes: () => navigation.routes, back: () => apply({ type: 'GO_BACK' }),
+    pair: () => { const current = ++generation; pathname = '/pair'; params = {}; render(); return current === generation; },
+  };
+}
+
+test('a same-screen Chat switch cancels a slow notification target', async t => {
+  const screen = pushHost(t, 'chat');
+  screen.tap();
+  await settle();
+  screen.switchChat('3');
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes()[0].name, 'chat');
+  assert.equal(screen.routes()[0].params, undefined);
+});
+
+test('a cold-start notification builds a route back to All Chats', async t => {
+  const screen = pushHost(t);
+  screen.tap();
+  await settle();
+  screen.opening.resolve();
+  await settle();
+  assert.deepEqual(screen.routes().map(route => route.name), ['index', 'projects', 'project', 'chat']);
+  screen.back();
+  assert.equal(screen.routes().at(-1).name, 'project');
+});
+
+test('duplicate in-flight taps share one opening and a later tap can open again', async t => {
+  const screen = pushHost(t);
+  screen.tap();
+  await settle();
+  screen.tap();
+  await settle();
+  assert.equal(screen.opens.length, 1);
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes().at(-1).name, 'chat');
+  screen.tap();
+  await settle();
+  assert.equal(screen.opens.length, 2);
+});
+
+test('route changes preserve a newer normal pairing while cancelling notification work', async t => {
+  const screen = pushHost(t);
+  assert.equal(screen.pair(), true);
+  screen.tap();
+  await settle();
+  assert.equal(screen.pair(), true);
+  screen.opening.resolve();
+  await settle();
+  assert.equal(screen.routes().at(-1).name, 'index');
+});
+
+test('a notification target clears an older Project loading state', async () => {
+  const oldOpening = deferred();
+  const render = sessionHost({
+    call: async (method, args) => method === 'project:recent' ? [] : method === 'project:open' ? args[0] === '/old' ? oldOpening.promise : { path: args[0] } : {},
+    snapshot: async projectPath => ({ ...snapshot(projectPath), project: { path: projectPath, state: { sessions: { 2: { id: 2 } } } } }),
+  });
+  await render().connect('address', 'token');
+  const old = render().open('/old');
+  assert.equal(render().opening.path, '/old');
+  await render().openNotificationTarget({ address: 'new', token: 'new', name: 'Mac' }, '/target', 2);
+  oldOpening.resolve({ path: '/old' });
+  await old;
+  assert.equal(render().snapshot.project.path, '/target');
+  assert.equal(render().opening, null);
 });

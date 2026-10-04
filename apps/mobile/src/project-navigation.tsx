@@ -9,7 +9,8 @@ import type { Snapshot } from './client';
 import { useSession } from './session';
 import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
-import { Icon, SpinnerRing } from './icons';
+import { Icon } from './icons';
+import { LoadingLogo } from './loading-logo';
 import { ErrorNotice, Field, IconButton, PillButton, PullDown, colors, styles } from './ui';
 
 type Destination = (href: Href, secondary?: boolean) => void;
@@ -139,7 +140,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
       </View>
       <View style={s.search}><Icon icon={Search01Icon} tone="ink3" size={18} /><View style={{ flex: 1 }}><Field label="Search chats" hideLabel placeholder="Search chats" value={query} onChangeText={setQuery} clearButtonMode="while-editing" style={{ backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 8 }} /></View></View>
-      {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><SpinnerRing size={14} /><Text style={s.secondary}>Opening...</Text></View>}
+      {busy && <View accessible accessibilityRole="progressbar" accessibilityLabel="Opening..." accessibilityLiveRegion="polite" style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><LoadingLogo size={22} /><Text style={s.secondary}>Opening...</Text></View>}
       {error ? <ErrorNotice message={error} /> : null}
     </View>
     <FlatList data={rows} keyExtractor={row => row.key} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 20 }}

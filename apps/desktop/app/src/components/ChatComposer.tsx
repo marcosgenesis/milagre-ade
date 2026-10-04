@@ -196,6 +196,8 @@ interface ChatComposerProps {
   asking?: boolean;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
+  /** The active turn's start time, independent of the chat view. */
+  runStartedAt?: number;
   lockedProvider?: ModelProvider;
   /** Hands this chat over to the other provider in a new chat. */
   onHandover?: (provider: ModelProvider) => void;
@@ -360,6 +362,7 @@ export function ChatComposer({
   waitingStepIds,
   asking = false,
   runModelName,
+  runStartedAt,
   lockedProvider,
   onHandover,
   canHandover = false,
@@ -489,7 +492,7 @@ export function ChatComposer({
           ) : null}
           {isSending && (
             <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-              <ThinkingIndicator label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
+              <ThinkingIndicator startedAt={runStartedAt} label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
             </div>
           )}
           {handover?.pending && (

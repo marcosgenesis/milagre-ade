@@ -40,7 +40,7 @@ export function lastUserModel(state, sessionId) {
 }
 
 export function startRun(runs, chatId, model) {
-  return { ...runs, [chatId]: { text: "", model, steps: [], approvals: [], questions: [], answered: {} } };
+  return { ...runs, [chatId]: { text: "", model, startedAt: Date.now(), steps: [], approvals: [], questions: [], answered: {} } };
 }
 
 /** The run with one step changed, or null when it has no such step or `update` declines. */

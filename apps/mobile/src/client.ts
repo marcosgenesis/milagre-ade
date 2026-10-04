@@ -33,9 +33,9 @@ export function createClient(address: string, token: string, fetcher: typeof fet
   // The last snapshot per route and its ETag: an unchanged Project answers 304 instead of megabytes.
   const cached = new Map<string, { etag: string; value: unknown }>();
   const auth = { Authorization: `Bearer ${token.trim()}`, ...(access ? { 'CF-Access-Client-Id': access.id, 'CF-Access-Client-Secret': access.secret } : {}) };
-  async function request<T>(route: string, body?: unknown): Promise<T> {
+  async function request<T>(route: string, body?: unknown, deadlineMs = timeoutMs): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), deadlineMs);
     try {
       let response: Response;
       try {
@@ -66,7 +66,8 @@ export function createClient(address: string, token: string, fetcher: typeof fet
   return {
     url,
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
-    call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }),
+    // Git fetches and worktree setup get the same deadline as the desktop daemon client.
+    call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }, method === 'worktree:create' ? Math.max(timeoutMs, 330000) : timeoutMs),
     /** An image file on the computer, served by the bridge only from the Project's Worktrees and Milagre's image folders. */
     media: (projectPath: string, path: string) => ({ uri: `${url}/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`, headers: auth }),
     /** One message with its tools' full output; the snapshot leaves that out. */

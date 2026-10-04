@@ -99,7 +99,7 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
 }
 export type MenuItem = { id: string; title: string; systemImage?: string; checked?: boolean; destructive?: boolean; disabled?: boolean; subtitle?: string };
 export type MenuSection = { title?: string; items: MenuItem[] };
-type NativeMenuTrigger = { title?: string; systemImage: string; disabled?: boolean };
+type NativeMenuTrigger = { title?: string; systemImage: string; disabled?: boolean; maxWidth?: number };
 /**
  * A system action sheet for a row's actions or a short list of choices. It draws its own buttons, so no React view is
  * hosted inside a native menu: those hosted views crashed Fabric when their content changed while a menu was up.
@@ -124,7 +124,7 @@ export function PullDown({ title, sections, onSelect, children, label, longPress
       ? <IOSToggle key={item.id} label={item.title} systemImage={item.systemImage as never} isOn={item.checked} onIsOnChange={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />
       : <IOSButton key={item.id} label={item.title} systemImage={item.systemImage as never} role={item.destructive ? 'destructive' : undefined} onPress={() => select(item.id)} modifiers={[nativeDisabled(!!item.disabled)]} />)}</IOSSection>);
     const trigger = nativeTrigger.title
-      ? <IOSHStack spacing={6} modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: 260, alignment: 'leading' })]}>
+      ? <IOSHStack spacing={6} modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: nativeTrigger.maxWidth ?? 260, alignment: 'leading' })]}>
         <IOSImage systemName={nativeTrigger.systemImage as never} size={14} color={colors.ink2} />
         <IOSText modifiers={[font({ size: 13, weight: 'medium' }), foregroundStyle(colors.ink2), lineLimit(1)]}>{nativeTrigger.title}</IOSText>
         <IOSImage systemName="chevron.up.chevron.down" size={13} color={colors.ink3} />

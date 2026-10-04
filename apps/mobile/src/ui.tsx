@@ -130,7 +130,7 @@ export function PullDown({ title, sections, onSelect, children, label, longPress
         <IOSImage systemName="chevron.up.chevron.down" size={13} color={colors.ink3} />
       </IOSHStack>
       : <IOSImage systemName={nativeTrigger.systemImage as never} size={21} color={colors.ink2} modifiers={[frame({ width: 36, height: 36 })]} />;
-    return <View style={style} onTouchStart={() => Keyboard.dismiss()}><IOSHost matchContents testID={label} ignoreSafeArea="all">
+    return <View style={style} onTouchStart={() => Keyboard.dismiss()}><IOSHost matchContents seedColor={colors.ink2} testID={label} ignoreSafeArea="all">
       <IOSMenu label={trigger} modifiers={[accessibilityLabel(label), menuOrder('fixed'), tint(colors.ink2), nativeDisabled(!!nativeTrigger.disabled)]}>{title ? <IOSSection title={title}>{body}</IOSSection> : body}</IOSMenu>
     </IOSHost></View>;
   }

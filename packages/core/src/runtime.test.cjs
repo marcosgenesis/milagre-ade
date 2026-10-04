@@ -288,3 +288,20 @@ test('path-taking commands refuse folders that are not open or recent', async t 
   assert.equal((await runtime.invoke('worktree-setup:read', [project])).setupCommand, '');
   await runtime.close();
 });
+
+test('a snapshot names its revision, and a reader that already holds it gets no state back', async t => {
+  const { project, make } = await fixture(t);
+  const runtime = make();
+  const opened = await runtime.openProject(project);
+  const session = Object.values(opened.state.sessions)[0];
+  const first = await runtime.invoke('project:snapshot', [project]);
+  assert.ok(first.state.sessions[session.id]);
+  assert.equal(typeof first.revision, 'string');
+  assert.deepEqual(await runtime.invoke('project:snapshot', [project, { unlessRevision: first.revision }]), { path: project, name: 'project', revision: first.revision, unchanged: true });
+  await runtime.invoke('chat:patch', [project, session.id, { title: 'Changed' }]);
+  const second = await runtime.invoke('project:snapshot', [project, { unlessRevision: first.revision }]);
+  assert.notEqual(second.revision, first.revision);
+  assert.equal(second.state.sessions[session.id].title, 'Changed');
+  assert.deepEqual(await runtime.invoke('project:worktree-paths', [project]), [project]);
+  await assert.rejects(runtime.invoke('project:worktree-paths', [path.join(project, 'elsewhere')]), /Open the project/);
+});

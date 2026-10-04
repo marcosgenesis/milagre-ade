@@ -10,7 +10,13 @@ class ProjectStates {
     this.timers = new Map();
     this.due = new Map();
     this.transient = new Set();
+    // Each state object a project goes through gets the next number; a reader can tell a state it already holds.
+    this.revisions = new WeakMap();
+    this.revisionCount = 0;
   }
+  /** The number of a state object this class handed out; states are replaced, never changed in place. */
+  revisionOf(state) { return this.revisions.get(state) ?? 0; }
+  stamp(state) { if (state && typeof state === 'object' && !this.revisions.has(state)) this.revisions.set(state, ++this.revisionCount); }
   has(projectPath) { return this.states.has(projectPath); }
   projects() { return [...this.states.keys()]; }
   /** Reconciled Worktree folders; never starts a Git process. */
@@ -26,10 +32,12 @@ class ProjectStates {
       let state = this.states.get(projectPath);
       if (state === undefined) {
         state = await this.read(projectPath);
+        this.stamp(state);
         this.states.set(projectPath, state);
       }
       const next = await change(state);
       if (next === state) return { state, changed: false };
+      this.stamp(next);
       this.states.set(projectPath, next);
       if (persist) {
         this.transient.delete(projectPath);

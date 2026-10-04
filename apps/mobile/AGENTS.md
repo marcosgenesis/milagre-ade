@@ -29,13 +29,21 @@ Run lint and typecheck before declaring any task done.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
-## Building with EAS
+## Shipping: OTA only, builds need approval
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+Changes ship as EAS Updates on channel `testflight` to the build people already have. `runtimeVersion` uses the `fingerprint` policy, so an update only reaches builds whose native fingerprint matches. `fingerprint.config.cjs` keeps `eas.json` and npm scripts out of it.
+
+Before you write a change, and again before you publish:
+
+1. Fingerprint your tree: `npx expo-updates fingerprint:generate --platform ios` (the `hash` field).
+2. Compare it with the latest TestFlight build: `npx eas-cli@latest build:list --platform ios --status finished --limit 1 --json --non-interactive` (its `runtime.version`).
+3. If they match, publish with `npm run update:testflight -- --message "<what changed>"` once the PR is merged, from `main`.
+4. If they differ, stop. A new build is required, and that needs the user's approval: say what changed the fingerprint and whether a JS-only way exists. Do not merge the PR, start `eas build`, upload to TestFlight or build an APK until they say yes.
+
+Run EAS CLI as `npx eas-cli@latest <command>` and substitute that for bare `eas` in docs examples. Docs: https://docs.expo.dev/eas/index.md
 
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+- Expo Go only includes its bundled native modules. A library with native code needs a development build to try locally (`npx expo run:ios|android`), and a new TestFlight build to ship, which needs the user's approval first (see Shipping above). Prefer a library already linked in the current build.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

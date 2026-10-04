@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
+import { Alert, FlatList, RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router } from 'expo-router';
-import { ArrowRight01Icon, GitBranchIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import * as Clipboard from 'expo-clipboard';
+import { GitBranchIcon, MoreHorizontalIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import type { AgentSession, ChatMessage, Worktree } from '@milagre/shared/model';
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import { useSession } from '../session';
-import { chatMark, chatRecency, type ChatMark } from '../indicators';
+import { chatMark, type ChatMark } from '../indicators';
 import { isListedChat } from '@milagre/shared/chats';
 import { ChatMarkIcon, PullRequestLabel, usePullRequest } from '../status-indicators';
 import { Icon, ProviderLogo, SpinnerRing } from '../icons';
-import { ErrorNotice, PullDown, colors, showActions, styles } from '../ui';
+import { ErrorNotice, PullDown, colors, styles, type MenuSection } from '../ui';
 
 type Show = 'all' | 'needs' | 'running' | 'archived';
 const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unread'];
@@ -17,24 +18,30 @@ const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unre
 function ChatRow({ chat, worktree, run, mark, onOpen, onAction }: { chat: AgentSession; worktree?: Worktree; run?: AgentRun; mark: ChatMark; onOpen: () => void; onAction: (action: string) => void }) {
   const pr = usePullRequest(worktree);
   const title = chat.title || chat.generatedTitle || 'New Chat';
-  // Long press opens a system action sheet: a native menu wrapped around the row crashed when its running mark changed.
-  const actions = () => showActions({ title, actions: [{ id: 'rename', title: 'Rename' }, { id: 'archive', title: chat.archived ? 'Restore' : 'Archive', disabled: !!run && !chat.archived }], onSelect: onAction });
-  return <View>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${title}${worktree ? `, ${worktree.name}` : ''}`} accessibilityActions={[{ name: 'longpress', label: 'Actions' }]} onAccessibilityAction={actions} onLongPress={actions} onPress={onOpen} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 20, backgroundColor: pressed ? colors.hover : 'transparent' })}>
-      <ChatMarkIcon mark={mark} />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: mark === 'unread' ? '600' : '500' }}>{title}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {chat.provider && <ProviderLogo provider={chat.provider} size={12} tone="ink3" />}
-          <Icon icon={GitBranchIcon} tone="ink3" size={12} />
-          <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 13, flexShrink: 1 }}>{worktree?.name || 'Worktree'}</Text>
-          {worktree?.diff && (worktree.diff.added > 0 || worktree.diff.removed > 0) && <Text style={{ fontSize: 13 }}><Text style={{ color: colors.green }}>+{worktree.diff.added}</Text> <Text style={{ color: colors.red }}>−{worktree.diff.removed}</Text></Text>}
-          {pr && <PullRequestLabel pr={pr} />}
+  // Desktop's ⋯ menu, less what only makes sense at the Mac (Finder, editor, commit). A long press on the row opens it too.
+  const sections: MenuSection[] = [
+    { items: [{ id: 'copy-path', title: 'Copy path', systemImage: 'doc.on.doc', disabled: !worktree?.path }, { id: 'copy-branch', title: 'Copy branch name', systemImage: 'arrow.triangle.branch', disabled: !worktree?.name }] },
+    { items: [{ id: 'rename', title: 'Rename chat', systemImage: 'pencil' }, chat.unread ? { id: 'read', title: 'Mark as read', systemImage: 'checkmark' } : { id: 'unread', title: 'Mark as unread', systemImage: 'circle' }] },
+    { items: [chat.archived ? { id: 'archive', title: 'Restore', systemImage: 'tray.and.arrow.up' } : { id: 'archive', title: 'Archive', systemImage: 'archivebox', destructive: true, disabled: !!run }] },
+  ];
+  return <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+    <PullDown label={`${title}${worktree ? `, ${worktree.name}` : ''}`} title={title} sections={sections} onSelect={onAction} onPress={onOpen} style={{ flex: 1 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingLeft: 20 }}>
+        <ChatMarkIcon mark={mark} />
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: mark === 'unread' ? '600' : '500' }}>{title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {chat.provider && <ProviderLogo provider={chat.provider} size={12} tone="ink3" />}
+            <Icon icon={GitBranchIcon} tone="ink3" size={12} />
+            <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 13, flexShrink: 1 }}>{worktree?.name || 'Worktree'}</Text>
+            {pr && <PullRequestLabel pr={pr} />}
+          </View>
         </View>
       </View>
-      {/* iOS disclosure indicator: the row opens the Chat. */}
-      <Icon icon={ArrowRight01Icon} tone="ink3" size={15} />
-    </Pressable>
+    </PullDown>
+    <PullDown label={`Actions for ${title}`} title={title} sections={sections} onSelect={onAction}>
+      <View style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center' }}><Icon icon={MoreHorizontalIcon} tone="ink3" size={18} /></View>
+    </PullDown>
   </View>;
 }
 
@@ -58,7 +65,7 @@ export default function ChatsScreen() {
     return Object.values(project.state.sessions).map(chat => {
       const run = runs.runs[`${project.path}#${chat.id}`];
       const messages = byChat.get(chat.id) ?? [];
-      return { chat, run, messages, mark: chatMark(chat, run, messages), recency: chatRecency(chat.id, messages) };
+      return { chat, run, messages, mark: chatMark(chat, run, messages) };
     // Like desktop's sidebar: a worktree's empty starter chat stays out until it has a message (or a turn is starting).
     }).filter(row => row.run || isListedChat(row.chat, row.messages.length))
       .filter(row => (show === 'archived') === !!row.chat.archived)
@@ -66,7 +73,8 @@ export default function ChatsScreen() {
       .filter(row => show !== 'running' || row.mark === 'running')
       .filter(row => worktreeFilter === null || row.chat.worktree_id === worktreeFilter)
       .filter(row => !query.trim() || (row.chat.title || row.chat.generatedTitle || '').toLowerCase().includes(query.trim().toLowerCase()))
-      .sort((a, b) => b.recency - a.recency);
+      // Newest Chat first, by when it was created (ids only grow), so rows don't jump around as agents reply.
+      .sort((a, b) => b.chat.id - a.chat.id);
   }, [snapshot, show, worktreeFilter, query]);
   // Opened from Projects before it loaded: a loading state, unless its last copy is already showing.
   if (session.client && session.opening && !session.opening.cached) return <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center', gap: 12 }]}>
@@ -83,6 +91,10 @@ export default function ChatsScreen() {
     setError('');
     try {
       if (action === 'archive') await client.call('chat:patch', [project.path, chat.id, { archived: !chat.archived }]);
+      if (action === 'read' || action === 'unread') await client.call('chat:patch', [project.path, chat.id, { unread: action === 'unread' }]);
+      const worktree = project.state.worktrees[chat.worktree_id];
+      if (action === 'copy-path' && worktree) await Clipboard.setStringAsync(worktree.path);
+      if (action === 'copy-branch' && worktree) await Clipboard.setStringAsync(worktree.name);
       if (action === 'rename') {
         const title = await new Promise<string | null>(resolve => Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel', onPress: () => resolve(null) }, { text: 'Save', onPress: (value?: string) => resolve(value ?? null) }], 'plain-text', chat.title || chat.generatedTitle || ''));
         if (!title?.trim()) return;

@@ -84,3 +84,24 @@ test("the first registry list scans existing coordination files once", async (t)
   await registry.add(await resolveProject(path.join(root, "Developer", "second")));
   assert.equal((await registry.list()).length, 2);
 });
+
+test("Links and Worktree positions survive restart and removed Worktrees lose their Links", async (t) => {
+  const root = await fixture(t);
+  const first = await repository(root, "first");
+  const second = await repository(root, "second");
+  const file = path.join(root, "userData", "project-registry.json");
+  const registry = createProjectRegistry(file, { roots: [] });
+  const a = await resolveProject(first.main);
+  const b = await resolveProject(second.main);
+  await registry.add(a);
+  await registry.add(b);
+  const active = { [a.id]: [first.main, first.linked], [b.id]: [second.main, second.linked] };
+  await registry.addLink({ project_id: a.id, worktree_path: first.linked }, { project_id: b.id }, active);
+  await registry.setWorktreePosition(a.id, first.linked, { x: 24, y: 80 });
+  const reopened = createProjectRegistry(file, { roots: [] });
+  assert.equal((await reopened.snapshot()).links.length, 1);
+  assert.deepEqual((await reopened.snapshot()).worktreePositions[a.id][first.linked], { x: 24, y: 80 });
+  await reopened.pruneLinks({ ...active, [a.id]: [first.main] });
+  assert.deepEqual((await reopened.snapshot()).links, []);
+  assert.equal((await reopened.snapshot()).worktreePositions[a.id][first.linked], undefined);
+});

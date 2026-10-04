@@ -12,6 +12,17 @@ This is a single-context repo. See `docs/agents/domain.md`.
 
 Scroll containers, scrollbars and choice menus go through shared primitives. See `docs/agents/ui.md`.
 
+### Mobile releases are OTA only
+
+Every change to `apps/mobile` reaches phones as an over-the-air update (EAS Update) to the build already in TestFlight. A new native build is the exception, and it needs the user's approval before you write the change that requires it, not after.
+
+- A change needs a new build when it changes the runtime fingerprint: a dependency with native code (direct, or newly linked), a config plugin, native fields in `app.json` (permissions, entitlements, icons, plugins, `ios`/`android`), or an Expo SDK upgrade. JS, TS, assets loaded at runtime and copy never do.
+- If your task looks like it needs one, stop and ask first. Say what needs the build, and whether a JS-only way exists.
+- A PR that changes the fingerprint strands every later OTA until a new build ships, so it is not merged without that approval either.
+- Never start an EAS build, TestFlight upload or APK build on your own.
+
+How to check the fingerprint and publish an update: `apps/mobile/AGENTS.md`.
+
 ### Pull request screenshots
 
 Every PR that changes something visible includes screenshots in its description. Take them from a real run (an Electron check under `scripts/test-*.cjs`, or the dev app) and show the before/after or each state the change adds.

@@ -292,7 +292,6 @@ test('/runs and the snapshot\'s runs stay small while a turn streams a lot of to
   const response = await request(route);
   const text = await response.text();
   const steps = JSON.parse(text).result.runs[key].steps;
-  console.log(`300 steps: ${JSON.stringify(whole).length} bytes in the daemon, ${text.length} bytes from /runs`);
   assert.ok(JSON.stringify(whole).length > 5_000_000);
   assert.ok(text.length < 100_000, `${text.length} bytes`);
   assert.equal(steps.length, 300);

@@ -133,3 +133,16 @@ test("many subagents round-trip through bounded concurrent hydration", async (t)
   await readProjectState(projectPath);
   assert.equal(calls.mock.callCount(), 2); // contentDirectory once for the whole Project, not once per agent
 });
+
+test("only a durable save syncs to disk; routine saves just rename", async (t) => {
+  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-store-durable-"));
+  t.after(() => fs.rm(projectPath, { recursive: true, force: true }));
+  const probe = await fs.open(__filename, "r");
+  const syncs = t.mock.method(Object.getPrototypeOf(probe), "sync");
+  await probe.close();
+  await saveProjectState(projectPath, { sessions: {} });
+  assert.equal(syncs.mock.callCount(), 0);
+  await saveProjectState(projectPath, { sessions: { 1: { id: 1 } } }, { durable: true });
+  assert.equal(syncs.mock.callCount(), 2, "the file, then its folder after the rename");
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(projectPath, ".milagre/coordination.json"), "utf8")).sessions, { 1: { id: 1 } });
+});

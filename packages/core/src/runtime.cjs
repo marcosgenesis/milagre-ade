@@ -30,7 +30,8 @@ const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
 const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
-const { reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
+const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
+const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -136,9 +137,39 @@ function createRuntime(options) {
 
   const projectName = (projectPath) => path.basename(projectPath) || "Untitled project";
 
+  // Chats brought back from linked worktrees' old files, per project, until a window opening it shows the notice.
+  const restoredChats = new Map();
+
+  // Before #117 a linked worktree opened as a project kept its chats in its own file. They join the main checkout's
+  // state on the first read, before anything uses it. This runs inside ProjectStates' read for the project, after
+  // ownProject took the repository's owner lock, so neither another window nor another runtime merges at the same time.
+  // Bringing chats back never stops a repository from opening: any failure leaves the files and keeps the stored state.
+  async function withWorktreeChats(projectPath, stored, discovered) {
+    try {
+      if (discovered.length < 2 || await fs.realpath(discovered[0].path).catch(() => null) !== projectPath) return stored;
+      const { state, restored } = await migrateWorktreeChats({
+        projectPath,
+        state: stored ?? emptyState(projectName(projectPath)),
+        linkedWorktrees: discovered.slice(1),
+        listed: new Set(discovered.map((worktree) => worktree.path)),
+        save: saveProjectState,
+      });
+      if (!restored.length) return stored;
+      restoredChats.set(projectPath, [...(restoredChats.get(projectPath) ?? []), ...restored]);
+      return state;
+    } catch (error) {
+      console.warn(`Milagre couldn't bring back chats saved in ${projectPath}'s linked worktrees:`, error.message);
+      return stored;
+    }
+  }
+
   // Every project's state goes through here: this runtime is its only writer (see ADR-0001 and ADR-0003).
   const states = new ProjectStates({
-    read: async (projectPath) => reconcileState(await readStoredState(projectPath), projectName(projectPath), await discoverWorktrees(projectPath)),
+    read: async (projectPath) => {
+      const stored = await readStoredState(projectPath);
+      const discovered = await discoverWorktrees(projectPath);
+      return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered);
+    },
     save: saveProjectState,
   });
 
@@ -547,21 +578,34 @@ function createRuntime(options) {
     ])));
   }
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
-  async function openProject(projectPath) {
+  // `takeNotice`: this open is a desktop window's, which shows the restored-chats notice. Over the daemon only the
+  // desktop asks for it, so the phone's bridge opening the project first doesn't use the notice up.
+  async function openProject(projectPath, { takeNotice = true } = {}) {
     const identity = await resolveProject(projectPath);
     const project = await readProject(identity.path);
     await projectRegistry().add(identity);
     await rememberProject(recentProjects(), identity.path);
     shownProjectPath = identity.path;
-    return project;
+    // The first window to open the project after chats came back says so, once. A read at startup (resuming a turn)
+    // or after removing a worktree keeps the notice for it.
+    const restored = takeNotice ? restoredChats.get(identity.path) : undefined;
+    if (restored) restoredChats.delete(identity.path);
+    return restored ? { ...project, restoredChats: restored } : project;
   }
 
   commands.handle("project:current", async () => openProject(await launchProject(recentProjects(), cwd)));
 
   // Chats a quit stopped continue on launch in every recent project, not only the one on screen.
   async function resumeRecentProjects() {
-    for (const { path: projectPath } of await recentProjects().list()) {
+    const resolved = new Set();
+    for (const { path: recentPath } of await recentProjects().list()) {
+      let projectPath = recentPath;
       try {
+        // An entry from before #117 can name a linked worktree. It is read as its repository, as opening it would be,
+        // so its old file is never loaded as a project of its own (whose saves would recreate it after its chats came back).
+        projectPath = (await resolveProject(recentPath)).path;
+        if (resolved.has(projectPath)) continue;
+        resolved.add(projectPath);
         // The raw JSON is enough to find a pending turn; only a project that has one is loaded (and hydrated) in full.
         const stored = states.has(projectPath) ? null : await readRawState(projectPath);
         if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
@@ -596,6 +640,11 @@ function createRuntime(options) {
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
+  });
+  // What the phone's media check needs, without the whole state.
+  commands.handle("project:worktree-paths", async (_event, projectPath) => {
+    if (!states.has(projectPath)) throw new Error("Open the project before reading its worktrees.");
+    return Object.values((await states.get(projectPath)).worktrees ?? {}).map((worktree) => worktree.path);
   });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
   commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
@@ -641,7 +690,7 @@ function createRuntime(options) {
         return handlers.get(method)(null, ...args);
       });
     },
-    openProject: projectPath => accept(() => openProject(projectPath)),
+    openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
     // Synchronous capture: the socket serializes this before another event can

@@ -13,7 +13,9 @@ const settled = new Map();
 const SWEEP_MIN_AGE_MS = 60_000;
 const swept = new Set();
 
-async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_AGE_MS } = {}) {
+// `durable` syncs the bytes and the rename to disk before returning. Only the migration of a linked worktree's old
+// chats asks for it, since it renames that file next; routine saves (up to ~20 MB, several a minute) only rename.
+async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_AGE_MS, durable = false } = {}) {
   const tracker = { known: settled.get(projectPath), next: new Map(), wrote: false };
   const persisted = await compactSubagents(projectPath, await migrateImages(projectPath, state), tracker);
   const contents = JSON.stringify(persisted);
@@ -21,8 +23,13 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   await fs.mkdir(directory, { recursive: true });
   const temporary = path.join(directory, `coordination.json.${process.pid}.${++counter}.tmp`);
   try {
-    await fs.writeFile(temporary, contents);
+    if (durable) {
+      const handle = await fs.open(temporary, 'w');
+      try { await handle.writeFile(contents); await handle.sync(); }
+      finally { await handle.close(); }
+    } else await fs.writeFile(temporary, contents);
     await fs.rename(temporary, stateFile(projectPath));
+    if (durable) await syncDirectory(directory);
   } catch (error) {
     await fs.rm(temporary, { force: true });
     throw error;
@@ -38,4 +45,10 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
 async function readProjectState(projectPath) {
   return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
 }
-module.exports = { saveProjectState, readProjectState, stateFile };
+/** Makes a rename in `directory` durable. Best effort: a file system that can't sync a folder still saves. */
+async function syncDirectory(directory) {
+  let handle;
+  try { handle = await fs.open(directory, 'r'); await handle.sync(); }
+  catch {} finally { await handle?.close().catch(() => {}); }
+}
+module.exports = { saveProjectState, readProjectState, stateFile, syncDirectory };

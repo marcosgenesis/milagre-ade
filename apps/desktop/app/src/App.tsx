@@ -70,6 +70,7 @@ import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore } from "./lib/draft-store";
+import { restoredChatsNotice } from "./lib/restored-chats";
 import { lazyView } from "./lib/lazy-view";
 import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
 import { reuseRows, useEvent, useStableSet } from "./lib/stable";
@@ -207,6 +208,7 @@ function App() {
   const [preparing, setPreparing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
+  const [restartingHost, setRestartingHost] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
@@ -595,6 +597,8 @@ function App() {
       setGitDialog(null);
       setView("chat");
     });
+    const restored = restoredChatsNotice(nextProject.restoredChats);
+    if (restored) setNotice(restored);
   }
 
   // Opens a project in place of the one shown; a cancelled dialog, or the project already open, changes nothing.
@@ -930,6 +934,13 @@ function App() {
   return (
     <>
     <DotBackground key="app">
+      {hostConnection.connected && hostConnection.hostOutdated && <div role="status" data-host-outdated className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]">
+        <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
+        <button type="button" disabled={restartingHost} onClick={() => {
+          setRestartingHost(true);
+          void window.milagre.restartHost().catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`)).finally(() => setRestartingHost(false));
+        }} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">{restartingHost ? "Restarting…" : "Restart host"}</button>
+      </div>}
       {!hostConnection.connected && <div role="status" data-host-disconnected className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]">
         <p className="font-medium">Reconnecting to your computer</p>
         <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>

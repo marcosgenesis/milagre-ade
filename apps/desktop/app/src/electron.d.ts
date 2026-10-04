@@ -37,7 +37,8 @@ export type PhoneStatus = {
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
-export type RuntimeConnection = { connected: boolean; message?: string };
+/** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects. */
+export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean };
 export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
@@ -52,6 +53,8 @@ declare global {
   interface Window {
     milagre: {
       getRuntimeConnection: () => Promise<RuntimeConnection>;
+      /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
+      restartHost: () => Promise<void>;
       onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
       onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;

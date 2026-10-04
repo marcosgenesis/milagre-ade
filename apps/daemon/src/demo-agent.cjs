@@ -9,6 +9,7 @@ const DEFAULT_COPY = {
 /** The one model the demo reports. */
 const DEMO_MODEL = Object.freeze({ id: 'demo', name: 'Demo agent', description: 'A scripted agent. It runs no command and changes no file', recommended: true, efforts: [], ultracode: false, fastMode: false });
 const DEMO_ONLY = 'This demo computer runs only the demo agent.';
+const NO_PULL_REQUESTS = 'Pull requests are not available on the demo computer.';
 
 /** A createSession for core's SessionManager. `copy` replaces the plain reply's two parts. */
 function createDemoSession(copy = {}) {
@@ -97,7 +98,11 @@ function demoRuntimeOptions({ cwd, worktreeRoot, copy } = {}) {
     agentModels: async () => ({ codex: [{ ...DEMO_MODEL }], claude: null }),
     agentCliStatus,
     readUsage: async () => ({ providers: [] }),
+    // The owner's personal skills stay on the Mac: `/skill` reaches the agent as typed.
+    expandSkills: false,
+    // Never `gh`, which would use the owner's GitHub login.
+    readPullRequest: async () => { throw new Error(NO_PULL_REQUESTS); },
   };
 }
 
-module.exports = { createDemoSession, demoSession, demoRuntimeOptions, DEMO_MODEL, DEMO_ONLY };
+module.exports = { createDemoSession, demoSession, demoRuntimeOptions, DEMO_MODEL, DEMO_ONLY, NO_PULL_REQUESTS };

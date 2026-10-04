@@ -3,7 +3,14 @@ const path = require('node:path');
 const { projectOfKey } = require('@milagre/shared/agent-runs');
 
 const REFUSED = 'This demo computer only opens its demo project.';
-const refused = () => Object.assign(new Error(REFUSED), { status: 403 });
+const NOTIFICATIONS_OFF = 'Notifications are off on the demo computer.';
+const TOO_LONG = 'Messages to the demo computer are limited to 64 KB.';
+// A message body, in UTF-8 bytes.
+const MAX_BODY = 64 * 1024;
+// What daemon:status says about the Mac itself, left out for a confined phone.
+const HIDDEN_STATUS = ['dataDir', 'socketPath', 'pid', 'uid', 'methods'];
+const failure = (status, message) => Object.assign(new Error(message), { status });
+const refused = () => failure(403, REFUSED);
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
 const realOrNull = async file => { try { return await fs.realpath(file); } catch { return null; } };
 
@@ -43,9 +50,9 @@ const PATHS = Object.freeze({
 });
 
 /**
- * Keeps a paired phone inside one folder: every project path, worktree path, cwd and file path it sends must resolve
- * (after realpath, so `..` and symlinks cannot lead out) inside `allowedRoot`. Files the phone uploaded itself
- * (`uploadsDir`) may also be attached and shown. Anything else is a 403.
+ * Keeps a paired phone inside one folder: every project path, worktree path, cwd and file path it sends must already
+ * be canonical (equal to its realpath, so no `..`, `.` or symlink in it) and inside `allowedRoot`. Files the phone
+ * uploaded itself (`uploadsDir`) may also be attached and shown. Anything else is a 403.
  */
 function createConfinement({ allowedRoot, uploadsDir }) {
   if (typeof allowedRoot !== 'string' || !path.isAbsolute(allowedRoot)) throw new Error('allowedRoot must be an absolute path');
@@ -59,7 +66,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
   async function allows(target, { uploads = false } = {}) {
     if (typeof target !== 'string' || !path.isAbsolute(target) || target.includes('\0')) return false;
     const real = await realOrNull(target);
-    if (!real) return false;
+    if (!real || real !== target) return false;
     if (inside(await realRoot(), real)) return true;
     if (!uploads || !uploadsDir) return false;
     const uploadsReal = await realOrNull(uploadsDir);
@@ -70,17 +77,36 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     if (!(await allows(target, options))) throw refused();
   }
 
+  /**
+   * Checks a command before it reaches the daemon. Resolves to `{ args }` to forward (possibly cleaned), or to
+   * `{ result }` when the bridge answers it itself; throws a 403 (or 400, 413) otherwise.
+   */
   async function checkCall(method, args) {
     const paths = PATHS[method];
     if (!paths || !Array.isArray(args)) throw refused();
+    // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
+    if (method === 'push:register') throw failure(403, NOTIFICATIONS_OFF);
+    if (method === 'push:unregister') return { result: { registered: false } };
+    if (method === 'push:focus') return { result: null };
+    if (method === 'chat:send') args = [sendRequest(args[0])];
     for (const item of paths(args)) {
       if (item && typeof item === 'object' && 'file' in item) await check(item.file, { uploads: true });
       else await check(item);
     }
+    return { args };
   }
 
-  /** What a command answers, cut down to the folder: the recent list and the turns running elsewhere. */
+  /**
+   * What a command answers, cut down to the folder: the recent list, the turns running elsewhere and what the daemon
+   * says about the Mac. A project:open that landed outside the folder (a subfolder of a bigger repository) is refused.
+   */
   async function filterResult(method, result) {
+    if (method === 'daemon:status' && result && typeof result === 'object') {
+      const kept = { ...result };
+      for (const key of HIDDEN_STATUS) delete kept[key];
+      return kept;
+    }
+    if (method === 'project:open' && !(await allows(result?.path))) throw refused();
     if (method === 'project:recent' && Array.isArray(result)) {
       const kept = await Promise.all(result.map(entry => allows(entry?.path)));
       return result.filter((_entry, index) => kept[index]);
@@ -96,4 +122,18 @@ function createConfinement({ allowedRoot, uploadsDir }) {
   return { allows, check, checkCall, filterResult, root: realRoot };
 }
 
-module.exports = { createConfinement, PATHS, REFUSED };
+/** A chat:send request with a bounded body, a list of files, and images that carry their bytes but no Mac path. */
+function sendRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) throw refused();
+  if (typeof request.body === 'string' && Buffer.byteLength(request.body) > MAX_BODY) throw failure(413, TOO_LONG);
+  if (request.files !== undefined && !Array.isArray(request.files)) throw failure(400, 'Attached files must be a list of paths.');
+  if (request.images !== undefined && !Array.isArray(request.images)) throw failure(400, 'Attached images must be a list.');
+  const images = request.images?.map(image => {
+    if (!image || typeof image !== 'object') return image;
+    const { path: _path, sourcePath: _sourcePath, ...rest } = image;
+    return rest;
+  });
+  return { ...request, ...(images ? { images } : {}) };
+}
+
+module.exports = { createConfinement, PATHS, REFUSED, NOTIFICATIONS_OFF, TOO_LONG, MAX_BODY };

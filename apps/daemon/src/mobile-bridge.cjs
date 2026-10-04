@@ -91,15 +91,32 @@ const LIVE_DELAY = { runs: 150, project: 400 };
 const projectRuns = ({ runs, seq }, projectPath) => ({ runs: Object.fromEntries(Object.entries(runs ?? {}).filter(([key]) => chatInProject(projectPath, key))), seq });
 const realOrNull = async file => { try { return await fs.realpath(file); } catch { return null; } };
 const failure = (status, message) => Object.assign(new Error(message), { status });
+const ATTACHMENT_QUOTA = 200 * 1024 * 1024;
+/** Bytes of regular files under `folder`, symlinks not followed; 0 when it does not exist yet. */
+async function folderBytes(folder) {
+  let entries;
+  try { entries = await fs.readdir(folder, { recursive: true, withFileTypes: true }); } catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
+  let total = 0;
+  for (const entry of entries) if (entry.isFile()) total += (await fs.lstat(path.join(entry.parentPath, entry.name))).size;
+  return total;
+}
 
 // A native-client bridge behind loopback or an explicitly configured TLS proxy. All state stays in the Unix-socket
 // daemon; closing this listener must never stop that runtime or its turns.
 // `allowedRoot` (the review demo sets it): every path a request names must resolve inside that folder, or it is a 403.
-async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000, allowedRoot }) {
+// Confined, the phone's uploads may take up `attachmentQuota` bytes in all; past that /attachments answers 507.
+async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000, allowedRoot, attachmentQuota = ATTACHMENT_QUOTA }) {
   if (!/^[a-f0-9]{64}$/.test(token ?? '')) throw new Error('Bridge token must be 32 random bytes encoded as hex');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid bridge port');
   const confine = allowedRoot === undefined ? null : createConfinement({ allowedRoot, uploadsDir: path.join(dataDir, 'mobile-attachments') });
+  if (!Number.isSafeInteger(attachmentQuota) || attachmentQuota < 0) throw new Error('Invalid attachment quota');
   await confine?.root();
+  // Confined, the paths handed back must be canonical, or the phone could not attach what it uploaded.
+  const uploads = path.join(confine ? await fs.realpath(dataDir) : dataDir, 'mobile-attachments');
+  // Confined: the bytes already uploaded, read once, then counted as uploads land. Uploads take turns, so two at once
+  // cannot both fit in the room that is left for one.
+  let uploadedBytes = null;
+  let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
   let active = 0;
@@ -291,20 +308,33 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
             await confine?.check(projectPath);
             await client.call('project:worktree-paths', [projectPath]);
-            const folder = path.join(dataDir, 'mobile-attachments', randomUUID());
+            const folder = path.join(uploads, randomUUID());
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
-            await fs.mkdir(folder, { recursive: true, mode: 0o700 });
-            const destination = path.join(folder, filename);
-            try { await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); }
-            catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
-            result = { path: destination, name: filename };
+            const save = async () => {
+              if (confine) {
+                uploadedBytes ??= await folderBytes(uploads);
+                if (uploadedBytes + bytes.length > attachmentQuota) throw failure(507, 'This demo computer is full.');
+              }
+              await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+              const destination = path.join(folder, filename);
+              try { await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); }
+              catch (error) { await fs.rm(folder, { recursive: true, force: true }); throw error; }
+              if (confine) uploadedBytes += bytes.length;
+              return { path: destination, name: filename };
+            };
+            if (confine) {
+              const turn = uploadTurn.then(save);
+              uploadTurn = turn.catch(() => {});
+              result = await turn;
+            } else result = await save();
           } else {
           if (request?.v !== 1 || typeof request.method !== 'string' || !Array.isArray(request.args)) throw failure(400, 'Expected version 1, method and args array');
           if (!METHODS.has(request.method)) throw failure(403, 'Command is not available from mobile');
-          await confine?.checkCall(request.method, request.args);
-          result = await client.call(request.method, request.args);
-          if (confine) result = await confine.filterResult(request.method, result);
+          if (confine) {
+            const decided = await confine.checkCall(request.method, request.args);
+            result = 'result' in decided ? decided.result : await confine.filterResult(request.method, await client.call(request.method, decided.args));
+          } else result = await client.call(request.method, request.args);
           // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
           if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
           }

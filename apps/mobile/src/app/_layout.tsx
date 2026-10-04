@@ -18,6 +18,7 @@ export default function Layout() {
   const sheet = { presentation: 'formSheet', sheetGrabberVisible: true, sheetCornerRadius: 28, headerShown: false, contentStyle: { backgroundColor: palette.page } } as const;
   return <KeyboardProvider><SessionProvider><PushProvider><ThemeProvider value={theme}><StatusBar style="auto" /><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
+    <Stack.Screen name="settings" options={{ title: 'Settings' }} />
     <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
     <Stack.Screen name="pair" options={{ title: 'Pairing' }} />

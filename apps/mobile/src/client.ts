@@ -66,6 +66,7 @@ export function mediaName(text: string, path: string): string {
 type Answer = { status: number; ok: boolean; etag?: string | null; text: () => Promise<string> };
 const LOST = 'Connection lost. Reconnect to your computer. Check the Chat before sending again.';
 const decoder = new TextDecoder();
+const MEDIA_AT_ONCE = 4;
 
 export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, timeoutMs = 30000, runtime?: RelayRuntime) {
   const relay = host.relay ? validRelay(host.relay) : undefined;
@@ -143,6 +144,19 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
   }
   // One load per image: thumbnails ask on every render, and must get the same source back.
   const images = new Map<string, Promise<{ uri: string }>>();
+  // The Mac serves at most 16 relayed requests at once. A chat full of images takes 4 of them, in order, so the
+  // snapshot, runs and sends always find a free one.
+  let fetching = 0;
+  const waiting: (() => void)[] = [];
+  function inTurn<T>(work: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        fetching++;
+        work().then(resolve, reject).finally(() => { fetching--; waiting.shift()?.(); });
+      };
+      if (fetching < MEDIA_AT_ONCE) run(); else waiting.push(run);
+    });
+  }
   function relayImage(projectPath: string, path: string): Promise<{ uri: string }> {
     const name = mediaName(`${url}\n${projectPath}\n${path}`, path);
     const known = images.get(name);
@@ -150,7 +164,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     const loading = (async () => {
       const found = await runtime!.files.find(name);
       if (found) return { uri: found };
-      const response = await timed(timeoutMs, signal => overRelay('GET', mediaRoute(projectPath, path), {}, undefined, signal));
+      const response = await inTurn(() => timed(timeoutMs, signal => overRelay('GET', mediaRoute(projectPath, path), {}, undefined, signal)));
       if (response.status !== 200) throw new Error('Could not load this image from your Mac.');
       return { uri: await runtime!.files.write(name, response.body) };
     })();

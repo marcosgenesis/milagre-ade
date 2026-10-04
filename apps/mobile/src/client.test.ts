@@ -221,3 +221,32 @@ test('an HTTP host keeps its authenticated image URL as the image source', () =>
   const client = createClient({ address: 'https://mac.example.com', token: 'token' }, fetch);
   assert.deepEqual(client.image('/p', '/p/a.png'), client.media('/p', '/p/a.png'));
 });
+
+test('relay images load at most 4 at a time, in order, and calls never wait behind them', async () => {
+  const held: { path: string; release: () => void }[] = [];
+  const relay = fakeRelay(sent => sent.path.startsWith('/media')
+    ? new Promise<RelayResponse>(resolve => held.push({ path: sent.path, release: () => resolve({ status: 200, headers: {}, body: new Uint8Array([1]) }) }))
+    : reply({ v: 1, result: 'ok' }));
+  const client = createClient(relayHost, fetch, 30000, relay.runtime);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  const loads = Array.from({ length: 10 }, (_, i) => client.image('/p', `/p/${i}.png`));
+  await settle();
+  const media = () => relay.sent.filter(sent => sent.path.startsWith('/media')).map(sent => new URLSearchParams(sent.path.split('?')[1]).get('path'));
+  assert.deepEqual(media(), ['/p/0.png', '/p/1.png', '/p/2.png', '/p/3.png']);
+  assert.equal(await client.call('daemon:status'), 'ok');
+  held[0].release();
+  await settle();
+  assert.deepEqual(media().slice(4), ['/p/4.png']);
+  let most = 0;
+  while (held.some(item => item.release)) {
+    const next = held.find(item => item.release)!;
+    const release = next.release;
+    next.release = undefined as unknown as () => void;
+    release();
+    await settle();
+    most = Math.max(most, held.filter(item => item.release).length);
+  }
+  assert.ok(most <= 4, `at most 4 images in flight, saw ${most}`);
+  assert.equal((await Promise.all(loads)).length, 10);
+  assert.equal(media().length, 10);
+});

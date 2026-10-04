@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The App Review demo computer as a LaunchAgent: it starts at login and again whenever it exits.
+  Not installed by anything in this repo. To use it:
+
+    1. Copy it to ~/Library/LaunchAgents/com.milagre.review-demo.plist
+    2. Replace /ABSOLUTE/PATH/TO/milagre-ade (twice) with the repo's path and YOU with your user name.
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.milagre.review-demo.plist
+
+  Stop it with: launchctl bootout gui/$(id -u)/com.milagre.review-demo
+  The pairing link stays in ~/.milagre-review-demo/review-pairing-link.txt; the log is in ~/Library/Logs.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.milagre.review-demo</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- A login shell, so node and npm come from the same PATH as in Terminal (nvm, Homebrew). -->
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd "/ABSOLUTE/PATH/TO/milagre-ade" &amp;&amp; exec npm run review:demo</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/TO/milagre-ade</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- At most one restart every 30 seconds, e.g. while port 8899 is still taken. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/milagre-review-demo.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/milagre-review-demo.log</string>
+</dict>
+</plist>

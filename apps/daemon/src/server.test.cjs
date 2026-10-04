@@ -294,7 +294,7 @@ test('chats brought back from a large old worktree file load through the daemon'
   await writeState(linked, { next_id: 5000, projects: { 1: { id: 1, name: 'linked' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' }, 2: { id: 2, project_id: 1, path: linked, name: 'linked' } }, sessions: { 3: session }, messages, tasks: {}, approvals: [] });
   assert.ok((await fs.stat(path.join(linked, '.milagre/coordination.json'))).size > MAX_FRAME_BYTES);
   const desktop = await client();
-  const opened = await desktop.call('project:open', [project]);
+  const opened = await desktop.call('project:open', [project, { takeNotice: true }]);
   assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 1 }]);
   const chat = Object.values(opened.state.sessions).find(item => item.title === 'Long chat');
   assert.equal(opened.state.worktrees[chat.worktree_id].path, linked);
@@ -377,10 +377,12 @@ test('a daemon that resumes a turn at startup brings the chats back first and ke
   const left = await fs.readdir(path.join(linked, '.milagre'));
   assert.equal(left.includes('coordination.json'), false);
   assert.equal(left.filter(name => name.startsWith('coordination.json.migrated-')).length, 1);
-  const opened = await desktop.call('project:open', [project]);
+  // The phone's bridge opening first (no takeNotice) leaves the notice for the desktop window.
+  assert.equal((await desktop.call('project:open', [project])).restoredChats, undefined);
+  const opened = await desktop.call('project:open', [project, { takeNotice: true }]);
   assert.deepEqual(opened.restoredChats, [{ worktree: 'linked', count: 1 }]);
   assert.equal(Object.values(opened.state.sessions).filter(session => session.title === 'Linked chat').length, 1);
-  assert.equal((await desktop.call('project:open', [project])).restoredChats, undefined);
+  assert.equal((await desktop.call('project:open', [project, { takeNotice: true }])).restoredChats, undefined);
   await daemon.close();
   assert.equal((await fs.readdir(path.join(linked, '.milagre'))).includes('coordination.json'), false, 'nothing recreated the old file');
 });
@@ -431,4 +433,98 @@ test('an enabled phone comes back when the daemon restarts, and stopping the dae
     const back = await phoneStatus(client, 'on');
     assert.equal(new URL(back.pairingLink).searchParams.get('token'), new URL(on.pairingLink).searchParams.get('token'));
   } finally { client.close(); await second.close(); }
+});
+
+test('captures let in together reserve their room at once, so they stay within the budget and the slot cap', async () => {
+  const { createResultPages } = require('./server.cjs');
+  const { MAX_PENDING } = require('./protocol.cjs');
+  const pages = createResultPages(8192, { budgetChars: 3000 });
+  const text = 'x'.repeat(2000);
+  let admitted = 0;
+  const first = await pages.capture(text); admitted++;
+  const rest = Array.from({ length: 5 }, () => pages.capture(text).then(result => { admitted++; return result; }));
+  await new Promise(setImmediate);
+  assert.equal(admitted, 1);
+  // Reading the first to its end frees its room: exactly one waiter takes it.
+  for (let index = 0; index < first.pageCount; index++) pages.page(first.pageId, index);
+  await new Promise(setImmediate);
+  assert.equal(admitted, 2);
+  assert.deepEqual(pages.usage(), { slots: 1, chars: 2000 });
+  // Small captures stop at MAX_PENDING slots, and only MAX_PENDING more may wait.
+  const many = createResultPages(8192);
+  let small = 0;
+  const all = Array.from({ length: MAX_PENDING * 2 }, () => many.capture('y'.repeat(100)).then(() => { small++; }));
+  await new Promise(setImmediate);
+  assert.equal(small, MAX_PENDING);
+  assert.equal(many.usage().slots, MAX_PENDING);
+  await assert.rejects(many.capture('z'), { code: 'PAGES_BUSY' });
+  pages.clear(); many.clear();
+  await Promise.all([...rest, ...all]);
+});
+
+// A plain socket that collects every reply by id, for requests the client would cap.
+async function rawConnection(t, dataDir) {
+  const socket = net.createConnection(require('./paths.cjs').socketPath(dataDir));
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  const replies = new Map();
+  let text = '';
+  socket.on('data', chunk => {
+    text += chunk;
+    const lines = text.split('\n');
+    text = lines.pop();
+    for (const line of lines) { const message = JSON.parse(line); if (message.id != null) replies.set(message.id, message); }
+  });
+  let closed = false;
+  socket.on('close', () => { closed = true; });
+  const send = request => socket.write(JSON.stringify({ v: 1, args: [], ...request }) + '\n');
+  const reply = id => waitFor(() => replies.get(id) || (closed && { closed: true }));
+  return { send, reply, replies, isClosed: () => closed };
+}
+
+test('replies waiting for paging room do not hold the slots a reader needs for its pages', async t => {
+  const { dataDir, project, client } = await fixture(t, { pagesBudgetChars: 3000 });
+  await notedProject(await client(), project);
+  const raw = await rawConnection(t, dataDir);
+  // As many requests as a connection may have in flight; the first gets its pages, the other 31 wait for room.
+  for (let id = 1; id <= 32; id++) raw.send({ id, method: 'project:snapshot', args: [project], pages: true });
+  const first = (await raw.reply(1)).pages;
+  await delay(100);
+  // One more takes the slot the first reply gave back, and waits too: 32 now wait.
+  raw.send({ id: 33, method: 'project:snapshot', args: [project], pages: true });
+  await delay(100);
+  assert.equal(raw.replies.size, 1, 'the rest wait for room');
+  // The reader's page reads still get through, and the socket stays open.
+  const parts = [];
+  for (let index = 0; index < first.pageCount; index++) {
+    raw.send({ id: 100 + index, method: 'daemon:result-page', args: [first.pageId, index] });
+    const page = await raw.reply(100 + index);
+    assert.equal(page.error, undefined, JSON.stringify(page));
+    parts.push(page.result);
+  }
+  assert.equal(JSON.parse(parts.join('')).state.messages.length, 2);
+  assert.ok((await raw.reply(2)).pages, 'the next waiting reply gets its room');
+  assert.equal(raw.isClosed(), false);
+});
+
+test('paged snapshots follow the result-page rules: two at once, re-armed by each read, expiring when left', async t => {
+  const { project, client } = await fixture(t, { pagesTtlMs: 300 });
+  const first = await client();
+  await notedProject(first, project);
+  const one = await first.call('daemon:snapshot', [{ paged: true }]);
+  const two = await first.call('daemon:snapshot', [{ paged: true }]);
+  assert.ok(one.pageCount > 2 && two.pageCount > 2);
+  // Both are read, side by side: the second capture didn't evict the first, and each read re-arms its limit.
+  const parts = [[], []];
+  for (let index = 0; index < Math.max(one.pageCount, two.pageCount); index++) {
+    if (index) await delay(120);
+    for (const [slot, manifest] of [one, two].entries()) {
+      if (index < manifest.pageCount) parts[slot].push(await first.call('daemon:snapshot-page', [manifest.snapshotId, index]));
+    }
+  }
+  for (const text of parts) assert.equal(JSON.parse(text.join('')).projects.length, 1);
+  const stalled = await first.call('daemon:snapshot', [{ paged: true }]);
+  await first.call('daemon:snapshot-page', [stalled.snapshotId, 0]);
+  await delay(500);
+  await assert.rejects(first.call('daemon:snapshot-page', [stalled.snapshotId, 1]), /expired/);
 });

@@ -17,22 +17,31 @@ const PAGES_BUDGET_CHARS = 64 * 1024 * 1024;
 const PAGE_METHODS = new Set(['daemon:result-page', 'daemon:snapshot-page']);
 
 // Responses too large to send whole, kept per connection until their client has read every page in order.
+// A capture's slot and characters are reserved the moment it is admitted, so waiters let in together never go past
+// the budget or MAX_PENDING; at most MAX_PENDING more may wait.
 function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = PAGES_BUDGET_CHARS } = {}) {
   const captures = new Map();
   const waiting = [];
   const size = pageSize(maxFrameBytes);
+  let slots = 0;
   let held = 0;
   let nextId = 0;
   let closed = false;
-  const fits = chars => captures.size === 0 || (captures.size < MAX_PENDING && held + chars <= budgetChars);
+  const fits = chars => slots === 0 || (slots < MAX_PENDING && held + chars <= budgetChars);
+  const reserve = chars => { slots++; held += chars; };
   function admit() {
-    while (waiting.length && (closed || fits(waiting[0].chars))) waiting.shift().resolve();
+    while (waiting.length && (closed || fits(waiting[0].chars))) {
+      const next = waiting.shift();
+      if (!closed) reserve(next.chars);
+      next.resolve();
+    }
   }
   function release(id) {
     const capture = captures.get(id);
     if (!capture) return;
     clearTimeout(capture.timer);
     captures.delete(id);
+    slots--;
     held -= capture.text.length;
     admit();
   }
@@ -43,14 +52,18 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
     capture.timer.unref();
   }
   return {
+    /** Whether a capture of `chars` would wait for room now. */
+    mustWait: chars => waiting.length > 0 || !fits(chars),
     /** The page count for `text`, once the connection has room for it; null when the connection closed meanwhile. */
     async capture(text) {
-      if (waiting.length || !fits(text.length)) await new Promise(resolve => waiting.push({ chars: text.length, resolve }));
+      if (waiting.length || !fits(text.length)) {
+        if (waiting.length >= MAX_PENDING) throw Object.assign(new Error('Too many large responses are waiting on this connection. Try again.'), { code: 'PAGES_BUSY' });
+        await new Promise(resolve => waiting.push({ chars: text.length, resolve }));
+      } else reserve(text.length);
       if (closed) return null;
       const pageId = ++nextId;
       const capture = { text, pageCount: Math.max(1, Math.ceil(text.length / size)), nextPage: 0, timer: null };
       captures.set(pageId, capture);
-      held += text.length;
       arm(pageId, capture);
       return { pageId, pageCount: capture.pageCount };
     },
@@ -63,6 +76,8 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
       else arm(pageId, capture);
       return text;
     },
+    /** Admitted captures, for tests: slots in use and characters reserved. */
+    usage: () => ({ slots, chars: held }),
     clear() { closed = true; for (const id of [...captures.keys()]) release(id); admit(); },
   };
 }
@@ -135,15 +150,11 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();
-    let snapshotCapture;
-    let snapshotTimer;
-    let nextSnapshotId = 0;
+    // Requests whose reply waits for paging room: they don't hold a MAX_PENDING slot, so a reader's page reads get through.
+    const awaitingPages = new Set();
+    // Result pages and paged snapshots share one store and its rules.
     const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
-    function releaseSnapshot() {
-      clearTimeout(snapshotTimer);
-      snapshotCapture = null;
-    }
-    socket.once('close', () => { releaseSnapshot(); resultPages.clear(); });
+    socket.once('close', () => { resultPages.clear(); });
     const view = { focused: false, projectPath: null, chatId: null };
     views.set(socket, view);
     const connection = wire(socket, {
@@ -168,14 +179,19 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         fail('INVALID_REQUEST', 'Expected id, method and an args array'); return;
       }
       if (stopping) { fail('CLOSING', 'The daemon is closing'); return; }
-      if (inflight.has(id) || inflight.size >= MAX_PENDING) { fail('TOO_MANY_REQUESTS', 'Request ID is in use or too many requests are pending'); socket.end(); return; }
+      if (inflight.has(id) || inflight.size - awaitingPages.size >= MAX_PENDING) { fail('TOO_MANY_REQUESTS', 'Request ID is in use or too many requests are pending'); socket.end(); return; }
       inflight.add(id);
+      async function capturePages(text) {
+        if (resultPages.mustWait(text.length)) awaitingPages.add(id);
+        try { return await resultPages.capture(text); }
+        finally { awaitingPages.delete(id); }
+      }
       // Serialised once. A client that reads pages (`pages: true`) gets anything over a quarter of a frame as a page
       // count; one that can't gets it whole up to the frame limit, and a clear FRAME_TOO_LARGE error past it.
       async function reply(result) {
         const resultJson = encode(result);
         if (request.pages === true && !PAGE_METHODS.has(request.method) && resultJson.length > inlineLimit) {
-          const pages = await resultPages.capture(resultJson);
+          const pages = await capturePages(resultJson);
           if (pages) connection.send({ v: VERSION, id, pages });
           return;
         }
@@ -190,29 +206,13 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         else if (request.method === 'daemon:snapshot') {
           const snapshot = { ...runtime.snapshot(), eventSeq };
           if (request.args[0]?.paged === true) {
-            releaseSnapshot();
             // Serialize once: all pages describe the same instant and watermark.
-            // JSON-encoding a fragment can expand each UTF-16 unit to six bytes.
-            const text = JSON.stringify(snapshot);
-            const snapshotId = ++nextSnapshotId;
-            const pageCount = Math.ceil(text.length / pageSize(maxFrameBytes));
-            snapshotCapture = { snapshotId, text, pageSize: pageSize(maxFrameBytes), pageCount, nextPage: 0 };
-            snapshotTimer = setTimeout(releaseSnapshot, 30000);
-            snapshotTimer.unref();
-            result = { snapshotId, pageCount, eventSeq: snapshot.eventSeq };
+            const pages = await capturePages(JSON.stringify(snapshot));
+            if (!pages) return;
+            result = { snapshotId: pages.pageId, pageCount: pages.pageCount, eventSeq: snapshot.eventSeq };
           } else result = snapshot;
         }
-        else if (request.method === 'daemon:snapshot-page') {
-          const [snapshotId, index] = request.args;
-          const capture = snapshotCapture;
-          if (!capture || capture.snapshotId !== snapshotId || !Number.isInteger(index) || index !== capture.nextPage || index >= capture.pageCount) {
-            throw new Error('Snapshot expired or page is out of order. Capture a new snapshot.');
-          }
-          result = capture.text.slice(index * capture.pageSize, (index + 1) * capture.pageSize);
-          capture.nextPage++;
-          if (capture.nextPage === capture.pageCount) releaseSnapshot();
-        }
-        else if (request.method === 'daemon:result-page') result = resultPages.page(...request.args);
+        else if (request.method === 'daemon:snapshot-page' || request.method === 'daemon:result-page') result = resultPages.page(...request.args);
         else if (request.method === 'daemon:flush') result = await runtime.flush();
         else if (request.method === 'daemon:focus') {
           const next = request.args[0];
@@ -225,7 +225,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
           await runtime.focused(view);
         }
         else if (request.method === 'daemon:stop') { await runtime.close(); result = { stopping: true }; }
-        else if (request.method === 'project:open') result = await runtime.openProject(...request.args);
+        // Only a desktop open (it passes takeNotice) takes the restored-chats notice; the phone's bridge opens without it.
+        else if (request.method === 'project:open') result = await runtime.openProject(request.args[0], { takeNotice: request.args[1]?.takeNotice === true });
         else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args);
         if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
@@ -268,4 +269,4 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
   }
   return { socketPath, close };
 }
-module.exports = { startDaemon };
+module.exports = { startDaemon, createResultPages };

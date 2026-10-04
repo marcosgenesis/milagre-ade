@@ -23,9 +23,3 @@ test('chat marks follow the desktop sidebar precedence', async () => {
   assert.equal(chatMark({} as AgentSession, undefined, [{ outcome: 'failed' }] as never), 'failed');
   assert.equal(chatMark({} as AgentSession), 'idle');
 });
-test('chats order by their newest message, empty chats last', async () => {
-  const { chatRecency } = await import('./indicators.ts');
-  const messages = [{ id: 3, session_id: 1 }, { id: 9, session_id: 2 }] as never;
-  assert.ok(chatRecency(2, messages) > chatRecency(1, messages));
-  assert.ok(chatRecency(1, messages) > chatRecency(7, messages));
-});

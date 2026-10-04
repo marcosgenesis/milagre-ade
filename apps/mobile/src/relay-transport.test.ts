@@ -383,6 +383,19 @@ test('pings go out every 20 s and a socket silent for 45 s is dropped', async ()
   transport.close();
 });
 
+test('a ping timer that fires after its socket ended schedules nothing', async () => {
+  const fake = relay();
+  const { transport, queue } = transportFor(fake);
+  await GET(transport);
+  const ping = queue.find(timer => timer.ms === 20000);
+  assert.ok(ping, 'a ping is scheduled');
+  transport.close();
+  assert.equal(queue.length, 0);
+  // The timer was already on its way out when the socket ended.
+  ping.fn();
+  assert.equal(queue.length, 0, 'a dead connection keeps no ping timer');
+});
+
 test('close() rejects what is pending and leaves nothing running', async () => {
   const fake = relay(() => 'never');
   const { transport, queue } = transportFor(fake);

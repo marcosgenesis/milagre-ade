@@ -216,7 +216,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
         conn = next;
         abortConnect = abortConnect === end ? null : abortConnect;
         heard(next);
-        const tick = () => { send(next, { t: 'ping' }); next.ping = timers.setTimeout(tick, PING); };
+        const tick = () => { if (next.over) return; send(next, { t: 'ping' }); next.ping = timers.setTimeout(tick, PING); };
         next.ping = timers.setTimeout(tick, PING);
         resolve(next);
       };

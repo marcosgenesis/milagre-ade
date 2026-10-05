@@ -34,5 +34,5 @@ test("electron-builder retains desktop identity, update feed, output path and re
   assert.equal(info.id, "com.milagre.app");
   assert.equal(info.version, "9.8.7");
   assert.equal(path.resolve(root, packager.config.directories.output), path.join(root, "release"));
-  assert.deepEqual(packager.config.publish, { provider: "github", owner: "marcosgenesis", repo: "milagre-ade", releaseType: "release" });
+  assert.deepEqual(packager.config.publish, { provider: "github", owner: "the-ptf", repo: "milagre-ade", releaseType: "release" });
 });

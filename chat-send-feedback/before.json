@@ -1,0 +1,26 @@
+{
+  "label": "before",
+  "revision": "f334a69d6efd40cd0a2707fc35284c3f32d0132c",
+  "source": "Continuous capture of the actual Electron renderer; timestamps preserved",
+  "worktreeDelaySeconds": 3,
+  "persistenceDelaySeconds": 2,
+  "frameCount": 80,
+  "events": [
+    {
+      "name": "Send clicked",
+      "seconds": 1.002
+    },
+    {
+      "name": "Worktree setup released",
+      "seconds": 4.007
+    },
+    {
+      "name": "Message saved and acknowledged",
+      "seconds": 6.01
+    },
+    {
+      "name": "Recording ended",
+      "seconds": 8.027
+    }
+  ]
+}

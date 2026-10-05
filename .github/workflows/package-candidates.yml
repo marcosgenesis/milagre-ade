@@ -66,9 +66,9 @@ jobs:
           gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'Milagre CI fixture' rsa3072 sign 1d
           MILAGRE_LINUX_SIGNING_KEY=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
           export MILAGRE_LINUX_SIGNING_KEY
-          MILAGRE_LINUX_REPOSITORY_INTEGRATION=1 node --test scripts/linux-repository.test.cjs
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           echo "MILAGRE_LINUX_SIGNING_KEY=$MILAGRE_LINUX_SIGNING_KEY" >> "$GITHUB_ENV"
+          MILAGRE_LINUX_REPOSITORY_INTEGRATION=1 node --test scripts/linux-repository.test.cjs
       - name: Exercise a real Windows npm agent launcher
         if: matrix.platform == 'windows'
         shell: pwsh

@@ -115,7 +115,7 @@ test('real tools authenticate metadata, install fixture packages and reject dama
     const rpmRoot = path.join(directory, 'rpmbuild');
     for (const subdirectory of ['BUILD', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS', 'BUILDROOT']) fs.mkdirSync(path.join(rpmRoot, subdirectory), { recursive: true });
     const spec = path.join(rpmRoot, 'SPECS/milagre.spec');
-    fs.writeFileSync(spec, 'Name: milagre\nVersion: 1.2.3\nRelease: 1\nSummary: Repository integration fixture\nLicense: MIT\nBuildArch: x86_64\n%description\nRepository integration fixture.\n%install\nmkdir -p %{buildroot}/usr/share/milagre\necho installed-rpm > %{buildroot}/usr/share/milagre/repository-fixture.txt\n%files\n/usr/share/milagre/repository-fixture.txt\n');
+    fs.writeFileSync(spec, 'Name: milagre\nVersion: 1.2.3\nRelease: 1\nSummary: Repository integration fixture\nLicense: MIT\nBuildArch: x86_64\nPrefix: /usr/share/milagre\n%description\nRepository integration fixture.\n%install\nmkdir -p %{buildroot}/usr/share/milagre\necho installed-rpm > %{buildroot}/usr/share/milagre/repository-fixture.txt\n%files\n/usr/share/milagre/repository-fixture.txt\n');
     run('rpmbuild', ['--define', `_topdir ${rpmRoot}`, '-bb', spec]);
     const rpm = path.join(artifacts, 'Milagre-1.2.3-x86_64.rpm');
     fs.copyFileSync(path.join(rpmRoot, 'RPMS/x86_64/milagre-1.2.3-1.x86_64.rpm'), rpm);
@@ -220,14 +220,18 @@ test('real tools authenticate metadata, install fixture packages and reject dama
     assert.equal(hash(path.join(aptRoot, 'var/cache/apt/archives/milagre_1.2.3_amd64.deb')), hash(deb));
     const debInstalled = path.join(directory, 'deb-installed');
     fs.mkdirSync(path.join(debInstalled, 'var/lib/dpkg'), { recursive: true });
-    run('dpkg', ['--root', debInstalled, '--install', deb]);
+    // This script-free fixture installs only into our disposable writable root.
+    // CI runs without root privileges, unlike a default Docker invocation.
+    run('dpkg', ['--force-not-root', '--root', debInstalled, '--install', deb]);
     assert.equal(fs.readFileSync(path.join(debInstalled, 'usr/share/milagre/repository-fixture.txt'), 'utf8'), 'installed-deb\n');
     const rpmInstalled = path.join(directory, 'rpm-installed');
     fs.mkdirSync(rpmInstalled);
-    const rpmArgs = ['--root', rpmInstalled, '--dbpath', '/var/lib/rpm'];
+    // Relocate the script-free fixture instead of chrooting (which requires root).
+    // Keep its package database and every installed file inside this test tree.
+    const rpmArgs = ['--dbpath', path.join(rpmInstalled, 'var/lib/rpm')];
     run('rpm', [...rpmArgs, '--initdb']);
     run('rpmkeys', [...rpmArgs, '--import', path.join(output, 'archive-keyring.asc')]);
-    run('rpm', [...rpmArgs, '--install', '--nodeps', rpm]);
+    run('rpm', [...rpmArgs, '--install', '--nodeps', '--prefix', path.join(rpmInstalled, 'usr/share/milagre'), rpm]);
     assert.equal(fs.readFileSync(path.join(rpmInstalled, 'usr/share/milagre/repository-fixture.txt'), 'utf8'), 'installed-rpm\n');
     const bytes = fs.readFileSync(rpm);
     bytes[bytes.length - 8] ^= 0xff;

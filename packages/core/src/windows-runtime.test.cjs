@@ -254,7 +254,9 @@ test('Windows native setup preserves Node quotes, spaced paths and command metac
   const fsp = require('node:fs/promises');
   const { runSetupCommand } = require('./worktree-setup.cjs');
   const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'milagre setup & '));
-  t.after(() => fsp.rm(cwd, { recursive: true, force: true }));
+  // The empty Windows job keeper finishes its final accounting poll after the
+  // application's close event and briefly retains its working directory.
+  t.after(() => fsp.rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const result = await runSetupCommand({ cwd, timeoutMs: 30000, command: `"${process.execPath}" -e "process.stdout.write('a & b'); require('node:fs').writeFileSync('file with spaces & symbols.txt','ok')"` });
   assert.equal(result.status, 'done', result.output || result.error);
   assert.equal(result.output, 'a & b');

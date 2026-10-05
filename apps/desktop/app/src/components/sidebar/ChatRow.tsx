@@ -58,6 +58,8 @@ export type ChatDetails = {
 
 export type SidebarRecent = {
   id: string;
+  /** A local Chat preview can be opened, but cannot be edited until the host accepts it. */
+  pending?: boolean;
   label: string;
   prompt?: string;
   /** The mark at the left of the row; idle when absent. */
@@ -207,6 +209,7 @@ export const ChatRow = memo(function ChatRow({
   useEffect(() => clearHover, []);
 
   const openMenu = (x: number, y: number) => {
+    if (item.pending) return;
     hideCard();
     setMenu({ x: Math.min(x, window.innerWidth - MENU_WIDTH - 8), y });
   };
@@ -281,7 +284,7 @@ export const ChatRow = memo(function ChatRow({
         className={`pointer-events-none absolute right-3 top-1.5 z-30 rounded border border-line bg-surface px-1 text-[11px] leading-5 text-ink ${collapsed ? "right-1" : ""}`}>
         {shortcutHint}
       </kbd>}
-      {!collapsed && !renaming && !shortcutHint && (
+      {!item.pending && !collapsed && !renaming && !shortcutHint && (
         <button
           ref={triggerRef}
           type="button"

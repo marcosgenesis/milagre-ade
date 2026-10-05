@@ -105,7 +105,12 @@ export function usePastedImages(scope: string) {
     setImages(current => current.filter(image => image.path !== path));
   }
 
-  return { images, files, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
+  function restore(sentImages: ImageAttachment[], sentFiles: string[]) {
+    setImages(current => [...sentImages, ...current.filter(image => !sentImages.some(sent => sent.id === image.id))]);
+    setFiles(current => [...new Set([...sentFiles, ...current])]);
+  }
+
+  return { images, files, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, restore, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
 }
 
 export type ImageDraft = ReturnType<typeof usePastedImages>;

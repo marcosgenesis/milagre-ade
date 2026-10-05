@@ -28,7 +28,8 @@ async function waitFor(read, description) {
 
 async function connect(url) {
   const socket = new WebSocket(url);
-  await once(socket, "open");
+  try { await once(socket, "open", { signal: AbortSignal.timeout(20000) }); }
+  catch (error) { socket.close(); throw error; }
   let id = 0;
   const pending = new Map();
   socket.addEventListener("message", ({ data }) => {
@@ -54,6 +55,7 @@ async function connect(url) {
 }
 
 async function checkApp({ executable, args, profile, project, expectTheme, expectStartupError = false, recoverOwnership }) {
+  console.log(`CHECK: ${expectTheme ? 'installed' : 'source'} desktop${expectStartupError ? ' ownership recovery' : ''}`);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   env.MILAGRE_DEV_SERVER_URL = pathToFileURL(path.join(root, "apps/desktop/dist/index.html")).href;
@@ -69,13 +71,14 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     debuggerPort ??= output.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/)?.[1];
   });
   let connection;
+  let failure;
   try {
     await waitFor(() => {
       assert.equal(child.exitCode, null, output);
       return debuggerPort;
     }, "Electron debugger");
     const page = await waitFor(async () => {
-      const pages = await fetch(`http://127.0.0.1:${debuggerPort}/json/list`).then(response => response.json());
+      const pages = await fetch(`http://127.0.0.1:${debuggerPort}/json/list`, { signal: AbortSignal.timeout(5000) }).then(response => response.json());
       return pages.find(page => page.type === "page" && page.url.startsWith("file:"));
     }, "desktop page");
     connection = await connect(page.webSocketDebuggerUrl);
@@ -169,7 +172,11 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     console.log('PASS: a host that crashed is started again, the window says so, and the draft stays');
     console.log(`PASS: ${expectTheme ? "packaged" : "source"} desktop opens existing Chats, provider IDs, Project settings, bundled skills and saved UI preferences`);
   } catch (error) {
+    failure = error;
     console.error(output);
+    console.error(error);
+    try { console.error(await fs.readFile(path.join(profile, 'daemon.log'), 'utf8')); }
+    catch (logError) { if (logError.code !== 'ENOENT') console.error(logError); }
     throw error;
   } finally {
     connection?.close();
@@ -179,12 +186,17 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     clearTimeout(timeout);
     // Desktop quit leaves the shared host available. This fixture alone owns
     // the temporary profile, so explicitly stop it before deleting test data.
-    const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
     try {
-      assert.ok((await shared.call('daemon:status')).capabilities.includes('desktop-v1'));
-      await shared.call('daemon:stop');
-    } finally { shared.close(); }
-    await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
+      const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
+      try {
+        assert.ok((await shared.call('daemon:status')).capabilities.includes('desktop-v1'));
+        await shared.call('daemon:stop');
+      } finally { shared.close(); }
+      await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
+    } catch (cleanupError) {
+      if (!failure) throw cleanupError;
+      console.error('Fixture cleanup failed:', cleanupError);
+    }
   }
 }
 
@@ -224,7 +236,7 @@ async function main() {
     const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
     assert.deepEqual(saved.messages, state.messages, "Launching and quitting must preserve the transcript");
   } finally {
-    await fs.rm(temporary, { recursive: true, force: true });
+    await fs.rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

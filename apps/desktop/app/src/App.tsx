@@ -632,6 +632,9 @@ function App() {
     void switchProject(chatId.slice(0, separator));
   }), []);
 
+  // Clicking the "phone paired" notification opens Settings → Phone, where access can be reset.
+  useEffect(() => window.milagre.onOpenPhoneSettings(() => { setSettingsSection("phone"); setView("settings"); }), []);
+
   function startNewChat() {
     advanceChatView();
     const latest = openState();

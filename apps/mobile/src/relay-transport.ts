@@ -35,7 +35,7 @@ export type RelayTransportOptions = {
   jitter?: () => number;
 };
 
-export type RelayErrorCode = 'host-offline' | 'bad-token' | 'unknown-phone' | 'bad-host' | 'lost';
+export type RelayErrorCode = 'host-offline' | 'bad-token' | 'host-reset' | 'unknown-phone' | 'bad-host' | 'lost';
 export class RelayTransportError extends Error {
   code: RelayErrorCode;
   constructor(code: RelayErrorCode, message: string) { super(message); this.name = 'RelayTransportError'; this.code = code; }
@@ -43,6 +43,7 @@ export class RelayTransportError extends Error {
 const COPY: Record<RelayErrorCode, string> = {
   'host-offline': 'Your Mac isn\'t reachable. Open Milagre on it and check Settings → Phone.',
   'bad-token': 'This phone was paired with an older code. Scan the new one in Settings → Phone.',
+  'host-reset': 'This Mac was reset. Scan its new pairing code in Settings → Phone.',
   'unknown-phone': 'Pairing is closed on your Mac. Open Settings → Phone on it and scan the code again.',
   'bad-host': 'This isn\'t the Mac this phone was paired with. Scan the code again in Settings → Phone.',
   lost: 'Connection lost. Reconnect to your computer. Check the Chat before sending again.',
@@ -204,9 +205,12 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
         }
         timers.clearTimeout(handshake);
         if (bytes[0] === REFUSED) {
-          let code: unknown;
-          try { code = JSON.parse(decoder.decode(bytes.subarray(1))).code; } catch { /* a bad hello is treated as a drop */ }
-          return end(code === 'bad-token' || code === 'unknown-phone' ? fail(code) : fail('lost'), code === 'bad-token' || code === 'unknown-phone');
+          let refusal: { code?: unknown; reason?: unknown } | null = null;
+          try { refusal = JSON.parse(decoder.decode(bytes.subarray(1))); } catch { /* a bad hello is treated as a drop */ }
+          // A Mac that was reset keeps its old room for a while only to say so; it sends `reason` with its bad-token.
+          const code = refusal?.code === 'bad-token' && refusal.reason === 'reset' ? 'host-reset' : refusal?.code;
+          const final = code === 'bad-token' || code === 'host-reset' || code === 'unknown-phone';
+          return end(final ? fail(code) : fail('lost'), final);
         }
         if (bytes[0] !== ACCEPT) return end(fail('lost'));
         let channel: Channel;

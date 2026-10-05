@@ -228,6 +228,21 @@ test('an unknown phone with a stale token gets {t:"error",code:"bad-token"} and 
   assert.equal((await phone.closed).code, 1000);
 });
 
+test('a retired host holds its old room only to tell every phone the Mac was reset', async t => {
+  const relay = await startRelay(t);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-retired-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const old = await readIdentity(dir);
+  const host = startRelayHost({ relayUrl: relay.url, identity: { hostId: old.hostId, sign: old.sign }, retired: true });
+  t.after(() => host.close());
+  await until(() => host.status() === 'online', 'retired host online');
+  // A phone that paired before the reset, with the token it still has.
+  const phone = connectPhone({ relayUrl: relay.url, identity: old });
+  t.after(() => phone.close());
+  assert.deepEqual(await phone.hello(), { error: { t: 'error', code: 'bad-token', reason: 'reset' } });
+  assert.equal((await phone.closed).code, 1000);
+});
+
 test('a new phone outside the pairing window gets unknown-phone; inside it, it pairs and is remembered', async t => {
   let open = false;
   const { relay, mac } = await paired(t, { mac: { canPair: () => open } });

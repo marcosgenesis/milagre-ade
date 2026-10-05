@@ -8,7 +8,7 @@ Public releases use a **Developer ID Application** certificate for direct distri
 2. In Keychain Access, select the certificate and its private key under **My Certificates**, then export the signing identity as a password-protected `.p12`. A `.cer` alone does not include the private key and cannot sign releases.
 3. Find the Team ID in [Apple Developer membership details](https://developer.apple.com/account/).
 4. Generate an [app-specific password](https://support.apple.com/pt-br/102654) for notarization from your Apple Account. Use a dedicated password for Milagre, not the account's login password.
-5. Add the following repository secrets in [GitHub Actions settings](https://github.com/marcosgenesis/milagre-ade/settings/secrets/actions):
+5. Add the following repository secrets in [GitHub Actions settings](https://github.com/the-ptf/milagre-ade/settings/secrets/actions):
 
 | Secret | Value |
 | --- | --- |
@@ -22,13 +22,13 @@ Use the GitHub CLI without placing secret values in shell arguments or history:
 
 ```bash
 # Replace the path with the exported certificate. Its contents go directly to GitHub.
-base64 -i /absolute/path/DeveloperIDApplication.p12 | gh secret set CSC_LINK --repo marcosgenesis/milagre-ade
+base64 -i /absolute/path/DeveloperIDApplication.p12 | gh secret set CSC_LINK --repo the-ptf/milagre-ade
 
 # Each command prompts for its value. Do not paste credentials into chat or source files.
-gh secret set CSC_KEY_PASSWORD --repo marcosgenesis/milagre-ade
-gh secret set APPLE_ID --repo marcosgenesis/milagre-ade
-gh secret set APPLE_APP_SPECIFIC_PASSWORD --repo marcosgenesis/milagre-ade
-gh secret set APPLE_TEAM_ID --repo marcosgenesis/milagre-ade
+gh secret set CSC_KEY_PASSWORD --repo the-ptf/milagre-ade
+gh secret set APPLE_ID --repo the-ptf/milagre-ade
+gh secret set APPLE_APP_SPECIFIC_PASSWORD --repo the-ptf/milagre-ade
+gh secret set APPLE_TEAM_ID --repo the-ptf/milagre-ade
 ```
 
 Do not commit certificates, private keys, passwords or credential files. Keep the exported `.p12` outside the repository. `electron-builder` imports the certificate into a temporary keychain on each macOS runner.

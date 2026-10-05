@@ -446,6 +446,27 @@ test('phone methods are advertised to desktop, drive a real bridge, and stay out
   assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile.json'), 'utf8')).enabled, false);
 });
 
+test('a first pairing reaches the desktop as phone:paired, with the count in the phone status', async t => {
+  const relays = [];
+  const startRelay = options => { relays.push(options); return { close: async () => {}, status: () => 'online' }; };
+  const { client } = await fixture(t, { phoneOptions: { localPort: 0, startRelay } });
+  const desktop = await client();
+  const paired = [];
+  desktop.on('event', event => { if (event.channel === 'phone:paired') paired.push(event.payload); });
+  await desktop.call('phone:set-enabled', [true]);
+  assert.equal((await phoneStatus(desktop, 'on')).pairedPhones, 0);
+  await relays[0].phones.add('phoneA');
+  await waitFor(() => paired.length === 1);
+  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.equal((await desktop.call('phone:status')).pairedPhones, 1);
+});
+
+test('a phone reset while the phone is off answers off', async t => {
+  const { client } = await fixture(t, { phoneOptions: fakePhoneOptions() });
+  const desktop = await client();
+  assert.deepEqual(await desktop.call('phone:reset'), { enabled: false, state: 'off', remote: 'none' });
+});
+
 test('an enabled phone comes back when the daemon restarts, and stopping the daemon closes its bridge', async t => {
   const first = await fixture(t, { phoneOptions: fakePhoneOptions() });
   const desktop = await first.client();

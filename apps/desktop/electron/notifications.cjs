@@ -14,12 +14,15 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
 class AttentionNotifier {
-  /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; setBadge?: (badge: string) => void }} options */
-  constructor({ createNotification, isAppFocused, openChat, setBadge = () => {} }) {
+  /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; openPhoneSettings?: () => void; setBadge?: (badge: string) => void }} options */
+  constructor({ createNotification, isAppFocused, openChat, openPhoneSettings = () => {}, setBadge = () => {} }) {
     this.createNotification = createNotification;
     this.isAppFocused = isAppFocused;
     this.openChat = openChat;
+    this.openPhoneSettings = openPhoneSettings;
     this.setBadge = setBadge;
+    /** @type {Electron.Notification | null} */
+    this.phonePaired = null;
     this.previews = new Map();
     this.completed = new Map();
     this.completionNotifications = new Map();
@@ -103,6 +106,17 @@ class AttentionNotifier {
     this.completionNotifications.get(chatId)?.close();
     this.completionNotifications.set(chatId, notification);
     notification.on('click', () => this.openChat(chatId));
+    notification.show();
+    return true;
+  }
+
+  // A phone paired with this Mac for the first time. Shown even while Milagre has focus: it is about who can reach
+  // the agents, and the pairing window opens just by looking at Settings → Phone. Clicking it opens that page.
+  notifyPhonePaired() {
+    const notification = this.createNotification({ title: "New phone paired", subtitle: "", body: "A phone can now reach your agents on this Mac. If it wasn't you, reset access in Settings → Phone." });
+    this.phonePaired?.close();
+    this.phonePaired = notification;
+    notification.on("click", () => this.openPhoneSettings());
     notification.show();
     return true;
   }

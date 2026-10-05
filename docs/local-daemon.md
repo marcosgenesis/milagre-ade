@@ -1,6 +1,6 @@
 # Local daemon
 
-Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. A bridge that attaches through this socket can use the same profile and owner; managed remote hosting is separate work.
+Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. The mobile bridge attaches to the same profile and owner. Desktop Settings > Phone manages phone access through the public encrypted relay or a configured Cloudflare tunnel; see [mobile setup](mobile-local.md).
 
 For the first upgrade from an embedded-runtime desktop, close that older app before launching the new build. Never open the same Projects through an older desktop while the new host owns them. The running app is not automatically replaced by development checks.
 
@@ -21,7 +21,7 @@ npm run daemon -- request chat:runs --data-dir /absolute/path/to/daemon-profile
 npm run daemon -- stop --data-dir /absolute/path/to/daemon-profile
 ```
 
-`request` accepts an existing core command name and a JSON array of arguments. `project:open` accepts a Project path directly; OS dialogs, clipboard, notifications, media serving and updates remain desktop features. The daemon has the same local user's privileges and can run provider commands. There is no TCP listener or remote authentication in this phase.
+`request` accepts an existing core command name and a JSON array of arguments. `project:open` accepts a Project path directly; OS dialogs, clipboard, notifications, media serving and updates remain desktop features. The daemon has the same local user's privileges and can run provider commands. The daemon socket has no TCP listener. Remote clients connect through the separate authenticated mobile bridge.
 
 A daemon stays alive when clients disconnect. On macOS, running agent turns and Worktree setup hold the existing keep-awake preference through `caffeinate`; closing the laptop lid can still suspend access. Desktop startup alone does not install a login service. `stop`, SIGINT and SIGTERM save resumable turns and drain pending writes before closing, then send every client a `daemon:stopping` event. A desktop whose host stops that way shows a reconnect notice and retains its unsent draft; start the host again to restore snapshots. A host that goes away without that event (a crash, SIGKILL) is started again by the desktop: up to three starts, the delay doubling each time, then a notice saying why it couldn't. A host the desktop stopped itself (an update, a restart, a quit) is never started again by a reconnect. It never retries a send automatically; only the connection is retried.
 
@@ -29,7 +29,7 @@ Updates install only through the explicit restart action. It saves and stops the
 
 Reconnect retains at most 1,024 events or 16 MiB while obtaining its snapshot. If that limit is exceeded, it disconnects and retries the snapshot without replaying commands. A deleted Project is skipped so another Project can still be opened. Other Project errors remain visible as a failed reconnect rather than being silently ignored.
 
-The desktop transport is implemented here. Login/background service installation, a managed tunnel, stable public HTTPS, and migration of an already running embedded desktop remain outside this increment. The current running desktop must be closed by its owner before its profile can move to the daemon.
+Desktop startup does not install a login service. An older embedded-runtime desktop must be closed before a current desktop can take ownership of its profile. Phone access is managed separately by the daemon through Settings > Phone.
 
 ## Ownership and recovery
 

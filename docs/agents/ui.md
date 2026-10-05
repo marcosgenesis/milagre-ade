@@ -15,7 +15,7 @@ Every dropdown goes through `primitives/Select`; a native `<select>` opens macOS
 
 ## Sliders
 
-Every slider is a `RangeSlider` (`app/src/components/primitives/RangeSlider.tsx`): tick dots per step, a bar handle that bounces as it lands, drag anywhere on the track or use the arrow keys, and no springs under reduced motion. Its value plumbing is `lib/use-slider.ts`; a native `<input type="range">` draws macOS's own control.
+Every slider is a `RangeSlider` (`apps/desktop/app/src/components/primitives/RangeSlider.tsx`): tick dots per step, a bar handle that bounces as it lands, drag anywhere on the track or use the arrow keys, and no springs under reduced motion. Its value plumbing is `lib/use-slider.ts`; a native `<input type="range">` draws macOS's own control.
 
 ## Backdrop blur
 

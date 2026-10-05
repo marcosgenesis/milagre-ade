@@ -15,7 +15,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { pairingWindow, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { pairedPhonesLine, pairingWindow, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
@@ -308,6 +308,7 @@ function PhoneSettings() {
     return () => window.clearInterval(timer);
   }, [showingQr, status?.pairingUntil]);
   const pairing = pairingWindow(status, now);
+  const paired = pairedPhonesLine(status);
   return (
     <>
     <Group title="Phone access">
@@ -347,6 +348,11 @@ function PhoneSettings() {
     )}
     {status?.enabled && (
       <Group title="Access">
+        {paired && (
+          <Row label="Paired phones" description="Milagre tells you when a new phone pairs.">
+            <span data-phone-paired>{paired}</span>
+          </Row>
+        )}
         <Row label="Reset access" description={confirmReset ? "Phones that already paired stop working and must scan again. This can't be undone." : "Make a new code. Phones that already paired scan again."}>
           {confirmReset ? (
             <span className="flex items-center gap-2">

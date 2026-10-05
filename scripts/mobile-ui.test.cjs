@@ -388,7 +388,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
-    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' },
+    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
   const rows = () => find(render(), node => node.type === 'FlatList');
@@ -416,14 +416,15 @@ test('a new Chat from the sidebar opens at once too', () => {
   assert.equal(nav.rows().props.data.some(item => item.kind === 'all'), false, 'no separate Chats screen to go to');
 });
 
-test('a typed project path opens at once and puts the form away', () => {
+test('Add project opens the computer search, and a pick opens its Chat at once', () => {
   const nav = navigationHost(deferred().promise);
   find(nav.render(), node => node.props?.accessibilityLabel === 'Add project').props.onPress();
-  find(nav.render(), node => node.type === 'Field' && node.props.label === 'Project path on your computer').props.onChangeText('/Users/me/Code/app');
-  find(nav.render(), node => node.type === 'PillButton' && node.props.title === 'Open project').props.onPress();
+  const search = find(nav.render(), node => node.type === 'ProjectSearch');
+  assert.ok(search, 'the search replaces the project list');
+  search.props.onOpen('/Users/me/Code/app');
   assert.deepEqual(nav.opened, [], 'the Chat opens the Project, not the navigation');
   assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: '/chat', params: { projectPath: '/Users/me/Code/app', hostId: 'mac' } }]));
-  assert.equal(find(nav.render(), node => node.type === 'PillButton' && node.props.title === 'Open project'), undefined, 'the form is gone');
+  assert.equal(find(nav.render(), node => node.type === 'ProjectSearch'), undefined, 'the search is put away');
 });
 
 test('Settings open inside the sidebar and go back to the Projects', () => {

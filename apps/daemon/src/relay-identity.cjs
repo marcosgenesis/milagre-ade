@@ -5,6 +5,8 @@ const { boxKeyPair, signKeyPair, hostIdOf, b64url, fromB64url } = require('@mila
 
 const random = n => new Uint8Array(randomBytes(n));
 const MAX_PHONES = 32;
+// Each retired identity holds one more relay socket while the phone is on, so only the last few are kept.
+const MAX_RETIRED = 3;
 
 async function writePrivate(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -21,8 +23,7 @@ const identityFile = dataDir => path.join(dataDir, 'relay-identity.json');
 async function readIdentity(dataDir) {
   try {
     const value = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8'));
-    const sign = { publicKey: fromB64url(value.sign.publicKey), secretKey: fromB64url(value.sign.secretKey) };
-    const box = { publicKey: fromB64url(value.box.publicKey), secretKey: fromB64url(value.box.secretKey) };
+    const sign = decode(value.sign), box = decode(value.box);
     return { hostId: hostIdOf(sign.publicKey), sign, box };
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -30,15 +31,47 @@ async function readIdentity(dataDir) {
   return rotateIdentity(dataDir);
 }
 
+const encode = pair => ({ publicKey: b64url(pair.publicKey), secretKey: b64url(pair.secretKey) });
+const decode = pair => ({ publicKey: fromB64url(pair.publicKey), secretKey: fromB64url(pair.secretKey) });
+
 /**
  * New sign and box key pairs, replacing any saved ones. Reset calls it, so a host id that leaked with an old link
- * no longer names this Mac on the relay.
+ * no longer names this Mac on the relay. `retireUntil` (ms epoch) keeps the old signing key until then, so the old
+ * room can still tell the phones that dial it that this Mac was reset (see readRetired).
  */
-async function rotateIdentity(dataDir) {
+async function rotateIdentity(dataDir, { retireUntil, now = Date.now() } = {}) {
+  if (retireUntil) {
+    let old;
+    try { old = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8')).sign; } catch { /* nothing saved, or unreadable: nothing to retire */ }
+    if (old) {
+      const kept = (await readRetiredRaw(dataDir)).filter(entry => entry.until > now && entry.sign.publicKey !== old.publicKey);
+      await writePrivate(retiredFile(dataDir), { retired: [...kept, { sign: old, until: retireUntil }].slice(-MAX_RETIRED) });
+    }
+  }
   const sign = signKeyPair(random), box = boxKeyPair(random);
-  const encode = pair => ({ publicKey: b64url(pair.publicKey), secretKey: b64url(pair.secretKey) });
   await writePrivate(identityFile(dataDir), { sign: encode(sign), box: encode(box) });
   return { hostId: hostIdOf(sign.publicKey), sign, box };
+}
+
+const retiredFile = dataDir => path.join(dataDir, 'relay-retired.json');
+async function readRetiredRaw(dataDir) {
+  try {
+    const value = JSON.parse(await fs.readFile(retiredFile(dataDir), 'utf8')).retired;
+    return Array.isArray(value) ? value.filter(entry => typeof entry?.sign?.publicKey === 'string' && typeof entry.sign.secretKey === 'string' && Number.isFinite(entry.until)) : [];
+  } catch { return []; }
+}
+
+/**
+ * Identities that Reset replaced and that still answer their old room until `until`: phones paired with them hear
+ * "this Mac was reset" there instead of finding nobody. Only the signing key is kept; the room needs nothing else.
+ */
+async function readRetired(dataDir, now = Date.now()) {
+  const out = [];
+  for (const entry of await readRetiredRaw(dataDir)) {
+    if (entry.until <= now) continue;
+    try { const sign = decode(entry.sign); out.push({ hostId: hostIdOf(sign.publicKey), sign, until: entry.until }); } catch { /* a damaged entry is skipped */ }
+  }
+  return out;
 }
 
 /** Phones that paired with the current token. Reset clears it, so an old phone must scan again. */
@@ -51,9 +84,11 @@ function createPhones(dataDir) {
   return {
     async load() { try { known = JSON.parse(await fs.readFile(file, 'utf8')).phones ?? []; } catch { known = []; } },
     isKnown: id => known.includes(id),
+    /** How many phones are paired now. */
+    count: () => known.length,
     async add(id) { known = [...known.filter(item => item !== id), id].slice(-MAX_PHONES); await write(known); },
     async clear() { known = []; await write(known); },
   };
 }
 
-module.exports = { readIdentity, rotateIdentity, createPhones };
+module.exports = { readIdentity, rotateIdentity, readRetired, createPhones };

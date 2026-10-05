@@ -34,7 +34,7 @@ function parseLsof(output) {
   const seen = new Set();
   let pid = 0;
   let command = "";
-  for (const line of output.split("\n")) {
+  for (const line of output.split(/\r?\n/)) {
     const value = line.slice(1);
     if (line[0] === "p") pid = Number(value);
     else if (line[0] === "c") command = value;

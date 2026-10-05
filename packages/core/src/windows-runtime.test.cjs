@@ -230,7 +230,7 @@ test('Windows native job handles literal arguments and releases an empty job', {
   const { spawnCommand } = require('./agents/command.cjs');
   const { isWindowsJobActive } = require('./agents/windows-job.cjs');
   const args = ['with space', 'quote"', 'C:\\path with space\\', '& echo injected', '%PATH%', 'é'];
-  const child = spawnCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const chunks = []; child.stdout.on('data', chunk => chunks.push(chunk));
   await once(child, 'close');
   assert.deepEqual(JSON.parse(Buffer.concat(chunks)), args);
@@ -291,4 +291,40 @@ test('fixture startup waits report early launcher failure and timeout stderr', a
   const stalled = fixture();
   const timeout = waitForOutput(stalled, { timeoutMs: 10 }); stalled.stderr.write('startup stalled');
   await assert.rejects(timeout, /Fixture startup timed out.*startup stalled/s);
+});
+
+test('Windows job keeper stays attached when callers request a detached application', () => {
+  const { EventEmitter } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { spawnWindowsJob } = require('./agents/windows-job.cjs');
+  const keeper = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  let launch;
+  spawnWindowsJob('C:\\node.exe', [], { detached: true }, (_file, _args, options) => { launch = options; return keeper; });
+  assert.equal(launch.detached, false);
+});
+
+test('Windows TCP listener output accepts PowerShell CRLF line endings', () => {
+  const { parseLsof } = require('./agents/ports.cjs');
+  assert.deepEqual(parseLsof('p20\r\ncnode\r\nn127.0.0.1:3000\r\n'), [{ pid: 20, command: 'node', port: 3000, address: '127.0.0.1' }]);
+});
+
+test('Windows job reports native missing executable errors through ENOENT', { timeout: 100 }, async () => {
+  const { EventEmitter, once } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { spawnWindowsJob } = require('./agents/windows-job.cjs');
+  const keeper = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  let payload;
+  const child = spawnWindowsJob('C:\\missing-cli.exe', [], {}, (_file, _args, options) => { payload = JSON.parse(Buffer.from(options.env.MILAGRE_WINDOWS_JOB_SPEC, 'base64')); return keeper; });
+  const error = once(child, 'error');
+  keeper.stderr.write(payload.marker + 'ERROR:ENOENT\n');
+  assert.equal((await error)[0].code, 'ENOENT');
+});
+
+test('Windows native missing executable keeps the install/PATH diagnosis', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+  const { once } = require('node:events');
+  const { spawnCommand } = require('./agents/command.cjs');
+  const { killTree } = require('./agents/process-tree.cjs');
+  const child = spawnCommand(path.join(os.tmpdir(), 'milagre-missing-cli-' + Date.now() + '.exe'), [], { detached: true });
+  t.after(() => killTree(child));
+  assert.equal((await once(child, 'error'))[0].code, 'ENOENT');
 });

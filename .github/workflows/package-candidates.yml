@@ -9,7 +9,24 @@ on:
         type: string
   push:
     branches:
-      - milagre/cross-platform-package-install-o2wq
+      - main
+    paths:
+      - '.github/workflows/package-candidates.yml'
+      - 'package*.json'
+      - 'apps/desktop/**'
+      - 'apps/daemon/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'distribution/**'
+  pull_request:
+    paths:
+      - '.github/workflows/package-candidates.yml'
+      - 'package*.json'
+      - 'apps/desktop/**'
+      - 'apps/daemon/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'distribution/**'
 permissions:
   contents: read
 jobs:

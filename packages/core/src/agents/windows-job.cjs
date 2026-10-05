@@ -76,6 +76,11 @@ public static class MilagreJob {
     }
    } else if(waited!=1) throw new Win32Exception(Marshal.GetLastWin32Error());
    return 0;
+  } catch(Win32Exception error) {
+   if(error.NativeErrorCode==2 || error.NativeErrorCode==3) {
+    Console.Error.WriteLine(marker+"ERROR:ENOENT"); Console.Error.Flush();
+   }
+   throw;
   } finally {
    if(child.process!=IntPtr.Zero && !assigned) TerminateProcess(child.process,1);
    if(attributesInitialized) DeleteProcThreadAttributeList(attributes);
@@ -98,7 +103,9 @@ function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
   const script = `$ErrorActionPreference='Stop'; try { Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${source}'))); $p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('MILAGRE_WINDOWS_JOB_SPEC'))) | ConvertFrom-Json); [Environment]::SetEnvironmentVariable('MILAGRE_WINDOWS_JOB_SPEC',$null); $result=[MilagreJob]::Run($p.file,$p.commandLine,$p.cwd,$p.marker,[uint32]$p.parent); exit $result } catch { [Console]::Error.WriteLine('Milagre Windows process containment failed: '+$_.Exception.Message); exit 1 }`;
   if (payload.length > 32000) throw new Error('The Windows agent command exceeds the process environment limit');
   const { windowsVerbatimArguments: _verbatim, ...keeperOptions } = options;
-  const keeper = spawnImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { ...keeperOptions, env: { ...(options.env || process.env), MILAGRE_WINDOWS_JOB_SPEC: payload }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  // WinPS can exit before evaluating its command when launched DETACHED_PROCESS.
+  // The native job contains the application; the keeper stays with its owner.
+  const keeper = spawnImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { ...keeperOptions, detached: false, env: { ...(options.env || process.env), MILAGRE_WINDOWS_JOB_SPEC: payload }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const child = new EventEmitter();
   Object.assign(child, { pid: undefined, exitCode: null, signalCode: null, killed: false, stdin: keeper.stdin, stdout: new PassThrough(), stderr: new PassThrough(), spawnfile: file, spawnargs: [file, ...args] });
   const stdio = options.stdio || ['pipe', 'pipe', 'pipe'];
@@ -156,6 +163,7 @@ function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
       const frame = control.slice(marker.length, end).trim(); control = control.slice(end + 1);
       if (/^PID:\d+$/.test(frame)) { child.pid = Number(frame.slice(4)); child.emit('spawn'); for (const chunk of earlyOutput.splice(0)) readOutput(chunk); }
       else if (/^EXIT:\d+$/.test(frame)) exit(Number(frame.slice(5)), null);
+      else if (frame === 'ERROR:ENOENT') child.emit('error', Object.assign(new Error(`spawn ${file} ENOENT`), { code: 'ENOENT', syscall: 'spawn', path: file, spawnargs: args }));
       else if (!closed && !ignored(2)) child.stderr.write(marker + frame + '\n');
     }
   });

@@ -34,6 +34,9 @@ async function connect(url) {
   const pending = new Map();
   socket.addEventListener("message", ({ data }) => {
     const reply = JSON.parse(data);
+    if (reply.method === 'Runtime.exceptionThrown' || reply.method === 'Log.entryAdded') {
+      console.error('Desktop renderer:', JSON.stringify(reply.params));
+    }
     const request = pending.get(reply.id);
     if (!request) return;
     pending.delete(reply.id);
@@ -82,6 +85,8 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
       return pages.find(page => page.type === "page" && page.url.startsWith("file:"));
     }, "desktop page");
     connection = await connect(page.webSocketDebuggerUrl);
+    await connection.call('Runtime.enable');
+    await connection.call('Log.enable');
     const evaluate = async expression => {
       const result = await connection.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
@@ -175,6 +180,17 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     failure = error;
     console.error(output);
     console.error(error);
+    if (connection) {
+      try {
+        const state = await connection.call('Runtime.evaluate', { expression: 'JSON.stringify({url:location.href,body:document.body?.textContent,bridge:typeof window.milagre})', returnByValue: true });
+        console.error('Desktop page at failure:', state.result.value);
+        if (process.env.MILAGRE_SCREENSHOT_DIR) {
+          await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+          const shot = await connection.call('Page.captureScreenshot');
+          await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'desktop-failure.png'), Buffer.from(shot.data, 'base64'));
+        }
+      } catch (diagnosticError) { console.error('Desktop diagnostics failed:', diagnosticError); }
+    }
     try { console.error(await fs.readFile(path.join(profile, 'daemon.log'), 'utf8')); }
     catch (logError) { if (logError.code !== 'ENOENT') console.error(logError); }
     throw error;

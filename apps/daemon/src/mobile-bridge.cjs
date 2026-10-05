@@ -12,7 +12,9 @@ const { chatInProject } = require('@milagre/shared/agent-runs');
 const { connect } = require('./client.cjs');
 const { createConfinement } = require('./confine.cjs');
 
-const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'chat:runs',
+// Characters of a data URL the phone gets for a Project's icon (about 450 KB of image).
+const MAX_PROJECT_IMAGE = 600_000;
+const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file',
@@ -346,6 +348,8 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           } else result = await client.call(request.method, request.args);
           // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
           if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
+          // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
+          if (request.method === 'project:image' && typeof result === 'string' && result.length > MAX_PROJECT_IMAGE) result = null;
           }
         } else throw failure(404, 'Unknown endpoint');
         reply(200, { result: result ?? null });

@@ -32,6 +32,9 @@ const PATHS = Object.freeze({
   'project:open': ([projectPath]) => [projectPath],
   // Takes a Project off the recent list; its folder is never touched.
   'project:forget': ([projectPath]) => [projectPath],
+  // The search names no path; its results are cut down to the folder (filterResult).
+  'project:find': none,
+  'project:image': ([projectPath]) => [projectPath],
   'chat:runs': none,
   'chat:send': ([request]) => [request?.projectPath, ...(request?.cwd === undefined ? [] : [request.cwd]), ...(Array.isArray(request?.files) ? request.files.map(attached) : [])],
   'chat:resume': ([projectPath]) => [projectPath],
@@ -118,7 +121,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
       const kept = await Promise.all(result.map(root => allows(root)));
       return result.filter((_root, index) => kept[index]);
     }
-    if (method === 'project:recent' && Array.isArray(result)) {
+    if ((method === 'project:recent' || method === 'project:find') && Array.isArray(result)) {
       const kept = await Promise.all(result.map(entry => allows(entry?.path)));
       return result.filter((_entry, index) => kept[index]);
     }

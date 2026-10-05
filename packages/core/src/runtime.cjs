@@ -38,6 +38,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
+const { createProjectFinder } = require("./project-finder.cjs");
 const { saveProjectState, readProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
@@ -722,6 +723,9 @@ function createRuntime(options) {
   });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
   commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
+  // The phone's project search: Git repositories under the home folder, matched by name (see project-finder.cjs).
+  const projectFinder = createProjectFinder(options.projectSearchRoot || require("node:os").homedir());
+  commands.handle("project:find", (_event, query) => projectFinder.search(typeof query === "string" ? query.slice(0, 200) : ""));
 
 
   function close() {

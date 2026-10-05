@@ -380,3 +380,14 @@ test('a confined phone still gets streaming turns slimmed, on /runs and /snapsho
   }
   await f.rpc('agent:interrupt', [chatId]);
 });
+
+test('the project search lists only repositories inside the folder, and a Project icon only for one inside', async t => {
+  const f = await fixture(t, { runtime: options => ({ ...options, projectSearchRoot: path.dirname(options.cwd) }) });
+  const found = await f.rpc('project:find', ['']);
+  assert.equal(found.status, 200);
+  assert.deepEqual(found.body.result.map(entry => entry.path), [f.demo], 'the outside repository stays hidden');
+  assert.equal((await f.owner.call('project:find', [''])).some(entry => entry.path === f.outside), true, 'the owner side sees both');
+  assert.equal((await f.rpc('project:open', [f.demo])).status, 200);
+  assert.equal((await f.rpc('project:image', [f.demo])).status, 200);
+  assert.equal((await f.rpc('project:image', [f.outside])).status, 403);
+});

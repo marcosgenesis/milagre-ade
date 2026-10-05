@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
-import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, Folder01Icon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
@@ -12,10 +12,12 @@ import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
 import { Icon } from './icons';
 import { LoadingLogo } from './loading-logo';
-import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from './ui';
+import { ErrorNotice, Field, IconButton, PageScroll, PullDown, colors, styles } from './ui';
 import { SettingsView, type SettingsPage } from './app/settings';
 import { NotificationsView } from './app/notifications';
 import { UsageSection } from './usage-section';
+import { ProjectIcon } from './project-icon';
+import { ProjectSearch } from './project-search';
 import { chatMenu, runChatAction } from './chat-actions';
 import { confirm } from './confirm-store';
 
@@ -42,9 +44,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const [query, setQuery] = useState('');
   const [show, setShow] = useState<Show>('all');
   // Settings open inside the navigation, so reaching them never passes through the screen behind it.
-  const [page, setPage] = useState<'settings' | SettingsPage | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [path, setPath] = useState('');
+  const [page, setPage] = useState<'settings' | SettingsPage | 'add' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -146,7 +146,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // A typed path opens like any Project: the Chat loads it behind the splash mark and shows a wrong path with Retry.
   function addProject(projectPath: string) {
     if (busy || !session.client) return;
-    setAdding(false); setPath('');
+    setPage(null);
     onNavigate({ pathname: '/chat', params: { projectPath, hostId: session.client.url } });
   }
   async function switchComputer(id: string) {
@@ -161,16 +161,16 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
     finally { if (alive.current) setBusy(false); }
   }
   const footer = <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-    <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setAdding(value => !value)} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setPage('add')} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
     <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => setPage('settings')} />
   </View>;
   if (page) return <View style={styles.screen}>
     <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <IconButton label={page === 'settings' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' ? null : 'settings')} />
-      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
+      <IconButton label={page === 'settings' || page === 'add' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' || page === 'add' ? null : 'settings')} />
+      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'add' ? 'Add project' : page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
       {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
     </View>
-    {page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
+    {page === 'add' ? <ProjectSearch onOpen={addProject} /> : page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
   </View>;
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 16, paddingBottom: 12 }}>
@@ -206,7 +206,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
           // A tap folds the group; a long press opens the Project's menu.
           return <View style={s.project}>
             <PullDown label={`${item.expanded ? 'Collapse' : 'Expand'} ${item.name}`} title={item.name} sections={menu} onSelect={choose} onPress={() => setExpanded(previous => { const next = new Set(previous); if (next.has(item.path)) next.delete(item.path); else next.add(item.path); return next; })} style={{ flex: 1 }}>
-              <View style={s.projectTitle}><View style={s.projectIcon}><Icon icon={Folder01Icon} tone="ink2" size={16} /></View><Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
+              <View style={s.projectTitle}><ProjectIcon client={session.client} path={item.path} /><Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
             </PullDown>
             <IconButton label={`New Chat in ${item.name}`} icon={Add01Icon} size={44} disabled={busy} onPress={() => select(item.path)} />
             <PullDown label={`Actions for ${item.name}`} title={item.name} sections={menu} onSelect={choose}>
@@ -232,7 +232,6 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
           </PullDown>
         </View>;
       }} />
-    {adding && <View style={{ padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line }}><Field label="Project path on your computer" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="off" autoFocus onSubmitEditing={() => { if (path.trim().startsWith('/')) addProject(path.trim()); }} /><PillButton title="Open project" disabled={busy || !path.trim().startsWith('/')} onPress={() => addProject(path.trim())} /></View>}
     {footer}
   </KeyboardAvoidingView>;
 }
@@ -245,7 +244,6 @@ const s = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 10, borderCurve: 'continuous', backgroundColor: colors.field },
   project: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
   projectTitle: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 8 },
-  projectIcon: { width: 28, height: 28, borderRadius: 7, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field },
   chat: { flexDirection: 'row', alignItems: 'center', marginVertical: 2, borderRadius: 8, borderCurve: 'continuous' },
   chatBody: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 64, paddingLeft: 12, paddingVertical: 12 },
   filter: { width: 44, height: 44, borderRadius: 10, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center' },

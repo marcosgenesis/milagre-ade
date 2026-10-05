@@ -697,3 +697,13 @@ for (const split of ['steering', 'answers']) test(`a ${split} split preserves th
   assert.deepEqual(await fs.readFile(reply.images[0].path), png);
   assert.equal(await h.host.images.resolve(project, file), reply.images[0].path);
 });
+
+
+test('saved input carries its client correlation id so previews reconcile before the send response', async t => {
+  const { host, manager, saved, published } = harness();
+  t.after(() => manager.closeAll());
+  const sent = await host.send(message(ALPHA, 'Hello', { clientMessageId: 'phone-first-message' }));
+  assert.equal(saved.get(ALPHA).messages[0].clientMessageId, 'phone-first-message');
+  assert.equal(published.find(item => item.event.type === 'message-sent').state.messages[0].clientMessageId, 'phone-first-message');
+  assert.equal(saved.get(ALPHA).messages[0].session_id, sent.sessionId);
+});

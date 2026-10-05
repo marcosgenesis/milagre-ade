@@ -5,10 +5,11 @@ import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'e
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { sessionForWorktree } from '@milagre/shared/model';
+import { createPendingChat, pendingChatSessionId } from '@milagre/shared/chats';
 import type { Client, OpenProject } from '../client';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
-import { useComposer, useSession } from '../session';
+import { useComposer, usePendingChats, useSession } from '../session';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
@@ -34,8 +35,10 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
+  const pendingStore = usePendingChats();
   const insets = useSafeAreaInsets();
-  const [busy, setBusy] = useState(false);
+  const [actionBusy, setBusy] = useState(false);
+  const sendingRef = useRef(false);
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState('');
@@ -54,6 +57,11 @@ export default function ChatScreen() {
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
   const connected = session.client;
   const projectPath = session.snapshot?.project.path;
+  const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
+  const originChatId = `${projectPath}#${params.id ?? `new:${params.worktreeId}`}`;
+  const pending = targetMatches ? Object.values(pendingStore.pendingChats).find(item => item.hostId === connected?.url && item.projectPath === projectPath && (item.originChatId === originChatId || (!!params.id && item.preview.targetSessionId === Number(params.id)))) : undefined;
+  const pendingCanonicalId = pending && session.snapshot ? pendingChatSessionId(session.snapshot.project.state, pending.preview) : null;
+  const busy = actionBusy || !!pending;
   const focused = useRef<object | null>(null);
   useFocusEffect(useCallback(() => { focused.current = { client: connected, projectPath, id: params.id, worktreeId: params.worktreeId }; return () => { focused.current = null; }; }, [connected, projectPath, params.id, params.worktreeId]));
   useEffect(() => {
@@ -65,20 +73,29 @@ export default function ChatScreen() {
     });
     return () => { cancelled = true; };
   }, [connected, projectPath, params.id]);
+  // A screen reopened from the drawer adopts its own acknowledged Chat; the original async handler may be unfocused.
+  const acceptedSessionId = pending?.accepted ? pending.preview.targetSessionId : null;
+  const pendingKey = pending ? `${pending.hostId}|${pending.originChatId}` : null;
+  const { setPendingChats } = pendingStore;
+  useFocusEffect(useCallback(() => {
+    if (acceptedSessionId === null || pending?.promoted || !pendingKey) return;
+    router.setParams({ id: String(acceptedSessionId) });
+    setPendingChats(current => current[pendingKey] ? { ...current, [pendingKey]: { ...current[pendingKey], promoted: true } } : current);
+  }, [acceptedSessionId, pending?.promoted, pendingKey, setPendingChats]));
   const allMessages = session.snapshot?.project.state.messages;
   const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
-  const messages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
+  const savedMessages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
+  const messages = useMemo(() => pending ? pendingCanonicalId !== null ? (allMessages || []).filter(message => message.session_id === pendingCanonicalId) : [pending.preview.message] : savedMessages, [pending, pendingCanonicalId, allMessages, savedMessages]);
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   const { rememberChat } = session;
-  const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
   const canRemember = !!params.id && !!session.snapshot?.project.state.sessions[Number(params.id)] && targetMatches;
   useFocusEffect(useCallback(() => {
     if (canRemember) rememberChat(Number(params.id));
   }, [canRemember, params.id, rememberChat]));
-  const panels = useSidePanels({ chatId: params.id ? Number(params.id) : undefined, worktreeId: targetMatches && worktreeOf ? worktreeOf.id : undefined });
+  const panels = useSidePanels({ chatId: pending ? pendingCanonicalId ?? pending.preview.session.id : params.id ? Number(params.id) : undefined, worktreeId: targetMatches && worktreeOf ? worktreeOf.id : undefined });
   // A Chat picked in another Project opens that Project here, behind the splash mark, rather than in the navigation.
   const { wanted, error: openError, retry: retryOpen } = useOpenProject(params);
   // A new Chat picked without a Worktree starts in the Project's own checkout once the Project is here.
@@ -122,7 +139,7 @@ export default function ChatScreen() {
   const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
   const branchName = newWorktree ? base || 'Choose branch' : worktree?.name || 'Choose branch';
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== 'ready';
-  const title = chat?.title || chat?.generatedTitle || 'New Chat';
+  const title = chat?.title || chat?.generatedTitle || pending?.preview.session.title || 'New Chat';
   async function action(work: () => Promise<unknown>) {
     if (busy) return false;
     setBusy(true); setError('');
@@ -141,31 +158,51 @@ export default function ChatScreen() {
     finally { setPicking(false); }
   }
   async function send(body = draft, withAttachments = true) {
+    if (busy || sendingRef.current || pending || picking || (!body && !(withAttachments && attachments.length))) return;
+    sendingRef.current = true;
+    setBusy(true); setError('');
     const sent = body;
+    const sendingProjectPath = project.path;
     const sending = withAttachments ? attachments : [];
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
-    await action(async () => {
-      const media = await prepareAttachments(client, project.path, sending);
+    const firstMessage = savedMessages.length === 0;
+    const clearsDraft = sent === draft;
+    const key = `${client.url}|${chatId}`;
+    const preview = firstMessage ? createPendingChat({ state: project.state, worktreeId, sessionId: params.id ? Number(params.id) : null, body: sent, images: sending.flatMap(item => item.image ? [item.image] : []), files: sending.filter(item => !item.image).map(item => item.path || item.name), model: model.id, provider: actualProvider }) : null;
+    if (preview) {
+      pendingStore.setPendingChats(current => ({ ...current, [key]: { preview, hostId: client.url, projectPath: sendingProjectPath, originChatId: chatId, originSessionId: params.id ? Number(params.id) : null, worktreeId, newWorktree, accepted: false } }));
+      if (clearsDraft) composer.setDrafts(current => ({ ...current, [chatId]: '' }));
+      const sentIds = new Set(sending.map(item => item.id));
+      composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(item => !sentIds.has(item.id)) }));
+      following.current = true;
+      Keyboard.dismiss();
+    }
+    const options = sendOptions(model, preferences);
+    let accepted = false;
+    try {
+      const media = await prepareAttachments(client, sendingProjectPath, sending);
       let target = { sessionId: params.id ? Number(params.id) : null as number | null, worktreeId };
       if (newWorktree) {
         if (!base) throw new Error(branches?.error || 'Choose a base branch before sending.');
         let ready = preparedTarget.current;
-        if (!ready || ready.client !== client || ready.path !== project.path || ready.base !== base) {
-          const created = await client.call<{ project: OpenProject; worktreeId: number }>('worktree:create', [{ projectPath: project.path, baseBranch: base, prompt: sent }]);
+        if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base) {
+          const created = await client.call<{ project: OpenProject; worktreeId: number }>('worktree:create', [{ projectPath: sendingProjectPath, baseBranch: base, prompt: sent }]);
           const chat = sessionForWorktree(created.project.state, created.worktreeId);
           if (!chat) throw new Error('No Chat was created for the new worktree.');
-          ready = { client, path: project.path, base, worktreeId: created.worktreeId, sessionId: chat.id };
+          ready = { client, path: sendingProjectPath, base, worktreeId: created.worktreeId, sessionId: chat.id };
           preparedTarget.current = ready;
         }
-        if (!current()) return;
         target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
       }
-      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: project.path, ...target, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...sendOptions(model, preferences) }]);
-      if (newWorktree && !current()) return;
-      const destination = `${project.path}#${result.sessionId}`;
-      if (sent === draft) composer.setDrafts(current => {
-        const remaining = current[chatId] === sent ? '' : current[chatId] || '';
+      if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], preview: { ...current[key].preview, targetSessionId: target.sessionId } } } : current);
+      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: sendingProjectPath, ...target, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }]);
+      accepted = true;
+      const promote = current();
+      if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], accepted: true, promoted: promote, preview: { ...current[key].preview, targetSessionId: result.sessionId } } } : current);
+      const destination = `${sendingProjectPath}#${result.sessionId}`;
+      if (clearsDraft || firstMessage) composer.setDrafts(current => {
+        const remaining = !firstMessage && clearsDraft && current[chatId] === sent ? '' : current[chatId] || '';
         const preserved = destination !== chatId ? current[destination] || '' : '';
         const next = { ...current, [destination]: [preserved, remaining].filter(Boolean).join('\n') };
         if (destination !== chatId) delete next[chatId];
@@ -184,10 +221,24 @@ export default function ChatScreen() {
         if (destination !== chatId) delete next[chatId];
         return next;
       });
-      following.current = true;
-      Keyboard.dismiss();
-      if (!params.id) router.setParams({ id: String(result.sessionId) });
-    });
+      session.expectActivity();
+      if (current()) {
+        following.current = true;
+        Keyboard.dismiss();
+        if (!params.id) router.setParams({ id: String(result.sessionId) });
+      }
+      await session.refresh();
+    } catch (e) {
+      if (!accepted && preview) {
+        pendingStore.setPendingChats(current => { const next = { ...current }; delete next[key]; return next; });
+        if (clearsDraft) composer.setDrafts(current => ({ ...current, [chatId]: [draft, current[chatId]].filter(Boolean).join('\n\n') }));
+        composer.setAttachments(current => ({ ...current, [chatId]: [...sending, ...(current[chatId] || []).filter(item => !sending.some(sent => sent.id === item.id))] }));
+      }
+      if (current()) setError((e as Error).message);
+    } finally {
+      sendingRef.current = false;
+      setBusy(false);
+    }
   }
   function headerAction(id: string) {
     if (id === 'changes') panels.show('right');
@@ -245,9 +296,9 @@ export default function ChatScreen() {
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
       {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
-      {chat && messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />)}
+      {messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />)}
       {run && <ChatReply run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />}
-      {run && <ThinkingIndicator startedAt={run.startedAt} label={run.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
+      {(run || pending) && <ThinkingIndicator startedAt={pending?.preview.startedAt ?? run?.startedAt} label={run?.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
     </KeyboardChatScrollView>

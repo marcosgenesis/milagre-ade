@@ -10,6 +10,7 @@ import type { SavedHost } from './hosts-store';
 import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/shared/model';
 import type { Attachment } from './attachments';
 import { defaultPreferences, type TurnPreferences } from './turn-options';
+import { pendingChatSessionId, type PendingChat } from '@milagre/shared/chats';
 
 const hostOf = (url: string) => /^relay:/.test(url) ? 'Mac' : String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 /** A computer to connect to: a saved one, a scanned pairing, or an address and token typed in. */
@@ -212,6 +213,22 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
 }
 type Composer = { defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
 const ComposerContext = createContext<Composer | null>(null);
+export type MobilePendingChat = { preview: PendingChat; hostId: string; projectPath: string; originChatId: string; originSessionId: number | null; worktreeId: number; newWorktree: boolean; accepted: boolean; promoted?: boolean };
+type PendingChats = { pendingChats: Record<string, MobilePendingChat>; setPendingChats: React.Dispatch<React.SetStateAction<Record<string, MobilePendingChat>>> };
+const PendingChatsContext = createContext<PendingChats | null>(null);
+function PendingChatsProvider({ children, snapshot, hostId }: { children: React.ReactNode; snapshot: Snapshot | null; hostId?: string }) {
+  const [pendingChats, setPendingChats] = useState<Record<string, MobilePendingChat>>({});
+  // Retire acknowledged previews as the live snapshot catches up, before children render the new state.
+  const accepted = snapshot ? Object.entries(pendingChats).filter(([, pending]) => pending.accepted && pending.promoted && pending.hostId === hostId && pending.projectPath === snapshot.project.path && pendingChatSessionId(snapshot.project.state, pending.preview) !== null).map(([key]) => key) : [];
+  if (accepted.length) setPendingChats(current => Object.fromEntries(Object.entries(current).filter(([key]) => !accepted.includes(key))));
+  const value = useMemo(() => ({ pendingChats, setPendingChats }), [pendingChats]);
+  return <PendingChatsContext.Provider value={value}>{children}</PendingChatsContext.Provider>;
+}
+export function usePendingChats() {
+  const pending = useContext(PendingChatsContext);
+  if (!pending) throw new Error('SessionProvider is required');
+  return pending;
+}
 export function useComposer() {
   const composer = useContext(ComposerContext);
   if (!composer) throw new Error('SessionProvider is required');
@@ -220,7 +237,7 @@ export function useComposer() {
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const session = useSessionState();
-  return <SessionContext.Provider value={session}><ComposerProvider>{children}</ComposerProvider></SessionContext.Provider>;
+  return <SessionContext.Provider value={session}><PendingChatsProvider snapshot={session.snapshot} hostId={session.client?.url}><ComposerProvider>{children}</ComposerProvider></PendingChatsProvider></SessionContext.Provider>;
 }
 export function useSession() {
   const session = useContext(SessionContext);

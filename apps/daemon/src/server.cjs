@@ -157,7 +157,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     }
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
-  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), ...phoneOptions });
+  // A first pairing is announced to the desktop, which tells the owner in case it was not them.
+  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), onPaired: info => broadcast('phone:paired', info), ...phoneOptions });
   const server = net.createServer(socket => {
     if (stopping) { socket.destroy(); return; }
     const inflight = new Set();

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { readIdentity, rotateIdentity, createPhones } = require('./relay-identity.cjs');
+const { readIdentity, rotateIdentity, readRetired, createPhones } = require('./relay-identity.cjs');
 
 test('identity is created once, private, and stable', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-id-'));
@@ -53,4 +53,43 @@ test('rotating the identity replaces both key pairs, privately, and is what late
   assert.deepEqual(again.box.publicKey, rotated.box.publicKey);
   assert.equal((await fs.stat(path.join(dir, 'relay-identity.json'))).mode & 0o777, 0o600);
   assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.tmp')), []);
+});
+
+test('a rotation that retires keeps the old signing key, privately, until its time is up', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-retire-'));
+  const first = await readIdentity(dir);
+  assert.deepEqual(await readRetired(dir, 0), []);
+  const second = await rotateIdentity(dir, { retireUntil: 100, now: 0 });
+  const retired = await readRetired(dir, 50);
+  assert.equal(retired.length, 1);
+  assert.equal(retired[0].hostId, first.hostId);
+  assert.deepEqual(retired[0].sign.secretKey, first.sign.secretKey);
+  assert.equal(retired[0].box, undefined, 'only the signing key is kept');
+  assert.equal(retired[0].until, 100);
+  assert.notEqual(retired[0].hostId, second.hostId);
+  assert.deepEqual(await readRetired(dir, 100), [], 'gone once its time is up');
+  assert.equal((await fs.stat(path.join(dir, 'relay-retired.json'))).mode & 0o777, 0o600);
+});
+
+test('a plain rotation retires nothing, and only the last three retired identities are kept', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-retire-cap-'));
+  await readIdentity(dir);
+  await rotateIdentity(dir);
+  assert.deepEqual(await readRetired(dir, 0), []);
+  const ids = [];
+  for (let i = 0; i < 4; i++) { ids.push((await readIdentity(dir)).hostId); await rotateIdentity(dir, { retireUntil: 1000, now: 0 }); }
+  assert.deepEqual((await readRetired(dir, 0)).map(entry => entry.hostId), ids.slice(1));
+});
+
+test('the phone list counts its phones', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-count-'));
+  const phones = createPhones(dir);
+  await phones.load();
+  assert.equal(phones.count(), 0);
+  await phones.add('phoneA');
+  await phones.add('phoneB');
+  await phones.add('phoneA');
+  assert.equal(phones.count(), 2);
+  await phones.clear();
+  assert.equal(phones.count(), 0);
 });

@@ -10,6 +10,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const TOKEN = 'a'.repeat(64);
 const OLDER_CODE = 'This phone was paired with an older code. Scan the new one in Settings → Phone.';
+const RESET = 'This Mac was reset. Scan its new pairing code in Settings → Phone.';
 const CLOSED_PAIRING = 'Pairing is closed on your Mac. Open Settings → Phone on it and scan the code again.';
 const OFFLINE = 'Your Mac isn\'t reachable. Open Milagre on it and check Settings → Phone.';
 const LOST = 'Connection lost. Reconnect to your computer. Check the Chat before sending again.';
@@ -34,7 +35,7 @@ function clock() {
 
 type Answer = { status?: number; headers?: Record<string, string>; body?: Uint8Array | string } | 'never';
 type Seen = { method: string; path: string; headers: Record<string, string>; body: Uint8Array };
-type Mode = 'host' | 'offline' | 'bad-token' | 'unknown-phone' | 'impostor';
+type Mode = 'host' | 'offline' | 'bad-token' | 'reset' | 'unknown-phone' | 'impostor';
 
 /** A relay with a Mac behind it: each socket the phone opens gets its own hostAccept, as the daemon does per connection. */
 function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":"pong"}' })) {
@@ -88,8 +89,10 @@ function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":
     say(message: RelayMessage) { this.toPhone(this.channel!.seal(message)); }
     receive(bytes: Uint8Array) {
       if (!this.channel) {
-        if (state.mode === 'bad-token' || state.mode === 'unknown-phone') {
-          this.toPhone(new Uint8Array([0x04, ...encoder.encode(JSON.stringify({ t: 'error', code: state.mode }))]));
+        if (state.mode === 'bad-token' || state.mode === 'unknown-phone' || state.mode === 'reset') {
+          // A reset Mac's old room answers what the daemon's retired host sends.
+          const refusal = state.mode === 'reset' ? { t: 'error', code: 'bad-token', reason: 'reset' } : { t: 'error', code: state.mode };
+          this.toPhone(new Uint8Array([0x04, ...encoder.encode(JSON.stringify(refusal))]));
           return void queueMicrotask(() => this.drop(1005));
         }
         try {
@@ -205,6 +208,18 @@ test('a stale pairing says to scan again, and does not reconnect', async () => {
   fake.state.mode = 'host';
   assert.equal((await GET(transport)).status, 200);
   assert.equal(fake.sockets.length, 2);
+  transport.close();
+});
+
+test('a Mac that was reset says to scan its new code, and does not reconnect', async () => {
+  const fake = relay();
+  fake.state.mode = 'reset';
+  const { transport, queue } = transportFor(fake);
+  await assert.rejects(GET(transport), { name: 'RelayTransportError', code: 'host-reset', message: RESET });
+  await settle();
+  assert.equal(queue.length, 0, 'no retry timer');
+  await assert.rejects(GET(transport), { message: RESET });
+  assert.equal(fake.sockets.length, 1, 'later requests fail fast without a socket');
   transport.close();
 });
 

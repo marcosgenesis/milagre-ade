@@ -17,6 +17,7 @@ function setup({ focused = false } = {}) {
     },
     isAppFocused: () => state.focused,
     openChat: (chatId) => opened.push(chatId),
+    openPhoneSettings: () => opened.push("settings:phone"),
   });
   return { notifier, shown, opened, state };
 }
@@ -137,4 +138,19 @@ test('Dock counts distinct waiting or unread chats, survives project changes, an
   assert.equal(badge, '2');
   notifier.sync({ projectPath: '/shop', unread: [], showDockBadge: false });
   assert.equal(badge, '');
+});
+
+test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Phone", () => {
+  const { notifier, shown, opened } = setup({ focused: true });
+  assert.equal(notifier.notifyPhonePaired(), true);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].visible, true);
+  assert.equal(shown[0].options.title, "New phone paired");
+  assert.match(shown[0].options.body, /If it wasn't you, reset access in Settings → Phone/);
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  // A second pairing replaces the first notice.
+  notifier.notifyPhonePaired();
+  assert.equal(shown[0].closed, true);
+  assert.equal(shown[1].visible, true);
 });

@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { createPhone, LOCAL_PORT } = require('./phone.cjs');
+const { createPhone, LOCAL_PORT, RETIRED_MS } = require('./phone.cjs');
 const { createPhones } = require('./relay-identity.cjs');
 
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
@@ -42,17 +42,20 @@ async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDel
     return tunnel;
   } };
   const relays = [];
+  // Hosts that only hold a room a reset retired, kept apart from the Mac's own.
+  const retired = [];
   const startRelay = options => {
-    const relay = { options, closed: false, state: 'connecting', status: () => relay.state, close: async () => { relay.closed = true; log.push('relay:close'); } };
-    relays.push(relay);
-    log.push('relay:start');
+    const relay = { options, closed: false, state: 'connecting', status: () => relay.state, close: async () => { relay.closed = true; log.push(options.retired ? 'retired:close' : 'relay:close'); } };
+    (options.retired ? retired : relays).push(relay);
+    log.push(options.retired ? 'retired:start' : 'relay:start');
     return relay;
   };
   const changes = [];
-  const create = () => createPhone({ dataDir, tunnels, startBridge, startRelay, now: () => clock.now, retryDelaysMs, name: () => 'Test Mac', onChange: status => changes.push(status.state) });
+  const paired = [];
+  const create = () => createPhone({ dataDir, tunnels, startBridge, startRelay, now: () => clock.now, retryDelaysMs, name: () => 'Test Mac', onChange: status => changes.push(status.state), onPaired: info => paired.push(info) });
   const phone = create();
   t.after(() => phone.close());
-  return { dataDir, phone, create, log, bridges, tunnelsStarted, relays, clock, changes, file: path.join(dataDir, 'mobile.json') };
+  return { dataDir, phone, create, log, bridges, tunnelsStarted, relays, retired, paired, clock, changes, file: path.join(dataDir, 'mobile.json') };
 }
 
 test('a phone that was never enabled is off and starts nothing', async t => {
@@ -212,6 +215,110 @@ test('reset while off forgets relay phones too', async t => {
   const after = createPhones(dataDir);
   await after.load();
   assert.equal(after.isKnown('phoneA'), false);
+});
+
+test('status counts the paired phones, and a first pairing is announced once', async t => {
+  const { phone, relays, paired, changes } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(phone.status().pairedPhones, 0);
+  const before = changes.length;
+  // The relay host adds a phone only when it pairs for the first time.
+  await relays[0].options.phones.add('phoneA');
+  assert.equal(relays[0].options.phones.isKnown('phoneA'), true);
+  assert.equal(phone.status().pairedPhones, 1);
+  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.equal(changes.length, before + 1, 'Settings hears the new count');
+  await relays[0].options.phones.add('phoneB');
+  assert.deepEqual(paired, [{ pairedPhones: 1 }, { pairedPhones: 2 }]);
+  await phone.reset();
+  await phone.settled();
+  assert.equal(phone.status().pairedPhones, 0, 'a reset forgets them');
+});
+
+test('a phone the old host pairs while a reset tears it down is not announced', async t => {
+  const { phone, relays, paired, clock } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const old = relays[0];
+  old.close = async () => { await old.options.phones.add('late'); old.closed = true; };
+  clock.now = 1;
+  await phone.reset();
+  await phone.settled();
+  assert.deepEqual(paired, []);
+  assert.equal(phone.status().pairedPhones, 0);
+});
+
+test('reset keeps the old room answering, only to say the Mac was reset', async t => {
+  const { phone, relays, retired, log } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await relays[0].options.phones.add('phoneA');
+  const old = relays[0].options.identity;
+  log.length = 0;
+  await phone.reset();
+  await phone.settled();
+  assert.equal(retired.length, 1);
+  assert.equal(retired[0].options.retired, true);
+  assert.equal(retired[0].options.identity.hostId, old.hostId);
+  assert.deepEqual(retired[0].options.identity.sign.publicKey, old.sign.publicKey);
+  // It holds no token, bridge or phone list: it can let nobody in.
+  for (const key of ['token', 'bridgeUrl', 'phones', 'canPair']) assert.equal(retired[0].options[key], undefined, key);
+  assert.notEqual(relays[1].options.identity.hostId, old.hostId);
+  assert.deepEqual(log, ['relay:close', 'bridge:close:0', `bridge:start:${LOCAL_PORT}`, 'relay:start', 'retired:start']);
+  // Turning the phone off lets the old room go too.
+  await phone.setEnabled(false);
+  await phone.settled();
+  assert.equal(retired[0].closed, true);
+});
+
+test('a reset with no paired phones retires nothing', async t => {
+  const { phone, retired } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await phone.reset();
+  await phone.settled();
+  assert.equal(retired.length, 0);
+});
+
+test('an old room is let go once its time is up', async t => {
+  const { phone, relays, retired, clock } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await relays[0].options.phones.add('phoneA');
+  await phone.reset();
+  await phone.settled();
+  assert.equal(retired.length, 1);
+  clock.now = RETIRED_MS - 1;
+  await phone.setEnabled(false);
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(retired.length, 2, 'still held after a restart');
+  clock.now = RETIRED_MS;
+  await phone.setEnabled(false);
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(retired.length, 2, 'not held any more');
+});
+
+test('a reset that fails while the phone is off stays off and says it failed', async t => {
+  const { phone, dataDir, changes } = await fixture(t);
+  await fs.mkdir(path.join(dataDir, 'relay-phones.json'));
+  await assert.rejects(phone.reset());
+  assert.deepEqual(phone.status(), { enabled: false, state: 'off', remote: 'none' });
+  assert.equal(changes.includes('error'), false);
+});
+
+test('reset needs neither a phone nor the relay: it finishes while the relay is unreachable', async t => {
+  const { phone, relays, file } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  relays[0].options.onStatus('offline');
+  const before = JSON.parse(await fs.readFile(file, 'utf8')).token;
+  await phone.reset();
+  await phone.settled();
+  assert.equal(phone.status().state, 'on');
+  assert.notEqual(JSON.parse(await fs.readFile(file, 'utf8')).token, before);
 });
 
 test('disabling stops the relay before the bridge', async t => {

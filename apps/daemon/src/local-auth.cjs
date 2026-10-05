@@ -22,8 +22,11 @@ function prepareToken(dataDir) {
 
 function readToken(dataDir) {
   const file = tokenPath(dataDir);
-  assertPrivate(path.dirname(file));
+  // The completed token is published after the daemon secures its directory.
+  // Before publication, ENOENT tells bootstrap to retry, rather than treating
+  // the directory's intermediate owner/ACL as a permanent security failure.
   assertPrivate(file);
+  assertPrivate(path.dirname(file));
   const token = fs.readFileSync(file, 'utf8');
   if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid local daemon authentication token');
   return token;

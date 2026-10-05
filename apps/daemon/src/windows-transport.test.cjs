@@ -9,6 +9,36 @@ const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
 const { readToken, tokenPath } = require('./local-auth.cjs');
 
+test('an unpublished token reports ENOENT while its private directory is still being secured', async t => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-auth-unready-'));
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const directory = path.dirname(tokenPath(dataDir));
+  await fs.mkdir(directory, { mode: 0o755 });
+  await fs.chmod(directory, 0o755);
+  assert.throws(() => readToken(dataDir), { code: 'ENOENT' });
+});
+
+test('Windows detached bootstrap attaches to fresh authenticated profiles repeatedly', { skip: process.platform !== 'win32', timeout: 120000 }, async t => {
+  const { ensureDaemon } = require('./bootstrap.cjs');
+  const clients = [];
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-native-bootstrap-')));
+  t.after(async () => {
+    for (const client of clients) { try { await client.call('daemon:stop'); } catch {} client.close(); }
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  for (let index = 0; index < 3; index++) {
+    const dataDir = path.join(directory, 'profile-' + index);
+    const client = await ensureDaemon({ dataDir, version: 'native-bootstrap', cwd: directory, startupTimeoutMs: 30000 });
+    clients.push(client);
+    const status = await client.call('daemon:status');
+    assert.equal(status.version, 'native-bootstrap');
+    assert.equal(status.dataDir, dataDir);
+    assert.notEqual(status.pid, process.pid);
+    const reconnected = await connect({ dataDir }); clients.push(reconnected);
+    assert.equal((await reconnected.call('daemon:status')).pid, status.pid);
+  }
+});
+
 async function fixture(t, options = {}) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-auth-')));
   const daemon = await startDaemon({ dataDir, version: 'test', requireAuthentication: true, runtimeOptions: { cwd: dataDir, environmentReady: Promise.resolve(), titleModels: {} }, ...options });

@@ -1,6 +1,6 @@
 // Run with npm run test:phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
 // directory and socket, port chosen by the OS): turn phone access on, see the QR code and the relay status, copy the
-// link, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
+// link, see a phone pair, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -25,6 +25,7 @@ window.milagre = new Proxy({
   readUsage: async () => ({ providers: [] }),
   getUpdateState: async () => ({ status: "idle" }),
   getAppVersion: async () => "0.0.0",
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
   setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
@@ -47,12 +48,15 @@ async function browserChecks() {
   app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-ui-")));
   const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-host-")));
   await app.whenReady();
-  // The check never dials the public relay: this stand-in reports that it connected.
-  const startRelay = (options) => { setTimeout(() => options.onStatus("online"), 20); return { close: async () => {}, status: () => "online" }; };
+  // The check never dials the public relay: this stand-in reports that it connected. A reset's retired room has no onStatus.
+  const relays = [];
+  const startRelay = (options) => { relays.push(options); setTimeout(() => options.onStatus?.("online"), 20); return { close: async () => {}, status: () => "online" }; };
   const daemon = await startDaemon({ dataDir, version: "test", phoneOptions: { localPort: 0, startRelay }, runtimeOptions: {
     cwd: dataDir, environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
   } });
   const host = await connect({ dataDir });
+  const paired = [];
+  host.on("event", ({ channel, payload }) => { if (channel === "phone:paired") paired.push(payload); });
   const window = new BrowserWindow({ width: 1100, height: 760, useContentSize: true, show: false, webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false } });
   for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"]) ipcMain.handle(method, (_event, ...args) => host.call(method, args));
   host.on("event", ({ channel, payload }) => { if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload); });
@@ -119,6 +123,15 @@ async function browserChecks() {
     assert.match(copied, /^milagre:\/\/pair\?relay=/);
     console.log("PASS: Copy pairing link copies the link");
 
+    // Paired phones: none yet, then one once a phone pairs through the relay (here, the host's phone list directly).
+    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
+    await relays.filter((options) => !options.retired).at(-1).phones.add("phone-key");
+    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === '1 phone'`);
+    assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+    await evaluate(`document.querySelector('[data-phone-paired]').scrollIntoView({ block: 'center' })`);
+    await screenshot("phone-paired");
+    console.log("PASS: a phone pairing shows in Paired phones and is announced to the desktop");
+
     // Reset asks first, and cancelling changes nothing.
     await click("Reset access");
     await waitFor(`document.body.textContent.includes('must scan again')`);
@@ -133,7 +146,12 @@ async function browserChecks() {
     for (let n = 0; n < 200 && second === first; n++) { await delay(25); second = await token().catch(() => first); }
     await waitFor(`(() => { const img = document.querySelector('[data-phone-qr]'); return img && img.complete && img.naturalWidth > 0 && document.body.textContent.includes('Make a new code'); })()`);
     assert.notEqual(second, first);
-    console.log("PASS: reset asks first and then makes a new token");
+    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
+    // The old room is held only to tell the phone that paired there that this Mac was reset.
+    const retired = relays.filter((options) => options.retired);
+    assert.equal(retired.length, 1);
+    assert.equal(retired[0].token, undefined);
+    console.log("PASS: reset asks first, makes a new token, forgets the paired phone and keeps the old room answering");
 
     // Off: the code goes away and the host keeps the setting.
     await evaluate(`${toggle}.click()`);

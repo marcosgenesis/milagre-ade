@@ -142,5 +142,10 @@ const bridge = {
     ipcRenderer.on("notification:open-chat", listener);
     return () => ipcRenderer.removeListener("notification:open-chat", listener);
   },
+  onOpenPhoneSettings: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("notification:open-phone-settings", listener);
+    return () => ipcRenderer.removeListener("notification:open-phone-settings", listener);
+  },
 };
 contextBridge.exposeInMainWorld("milagre", bridge);

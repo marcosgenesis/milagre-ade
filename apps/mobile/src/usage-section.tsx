@@ -1,6 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppState, Text, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { RefreshIcon } from '@hugeicons/core-free-icons';
 import type { ProviderUsage, UsageWindow } from '@milagre/shared/model';
 import { providerName } from '@milagre/shared/providers';
@@ -47,12 +46,13 @@ export function UsageSection() {
   const session = useSession();
   const usage = useUsage(session.client);
   const [now, setNow] = useState(Date.now);
-  useFocusEffect(useCallback(() => {
+  // A plain effect: the section also shows in the navigation panel, which sits outside the router's screens.
+  useEffect(() => {
     const tick = () => { if (AppState.currentState === 'active') setNow(Date.now()); };
     tick(); const timer = setInterval(tick, 30000);
     const subscription = AppState.addEventListener('change', tick);
     return () => { clearInterval(timer); subscription.remove(); };
-  }, []));
+  }, []);
   const providers = usage.snapshot?.providers.filter(provider => provider.status !== 'unavailable') ?? [];
   return <View style={{ gap: 8 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 16 }}>

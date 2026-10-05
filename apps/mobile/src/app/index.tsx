@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession, type HostLink } from '../session';
 import { usePush } from '../push';
 import { savedHosts } from '../hosts-native';
+import { confirmSheet } from '../confirm-store';
 import { createClient } from '../client';
 import { relayRuntime } from '../relay-native';
 import type { SavedHost } from '../hosts-store';
@@ -56,7 +57,7 @@ export default function ComputersScreen() {
   }, [session.hosts, session.booted]); // eslint-disable-line react-hooks/exhaustive-deps
   function manage(host: SavedHost, action: string) {
     if (action === 'rename') Alert.prompt('Rename computer', undefined, name => void savedHosts.rename(host.id, name).then(load).catch(e => setError(e.message)), 'plain-text', host.name);
-    if (action === 'forget') Alert.alert(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(() => { if (host.relay) relayRuntime.forget(host.relay.hostId); }).then(load).catch(e => setError(e.message)); } }]);
+    if (action === 'forget') confirmSheet(`Forget ${host.name}?`, 'You will need to scan its code again to reconnect.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Forget', style: 'destructive', onPress: () => { session.cancelNavigation(); if (session.client?.url === host.address) session.disconnect(); void push.forget(host).then(() => savedHosts.forget(host.id)).then(() => { if (host.relay) relayRuntime.forget(host.relay.hostId); }).then(load).catch(e => setError(e.message)); } }]);
   }
   const dot = (state?: Reachability) => state === 'online' ? colors.green : state === 'offline' ? colors.red : colors.orange;
   const label = (state?: Reachability) => state === 'online' ? 'Online' : state === 'offline' ? 'Offline' : 'Checking…';

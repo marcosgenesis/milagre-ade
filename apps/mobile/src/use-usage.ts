@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import type { Client } from './client';
 import { createUsageState, type UsageState } from './usage-state';
 
@@ -11,7 +10,8 @@ const empty = () => EMPTY;
 export function useUsage(client: Client | null) {
   const usage = useMemo(() => client ? createUsageState(client) : null, [client]);
   const state = useSyncExternalStore(usage?.subscribe ?? idleSubscribe, usage?.get ?? empty, empty);
-  useFocusEffect(useCallback(() => {
+  // A plain effect, so usage also loads in the navigation panel, outside the router's screens.
+  useEffect(() => {
     if (!usage) return;
     void usage.loadCached();
     const refresh = () => { if (AppState.currentState === 'active') void usage.refreshIfStale(60000); };
@@ -19,6 +19,6 @@ export function useUsage(client: Client | null) {
     const timer = setInterval(refresh, 5 * 60000);
     const subscription = AppState.addEventListener('change', refresh);
     return () => { clearInterval(timer); subscription.remove(); };
-  }, [usage]));
+  }, [usage]);
   return { ...state, refresh: usage?.refresh ?? (() => Promise.resolve()) };
 }

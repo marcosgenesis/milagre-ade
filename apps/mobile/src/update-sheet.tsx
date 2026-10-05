@@ -93,7 +93,7 @@ export function useUpdatePresentation(state: UpdateState) {
 export function UpdateSheet({ state, onUpdate, onRetry, onDismiss }: { state: UpdateState; onUpdate: () => void; onRetry: () => void; onDismiss: () => void }) {
   const actionable = state.status === 'ready' || state.status === 'error';
   const busy = state.status === 'checking' || state.status === 'downloading' || state.status === 'restarting';
-  const title = state.status === 'checking' ? 'Checking for updates' : state.status === 'downloading' ? 'Downloading update' : state.status === 'restarting' ? 'Applying update' : state.status === 'up-to-date' ? 'Up to date' : 'Update available';
+  const title = state.status === 'checking' ? 'Checking for updates' : state.status === 'downloading' ? 'Downloading update' : state.status === 'restarting' ? 'Applying update' : state.status === 'up-to-date' ? 'Up to date' : state.status === 'check-error' ? 'Could not check for updates' : 'Update available';
   const description = state.status === 'ready' ? 'A new version of Milagre is ready. Update now to restart the app and apply it.' : state.status === 'restarting' ? 'Milagre is restarting with the new version.' : state.status === 'up-to-date' ? 'You have the latest version of Milagre.' : busy ? 'You can keep using Milagre while the update downloads.' : '';
   return <View accessibilityLiveRegion="polite" style={{ padding: 24, paddingTop: 32, gap: 20 }}>
     <View style={{ gap: 10 }}>

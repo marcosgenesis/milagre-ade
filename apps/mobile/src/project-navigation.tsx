@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
-import { Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, Folder01Icon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, Folder01Icon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
@@ -12,8 +12,12 @@ import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
 import { Icon } from './icons';
 import { LoadingLogo } from './loading-logo';
-import { ErrorNotice, Field, IconButton, PillButton, PullDown, colors, styles } from './ui';
+import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from './ui';
+import { SettingsView, type SettingsPage } from './app/settings';
+import { NotificationsView } from './app/notifications';
+import { UsageSection } from './usage-section';
 import { chatMenu, runChatAction } from './chat-actions';
+import { confirm } from './confirm-store';
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -37,6 +41,8 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [show, setShow] = useState<Show>('all');
+  // Settings open inside the navigation, so reaching them never passes through the screen behind it.
+  const [page, setPage] = useState<'settings' | SettingsPage | null>(null);
   const [adding, setAdding] = useState(false);
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
@@ -128,10 +134,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
     if (action === 'copy') { await Clipboard.setStringAsync(projectPath); return; }
     if (action !== 'remove' || !session.client) return;
     const client = session.client;
-    const confirmed = await new Promise<boolean>(resolve => Alert.alert(`Remove ${name}?`, 'It leaves this list on your phone and your Mac. The folder and its Chats stay on your computer; add it again to bring it back.', [
-      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-      { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
-    ]));
+    const confirmed = await confirm(`Remove ${name}?`, 'It leaves this list on your phone and your Mac. The folder and its Chats stay on your computer; add it again to bring it back.', 'Remove');
     if (!confirmed) return;
     setError('');
     try { await client.call('project:forget', [projectPath]); await reloadProjects(); }
@@ -140,15 +143,11 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       if (alive.current) setError(/not available from mobile/i.test(message) ? 'Update Milagre on your Mac to remove Projects from your phone.' : message);
     }
   }
-  // A typed path is checked here first, so a wrong one stays next to the field.
-  async function addProject(projectPath: string) {
+  // A typed path opens like any Project: the Chat loads it behind the splash mark and shows a wrong path with Retry.
+  function addProject(projectPath: string) {
     if (busy || !session.client) return;
-    setBusy(true); setError('');
-    try {
-      const copy = await session.open(projectPath, { background: true });
-      if (copy && alive.current) onNavigate({ pathname: '/chat', params: { projectPath: copy.project.path, hostId: session.client.url } });
-    } catch (e) { if (alive.current) setError((e as Error).message); }
-    finally { if (alive.current) setBusy(false); }
+    setAdding(false); setPath('');
+    onNavigate({ pathname: '/chat', params: { projectPath, hostId: session.client.url } });
   }
   async function switchComputer(id: string) {
     if (busy) return;
@@ -163,7 +162,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   }
   const footer = <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
     <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setAdding(value => !value)} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
-    <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate('/settings', true)} />
+    <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => setPage('settings')} />
+  </View>;
+  if (page) return <View style={styles.screen}>
+    <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <IconButton label={page === 'settings' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' ? null : 'settings')} />
+      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
+      {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
+    </View>
+    {page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
   </View>;
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 16, paddingBottom: 12 }}>
@@ -225,7 +232,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
           </PullDown>
         </View>;
       }} />
-    {adding && <View style={{ padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line }}><Field label="Project path on your computer" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoFocus onSubmitEditing={() => { if (path.trim().startsWith('/')) void addProject(path.trim()); }} /><PillButton title="Open project" disabled={busy || !path.trim().startsWith('/')} onPress={() => void addProject(path.trim())} /></View>}
+    {adding && <View style={{ padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line }}><Field label="Project path on your computer" value={path} onChangeText={setPath} placeholder="/Users/you/Code/project" autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="off" autoFocus onSubmitEditing={() => { if (path.trim().startsWith('/')) addProject(path.trim()); }} /><PillButton title="Open project" disabled={busy || !path.trim().startsWith('/')} onPress={() => addProject(path.trim())} /></View>}
     {footer}
   </KeyboardAvoidingView>;
 }

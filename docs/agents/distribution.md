@@ -59,7 +59,7 @@ Required repository secrets:
 | Linux signing | `LINUX_REPOSITORY_PRIVATE_KEY`, `LINUX_REPOSITORY_KEY_FINGERPRINT` |
 | Cloudflare deployment | `CLOUDFLARE_PACKAGES_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
 
-Apple and Linux signing secrets are configured. Windows signing and Cloudflare deployment secrets still need setup. The existing local Cloudflare token stays in its private environment file; it is not copied into GitHub. Use a dedicated deployment token for the repository workflow.
+Apple and Linux signing secrets and the Cloudflare account ID are configured. Windows signing and the dedicated Cloudflare deployment token still need setup. The existing local Cloudflare token stays in its private environment file; it is not copied into GitHub. Use a dedicated deployment token for the repository workflow.
 
 For the first Linux release, select `initialize_linux_repository=true`. Later releases fetch existing download/index mappings before replacing current metadata. **Deploy Linux package repository** takes the public tag, verifies the bundle against the pinned fingerprint, downloads both public installers to check their hashes, and deploys `packages.milagre.cloud`. No private signing key enters the Worker. Install commands for that domain become usable after this deployment, not after a candidate build.
 
@@ -79,4 +79,6 @@ Local macOS x64/arm64 DMG/ZIP builds and source/packaged desktop checks passed. 
 
 Linux x64 AppImage, DEB and RPM builds passed. Isolated Debian and Fedora containers installed the DEB and signed RPM and passed source/installed desktop checks without disabling Electron's sandbox. Real-tool repository tests verified GPG signatures, APT downloads through the Worker, DEB/RPM installation, and rejection of damaged package bytes. A production-sized signed repository generated a Worker bundle of about 28 KiB.
 
-Windows manifest fixtures passed Microsoft's singleton schema. Native Windows results are recorded with the candidate workflow; passing fixture generation alone does not establish runtime compatibility.
+Windows manifest fixtures passed Microsoft's singleton schema. Native Windows checks passed the Codex protocol, named-pipe authentication, NTFS permissions, process cleanup, PowerShell 7 inheritance, fresh host startup, and real Git worktree identity. A real npm-installed Codex launcher and NSIS installation passed. Source and installed desktop checks preserved saved Chats, provider IDs, settings and drafts across shared clients, host restart and crash recovery; Project ownership errors and Retry also passed.
+
+Full repository CI passed for the final runtime changes: [CI run](https://github.com/the-ptf/milagre-ade/actions/runs/37349549214). Native installer evidence is in the [candidate run](https://github.com/the-ptf/milagre-ade/actions/runs/37349549112); its unsigned artifacts are for testing, while public Windows/Linux publication still requires the credentials and release steps above.

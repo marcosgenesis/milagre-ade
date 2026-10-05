@@ -1,3 +1,5 @@
+const { powershell } = require('../private-files.cjs');
+const { killWindowsTree } = require('./process-tree.cjs');
 // The TCP ports each chat's agent has opened: dev servers, Metro, a database it started.
 // A port belongs to a chat when the process listening on it was started by one of the agent's
 // command shells. The agent CLI's other children (MCP servers) share its process group, while
@@ -20,7 +22,9 @@ const inside = (dir, root) => dir === root || dir.startsWith(root.endsWith(path.
 function parsePs(output) {
   return output.split("\n").flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: match[4].trim() }] : [];
+    if (!match) return [];
+    const windows = /^@(\d+) (.*)$/.exec(match[4].trim());
+    return [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), command: windows ? windows[2] : match[4].trim(), ...(windows ? { startedAt: windows[1] } : {}) }];
   });
 }
 
@@ -151,6 +155,16 @@ function samePorts(a, b) {
 }
 
 const run = (command, args) => new Promise((resolve) => {
+  if (process.platform === "win32") {
+    let script;
+    if (command === 'ps') script = "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {0} @{2} {3}' -f $_.ProcessId,$_.ParentProcessId,$_.CreationDate.ToUniversalTime().Ticks,$_.Name }";
+    else if (command === 'lsof' && args.includes('-iTCP')) {
+      const key = args[args.indexOf('-p') + 1];
+      if (!/^\d+(,\d+)*$/.test(key)) return resolve('');
+      script = `$wanted = @(${key}); Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $wanted -contains $_.OwningProcess } | ForEach-Object { 'p' + $_.OwningProcess; 'c' + (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; 'n' + $_.LocalAddress + ':' + $_.LocalPort }`;
+    } else return resolve('');
+    command = powershell(); args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+  }
   execFile(command, args, { maxBuffer: 8 * 1024 * 1024, timeout: 10_000 }, (_error, stdout) => resolve(stdout ?? ""));
 });
 
@@ -160,11 +174,12 @@ const run = (command, args) => new Promise((resolve) => {
  * whenever they change.
  */
 class PortWatcher {
-  constructor({ roots, publish, pollMs = POLL_MS, idlePollMs = 15_000, isRunning = () => true, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000, now = Date.now, lsofMaxAgeMs = LSOF_MAX_AGE_MS }) {
-    Object.assign(this, { roots, publish, pollMs, idlePollMs, isRunning, exec, kill, graceMs, now, lsofMaxAgeMs });
+  constructor({ platform = process.platform, stopWindowsTree = killWindowsTree, roots, publish, pollMs = POLL_MS, idlePollMs = 15_000, isRunning = () => true, exec = run, kill = (pid, signal) => process.kill(pid, signal), graceMs = 2000, now = Date.now, lsofMaxAgeMs = LSOF_MAX_AGE_MS }) {
+    Object.assign(this, { platform, stopWindowsTree, roots, publish, pollMs, idlePollMs, isRunning, exec, kill, graceMs, now, lsofMaxAgeMs });
     this.listeners = { key: null, at: -Infinity, rows: [] };
     this.groups = new Map();
     this.processes = new Map();
+    this.windowsIdentities = new Map();
     this.ports = {};
     this.timer = null;
     this.polling = false;
@@ -197,6 +212,24 @@ class PortWatcher {
    */
   async stopPort(chatId, pid) {
     if (!this.ports[chatId]?.some((port) => port.pid === pid)) return false;
+    if (this.platform === 'win32') {
+      await this.poll({ fresh: true });
+      if (!this.ports[chatId]?.some(port => port.pid === pid)) return false;
+      const owned = this.groups.get(chatId);
+      const agentPid = this.roots().get(chatId)?.pid;
+      let target = this.processes.get(pid);
+      if (!target || !owned?.has(pid) || target.startedAt !== this.windowsIdentities.get(pid)) return false;
+      const seen = new Set([pid]);
+      while (true) {
+        const parent = this.processes.get(target.ppid);
+        if (!parent || parent.pid === agentPid || !owned.has(parent.pid) || seen.has(parent.pid) || parent.startedAt !== this.windowsIdentities.get(parent.pid)) break;
+        seen.add(parent.pid); target = parent;
+      }
+      if (!target.startedAt) return false;
+      await this.stopWindowsTree(target.pid, undefined, { expectedStartTime: target.startedAt });
+      await this.poll({ fresh: true });
+      return true;
+    }
     const pgid = this.processes.get(pid)?.pgid;
     const target = pgid && this.groups.get(chatId)?.has(pgid) ? -pgid : pid;
     const signal = (name) => {
@@ -225,6 +258,15 @@ class PortWatcher {
       const roots = this.roots();
       if (roots.size || this.groups.size) {
         const processes = parsePs(await this.exec("ps", ["-axo", "pid=,ppid=,pgid=,comm="]));
+        if (this.platform === 'win32') {
+          const stillRunning = this.roots();
+          for (const [chatId, root] of roots) if (stillRunning.get(chatId)?.pid !== root.pid) roots.delete(chatId);
+          const current = new Map(processes.map(row => [row.pid, row.startedAt]));
+          for (const known of this.groups.values()) for (const pid of known) {
+            if (!current.get(pid) || current.get(pid) !== this.windowsIdentities.get(pid)) known.delete(pid);
+          }
+          this.windowsIdentities = current;
+        }
         this.processes = new Map(processes.map((row) => [row.pid, row]));
         const known = new Set([...this.groups.values()].flatMap((set) => [...set]));
         const strays = [...roots.values()].some((root) => root.cwd) ? orphans(processes).filter((row) => !known.has(row.pgid)) : [];

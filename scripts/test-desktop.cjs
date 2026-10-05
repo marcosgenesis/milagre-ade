@@ -1,5 +1,5 @@
 // Runs the real main process, preload, and built renderer against temporary legacy-format data.
-// npm run build && npm run test:desktop [-- --packaged release/mac-arm64/Milagre.app]
+// npm run build && npm run test:desktop [-- --packaged <.app, unpacked directory, or executable>]
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -10,6 +10,12 @@ const { setTimeout: delay } = require("node:timers/promises");
 const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..");
+
+async function packagedExecutable(input) {
+  const bundle = path.resolve(input);
+  if (!(await fs.stat(bundle)).isDirectory()) return bundle;
+  return path.join(bundle, process.platform === 'darwin' ? 'Contents/MacOS/Milagre' : process.platform === 'win32' ? 'Milagre.exe' : 'milagre');
+}
 
 async function waitFor(read, description) {
   for (let i = 0; i < 400; i++) {
@@ -207,9 +213,8 @@ async function main() {
     await checkApp({ executable: require("electron"), args: [path.join(root, "apps/desktop")], profile, project, expectTheme: false });
     const packagedIndex = process.argv.indexOf("--packaged");
     if (packagedIndex !== -1) {
-      assert.ok(process.argv[packagedIndex + 1], "Pass the packaged .app path after --packaged");
-      const bundle = path.resolve(process.argv[packagedIndex + 1]);
-      await checkApp({ executable: path.join(bundle, "Contents/MacOS/Milagre"), args: [], profile, project, expectTheme: true });
+      assert.ok(process.argv[packagedIndex + 1], "Pass the packaged application path after --packaged");
+      await checkApp({ executable: await packagedExecutable(process.argv[packagedIndex + 1]), args: [], profile, project, expectTheme: true });
     }
     const { acquireOwnership } = require("@milagre/core/ownership");
     const owner = acquireOwnership(path.join(project, ".milagre/runtime.lock"));

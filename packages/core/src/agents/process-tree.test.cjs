@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { spawn } = require("node:child_process");
+const { spawnCommand: spawn } = require("./command.cjs");
 const { killTree } = require("./process-tree.cjs");
 const { waitUntil } = require("./test-helpers.cjs");
 
@@ -32,7 +32,7 @@ test("killTree stops the rest of the group after its leader already exited", asy
   t.after(() => {
     if (isAlive(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
   });
-  process.kill(child.pid, "SIGKILL");
+  child.kill("SIGKILL");
   await new Promise((resolve) => child.once("exit", resolve));
   assert.ok(isAlive(grandchildPid));
 

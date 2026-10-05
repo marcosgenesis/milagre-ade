@@ -22,6 +22,8 @@ The screenshot shows the real desktop and mobile interfaces with demo data inspi
 
 Milagre is a public alpha for macOS. Install the [latest release](https://github.com/the-ptf/milagre-ade/releases/latest), then open a Git Project and start a Chat.
 
+Or install with Homebrew: `brew install --cask the-ptf/tap/milagre`. Windows and Linux installers, native checks and signed repository tooling are described in [desktop distribution](docs/agents/distribution.md).
+
 You need at least one local agent CLI, installed and logged in:
 
 | Agent | Minimum version | Sign in |

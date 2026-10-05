@@ -1,9 +1,10 @@
-const { exec } = require("node:child_process");
+const { exec, execFile } = require("node:child_process");
+const { execCommand } = require("./command.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { inspectCli, parseVersion, isAtLeast, MIN_VERSIONS } = require("./cli.cjs");
-const { installDirs, mergePath } = require("./environment.cjs");
+const { installDirs, mergePath, resolveExecutable } = require("./environment.cjs");
 
 function runCommand(cmd, execImpl = exec) {
   return new Promise((resolve) => {
@@ -24,6 +25,7 @@ function runCommand(cmd, execImpl = exec) {
  * that satisfies MIN_VERSIONS.claude.
  */
 function linkNewestClaudeVersion(home = os.homedir()) {
+  if (process.platform === "win32") return false;
   try {
     const versionsDir = path.join(home, ".local/share/claude/versions");
     if (!fs.existsSync(versionsDir)) return false;
@@ -59,7 +61,27 @@ function linkNewestClaudeVersion(home = os.homedir()) {
  * 3. Falls back to `curl -fsSL https://claude.ai/install.sh | bash -s latest`
  * 4. Ensures the symlink points to the newest compliant version
  */
+async function runWindowsCliUpdate(name, { inspect = inspectCli, resolve = resolveExecutable, execFileImpl = execFile } = {}) {
+  if (!['claude', 'codex'].includes(name)) return { ok: false, error: `Unknown provider: ${name}` };
+  let status = await inspect(name);
+  if (name === 'claude' && !status.problem) return { ok: true, version: status.version };
+  const commands = name === 'claude'
+    ? [['claude', ['install', '--force', 'latest']], ['npm', ['install', '-g', '@anthropic-ai/claude-code@latest']], ['claude', ['update']]]
+    : [['codex', ['update']], ['npm', ['install', '-g', '@openai/codex@latest']]];
+  let failure;
+  for (const [program, args] of commands) {
+    const file = await resolve(program);
+    if (file) {
+      failure = await new Promise(done => execCommand(file, args, { encoding: 'utf8', timeout: 120000, windowsHide: true }, (error, _stdout, stderr) => done(error ? error.message || String(stderr) : null), execFileImpl));
+    } else failure = `${program} is not installed on PATH.`;
+    status = await inspect(name);
+    if (!status.problem) return { ok: true, version: status.version };
+  }
+  return { ok: false, version: status.version, error: status.problem || failure || `${name} update did not meet the required version.` };
+}
+
 async function runCliUpdate(name, deps = {}) {
+  if ((deps.platform || process.platform) === 'win32') return runWindowsCliUpdate(name, deps);
   const {
     inspect = inspectCli,
     execImpl = exec,
@@ -83,7 +105,7 @@ async function runCliUpdate(name, deps = {}) {
     }
 
     // 3. Fallback to install.sh latest
-    const fallback = await runCommand("curl -fsSL https://claude.ai/install.sh | bash -s latest", execImpl);
+    const fallback = await runCommand(process.platform === "win32" ? "npm install -g @anthropic-ai/claude-code@latest" : "curl -fsSL https://claude.ai/install.sh | bash -s latest", execImpl);
     linkVersion();
     status = await inspect("claude");
     if (!status.problem) {

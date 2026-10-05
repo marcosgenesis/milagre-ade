@@ -195,6 +195,7 @@ function codexDeps(child, overrides = {}) {
   const deps = {
     now: () => NOW,
     timeoutMs: 200,
+    command: "codex",
     spawnImpl: (command, args) => {
       spawnCalls.push({ command, args });
       return child;

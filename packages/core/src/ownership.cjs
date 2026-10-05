@@ -1,3 +1,4 @@
+const { powershell } = require('./private-files.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -5,9 +6,16 @@ const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
 // When a live process with this pid started, or null when there is none (or it can't be read).
-function processStartTime(pid) {
+function processStartTime(pid, { platform = process.platform, execFileSyncImpl = execFileSync } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
-    const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (platform === 'win32') {
+      const script = `[Console]::Write((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o'))`;
+      const started = execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const time = Date.parse(started);
+      return Number.isNaN(time) ? null : time;
+    }
+    const started = execFileSyncImpl('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     const time = Date.parse(started);
     return Number.isNaN(time) ? null : time;
   } catch { return null; }
@@ -89,4 +97,4 @@ function acquireOwnership(lockPath) {
   };
 }
 
-module.exports = { acquireOwnership, staleOwner };
+module.exports = { acquireOwnership, staleOwner, processStartTime };

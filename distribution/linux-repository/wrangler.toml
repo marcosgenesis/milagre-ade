@@ -1,0 +1,8 @@
+# The generator copies this manifest beside its generated repository-data.mjs.
+# Deploy the generated copy, never this template.
+name = "milagre-packages"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "packages.milagre.cloud", custom_domain = true }]

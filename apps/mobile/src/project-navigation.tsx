@@ -4,10 +4,10 @@ import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
 import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { isListedChat } from '@milagre/shared/chats';
+import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
 import type { Snapshot } from './client';
-import { useSession } from './session';
+import { usePendingChats, useSession, type MobilePendingChat } from './session';
 import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
 import { Icon } from './icons';
@@ -24,7 +24,7 @@ import { confirm } from './confirm-store';
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
   | { kind: 'project'; name: string; expanded: boolean }
-  | { kind: 'chat'; chat: AgentSession; worktree: string; mark: ChatMark }
+  | { kind: 'chat'; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
   | { kind: 'notice'; message: string; failed?: boolean }
 );
 type Show = 'all' | 'needs' | 'running' | 'archived';
@@ -35,6 +35,7 @@ const labels: Record<ChatMark, string> = { idle: '', running: 'Running', questio
 /** The same project tree is the first-run destination and the drawer over a Chat: every Project's Chats, their ⋯ actions and filters. */
 export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number }) {
   const session = useSession();
+  const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
   const { reloadProjects, previewProject } = session;
   const currentPath = session.snapshot?.project.path;
@@ -77,7 +78,11 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
     for (const project of session.recent) {
-      const copy = project.path === currentPath && session.snapshot ? session.snapshot : copies[project.path];
+      const saved = project.path === currentPath && session.snapshot ? session.snapshot : copies[project.path];
+      const previews = Object.values(pendingChats).filter(item => item.hostId === session.client?.url && item.projectPath === project.path);
+      const projected = saved && previews.reduce((state, item) => withPendingChat(state, item.preview), saved.project.state);
+      const copy = saved && projected ? { ...saved, project: { ...saved.project, state: projected } } : saved;
+      const pendingById = new Map(previews.map(item => [saved ? pendingChatSessionId(saved.project.state, item.preview) ?? item.preview.session.id : item.preview.session.id, item]));
       const name = project.name || project.path.split('/').at(-1) || 'Project';
       const open = searching || expanded.has(project.path);
       // Keep message lookup linear even in large Projects.
@@ -88,7 +93,8 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       }
       const marked = Object.values(copy?.project.state.sessions || {}).map(chat => {
         const run = copy?.runs.runs[`${copy.project.path}#${chat.id}`];
-        return { chat, run, mark: chatMark(chat, run, byChat.get(chat.id) || []) };
+        const pending = pendingById.get(chat.id);
+        return { chat, run, pending, mark: pending && !pending.accepted ? 'running' as const : chatMark(chat, run, byChat.get(chat.id) || []) };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const chats = marked.filter(({ chat, run }) => (show === 'archived') === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
@@ -96,24 +102,26 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         .filter(({ mark }) => show !== 'running' || mark === 'running')
         .filter(({ chat }) => !needle || [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some(text => text?.toLowerCase().includes(needle)))
         // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => b.chat.id - a.chat.id);
+        .sort((a, b) => (b.pending?.preview.sortId ?? b.chat.id) - (a.pending?.preview.sortId ?? a.chat.id));
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open });
       if (!open) continue;
-      for (const { chat, mark } of chats) result.push({ key: `${project.path}#${chat.id}`, path: project.path, kind: 'chat', chat, worktree: copy?.project.state.worktrees[chat.worktree_id]?.name || 'Worktree', mark });
+      for (const { chat, mark, pending } of chats) result.push({ key: `${project.path}#${chat.id}`, path: project.path, kind: 'chat', chat, pending, worktree: pending?.newWorktree ? 'New worktree' : copy?.project.state.worktrees[chat.worktree_id]?.name || 'Worktree', mark });
       if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: 'Could not load chats. Tap to retry.', failed: true });
       else if (!copy || !chats.length) result.push({ key: `${project.path}:notice`, path: project.path, kind: 'notice', message: !copy ? 'Loading chats...' : searching ? 'No matching chats' : 'No chats yet. Start one with +.' });
     }
     return result;
-  }, [copies, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot]);
+  }, [copies, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.
-  function select(projectPath: string, chatId?: number) {
+  function select(projectPath: string, chatId?: number, pending?: MobilePendingChat) {
     if (busy || !session.client) return;
     const params = { projectPath, hostId: session.client.url };
     if (chatId === undefined) onNavigate({ pathname: '/chat', params });
     else if (projectPath === currentPath && chatId === activeChatId && onClose) onClose();
+    else if (pending?.accepted && pending.preview.targetSessionId !== null) onNavigate({ pathname: '/chat', params: { ...params, id: String(pending.preview.targetSessionId) } });
+    else if (pending) onNavigate({ pathname: '/chat', params: { ...params, ...(pending.originSessionId !== null ? { id: String(pending.originSessionId) } : { worktreeId: String(pending.worktreeId) }) } });
     else onNavigate({ pathname: '/chat', params: { ...params, id: String(chatId) } });
   }
   // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
@@ -221,15 +229,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         const menu = chatMenu(item.chat, copy?.project.state.worktrees[item.chat.worktree_id]);
         // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
         return <View style={[s.chat, { backgroundColor: selected ? colors.hover : 'transparent' }]}>
-          <PullDown label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)} onPress={() => select(item.path, item.chat.id)} style={{ flex: 1 }}>
+          <PullDown label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={item.pending ? [] : menu} onSelect={action => { if (!item.pending) void act(item.path, item.chat, action); }} onPress={() => select(item.path, item.chat.id, item.pending)} style={{ flex: 1 }}>
             <View style={s.chatBody}>
               <ChatMarkIcon mark={item.mark} />
               <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}><Icon icon={GitBranchIcon} tone="ink3" size={12} /><Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
             </View>
           </PullDown>
-          <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)}>
+          {!item.pending && <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)}>
             <View style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center' }}><Icon icon={MoreHorizontalIcon} tone="ink3" size={18} /></View>
-          </PullDown>
+          </PullDown>}
         </View>;
       }} />
     {footer}

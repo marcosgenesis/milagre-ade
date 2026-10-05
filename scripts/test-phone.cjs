@@ -153,6 +153,8 @@ async function browserChecks() {
     assert.equal(retired[0].token, undefined);
     console.log("PASS: reset asks first, makes a new token, forgets the paired phone and keeps the old room answering");
 
+    // The pushed reset status can reach the renderer before the reset RPC releases its busy guard.
+    await waitFor(`[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Reset access' && !el.disabled)`);
     // Off: the code goes away and the host keeps the setting.
     await evaluate(`${toggle}.click()`);
     await waitFor(`!document.querySelector('[data-phone-qr]') && ${toggle}.getAttribute('aria-checked') === 'false'`);

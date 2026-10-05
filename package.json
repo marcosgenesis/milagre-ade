@@ -16,6 +16,7 @@
     "test:question-card": "node scripts/test-question-card.cjs",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:chat-timer": "node scripts/test-chat-timer.cjs",
+    "test:chat-send-feedback": "node scripts/test-chat-send-feedback.cjs",
     "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",
     "test:reply-thought": "node scripts/test-reply-thought.cjs",

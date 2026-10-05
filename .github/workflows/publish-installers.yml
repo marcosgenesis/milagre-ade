@@ -195,7 +195,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test Windows runtime
-        run: node --test packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs packages/core/src/agents/codex-provider.test.cjs
+        timeout-minutes: 15
+        run: node --test --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs packages/core/src/agents/codex-provider.test.cjs
       - name: Build signed Windows installer
         shell: bash
         env:

@@ -20,7 +20,7 @@ const inside = (dir, root) => dir === root || dir.startsWith(root.endsWith(path.
 
 /** `ps -axo pid=,ppid=,pgid=,comm=` as rows of { pid, ppid, pgid, command }. */
 function parsePs(output) {
-  return output.split("\n").flatMap((line) => {
+  return output.split(/\r?\n/).flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!match) return [];
     const windows = /^@(\d+) (.*)$/.exec(match[4].trim());

@@ -304,8 +304,24 @@ test('Windows job keeper stays attached when callers request a detached applicat
 });
 
 test('Windows TCP listener output accepts PowerShell CRLF line endings', () => {
-  const { parseLsof } = require('./agents/ports.cjs');
+  const { parseLsof, parsePs } = require('./agents/ports.cjs');
   assert.deepEqual(parseLsof('p20\r\ncnode\r\nn127.0.0.1:3000\r\n'), [{ pid: 20, command: 'node', port: 3000, address: '127.0.0.1' }]);
+  assert.deepEqual(parsePs('10 1 10 @100 node.exe\r\n20 10 20 @200 node.exe\r\n'), [
+    { pid: 10, ppid: 1, pgid: 10, startedAt: '100', command: 'node.exe' },
+    { pid: 20, ppid: 10, pgid: 20, startedAt: '200', command: 'node.exe' },
+  ]);
+});
+
+test('Windows keeper suppresses PowerShell progress serialization before compiling native code', () => {
+  const { EventEmitter } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { spawnWindowsJob } = require('./agents/windows-job.cjs');
+  const keeper = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  let script; let invocation;
+  spawnWindowsJob('C:\\node.exe', [], {}, (_file, args) => { invocation = args; script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); return keeper; });
+  assert.ok(script.indexOf("$ProgressPreference='SilentlyContinue'") >= 0);
+  assert.ok(script.indexOf("$ProgressPreference='SilentlyContinue'") < script.indexOf('Add-Type'));
+  assert.equal(invocation[invocation.indexOf('-OutputFormat') + 1], 'Text');
 });
 
 test('Windows job reports native missing executable errors through ENOENT', { timeout: 100 }, async () => {

@@ -1,4 +1,6 @@
 const { isDeepStrictEqual } = require("node:util");
+const path = require('node:path');
+const fs = require('node:fs');
 // Coordination state persisted in <project>/.milagre/coordination.json, reconciled with the
 // worktrees git reports each time a project is read.
 
@@ -14,7 +16,7 @@ function emptyState(projectName) {
 }
 
 /** The state matched with the worktrees git lists now; a state that already matches is returned as is. */
-function reconcileState(rawState, projectName, discoveredWorktrees) {
+function reconcileState(rawState, projectName, discoveredWorktrees, { platform = process.platform, realpathSync = fs.realpathSync.native } = {}) {
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
   const existingSessions = Object.values(state.sessions ?? {});
@@ -23,14 +25,28 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     ...existingSessions.map((item) => item.id),
   ]) || 1;
   const allocateId = () => nextId++;
-  const existingByPath = new Map(existingWorktrees.map((worktree) => [worktree.path, worktree]));
+  // Resolve older Windows spellings using filesystem identity. Case-sensitive
+  // directories stay distinct; a removed worktree still has its lexical path.
+  const paths = new Map();
+  const nativePath = folder => {
+    if (platform !== 'win32' || typeof folder !== 'string') return folder;
+    if (!paths.has(folder)) {
+      let canonical = folder;
+      try { canonical = realpathSync(folder); }
+      catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+      paths.set(folder, path.win32.normalize(canonical));
+    }
+    return paths.get(folder);
+  };
+  const existingByPath = new Map(existingWorktrees.map((worktree) => [nativePath(worktree.path), worktree]));
   const worktrees = {};
   const sessions = {};
 
   for (const discovered of discoveredWorktrees) {
-    const previous = existingByPath.get(discovered.path);
-    const worktree = previous ?? { id: allocateId(), project_id: 1, path: discovered.path, name: discovered.name };
-    worktrees[worktree.id] = { ...worktree, project_id: 1, path: discovered.path, name: discovered.name };
+    const folder = nativePath(discovered.path);
+    const previous = existingByPath.get(folder);
+    const worktree = previous ?? { id: allocateId(), project_id: 1, path: folder, name: discovered.name };
+    worktrees[worktree.id] = { ...worktree, project_id: 1, path: folder, name: discovered.name };
     // A worktree can hold several chats; keep them all and make sure it has at least one.
     const worktreeSessions = existingSessions.filter((session) => session.worktree_id === worktree.id);
     if (worktreeSessions.length === 0) worktreeSessions.push({ id: allocateId(), worktree_id: worktree.id, agent_name: discovered.name, status: "Created" });

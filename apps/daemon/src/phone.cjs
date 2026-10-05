@@ -1,3 +1,4 @@
+const { preparePrivateDirectory, assertPrivate } = require('@milagre/core/private-files');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
@@ -78,6 +79,7 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
   }
   async function save() {
     await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") preparePrivateDirectory(dataDir);
     const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
     try {
       await fs.writeFile(temporary, JSON.stringify({ enabled: config.enabled, token: config.token }, null, 2), { flag: 'wx', mode: 0o600 });

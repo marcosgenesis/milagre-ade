@@ -1,3 +1,4 @@
+const { readToken, authenticationProof, authenticationNonce, validToken, validNonce } = require('./local-auth.cjs');
 const net = require('node:net');
 const { once, EventEmitter } = require('node:events');
 const { socketPath } = require('./paths.cjs');
@@ -11,7 +12,8 @@ const SLOW_METHODS = Object.freeze({
 });
 const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
 
-async function connect({ dataDir, timeoutMs = 30000 }) {
+async function connect({ dataDir, timeoutMs = 30000, requireAuthentication = process.platform === 'win32' }) {
+  const authenticationToken = requireAuthentication ? readToken(dataDir) : null;
   const socket = net.createConnection(socketPath(dataDir));
   const connecting = once(socket, 'connect');
   const deadline = setTimeout(() => socket.destroy(new Error('Daemon connection timed out')), timeoutMs);
@@ -60,6 +62,16 @@ async function connect({ dataDir, timeoutMs = 30000 }) {
     } catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
   });
   client.close = () => socket.destroy();
+  if (requireAuthentication) {
+    try {
+      const token = authenticationToken;
+      const clientNonce = authenticationNonce();
+      const challenge = await client.call('daemon:authenticate', [{ clientNonce }]);
+      if (!validNonce(challenge?.serverNonce) || !validToken(authenticationProof(token, 'server', clientNonce, challenge.serverNonce), challenge?.proof)) throw Object.assign(new Error('The local daemon could not prove its identity'), { code: 'UNAUTHORIZED' });
+      await client.call('daemon:authenticate', [{ proof: authenticationProof(token, 'client', clientNonce, challenge.serverNonce) }]);
+    }
+    catch (error) { client.close(); throw error; }
+  }
   return client;
 }
 module.exports = { connect, deadlineFor };

@@ -140,6 +140,7 @@ runtime = await connectDesktopRuntime({
   },
 });
 } catch (error) {
+  console.error("Milagre cannot open its saved state:", error);
   void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error instanceof Error ? error.message : String(error)); app.quit(); });
   return;
 }
@@ -271,4 +272,7 @@ app.on("before-quit", (event) => {
 });
 
 }
-void startDesktop().catch(error => { void app.whenReady().then(() => { dialog.showErrorBox("Milagre could not start", error.message); app.quit(); }); });
+void startDesktop().catch(error => {
+  console.error("Milagre could not start:", error);
+  void app.whenReady().then(() => { dialog.showErrorBox("Milagre could not start", error.message); app.quit(); });
+});

@@ -1,3 +1,4 @@
+const { spawnCommand } = require("./agents/command.cjs");
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
@@ -46,8 +47,9 @@ async function resolveSetupCommand(projectPath, setting) {
   return { source: "repo", command: parsed.setup.trim() || null };
 }
 
-function loginShell(env) {
-  return env.SHELL && SHELLS.has(path.basename(env.SHELL)) ? env.SHELL : "/bin/zsh";
+function loginShell(env, platform = process.platform) {
+  if (platform === "win32") return env.ComSpec || path.win32.join(env.SystemRoot || "C:\\Windows", "System32/cmd.exe");
+  return env.SHELL && SHELLS.has(path.basename(env.SHELL)) ? env.SHELL : (platform === "darwin" ? "/bin/zsh" : "/bin/sh");
 }
 
 /**
@@ -79,7 +81,7 @@ function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(e
     const onAbort = () => stop("cancelled");
     const timer = setTimeout(() => stop("timed-out"), timeoutMs);
     try {
-      child = spawn(shell, ["-l", "-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+      child = spawnCommand(shell, process.platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-l", "-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true, windowsVerbatimArguments: process.platform === "win32" });
     } catch (error) {
       void finish({ status: "failed", error: error.message });
       return;
@@ -239,4 +241,4 @@ class WorktreeSetups {
   }
 }
 
-module.exports = { SETUP_FILE, SETUP_TIMEOUT_MS, WorktreeSetups, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, setupStarted };
+module.exports = { loginShell, SETUP_FILE, SETUP_TIMEOUT_MS, WorktreeSetups, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, setupStarted };

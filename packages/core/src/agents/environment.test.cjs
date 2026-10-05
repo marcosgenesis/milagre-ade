@@ -139,14 +139,14 @@ test("fills in what the app lacks from the login shell, and puts the shell's PAT
   });
 });
 
-test("falls back to the install folders when the shell gives nothing, and leaves Windows alone", async () => {
+test("falls back to the install folders when the shell gives nothing, and fills Windows install folders", async () => {
   const target = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", SHELL: "/bin/zsh" };
   const result = await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv: async () => null, dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"] });
   assert.deepEqual(result, { source: "fallback" });
   assert.equal(target.PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin:/opt/homebrew/bin");
 
   const windows = { PATH: "C:\\Windows" };
-  assert.deepEqual(await loadLoginEnvironment({ target: windows, platform: "win32", readShellEnv: async () => assert.fail("no shell on Windows") }), { source: "none" });
+  assert.deepEqual(await loadLoginEnvironment({ target: windows, platform: "win32", dirs: () => [], readShellEnv: async () => assert.fail("no shell on Windows") }), { source: "fallback" });
   assert.deepEqual(windows, { PATH: "C:\\Windows" });
 });
 
@@ -201,6 +201,6 @@ test("refreshing the install folders adds ones that appeared, after the folders 
   refreshInstallPath({ target, platform: "darwin", home: "/Users/x", dirs });
   assert.equal(target.PATH, "/opt/homebrew/bin:/usr/bin:/Users/x/.local/bin:/Users/x/.volta/bin");
   const windows = { PATH: "C:\\Windows" };
-  refreshInstallPath({ target: windows, platform: "win32", dirs: () => assert.fail("no folders on Windows") });
+  refreshInstallPath({ target: windows, platform: "win32", dirs: () => [] });
   assert.equal(windows.PATH, "C:\\Windows");
 });

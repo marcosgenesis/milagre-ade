@@ -1,3 +1,6 @@
+const { closeWindowsJob } = require('./windows-job.cjs');
+const { execFile } = require('node:child_process');
+const { powershell, powershellEnvironment } = require('../private-files.cjs');
 // Stops a child process and everything it started. Agents start shells and MCP servers;
 // signalling the whole process group keeps them from outliving the session, even when the
 // leader itself already exited (an idle CLI exits as soon as its stdin ends). Children
@@ -13,9 +16,15 @@ function groupAlive(pid) {
   }
 }
 
-async function killTree(child, { graceMs = 2000 } = {}) {
+async function killTree(child, { graceMs = 2000, platform = process.platform, execFileImpl = execFile } = {}) {
+  if (platform === "win32" && await closeWindowsJob(child)) return;
   const pid = child?.pid;
   if (!pid) return;
+  if (platform === "win32") {
+    const current = () => child.exitCode == null && child.signalCode == null && !child.killed;
+    if (!current()) return;
+    return killWindowsTree(pid, execFileImpl, { isRootCurrent: current });
+  }
   const exited = () => child.exitCode !== null || child.signalCode != null;
   const alive = () => groupAlive(pid) || !exited();
   const signal = (name) => {
@@ -52,4 +61,57 @@ function waitForExit(alive, ms) {
   });
 }
 
-module.exports = { killTree };
+// Pin validated kernel process objects before sending any termination. Reading
+// .Handle makes .Kill() use the same cached handle instead of reopening a PID.
+// The caller rechecks its ChildProcess after handles are pinned, before approval.
+function killWindowsTree(pid, execFileImpl = execFile, { expectedStartTime, isRootCurrent = () => true } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return Promise.reject(new Error('Invalid process ID'));
+  if (expectedStartTime !== undefined && !/^\d+$/.test(String(expectedStartTime))) return Promise.reject(new Error('Invalid process creation time'));
+  const script = `$ErrorActionPreference = 'Stop'
+$rows = @(Get-CimInstance Win32_Process)
+$seen = [Collections.Generic.HashSet[int]]::new()
+$held = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+function Capture([int]$id, [long]$minimumStart) {
+ if (-not $seen.Add($id)) { return }
+ $row = $rows | Where-Object { [int]$_.ProcessId -eq $id } | Select-Object -First 1
+ if (-not $row) { return }
+ $created = $row.CreationDate.ToUniversalTime().Ticks
+ if ($created -lt $minimumStart) { return }
+ $p = Get-Process -Id $id -ErrorAction SilentlyContinue
+ if (-not $p) { return }
+ try {
+  [void]$p.Handle
+   $current = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id)
+  if ($p.HasExited -or -not $current -or $current.CreationDate.ToUniversalTime().Ticks -ne $created) { $p.Dispose(); return }
+  ${expectedStartTime === undefined ? '' : `if ($id -eq ${pid} -and $created -ne [long]'${expectedStartTime}') { $p.Dispose(); return }`}
+ } catch { $p.Dispose(); return }
+ [void]$held.Add($p)
+ foreach ($rowChild in $rows) { if ([int]$rowChild.ParentProcessId -eq $id) { Capture ([int]$rowChild.ProcessId) $created } }
+}
+try {
+ Capture ${pid} 0
+ if ($held.Count -eq 0) { [Console]::WriteLine('NOT_CURRENT'); exit 0 }
+ [Console]::WriteLine('PINNED')
+ if ([Console]::ReadLine() -ne 'STOP') { exit 0 }
+ for ($i = $held.Count - 1; $i -ge 0; $i--) {
+  $p = $held[$i]
+  if (-not $p.HasExited) { try { $p.Kill(); [void]$p.WaitForExit(5000) } catch { if (-not $p.HasExited) { throw } } }
+ }
+} finally { foreach ($p in $held) { $p.Dispose() } }`;
+  return new Promise((resolve, reject) => {
+    let output = '';
+    let approved = false;
+    let allowed = false;
+    const controller = execFileImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), timeout: 15000, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(allowed && String(stdout).includes('PINNED')));
+    controller?.stdin?.on('error', () => {});
+    controller?.stdout?.on('data', chunk => {
+      output += String(chunk);
+      if (!approved && output.includes('PINNED')) {
+        approved = true;
+        allowed = isRootCurrent();
+        controller.stdin.end(allowed ? 'STOP\n' : 'ABORT\n');
+      }
+    });
+  });
+}
+module.exports = { killTree, killWindowsTree };

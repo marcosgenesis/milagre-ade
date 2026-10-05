@@ -1,3 +1,4 @@
+const { preparePrivateDirectory, assertPrivate, windowsAcl } = require('@milagre/core/private-files');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
@@ -10,9 +11,11 @@ const MAX_RETIRED = 3;
 
 async function writePrivate(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") preparePrivateDirectory(path.dirname(file));
   const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
   try {
     await fs.writeFile(temporary, JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+    if (process.platform === "win32") windowsAcl(temporary, { mode: "protect" });
     await fs.rename(temporary, file);
   } finally { await fs.rm(temporary, { force: true }); }
 }
@@ -22,6 +25,7 @@ const identityFile = dataDir => path.join(dataDir, 'relay-identity.json');
 /** The Mac's relay identity: a signing key the relay checks, and a box key the phone pins from the QR. */
 async function readIdentity(dataDir) {
   try {
+    assertPrivate(identityFile(dataDir));
     const value = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8'));
     const sign = decode(value.sign), box = decode(value.box);
     return { hostId: hostIdOf(sign.publicKey), sign, box };
@@ -82,7 +86,7 @@ function createPhones(dataDir) {
   let writes = Promise.resolve();
   const write = phones => { const next = writes.then(() => writePrivate(file, { phones })); writes = next.catch(() => {}); return next; };
   return {
-    async load() { try { known = JSON.parse(await fs.readFile(file, 'utf8')).phones ?? []; } catch { known = []; } },
+    async load() { try { assertPrivate(file); known = JSON.parse(await fs.readFile(file, 'utf8')).phones ?? []; } catch { known = []; } },
     isKnown: id => known.includes(id),
     /** How many phones are paired now. */
     count: () => known.length,

@@ -1,3 +1,4 @@
+const { spawnCommand } = require("./command.cjs");
 const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
@@ -24,7 +25,7 @@ class CodexRpc extends EventEmitter {
   }
 
   start() {
-    const child = this.spawnImpl(this.command, this.args, { cwd: this.cwd, env: this.env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = spawnCommand(this.command, this.args, { cwd: this.cwd, env: this.env, stdio: ["pipe", "pipe", "pipe"], detached: true, windowsHide: true }, this.spawnImpl);
     this.child = child;
     createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
     child.stderr.on("data", (chunk) => {

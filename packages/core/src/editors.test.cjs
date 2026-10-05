@@ -10,6 +10,7 @@ const fakeWhich = (found) => async (name) => found[name] ?? null;
 
 test("detects editors in the fixed order, from apps and CLIs", async () => {
   const editors = await detectEditors({
+    platform: "darwin",
     fs: fakeFs(["/Applications/Zed.app", "/Users/me/Applications/Cursor.app", "/Applications/Sublime Text.app"]),
     which: fakeWhich({ code: "/usr/local/bin/code", subl: "/usr/local/bin/subl" }),
     home: "/Users/me",
@@ -25,9 +26,9 @@ test("detects editors in the fixed order, from apps and CLIs", async () => {
 });
 
 test("lists Windsurf and VSCodium, and nothing when nothing is installed", async () => {
-  const some = await detectEditors({ fs: fakeFs(["/Applications/Windsurf.app", "/Applications/VSCodium.app"]), which: fakeWhich({}), home: "/h" });
+  const some = await detectEditors({ platform: "darwin", fs: fakeFs(["/Applications/Windsurf.app", "/Applications/VSCodium.app"]), which: fakeWhich({}), home: "/h" });
   assert.deepEqual(some.map((editor) => editor.id), ["windsurf", "vscodium"]);
-  assert.deepEqual(await detectEditors({ fs: fakeFs([]), which: fakeWhich({}), home: "/h" }), []);
+  assert.deepEqual(await detectEditors({ platform: "darwin", fs: fakeFs([]), which: fakeWhich({}), home: "/h" }), []);
 });
 
 const cursor = { id: "cursor", name: "Cursor", appPath: "/Applications/Cursor.app", cli: "/usr/local/bin/cursor" };
@@ -122,6 +123,7 @@ test("openInEditor falls back to the first editor, and reports no editor or a fa
 
 test("a CLI that is not on PATH is found inside the app bundle", async () => {
   const editors = await detectEditors({
+    platform: "darwin",
     fs: fakeFs(["/Applications/Cursor.app", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "/Applications/Zed.app", "/Applications/Zed.app/Contents/MacOS/cli"]),
     which: fakeWhich({ zed: "/usr/local/bin/zed" }),
     home: "/h",

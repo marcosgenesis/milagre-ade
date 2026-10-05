@@ -1,3 +1,4 @@
+const { execCommand } = require("./command.cjs");
 const { execFile } = require("node:child_process");
 const { resolveExecutable } = require("./environment.cjs");
 const { cliBrokenMessage, cliTooOldMessage, lastLine, missingCliMessage } = require("./events.cjs");
@@ -26,9 +27,9 @@ function isAtLeast(version, minimum) {
 // `<command> --version`: { output }, or { error } with the last line it printed when it didn't run.
 function runVersion(command, { execFileImpl = execFile } = {}) {
   return new Promise((resolve) => {
-    execFileImpl(command, ["--version"], { encoding: "utf8", timeout: VERSION_TIMEOUT_MS }, (error, stdout, stderr) => {
+    execCommand(command, ["--version"], { encoding: "utf8", timeout: VERSION_TIMEOUT_MS }, (error, stdout, stderr) => {
       resolve(error ? { error: lastLine(stderr) || lastLine(error.message) } : { output: String(stdout) });
-    });
+    }, execFileImpl);
   });
 }
 

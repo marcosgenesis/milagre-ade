@@ -22,7 +22,19 @@ The screenshot shows the real desktop and mobile interfaces with demo data inspi
 
 Milagre is a public alpha for macOS. Install the [latest release](https://github.com/the-ptf/milagre-ade/releases/latest), then open a Git Project and start a Chat.
 
-Or install with Homebrew: `brew install --cask the-ptf/tap/milagre`. Windows and Linux installers, native checks and signed repository tooling are described in [desktop distribution](docs/agents/distribution.md).
+Or install with Homebrew:
+
+```sh
+brew install --cask the-ptf/tap/milagre
+```
+
+Native installer checks pass on all three platforms. Public distribution is at different stages:
+
+| Platform | Packages | Availability |
+| --- | --- | --- |
+| macOS, Apple Silicon and Intel | DMG, ZIP, Homebrew cask | Signed releases and Homebrew are live |
+| Windows, x64 | Per-user NSIS installer, WinGet manifest | Native checks pass; signed public release and WinGet listing pending |
+| Linux, x64 | AppImage, DEB, RPM, signed APT/RPM repositories | Native checks pass; public release and repository deployment pending |
 
 You need at least one local agent CLI, installed and logged in:
 
@@ -36,6 +48,23 @@ Milagre uses your existing agent login. It does not provide model credentials or
 > Experimental software. Use Full permission mode only in a Project you can recover.
 
 For the phone companion, start with [pairing and mobile setup](docs/mobile-local.md). Your Mac must be awake, online and running the host for the phone to reach its agents.
+
+## Finish Windows and Linux publication
+
+Apple and Linux signing credentials and the Cloudflare account ID are configured. Public Windows/Linux distribution still needs these GitHub repository secrets:
+
+| Purpose | Missing secrets |
+| --- | --- |
+| Windows signing | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` |
+| Linux repository deployment | `CLOUDFLARE_PACKAGES_API_TOKEN` (a dedicated Cloudflare deployment token) |
+
+After adding the secrets:
+
+1. Publish a stable release with **Publish installers**, selecting `platforms=all` and `initialize_linux_repository=true` for the first Linux release.
+2. Run **Deploy Linux package repository** for that public release tag to publish `packages.milagre.cloud`.
+3. Validate the signed Windows installer and WinGet manifest, then submit the manifest to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). The public WinGet command becomes available after acceptance.
+
+See [desktop distribution](docs/agents/distribution.md) for build commands, native test evidence and release instructions. Windows/Linux ARM64, Chocolatey, Scoop, Flatpak and Snap are outside this implementation.
 
 ## Develop locally
 

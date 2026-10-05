@@ -7,12 +7,18 @@ import { Icon } from '../icons';
 import { ErrorNotice, PageScroll, PillButton, Toggle, colors, styles } from '../ui';
 
 export default function NotificationsScreen() {
+  return <>
+    <Stack.Screen options={{ title: 'Notifications' }} />
+    <NotificationsView />
+  </>;
+}
+
+/** The notification settings; the navigation panel shows them too. */
+export function NotificationsView() {
   const push = usePush();
   const session = useSession();
   const state = push.state;
-  return <>
-    <Stack.Screen options={{ title: 'Notifications' }} />
-    <PageScroll>
+  return <PageScroll>
       <View style={[styles.card, { gap: 16 }]}>
         <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
           <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}><Icon icon={Notification01Icon} size={24} tone="ink" /></View>
@@ -34,6 +40,5 @@ export default function NotificationsScreen() {
       {state?.pending.length ? <Text style={styles.muted}>Removal is pending for {state.pending.map(host => host.name).join(', ')}. Milagre will retry when you open the app and the computer is online.</Text> : null}
       <Text style={styles.muted}>Alerts include Chat previews. Expo, Apple and Google process notification content. Your computer must stay online to send alerts.</Text>
       <PillButton title="Open system settings" secondary onPress={() => void Linking.openSettings()} />
-    </PageScroll>
-  </>;
+  </PageScroll>;
 }

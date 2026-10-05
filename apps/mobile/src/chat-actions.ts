@@ -4,6 +4,7 @@ import type { AgentSession } from '@milagre/shared/model';
 import type { Client } from './client';
 import type { MenuSection } from './ui';
 import { archiveFromPhone, type ArchiveRequest } from './archive';
+import { confirmSheet } from './confirm-store';
 
 /** Desktop's ⋯ menu for a Chat, less what only makes sense at the Mac (Finder, editor, commit). */
 export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: string }): MenuSection[] {
@@ -23,7 +24,7 @@ export async function runChatAction({ action, chat, running, client, projectPath
   refresh: () => Promise<unknown>; expectActivity: () => void; notify: (message: string) => void;
 }) {
   if (action === 'archive' && !chat.archived) {
-    return archiveFromPhone({ client, alert: (...args) => Alert.alert(...args), projectPath, state, chat, running, onConfirm: expectActivity, notify, refresh: async () => { await refresh(); } });
+    return archiveFromPhone({ client, alert: confirmSheet, projectPath, state, chat, running, onConfirm: expectActivity, notify, refresh: async () => { await refresh(); } });
   }
   if (action === 'archive') await client.call('chat:patch', [projectPath, chat.id, { archived: false }]);
   if (action === 'read' || action === 'unread') await client.call('chat:patch', [projectPath, chat.id, { unread: action === 'unread' }]);

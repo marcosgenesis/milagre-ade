@@ -291,7 +291,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     '../use-open-project': load('use-open-project.ts', { react, 'expo-router': { router, useFocusEffect: fn => react.useEffect(fn, [fn]) }, './session': { useSession: () => session } }), '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': require('@milagre/shared/model'),
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'),
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'), '../confirm-store': { confirmSheet: (...args) => alert(...args) },
   });
   const render = () => { react.begin(); return ChatScreen(); };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
@@ -376,6 +376,9 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
   const session = { client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
   const native = { Alert: { alert, prompt() {} } };
+  // Confirmations use the real sheet store, shown through the host's alert in the order the sheet would list them.
+  const confirmStore = load('confirm-store.ts', {});
+  confirmStore.setConfirmPresenter(() => { const entry = confirmStore.currentConfirmation(); alert(entry.title, entry.message, entry.buttons.map((button, index) => ({ ...button, onPress: () => entry.choose(index) }))); });
   const { ProjectNavigation } = load('project-navigation.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), ...native, Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
@@ -384,7 +387,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     '@milagre/shared/chats': { isListedChat: () => true }, './session': { useSession: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
-    './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts') }),
+    './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
+    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
   const rows = () => find(render(), node => node.type === 'FlatList');
@@ -412,6 +416,29 @@ test('a new Chat from the sidebar opens at once too', () => {
   assert.equal(nav.rows().props.data.some(item => item.kind === 'all'), false, 'no separate Chats screen to go to');
 });
 
+test('a typed project path opens at once and puts the form away', () => {
+  const nav = navigationHost(deferred().promise);
+  find(nav.render(), node => node.props?.accessibilityLabel === 'Add project').props.onPress();
+  find(nav.render(), node => node.type === 'Field' && node.props.label === 'Project path on your computer').props.onChangeText('/Users/me/Code/app');
+  find(nav.render(), node => node.type === 'PillButton' && node.props.title === 'Open project').props.onPress();
+  assert.deepEqual(nav.opened, [], 'the Chat opens the Project, not the navigation');
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: '/chat', params: { projectPath: '/Users/me/Code/app', hostId: 'mac' } }]));
+  assert.equal(find(nav.render(), node => node.type === 'PillButton' && node.props.title === 'Open project'), undefined, 'the form is gone');
+});
+
+test('Settings open inside the sidebar and go back to the Projects', () => {
+  const nav = navigationHost(deferred().promise);
+  find(nav.render(), node => node.type === 'IconButton' && node.props.label === 'Settings').props.onPress();
+  const settings = nav.render();
+  assert.ok(find(settings, node => node.type === 'SettingsView'));
+  assert.equal(nav.routes.length, 0, 'nothing navigates behind the sidebar');
+  find(settings, node => node.type === 'SettingsView').props.onOpen('usage');
+  assert.ok(find(nav.render(), node => node.type === 'UsageSection'));
+  find(nav.render(), node => node.props?.label === 'Back to Settings').props.onPress();
+  find(nav.render(), node => node.props?.label === 'Back to Projects').props.onPress();
+  assert.ok(find(nav.render(), node => node.type === 'FlatList'));
+});
+
 test('the sidebar filter shows archived, running or waiting Chats across Projects', () => {
   const nav = navigationHost(deferred().promise);
   nav.state.project.state.sessions[4] = { id: 4, archived: true, title: 'Old work' };
@@ -430,7 +457,7 @@ test('a sidebar Project can be removed from the list after confirming', async ()
   nav.more(nav.row('project')).props.onSelect('remove');
   await settleAll();
   assert.equal(alerts[0].title, 'Remove last?');
-  assert.equal(JSON.stringify(alerts[0].buttons), JSON.stringify([['Cancel', 'cancel'], ['Remove', 'destructive']]));
+  assert.equal(JSON.stringify(alerts[0].buttons), JSON.stringify([['Remove', 'destructive'], ['Cancel', 'cancel']]));
   assert.equal(JSON.stringify(nav.calls), JSON.stringify([['project:forget', ['/last']], ['reload']]));
 });
 
@@ -486,7 +513,7 @@ function pullDownHost() {
     react: { forwardRef: fn => fn }, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, ActionSheetIOS: { showActionSheetWithOptions: (options, select) => sheets.push({ options, select }) }, StyleSheet: { create: value => value }, Pressable: 'Pressable', View: 'View' },
     '@expo/ui': {}, '@expo/ui/swift-ui': Object.fromEntries(['Button', 'Host', 'Menu', 'Picker', 'Section', 'Text', 'Toggle', 'HStack', 'Image', 'Rectangle'].map(name => [name, `IOS${name}`])), '@expo/ui/swift-ui/modifiers': modifiers, '@expo/ui/community/menu': { MenuView: 'MenuView' },
-    'expo-haptics': { selectionAsync: async () => {} }, '@hugeicons/core-free-icons': {}, './theme': { colors: { ink2: '#aaa', ink3: '#666' }, fonts: { mono: 'monospace' } }, './icons': { Icon: 'Icon' },
+    'expo-haptics': { selectionAsync: async () => {} }, '@hugeicons/core-free-icons': {}, './theme': { colors: { ink2: '#aaa', ink3: '#666' }, fonts: { mono: 'monospace' } }, './icons': { Icon: 'Icon' }, './confirm-store': { confirmSheet: (...args) => sheets.push(args) },
   });
   return { PullDown, sheets };
 }
@@ -1319,7 +1346,7 @@ test('refreshing saved hosts during startup cannot cancel the claimed auto-open'
     'react-native': { Alert: {}, Platform: { OS: 'ios' }, RefreshControl: 'RefreshControl', Text: 'Text', View: 'View' },
     'expo-router': { Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Button: 'Button', Spacer: 'Spacer' }) }, router: { replace: route => routes.push(route) }, useFocusEffect() {} },
     '@hugeicons/core-free-icons': {}, 'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0 }) },
-    '../session': { useSession: () => session }, '../push': { usePush: () => ({}) }, '../hosts-native': { savedHosts: {} }, '../client': {}, '../relay-native': {}, '../icons': { Icon: 'Icon' },
+    '../session': { useSession: () => session }, '../push': { usePush: () => ({}) }, '../hosts-native': { savedHosts: {} }, '../confirm-store': { confirmSheet() {} }, '../client': {}, '../relay-native': {}, '../icons': { Icon: 'Icon' },
     '../ui': { colors: {}, styles: {}, ErrorNotice: 'ErrorNotice', ListRow: 'ListRow', PageScroll: 'PageScroll' },
   });
   react.begin(); Screen(); react.flush();

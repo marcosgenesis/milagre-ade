@@ -19,7 +19,7 @@ type Side = 'left' | 'right';
 type Screen = { token: object; chatId?: number; worktreeId?: number };
 type Panels = {
   screen: Screen | null; open: Side | null; mounted: Record<Side, boolean>; progress: SharedValue<number>; from: SharedValue<number>;
-  attach: (screen: Screen) => void; blur: (token: object) => void; detach: (token: object) => void;
+  attach: (screen: Screen) => void; update: (screen: Screen) => void; detach: (token: object) => void;
   show: (side: Side | null) => void; pull: (side: Side) => void; settled: (to: number) => void; navigate: (href?: Href, secondary?: boolean) => void;
 };
 
@@ -50,8 +50,15 @@ export function SidePanelsProvider({ children }: { children: React.ReactNode }) 
     current.current = next;
     setScreen(next);
   }, [reset]);
-  // Another screen covering this one takes the panels down at once; they come back closed.
-  const blur = useCallback((token: object) => { if (current.current?.token === token) reset(); }, [reset]);
+  // A focused screen's Chat or Worktree can change under an open panel (a first send, a Project loading); that only
+  // swaps what the panels show.
+  const update = useCallback((next: Screen) => {
+    if (current.current?.token !== next.token) return;
+    current.current = next;
+    setScreen(next);
+  }, []);
+  // Blurring keeps the panels: a confirmation or update sheet opens over an open panel and returns to it, and
+  // everything the panels navigate to closes them first.
   const detach = useCallback((token: object) => {
     if (current.current?.token !== token) return;
     current.current = null;
@@ -74,18 +81,19 @@ export function SidePanelsProvider({ children }: { children: React.ReactNode }) 
     router.replace(href);
   }, []);
   // The navigation slides away before the next screen replaces this one, and whatever was still opening is dropped.
+  // The navigation goes ahead even when something else stops the slide early (a screen resetting the panels).
   const navigate = useCallback((href?: Href, secondary = false) => {
     Keyboard.dismiss();
     cancelNavigation();
     setOpen(null);
-    progress.set(withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System }, done => { if (done && href) scheduleOnRN(go, href, secondary); }));
+    progress.set(withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System }, () => { if (href) scheduleOnRN(go, href, secondary); }));
   }, [progress, go, cancelNavigation]);
   useEffect(() => {
     if (!open) return;
     const back = BackHandler.addEventListener('hardwareBackPress', () => { show(null); return true; });
     return () => back.remove();
   }, [open, show]);
-  const value = useMemo(() => ({ screen, open, mounted, progress, from, attach, blur, detach, show, pull, settled, navigate }), [screen, open, mounted, progress, from, attach, blur, detach, show, pull, settled, navigate]);
+  const value = useMemo(() => ({ screen, open, mounted, progress, from, attach, update, detach, show, pull, settled, navigate }), [screen, open, mounted, progress, from, attach, update, detach, show, pull, settled, navigate]);
   return <PanelsContext.Provider value={value}>{children}</PanelsContext.Provider>;
 }
 
@@ -99,11 +107,11 @@ function usePanels() {
 export function useSidePanels({ chatId, worktreeId }: { chatId?: number; worktreeId?: number }) {
   const panels = usePanels();
   const [token] = useState(() => ({}));
-  const { attach, blur, detach, show, pull, settled, progress, from } = panels;
-  useFocusEffect(useCallback(() => {
-    attach({ token, chatId, worktreeId });
-    return () => blur(token);
-  }, [attach, blur, token, chatId, worktreeId]));
+  const { attach, update, detach, show, pull, settled, progress, from } = panels;
+  // Focus gives the panels to this screen; what it offers is updated in place.
+  const offer = useRef({ token, chatId, worktreeId });
+  useEffect(() => { offer.current = { token, chatId, worktreeId }; update(offer.current); }, [update, token, chatId, worktreeId]);
+  useFocusEffect(useCallback(() => { attach(offer.current); }, [attach]));
   useEffect(() => () => detach(token), [detach, token]);
   const { width } = useWindowDimensions();
   const ours = panels.screen?.token === token;

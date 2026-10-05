@@ -26,6 +26,7 @@ import { LoadingLogo } from '../loading-logo';
 import { useOpenProject } from '../use-open-project';
 import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { archiveFromPhone } from '../archive';
+import { confirmSheet } from '../confirm-store';
 
 const PAGE = 40;
 
@@ -96,7 +97,7 @@ export default function ChatScreen() {
       <Stack.Screen options={{ title: '', headerBackVisible: false, gestureEnabled: false }} />
       {sidebar}
       <PanelSwipe panels={panels}><View accessible={!openError} accessibilityRole="progressbar" accessibilityLabel="Opening Chat…" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        {openError ? <ErrorNotice message={openError} retry={retryOpen} /> : wanted || needsWorktree ? <LoadingLogo /> : null}
+        {openError ? <ErrorNotice message={openError} retry={retryOpen} retryTitle="Try again" /> : wanted || needsWorktree ? <LoadingLogo /> : null}
       </View></PanelSwipe>
     </View>;
   }
@@ -202,7 +203,7 @@ export default function ChatScreen() {
     if (busy) return;
     setError('');
     try {
-      const result = await archiveFromPhone({ client, alert: (...args) => Alert.alert(...args), projectPath: project.path, state: project.state, chat: target, running: !!run,
+      const result = await archiveFromPhone({ client, alert: confirmSheet, projectPath: project.path, state: project.state, chat: target, running: !!run,
         onConfirm: () => { setBusy(true); session.expectActivity(); }, notify: setError, refresh: session.refresh });
       if (result === 'hidden' || result === 'removed') router.replace('/projects');
     } catch (e) { setError((e as Error).message); }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { ThemeProvider, DarkTheme, DefaultTheme } from 'expo-router/react-navigation';
 import { StatusBar } from 'expo-status-bar';
@@ -11,6 +11,10 @@ import { StartupSplash } from '../startup-splash';
 import { hex } from '../theme';
 import { UpdateShell } from '../update-sheet';
 import { SidePanelsHost, SidePanelsProvider } from '../side-panels';
+import { setConfirmPresenter } from '../confirm-store';
+
+// Confirmations open as a bottom sheet over whatever is showing, the side panels included.
+setConfirmPresenter(() => router.push('/confirm-sheet'));
 
 export default function Layout() {
   const scheme = useColorScheme();
@@ -23,6 +27,7 @@ export default function Layout() {
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
     <Stack.Screen name="settings" options={{ title: 'Settings' }} />
     <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: 'fitToContents' }} />
+    <Stack.Screen name="confirm-sheet" options={{ ...sheet, sheetAllowedDetents: 'fitToContents' }} />
     <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
     <Stack.Screen name="pair" options={{ title: 'Pairing' }} />

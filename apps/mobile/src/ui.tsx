@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { Button as NativeButton, Host, Picker, Switch } from '@expo/ui';
 import { Button as IOSButton, HStack as IOSHStack, Host as IOSHost, Image as IOSImage, Menu as IOSMenu, Picker as IOSPicker, Rectangle, Section as IOSSection, Text as IOSText, Toggle as IOSToggle } from '@expo/ui/swift-ui';
 import { accessibilityLabel, contentShape, disabled as nativeDisabled, font, foregroundStyle, frame, lineLimit, menuOrder, padding, tint, pickerStyle, shapes, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
@@ -7,6 +7,7 @@ import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 import * as Haptics from 'expo-haptics';
 import { ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon } from '@hugeicons/core-free-icons';
 import { colors as palette, fonts } from './theme';
+import { confirmSheet } from './confirm-store';
 import { Icon, type IconData, type Tone } from './icons';
 
 export const colors = { ...palette, bg: palette.page, panel: palette.surface, text: palette.ink, muted: palette.ink2, error: palette.red };
@@ -55,8 +56,8 @@ export function Choice({ title, selected, onPress }: { title: string; selected: 
 export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean }) {
   return <View style={{ gap: 8 }}>{!hideLabel && <Text style={styles.label}>{label}</Text>}<TextInput accessibilityLabel={label} autoCapitalize="none" autoCorrect={false} placeholderTextColor={colors.ink3} selectionColor={colors.accent} {...props} style={[styles.input, props.style]} /></View>;
 }
-export function ErrorNotice({ message, retry }: { message: string; retry?: () => void }) {
-  return <View accessibilityRole="alert" style={styles.error}><Text selectable style={{ color: colors.red, fontSize: 15, lineHeight: 22 }}>{message}</Text>{retry && <PillButton title="Reconnect" secondary onPress={retry} style={{ alignSelf: 'flex-start' }} />}</View>;
+export function ErrorNotice({ message, retry, retryTitle = 'Reconnect' }: { message: string; retry?: () => void; retryTitle?: string }) {
+  return <View accessibilityRole="alert" style={styles.error}><Text selectable style={{ color: colors.red, fontSize: 15, lineHeight: 22 }}>{message}</Text>{retry && <PillButton title={retryTitle} secondary onPress={retry} style={{ alignSelf: 'flex-start' }} />}</View>;
 }
 export function Select({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; title: string; description?: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
   const selected = options.find(option => option.value === value);
@@ -100,21 +101,12 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
 export type MenuItem = { id: string; title: string; systemImage?: string; checked?: boolean; destructive?: boolean; disabled?: boolean; subtitle?: string };
 export type MenuSection = { title?: string; items: MenuItem[] };
 type NativeMenuTrigger = { title?: string; systemImage: string; disabled?: boolean; maxWidth?: number };
-/**
- * A system action sheet for a row's actions or a short list of choices. It draws its own buttons, so no React view is
- * hosted inside a native menu: those hosted views crashed Fabric when their content changed while a menu was up.
- */
+/** A row's actions or a short list of choices, in the confirmation bottom sheet with Cancel last. */
 export function showActions({ title, actions, onSelect }: { title?: string; actions: { id: string; title: string; destructive?: boolean; disabled?: boolean }[]; onSelect: (id: string) => void }) {
   const enabled = actions.filter(action => !action.disabled);
   if (!enabled.length) return;
   Keyboard.dismiss();
-  if (Platform.OS === 'ios') {
-    const destructive = enabled.findIndex(action => action.destructive);
-    ActionSheetIOS.showActionSheetWithOptions({ title, options: [...enabled.map(action => action.title), 'Cancel'], cancelButtonIndex: enabled.length, ...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}) },
-      index => { if (index < enabled.length) { tap(); onSelect(enabled[index].id); } });
-    return;
-  }
-  Alert.alert(title || '', undefined, [...enabled.map(action => ({ text: action.title, style: action.destructive ? 'destructive' as const : 'default' as const, onPress: () => onSelect(action.id) })), { text: 'Cancel', style: 'cancel' as const }]);
+  confirmSheet(title || '', undefined, [...enabled.map(action => ({ text: action.title, style: action.destructive ? 'destructive' as const : 'default' as const, onPress: () => { tap(); onSelect(action.id); } })), { text: 'Cancel', style: 'cancel' as const }]);
 }
 /**
  * A native pull-down menu on its trigger. With `onPress`, a tap runs it and a long press opens the menu (a Chat row);

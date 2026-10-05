@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { spawnCommand: spawn } = require("./command.cjs");
 const { killTree } = require("./process-tree.cjs");
-const { waitUntil } = require("./test-helpers.cjs");
+const { waitUntil, waitForOutput } = require("./test-helpers.cjs");
 
 const isAlive = (pid) => {
   try {
@@ -13,10 +13,11 @@ const isAlive = (pid) => {
   }
 };
 
-test("killTree stops a detached child and the processes it started", async () => {
+test("killTree stops a detached child and the processes it started", { timeout: 45000 }, async (t) => {
   const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
-  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
-  const grandchildPid = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  t.after(() => killTree(child));
+  const grandchildPid = Number(String(await waitForOutput(child)).trim());
   assert.ok(isAlive(grandchildPid));
 
   await killTree(child, { graceMs: 500 });
@@ -25,10 +26,11 @@ test("killTree stops a detached child and the processes it started", async () =>
   await waitUntil(() => !isAlive(grandchildPid));
 });
 
-test("killTree stops the rest of the group after its leader already exited", async (t) => {
+test("killTree stops the rest of the group after its leader already exited", { timeout: 45000 }, async (t) => {
   const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
-  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
-  const grandchildPid = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  t.after(() => killTree(child));
+  const grandchildPid = Number(String(await waitForOutput(child)).trim());
   t.after(() => {
     if (isAlive(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
   });
@@ -41,8 +43,9 @@ test("killTree stops the rest of the group after its leader already exited", asy
   await waitUntil(() => !isAlive(grandchildPid));
 });
 
-test("killTree resolves for a process that already exited", async () => {
+test("killTree resolves for a process that already exited", { timeout: 30000 }, async (t) => {
   const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  t.after(() => killTree(child));
   await new Promise((resolve) => child.once("exit", resolve));
   await killTree(child);
   await killTree(null);

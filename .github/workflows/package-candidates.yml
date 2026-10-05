@@ -55,10 +55,14 @@ jobs:
         run: npm ci
       - name: Test manifest generation
         run: node --test scripts/package-managers.test.cjs
+      - name: Test Windows agent protocol
+        if: matrix.platform == 'windows'
+        timeout-minutes: 5
+        run: node --test --test-reporter=tap --test-timeout=60000 packages/core/src/agents/codex-provider.test.cjs
       - name: Test Windows runtime and pipe security
         if: matrix.platform == 'windows'
         timeout-minutes: 15
-        run: node --test --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs packages/core/src/agents/codex-provider.test.cjs
+        run: node --test --test-reporter=tap --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs
       - name: Test real Linux repository signing and installation
         if: matrix.platform == 'linux'
         run: |-

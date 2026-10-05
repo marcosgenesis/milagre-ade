@@ -278,3 +278,17 @@ test('Windows native launch binds its kill-on-close job atomically at CreateProc
   assert.ok(source.includes('0x08080004'));
   assert.ok(!source.includes('AssignProcessToJobObject'));
 });
+
+test('fixture startup waits report early launcher failure and timeout stderr', async () => {
+  const { EventEmitter } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { waitForOutput } = require('./agents/test-helpers.cjs');
+  const fixture = () => Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null });
+  const failed = fixture();
+  const failure = waitForOutput(failed, { timeoutMs: 50 });
+  failed.stderr.write('native launch diagnostic'); failed.emit('close', 1, null);
+  await assert.rejects(failure, /Fixture exited before output.*native launch diagnostic/s);
+  const stalled = fixture();
+  const timeout = waitForOutput(stalled, { timeoutMs: 10 }); stalled.stderr.write('startup stalled');
+  await assert.rejects(timeout, /Fixture startup timed out.*startup stalled/s);
+});

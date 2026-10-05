@@ -194,9 +194,12 @@ jobs:
         run: if (!$env:CSC_LINK -or !$env:CSC_KEY_PASSWORD) { throw 'Configure WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD before publishing Windows installers' }
       - name: Install dependencies
         run: npm ci
+      - name: Test Windows agent protocol
+        timeout-minutes: 5
+        run: node --test --test-reporter=tap --test-timeout=60000 packages/core/src/agents/codex-provider.test.cjs
       - name: Test Windows runtime
         timeout-minutes: 15
-        run: node --test --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs packages/core/src/agents/codex-provider.test.cjs
+        run: node --test --test-reporter=tap --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs
       - name: Build signed Windows installer
         shell: bash
         env:

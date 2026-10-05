@@ -1,6 +1,16 @@
-# Run Milagre in a local simulator
+# Phone setup and local mobile development
 
 This preview connects an Expo mobile app to the Node daemon on your Mac. It groups Chats by Worktree, creates Worktrees, shows transcripts and live text, sends text, photos and files, stops or continues a turn, and answers approvals and questions. It also supports model, effort, fast-mode and permission settings, Chat rename/archive/restore, and read-only changes and file diffs. The daemon owns the state and keeps running when the app disconnects.
+
+## Pair with your Mac
+
+1. In the desktop app, open **Settings > Phone** and turn on **Allow your phone to connect**.
+2. In the installed phone app, add a computer and scan the pairing code.
+3. Open a Project from the sidebar to follow its Chats, or create a new Chat.
+
+Your Mac runs the agents and must stay awake and online. Desktop and phone share the same daemon, Chats and Worktrees. By default, the daemon uses the public encrypted relay at `relay.milagre.cloud`; no Cloudflare account or tunnel is needed. A configured named Cloudflare tunnel remains supported.
+
+The pairing code grants access to your agents. Keep it private. New phones can pair for 10 minutes after the code is shown; existing paired phones continue to work. **Reset access** forgets paired phones and creates a new token.
 
 ## Try the demo
 
@@ -92,7 +102,7 @@ Then start the host with `npm run mobile:host -- --cloudflare --desktop` and sca
 
 `npm run mobile:host -- --tunnel` opens a temporary Cloudflare Quick Tunnel instead: no account, a random `trycloudflare.com` address that changes on every start, and no Access in front.
 
-TLS ends at Cloudflare's edge, so Cloudflare can see the traffic. This is not an end-to-end encrypted relay.
+For a named Cloudflare tunnel, TLS ends at Cloudflare's edge and Cloudflare can see the traffic. The default public relay forwards encrypted frames and cannot read Chat traffic.
 
 ## Connect through your own HTTPS endpoint
 
@@ -133,23 +143,23 @@ This generates the ignored native project and produces `/tmp/milagre-mobile-rele
 ## Boundaries
 
 - The HTTP bridge binds only to `127.0.0.1`. Every request needs its token; browser Origins and unexpected Hosts are rejected. Only the mobile command allowlist is available. RPC bodies are capped at 1 MiB and concurrent requests at 16. File uploads use a separate authenticated 7 MiB envelope for at most 5 MiB of decoded content.
-- Foreground snapshots poll once per second. PR status refreshes every 30 seconds on the focused, foreground screen with at most two requests in flight. Chat renders Markdown, expandable tool output, live activity, agent counts and PR blockers. The composer opens native model/effort/permission controls and Photo Library/Files pickers. Up to four attachments fit per message; photos are resized to 1024 pixels and capped at 160 KiB each, files at 5 MiB each. Persisted and agent-generated images are fetched through the bridge (see Images below). Large-history virtualization is still pending.
+- A live WebSocket signals snapshot changes. While it is unavailable, foreground snapshots poll every second during activity and every four seconds while idle. PR status refreshes every 30 seconds on the focused, foreground screen with at most two requests in flight. Chat renders Markdown, expandable tool output, live activity, agent counts and PR blockers. The composer opens native model/effort/permission controls and Photo Library/Files pickers. Up to four attachments fit per message; photos are resized to 1024 pixels and capped at 160 KiB each, files at 5 MiB each. Persisted and agent-generated images are fetched through the bridge (see Images below). Chat initially mounts its newest 40 messages; **Show earlier messages** loads older history.
 - Uploaded files stay in the host profile for Chat history. Failed sends preserve drafts; retrying may upload a file again. Abandoned-upload cleanup and upload reuse are pending.
-- Local simulator and direct HTTPS host access are supported. Optional mobile push notifications use Expo Push Service (see below). An encrypted relay and production background services come later.
-- iOS works in Expo Go and a standalone simulator Release build. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation. No physical-device or store build is claimed.
+- Local simulator and direct HTTPS host access are supported. Optional mobile push notifications use Expo Push Service (see below). The default encrypted relay is implemented; desktop startup does not install a login service.
+- iOS works in Expo Go and a standalone simulator Release build. Android uses the same client; its host address is `http://10.0.2.2:8787`. Android runtime behavior still needs emulator validation.
 - Demo connection defaults are injected into a local development bundle. Never publish that bundle or use this mechanism for a real remote token. The real workflow enters the token in the app.
 
 ## Push notifications
 
 On an installed phone build, open **Settings > Notifications > Enable notifications** and allow notifications. Open Settings with the gear button on Computers. Waiting alerts cover approvals and questions; finished alerts cover completed and failed turns. Each has its own toggle. Notifications register for remembered computers, and the daemon sends them even when the mobile app and desktop window are closed. The Mac must be awake, online and running the daemon. Tapping an alert reconnects to its saved computer and opens the current Chat state. Alerts for the Chat being viewed are suppressed; a 15-second focus lease expires after the phone stops reporting activity.
 
-Expo Go and simulator push registration are unsupported. They can still use the rest of the app and adjust notification preferences. This change needs a new native build because `expo-notifications` adds the APNs entitlement and Android notification channel. The existing EAS project ID is used. Configure iOS APNs credentials with `npx eas-cli@latest credentials --platform ios` (or during EAS Build), and configure Android FCM v1 credentials plus the matching `google-services.json` in a private build environment. If configuring that file, set its path with `android.googleServicesFile` in the app config. Never commit private credentials. Build with the existing `testflight` profile for iOS; Android needs its own signed development or release build profile. See [Expo setup](https://docs.expo.dev/push-notifications/push-notifications-setup/) and [sending/receipts](https://docs.expo.dev/push-notifications/sending-notifications/).
+Expo Go and simulator push registration are unsupported. They can still use the rest of the app and adjust notification preferences. Push requires an installed native build configured for notifications. Native changes and new builds require approval under [the mobile release rules](../apps/mobile/AGENTS.md). The existing EAS project ID is used. Configure iOS APNs credentials with `npx eas-cli@latest credentials --platform ios` (or during EAS Build), and configure Android FCM v1 credentials plus the matching `google-services.json` in a private build environment. If configuring that file, set its path with `android.googleServicesFile` in the app config. Never commit private credentials. Build with the existing `testflight` profile for iOS; Android needs its own signed development or release build profile. See [Expo setup](https://docs.expo.dev/push-notifications/push-notifications-setup/) and [sending/receipts](https://docs.expo.dev/push-notifications/sending-notifications/).
 
 Delivery is best effort. The daemon caps its outgoing queue at 256 notices and its pending receipt registry at 1000. Requests time out after 10 seconds; transient errors retry after 1 and 3 seconds. Expo tickets and receipts remove tokens reported as `DeviceNotRegistered`. The first receipt check runs after 15 minutes; missing receipts get two more checks. Alerts expire after 5 minutes. Logs report generic delivery/configuration failures without push tokens or notification content. If enhanced push security is enabled in the EAS dashboard, provide `EXPO_PUSH_ACCESS_TOKEN` in the daemon's launch environment (including the Electron-launched daemon), never in mobile app config.
 
 Chat titles, previews and navigation identifiers pass through Expo and Apple or Google; push is not end-to-end encrypted. No bridge token or Cloudflare Access credentials are included in notification payloads. Registrations live in `mobile-push.json` in the daemon's profile, written atomically with mode 0600. Turning off desktop Phone access or resetting access clears registrations. Turning off mobile notifications or forgetting a computer unregisters that device. When that computer is offline, the app keeps a private unregister retry in secure storage, including the credentials needed for removal. Those credentials are deleted after the removal succeeds. The forgotten computer is immediately excluded from notification navigation. Reopen Milagre while the computer is online to finish removal; until then, it can still send alerts.
 
-Verification for this PR covers daemon delivery through a fake Expo HTTP boundary, real Unix-socket/bridge registration, mobile permission/token/navigation tests and a native simulator run. A simulator-injected notification opens its paired Chat from a cold start, and Back returns to All Chats. Injection bypasses Expo/APNs transport. Live APNs/FCM delivery and Android runtime behavior require signed physical-device validation; no store build is published by this PR.
+Simulator notification injection bypasses Expo/APNs transport. Live APNs/FCM delivery and Android runtime behavior require signed physical-device validation.
 
 ## Images
 
@@ -166,10 +176,6 @@ npm run export:ios --workspace @milagre/mobile
 ```
 
 `apps/mobile` uses Expo Router and the default Expo monorepo Metro configuration. `scripts/start-mobile.cjs` selects IPv4-first DNS for Metro because Expo advertises `127.0.0.1`, while Node can otherwise bind only `::1` for localhost on macOS. Desktop React and mobile React resolve independently; existing desktop dependency versions are retained. The native UI's scrolling and choice controls live in `apps/mobile/src/ui.tsx`.
-
-### Validation note
-
-Expo Doctor passes 20 of 21 checks. Its duplicate-React check sees desktop React 19.3.0 and mobile React 19.2.3. Both are intentionally retained to preserve the desktop and match Expo 57. The running iOS Metro source map contains only `apps/mobile/node_modules/react`; the simulator renders and handles hooks correctly. The standalone iOS simulator Release build also compiles and runs with these separate versions. See [Expo's duplicate-package guidance](https://docs.expo.dev/guides/monorepos/#duplicate-native-packages-within-monorepos).
 
 ### Opt-in real-provider check
 

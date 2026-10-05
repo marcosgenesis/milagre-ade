@@ -102,7 +102,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "marcosgenesis",
+      "owner": "the-ptf",
       "repo": "milagre-ade",
       "releaseType": "release"
     }

@@ -1,4 +1,4 @@
-const { powershell } = require('../private-files.cjs');
+const { powershell, powershellEnvironment } = require('../private-files.cjs');
 const { killWindowsTree } = require('./process-tree.cjs');
 // The TCP ports each chat's agent has opened: dev servers, Metro, a database it started.
 // A port belongs to a chat when the process listening on it was started by one of the agent's
@@ -165,7 +165,7 @@ const run = (command, args) => new Promise((resolve) => {
     } else return resolve('');
     command = powershell(); args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
   }
-  execFile(command, args, { maxBuffer: 8 * 1024 * 1024, timeout: 10_000 }, (_error, stdout) => resolve(stdout ?? ""));
+  execFile(command, args, { ...(process.platform === 'win32' ? { env: powershellEnvironment() } : {}), maxBuffer: 8 * 1024 * 1024, timeout: 10_000 }, (_error, stdout) => resolve(stdout ?? ""));
 });
 
 /**

@@ -5,6 +5,14 @@ const { execFileSync } = require('node:child_process');
 // Use the OS copy, never a program from a Project's PATH. Encoded commands contain
 // constant code and base64 data; paths never become PowerShell expressions.
 const powershell = () => path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+function powershellEnvironment(environment = process.env) {
+  const safe = { ...environment };
+  // PS7 exports modules that Windows PowerShell 5.1 cannot load. Do not import
+  // user or Project modules into privileged ACL/process helper scripts either.
+  for (const name of Object.keys(safe)) if (name.toLowerCase() === 'psmodulepath') delete safe[name];
+  safe.PSModulePath = path.win32.join(path.win32.dirname(powershell()), 'Modules');
+  return safe;
+}
 function windowsAcl(file, { mode = 'verify', execFileSyncImpl = execFileSync } = {}) {
   const encoded = Buffer.from(file, 'utf8').toString('base64');
   const script = `
@@ -44,7 +52,7 @@ foreach ($r in $a.GetAccessRules($true, $true, [Security.Principal.SecurityIdent
 }
 if (-not $ownAccess) { throw 'Private path must allow the current Windows user to read it' }
 `;
-  execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 function assertPrivate(file, { platform = process.platform } = {}) {
   const stat = fs.lstatSync(file);
@@ -58,4 +66,4 @@ function preparePrivateDirectory(directory) {
   if (process.platform === 'win32') windowsAcl(directory, { mode: 'protect' });
   else assertPrivate(directory);
 }
-module.exports = { powershell, windowsAcl, assertPrivate, preparePrivateDirectory };
+module.exports = { powershell, powershellEnvironment, windowsAcl, assertPrivate, preparePrivateDirectory };

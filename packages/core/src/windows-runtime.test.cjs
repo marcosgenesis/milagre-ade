@@ -5,6 +5,60 @@ const os = require('node:os');
 const path = require('node:path');
 const { resolveExecutable, refreshInstallPath, loadLoginEnvironment } = require('./agents/environment.cjs');
 
+test('Windows PowerShell helpers use only OS modules while preserving other environment variables', () => {
+  const { powershell, powershellEnvironment } = require('./private-files.cjs');
+  const original = { pSmOdUlEpAtH: 'C:\\Program Files\\PowerShell\\7\\Modules', PSModulePath: 'C:\\project\\modules', Path: 'C:\\tools', CUSTOM: 'kept' };
+  const environment = powershellEnvironment(original);
+  assert.equal(environment.PSModulePath, path.win32.join(path.win32.dirname(powershell()), 'Modules'));
+  assert.equal(environment.pSmOdUlEpAtH, undefined);
+  assert.equal(environment.Path, original.Path);
+  assert.equal(environment.CUSTOM, 'kept');
+  assert.equal(original.PSModulePath, 'C:\\project\\modules');
+});
+
+test('Windows job keeper isolates PowerShell modules and restores the target environment before launch', () => {
+  const { EventEmitter } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { powershellEnvironment } = require('./private-files.cjs');
+  const { spawnWindowsJob } = require('./agents/windows-job.cjs');
+  const keeper = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  const env = { psmodulepath: 'C:\\Program Files\\PowerShell\\7\\Modules', CUSTOM: 'agent-value' };
+  spawnWindowsJob('C:\\node.exe', [], { env }, (_file, _args, options) => {
+    assert.deepEqual(options.env.PSModulePath, powershellEnvironment(env).PSModulePath);
+    assert.equal(options.env.psmodulepath, undefined);
+    assert.equal(options.env.CUSTOM, 'agent-value');
+    const payload = JSON.parse(Buffer.from(options.env.MILAGRE_WINDOWS_JOB_SPEC, 'base64'));
+    assert.equal(payload.targetPSModulePath, env.psmodulepath);
+    return keeper;
+  });
+  assert.equal(env.PSModulePath, undefined);
+});
+
+test('Windows native helpers survive inherited PowerShell 7 modules and preserve the application module path', { skip: process.platform !== 'win32', timeout: 45000 }, async t => {
+  const { once } = require('node:events');
+  const { windowsAcl } = require('./private-files.cjs');
+  const { spawnCommand } = require('./agents/command.cjs');
+  const { killTree } = require('./agents/process-tree.cjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-ps7-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const pollution = path.win32.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'Modules');
+  if (process.env.CI) assert.ok(fs.existsSync(path.win32.join(pollution, 'Microsoft.PowerShell.Security')), 'CI fixture must use actual PowerShell 7 modules');
+  const before = process.env.PSModulePath;
+  process.env.PSModulePath = pollution;
+  try {
+    windowsAcl(directory, { mode: 'protect' }); windowsAcl(directory);
+    const child = spawnCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env.PSModulePath))'], { env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    t.after(() => killTree(child));
+    const output = []; child.stdout.on('data', chunk => output.push(chunk));
+    await once(child, 'close');
+    assert.equal(child.exitCode, 0);
+    assert.equal(JSON.parse(Buffer.concat(output)), pollution);
+  } finally {
+    if (before === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = before;
+  }
+});
+
 test('Windows executable lookup searches only absolute PATH directories and prefers PATHEXT launchers', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-path-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -61,8 +115,9 @@ test('npm cmd shims run their JavaScript entry directly with literal arguments',
 test('Windows ACL operations encode paths and fail closed on command errors', () => {
   const { windowsAcl } = require('./private-files.cjs');
   let script;
-  windowsAcl("C:\\test'; whoami\\profile", { mode: 'protect', execFileSyncImpl(file, args) {
+  windowsAcl("C:\\test'; whoami\\profile", { mode: 'protect', execFileSyncImpl(file, args, options) {
     assert.match(file, /powershell\.exe$/i);
+    assert.deepEqual(options.env, require('./private-files.cjs').powershellEnvironment());
     assert.ok(args.includes('-EncodedCommand'));
     script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); return '';
   } });
@@ -75,7 +130,7 @@ test('Windows ACL operations encode paths and fail closed on command errors', ()
 test('Windows process creation times preserve PID reuse protection and unknown owners stay live', () => {
   const { processStartTime } = require('./ownership.cjs');
   let script;
-  assert.equal(processStartTime(123, { platform: 'win32', execFileSyncImpl(_file, args) { script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); return '2026-01-02T03:04:05.1230000Z'; } }), Date.parse('2026-01-02T03:04:05.123Z'));
+  assert.equal(processStartTime(123, { platform: 'win32', execFileSyncImpl(_file, args, options) { assert.deepEqual(options.env, require('./private-files.cjs').powershellEnvironment()); script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); return '2026-01-02T03:04:05.1230000Z'; } }), Date.parse('2026-01-02T03:04:05.123Z'));
   assert.ok(script.includes('Get-Process -Id 123'));
   assert.equal(processStartTime(123, { platform: 'win32', execFileSyncImpl() { throw new Error('access denied'); } }), null);
   assert.equal(processStartTime('123; exit', { platform: 'win32' }), null);
@@ -91,7 +146,7 @@ test('Windows shutdown refuses an exited or already killed child before looking 
 test('Windows shutdown pins validated process handles before termination', async () => {
   const { killTree } = require('./agents/process-tree.cjs');
   let script;
-  await killTree({ pid: 321, exitCode: null, killed: false }, { platform: 'win32', execFileImpl(file, args, options, callback) { assert.match(file, /powershell.exe$/i); script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); callback(null, ''); } });
+  await killTree({ pid: 321, exitCode: null, killed: false }, { platform: 'win32', execFileImpl(file, args, options, callback) { assert.match(file, /powershell.exe$/i); assert.deepEqual(options.env, require('./private-files.cjs').powershellEnvironment()); script = Buffer.from(args.at(-1), 'base64').toString('utf16le'); callback(null, ''); } });
   assert.ok(script.includes('CreationDate'));
   assert.ok(script.includes('.Handle'));
   assert.ok(script.includes('$current.CreationDate'));

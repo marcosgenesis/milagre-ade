@@ -97,10 +97,10 @@ test('authenticated daemon runs fixture turns, persists replies, reconnects and 
 test('Windows rejects a token whose NTFS ACL permits another local account', { skip: process.platform !== 'win32' }, async t => {
   const { dataDir } = await fixture(t);
   const { execFileSync } = require('node:child_process');
-  const { powershell, windowsAcl } = require('@milagre/core/private-files');
+  const { powershell, powershellEnvironment, windowsAcl } = require('@milagre/core/private-files');
   const encodedPath = Buffer.from(tokenPath(dataDir), 'utf8').toString('base64');
   const script = `$ErrorActionPreference='Stop'; $p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}')); $a=Get-Acl -LiteralPath $p; $sid=[Security.Principal.SecurityIdentifier]::new('S-1-1-0'); $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::Read,[Security.AccessControl.AccessControlType]::Allow); [void]$a.AddAccessRule($rule); Set-Acl -LiteralPath $p -AclObject $a`;
-  execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+  execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), windowsHide: true });
   try {
     assert.throws(() => readToken(dataDir), /another Windows account/);
     await assert.rejects(connect({ dataDir }), /another Windows account/);

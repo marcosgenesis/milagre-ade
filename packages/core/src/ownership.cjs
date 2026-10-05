@@ -1,4 +1,4 @@
-const { powershell } = require('./private-files.cjs');
+const { powershell, powershellEnvironment } = require('./private-files.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,7 +11,7 @@ function processStartTime(pid, { platform = process.platform, execFileSyncImpl =
   try {
     if (platform === 'win32') {
       const script = `[Console]::Write((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o'))`;
-      const started = execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const started = execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       const time = Date.parse(started);
       return Number.isNaN(time) ? null : time;
     }

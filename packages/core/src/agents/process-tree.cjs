@@ -1,6 +1,6 @@
 const { closeWindowsJob } = require('./windows-job.cjs');
 const { execFile } = require('node:child_process');
-const { powershell } = require('../private-files.cjs');
+const { powershell, powershellEnvironment } = require('../private-files.cjs');
 // Stops a child process and everything it started. Agents start shells and MCP servers;
 // signalling the whole process group keeps them from outliving the session, even when the
 // leader itself already exited (an idle CLI exits as soon as its stdin ends). Children
@@ -102,7 +102,7 @@ try {
     let output = '';
     let approved = false;
     let allowed = false;
-    const controller = execFileImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { timeout: 15000, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(allowed && String(stdout).includes('PINNED')));
+    const controller = execFileImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), timeout: 15000, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(allowed && String(stdout).includes('PINNED')));
     controller?.stdin?.on('error', () => {});
     controller?.stdout?.on('data', chunk => {
       output += String(chunk);

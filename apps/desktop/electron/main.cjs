@@ -126,7 +126,11 @@ runtime = await connectDesktopRuntime({
   emit(channel, payload) {
     if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
     if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
-    if (channel === "runtime:connection") connectionState = payload;
+    if (channel === "runtime:connection") {
+      connectionState = payload;
+      // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)
+      if (payload.connected && runtime) registerHostMethods();
+    }
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
     }

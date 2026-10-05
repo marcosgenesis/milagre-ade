@@ -38,7 +38,7 @@ function callbackExec(exec) {
   };
 }
 
-function createGit({ execFile = execute, env = process.env } = {}) {
+function createGit({ execFile = execute, env = process.env, platform = process.platform } = {}) {
   function executeGit(cwd, args, { profile = 'READ', input } = {}) {
     const limits = LIMITS[profile];
     if (!limits) throw new Error(`Unknown Git limit profile: ${profile}`);
@@ -84,7 +84,10 @@ function createGit({ execFile = execute, env = process.env } = {}) {
       const folder = fields.find(field => field.startsWith('worktree '))?.slice(9);
       if (!folder) return null;
       const branch = fields.find(field => field.startsWith('branch '))?.slice(7).replace(/^refs\/heads\//, '');
-      return { path: folder, name: branch || path.basename(folder) };
+      // Git for Windows prints forward slashes. Keep filesystem identities in
+      // the same native form as realpath and persisted Project state.
+      const nativePath = platform === 'win32' ? path.win32.normalize(folder) : folder;
+      return { path: nativePath, name: branch || (platform === 'win32' ? path.win32 : path).basename(nativePath) };
     }).filter(Boolean);
   }
   const commonDir = async cwd => fs.realpath(path.resolve(cwd, (await text(cwd, ['rev-parse', '--git-common-dir'])).trim()));

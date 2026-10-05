@@ -5,6 +5,33 @@ const os = require('node:os');
 const path = require('node:path');
 const { resolveExecutable, refreshInstallPath, loadLoginEnvironment } = require('./agents/environment.cjs');
 
+test('Windows real Git worktrees preserve persisted Chat and provider session identities', { skip: process.platform !== 'win32' }, async t => {
+  const { execFileSync } = require('node:child_process');
+  const { createGit } = require('./git/client.cjs');
+  const { reconcileState, emptyState } = require('./project-state.cjs');
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'milagre git identity ')));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  execFileSync('git', ['init', '-b', 'main', directory], { stdio: 'ignore' });
+  const saved = {
+    ...emptyState('shop'), next_id: 4,
+    worktrees: { 1: { id: 1, project_id: 1, path: directory, name: 'main' } },
+    sessions: { 2: { id: 2, worktree_id: 1, title: 'Saved chat', agent_name: 'main', native_session_id: 'existing-provider-session' } },
+    messages: [{ id: 3, session_id: 2, body: 'Existing conversation survives' }],
+  };
+  const raw = execFileSync('git', ['-C', directory, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf8' });
+  assert.ok(raw.includes(directory.replaceAll('\\', '/')));
+  const listed = await createGit().worktreeList(directory);
+  assert.equal(listed[0].path, directory);
+  const reloaded = reconcileState(saved, 'shop', listed);
+  assert.equal(reloaded, saved);
+  saved.worktrees[1].path = directory.replaceAll('\\', '/');
+  const migrated = reconcileState(saved, 'shop', listed);
+  assert.deepEqual(migrated.sessions, saved.sessions);
+  assert.deepEqual(migrated.messages, saved.messages);
+  assert.equal(migrated.worktrees[1].path, directory);
+  assert.equal(migrated.next_id, 4);
+});
+
 test('Windows PowerShell helpers use only OS modules while preserving other environment variables', () => {
   const { powershell, powershellEnvironment } = require('./private-files.cjs');
   const original = { pSmOdUlEpAtH: 'C:\\Program Files\\PowerShell\\7\\Modules', PSModulePath: 'C:\\project\\modules', Path: 'C:\\tools', CUSTOM: 'kept' };

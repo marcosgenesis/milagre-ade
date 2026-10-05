@@ -6,6 +6,16 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { createGit, LIMITS } = require('./git/client.cjs');
 
+test('Windows Git worktree paths use native separators at the client boundary', async () => {
+  const git = createGit({ platform: 'win32', execFile(_command, _args, _options, done) {
+    done(null, 'worktree C:/Users/me/shop\0branch refs/heads/main\0\0worktree C:/Users/me/worktrees/cart\0detached\0\0', '');
+  } });
+  assert.deepEqual(await git.worktreeList('C:\\Users\\me\\shop'), [
+    { path: 'C:\\Users\\me\\shop', name: 'main' },
+    { path: 'C:\\Users\\me\\worktrees\\cart', name: 'cart' },
+  ]);
+});
+
 test('every Git profile has bounded output, a deadline and a noninteractive environment', async () => {
   const calls = [];
   const git = createGit({ env: { PATH: '/bin', GIT_TERMINAL_PROMPT: '1' }, execFile(command, args, options, done) {

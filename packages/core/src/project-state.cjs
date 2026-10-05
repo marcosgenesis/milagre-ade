@@ -1,4 +1,5 @@
 const { isDeepStrictEqual } = require("node:util");
+const path = require('node:path');
 // Coordination state persisted in <project>/.milagre/coordination.json, reconciled with the
 // worktrees git reports each time a project is read.
 
@@ -14,7 +15,7 @@ function emptyState(projectName) {
 }
 
 /** The state matched with the worktrees git lists now; a state that already matches is returned as is. */
-function reconcileState(rawState, projectName, discoveredWorktrees) {
+function reconcileState(rawState, projectName, discoveredWorktrees, { platform = process.platform } = {}) {
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
   const existingSessions = Object.values(state.sessions ?? {});
@@ -23,14 +24,18 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     ...existingSessions.map((item) => item.id),
   ]) || 1;
   const allocateId = () => nextId++;
-  const existingByPath = new Map(existingWorktrees.map((worktree) => [worktree.path, worktree]));
+  // Older Windows state can contain Git's slash form or Node's native form.
+  // Normalize separators without conflating distinct case-sensitive paths.
+  const nativePath = folder => platform === 'win32' && typeof folder === 'string' ? path.win32.normalize(folder) : folder;
+  const existingByPath = new Map(existingWorktrees.map((worktree) => [nativePath(worktree.path), worktree]));
   const worktrees = {};
   const sessions = {};
 
   for (const discovered of discoveredWorktrees) {
-    const previous = existingByPath.get(discovered.path);
-    const worktree = previous ?? { id: allocateId(), project_id: 1, path: discovered.path, name: discovered.name };
-    worktrees[worktree.id] = { ...worktree, project_id: 1, path: discovered.path, name: discovered.name };
+    const folder = nativePath(discovered.path);
+    const previous = existingByPath.get(folder);
+    const worktree = previous ?? { id: allocateId(), project_id: 1, path: folder, name: discovered.name };
+    worktrees[worktree.id] = { ...worktree, project_id: 1, path: folder, name: discovered.name };
     // A worktree can hold several chats; keep them all and make sure it has at least one.
     const worktreeSessions = existingSessions.filter((session) => session.worktree_id === worktree.id);
     if (worktreeSessions.length === 0) worktreeSessions.push({ id: allocateId(), worktree_id: worktree.id, agent_name: discovered.name, status: "Created" });

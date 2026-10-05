@@ -38,7 +38,7 @@ function callbackExec(exec) {
   };
 }
 
-function createGit({ execFile = execute, env = process.env, platform = process.platform } = {}) {
+function createGit({ execFile = execute, env = process.env, platform = process.platform, realpath = fs.realpath } = {}) {
   function executeGit(cwd, args, { profile = 'READ', input } = {}) {
     const limits = LIMITS[profile];
     if (!limits) throw new Error(`Unknown Git limit profile: ${profile}`);
@@ -79,16 +79,23 @@ function createGit({ execFile = execute, env = process.env, platform = process.p
 
   async function worktreeList(cwd) {
     const output = await text(cwd, ['worktree', 'list', '--porcelain', '-z']);
-    return output.split('\0\0').filter(Boolean).map(block => {
+    const listed = await Promise.all(output.split('\0\0').filter(Boolean).map(async block => {
       const fields = block.split('\0');
       const folder = fields.find(field => field.startsWith('worktree '))?.slice(9);
       if (!folder) return null;
       const branch = fields.find(field => field.startsWith('branch '))?.slice(7).replace(/^refs\/heads\//, '');
-      // Git for Windows prints forward slashes. Keep filesystem identities in
-      // the same native form as realpath and persisted Project state.
-      const nativePath = platform === 'win32' ? path.win32.normalize(folder) : folder;
+      // Git's spelling can differ from Node's (slashes, drive case or aliases).
+      // Resolve existing Windows worktrees through the OS, preserving missing
+      // entries for activeWorktrees to filter out as before.
+      let nativePath = folder;
+      if (platform === 'win32') {
+        try { nativePath = await realpath(folder); }
+        catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+        nativePath = path.win32.normalize(nativePath);
+      }
       return { path: nativePath, name: branch || (platform === 'win32' ? path.win32 : path).basename(nativePath) };
-    }).filter(Boolean);
+    }));
+    return listed.filter(Boolean);
   }
   const commonDir = async cwd => fs.realpath(path.resolve(cwd, (await text(cwd, ['rev-parse', '--git-common-dir'])).trim()));
   const read = Object.freeze({ run, checked, text, out, commitOf, refExists, resolveBase, worktreeList, commonDir });

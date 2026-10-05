@@ -23,6 +23,21 @@ test('Windows worktree reconciliation preserves saved Chats across Git and nativ
   }
 });
 
+test('Windows reconciliation resolves filesystem aliases without guessing case equivalence', () => {
+  const stored = {
+    ...emptyState('shop'), next_id: 4,
+    worktrees: { 1: { id: 1, project_id: 1, path: 'c:/users/me/shop', name: 'main' } },
+    sessions: { 2: { id: 2, worktree_id: 1, title: 'Saved chat', agent_name: 'main', native_session_id: 'provider-session' } },
+    messages: [{ id: 3, session_id: 2, body: 'Existing conversation' }],
+  };
+  const canonical = 'C:\\Users\\Me\\Shop';
+  const state = reconcileState(stored, 'shop', [{ path: canonical, name: 'main' }], { platform: 'win32', realpathSync: () => canonical });
+  assert.deepEqual(state.sessions, stored.sessions);
+  assert.deepEqual(state.messages, stored.messages);
+  assert.equal(state.worktrees[1].path, canonical);
+  assert.equal(state.next_id, 4);
+});
+
 test("a new worktree gets one empty chat", () => {
   const state = reconcileState(null, "shop", [main]);
   const sessions = Object.values(state.sessions);

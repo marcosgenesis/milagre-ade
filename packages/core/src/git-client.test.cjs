@@ -16,6 +16,14 @@ test('Windows Git worktree paths use native separators at the client boundary', 
   ]);
 });
 
+test('Windows Git worktrees use filesystem identities rather than Git path spelling', async () => {
+  const canonical = 'C:\\Users\\Me\\Shop';
+  const git = createGit({ platform: 'win32', realpath: async folder => {
+    assert.equal(folder, 'c:/users/me/shop'); return canonical;
+  }, execFile(_command, _args, _options, done) { done(null, 'worktree c:/users/me/shop\0branch refs/heads/main\0\0', ''); } });
+  assert.deepEqual(await git.worktreeList(canonical), [{ path: canonical, name: 'main' }]);
+});
+
 test('every Git profile has bounded output, a deadline and a noninteractive environment', async () => {
   const calls = [];
   const git = createGit({ env: { PATH: '/bin', GIT_TERMINAL_PROMPT: '1' }, execFile(command, args, options, done) {

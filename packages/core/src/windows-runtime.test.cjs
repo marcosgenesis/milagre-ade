@@ -9,7 +9,7 @@ test('Windows real Git worktrees preserve persisted Chat and provider session id
   const { execFileSync } = require('node:child_process');
   const { createGit } = require('./git/client.cjs');
   const { reconcileState, emptyState } = require('./project-state.cjs');
-  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'milagre git identity ')));
+  const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'milagre git identity ')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   execFileSync('git', ['init', '-b', 'main', directory], { stdio: 'ignore' });
   const saved = {
@@ -19,9 +19,11 @@ test('Windows real Git worktrees preserve persisted Chat and provider session id
     messages: [{ id: 3, session_id: 2, body: 'Existing conversation survives' }],
   };
   const raw = execFileSync('git', ['-C', directory, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf8' });
-  assert.ok(raw.includes(directory.replaceAll('\\', '/')));
+  const gitPath = raw.split('\0').find(field => field.startsWith('worktree '))?.slice(9);
+  assert.ok(gitPath, JSON.stringify({ directory, raw }));
+  assert.equal(fs.realpathSync.native(gitPath), directory, JSON.stringify({ directory, gitPath, raw }));
   const listed = await createGit().worktreeList(directory);
-  assert.equal(listed[0].path, directory);
+  assert.equal(listed[0].path, directory, JSON.stringify({ directory, gitPath, listed, raw }));
   const reloaded = reconcileState(saved, 'shop', listed);
   assert.equal(reloaded, saved);
   saved.worktrees[1].path = directory.replaceAll('\\', '/');

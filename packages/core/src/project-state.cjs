@@ -1,5 +1,6 @@
 const { isDeepStrictEqual } = require("node:util");
 const path = require('node:path');
+const fs = require('node:fs');
 // Coordination state persisted in <project>/.milagre/coordination.json, reconciled with the
 // worktrees git reports each time a project is read.
 
@@ -15,7 +16,7 @@ function emptyState(projectName) {
 }
 
 /** The state matched with the worktrees git lists now; a state that already matches is returned as is. */
-function reconcileState(rawState, projectName, discoveredWorktrees, { platform = process.platform } = {}) {
+function reconcileState(rawState, projectName, discoveredWorktrees, { platform = process.platform, realpathSync = fs.realpathSync.native } = {}) {
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
   const existingSessions = Object.values(state.sessions ?? {});
@@ -24,9 +25,19 @@ function reconcileState(rawState, projectName, discoveredWorktrees, { platform =
     ...existingSessions.map((item) => item.id),
   ]) || 1;
   const allocateId = () => nextId++;
-  // Older Windows state can contain Git's slash form or Node's native form.
-  // Normalize separators without conflating distinct case-sensitive paths.
-  const nativePath = folder => platform === 'win32' && typeof folder === 'string' ? path.win32.normalize(folder) : folder;
+  // Resolve older Windows spellings using filesystem identity. Case-sensitive
+  // directories stay distinct; a removed worktree still has its lexical path.
+  const paths = new Map();
+  const nativePath = folder => {
+    if (platform !== 'win32' || typeof folder !== 'string') return folder;
+    if (!paths.has(folder)) {
+      let canonical = folder;
+      try { canonical = realpathSync(folder); }
+      catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+      paths.set(folder, path.win32.normalize(canonical));
+    }
+    return paths.get(folder);
+  };
   const existingByPath = new Map(existingWorktrees.map((worktree) => [nativePath(worktree.path), worktree]));
   const worktrees = {};
   const sessions = {};

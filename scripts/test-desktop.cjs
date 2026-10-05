@@ -147,6 +147,20 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     await waitFor(() => evaluate('!document.querySelector("[data-host-disconnected]")'), 'desktop reconnect without reload');
     assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="Prompt"]\').value'), 'Keep this unsent draft');
     console.log('PASS: a shared client updates desktop and host restart restores state without losing its draft');
+    // A host that dies without being asked to stop (killed outright: its lock and socket stay behind) is started again.
+    const crashed = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    let crashedPid;
+    try { ({ pid: crashedPid } = await crashed.call('daemon:status')); } finally { crashed.close(); }
+    process.kill(crashedPid, 'SIGKILL');
+    await waitFor(() => evaluate('document.body?.textContent.includes("stopped unexpectedly, so it was started again") && !document.querySelector("[data-host-disconnected]")'), 'host started again after a crash');
+    const replacement = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    try { assert.notEqual((await replacement.call('daemon:status')).pid, crashedPid); } finally { replacement.close(); }
+    assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="Prompt"]\').value'), 'Keep this unsent draft');
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      const shot = await connection.call('Page.captureScreenshot');
+      await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'host-restarted.png'), Buffer.from(shot.data, 'base64'));
+    }
+    console.log('PASS: a host that crashed is started again, the window says so, and the draft stays');
     console.log(`PASS: ${expectTheme ? "packaged" : "source"} desktop opens existing Chats, provider IDs, Project settings, bundled skills and saved UI preferences`);
   } catch (error) {
     console.error(output);

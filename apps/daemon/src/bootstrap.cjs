@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { connect } = require('./client.cjs');
+const { staleOwner } = require('@milagre/core/ownership');
 
 async function compatibleClient(dataDir, timeoutMs = 30000) {
   const client = await connect({ dataDir, timeoutMs });
@@ -30,9 +31,10 @@ async function ensureDaemon({ dataDir, version, cwd = process.cwd(), worktreeRoo
   const logPath = path.join(dataDir, 'daemon.log');
   let child;
   let launchError;
-  // An existing lock may be a concurrent launch; wait for it to listen, but
-  // never remove it. A stale owner remains an explicit recovery operation.
-  if (!fs.existsSync(path.join(dataDir, 'runtime.lock'))) {
+  // An existing lock may be a concurrent launch; wait for it to listen. One whose owner has certainly exited (a crash)
+  // doesn't stop a start: the new host takes it over (see acquireOwnership).
+  const lockPath = path.join(dataDir, 'runtime.lock');
+  if (!fs.existsSync(lockPath) || staleOwner(lockPath)) {
     const log = fs.openSync(logPath, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);
     try {
       const args = [entry, 'serve', '--data-dir', dataDir, '--app-version', version, '--cwd', cwd];
@@ -49,7 +51,7 @@ async function ensureDaemon({ dataDir, version, cwd = process.cwd(), worktreeRoo
     if (launchError) throw launchError;
     await delay(50);
   } while (Date.now() < until);
-  throw new Error(`Milagre host could not start. Check ${logPath} and ${path.join(dataDir, 'runtime.lock/owner.json')}. Never remove a live owner's lock.`);
+  throw new Error(`Milagre host could not start. Check ${logPath} and ${path.join(lockPath, 'owner.json')}. Never remove a live owner's lock.`);
 }
 
 module.exports = { ensureDaemon, compatibleClient };

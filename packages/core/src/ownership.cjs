@@ -1,18 +1,73 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 
-// mkdir is the atomic ownership decision. Never infer that a missing/old PID makes
-// it safe to steal a lock: crashes leave evidence for explicit operator recovery.
+// When a live process with this pid started, or null when there is none (or it can't be read).
+function processStartTime(pid) {
+  try {
+    const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const time = Date.parse(started);
+    return Number.isNaN(time) ? null : time;
+  } catch { return null; }
+}
+function alive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code !== 'ESRCH'; }
+}
+
+// A lock is stale only when its owner is certainly gone: no process has its pid, or the one that does started after
+// the owner did (the pid was reused). Anything unclear (no readable record, another computer's record, a start time
+// that can't be read) counts as live: a live owner's lock is never removed.
+function staleOwner(lockPath) {
+  let owner;
+  try { owner = JSON.parse(fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8')); }
+  catch { return null; }
+  if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) return null;
+  if (owner.host !== undefined && owner.host !== os.hostname()) return null;
+  const startedAt = Date.parse(owner.processStartedAt ?? owner.startedAt);
+  if (Number.isNaN(startedAt)) return null;
+  if (alive(owner.pid)) {
+    // ps reports whole seconds, rounded down, so a reused pid started within the owner's own second still counts as live.
+    const running = processStartTime(owner.pid);
+    if (running === null || running <= startedAt) return null;
+  }
+  return owner;
+}
+
+// Removes a stale lock. A second directory makes the takeover itself exclusive, so two processes that both found the
+// lock stale can't remove the one the other has just taken. A takeover left behind by a crash expires after a minute.
+function clearStale(lockPath) {
+  const takeover = `${lockPath}.takeover`;
+  try { fs.mkdirSync(takeover, { mode: 0o700 }); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    try { if (Date.now() - fs.statSync(takeover).mtimeMs > 60_000) fs.rmdirSync(takeover); } catch {}
+    return false;
+  }
+  try {
+    // Read again inside the takeover: the lock may have changed hands since it was first found stale.
+    const owner = staleOwner(lockPath);
+    if (!owner) return false;
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    return true;
+  } finally { fs.rmdirSync(takeover); }
+}
+
+// mkdir is the atomic ownership decision. A lock left by an owner that has certainly exited (see staleOwner) is taken
+// over; any other existing lock stays, and its path is reported for the operator.
 function acquireOwnership(lockPath) {
   fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
   try {
     fs.mkdirSync(lockPath, { mode: 0o700 });
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    throw new Error(`Milagre state is already owned. Close its other runtime. If it crashed, verify the process in ${path.join(lockPath, 'owner.json')} has exited before removing ${lockPath}.`);
+    if (!clearStale(lockPath)) throw new Error(`Milagre state is already owned. Close its other runtime. If it crashed, verify the process in ${path.join(lockPath, 'owner.json')} has exited before removing ${lockPath}.`);
+    return acquireOwnership(lockPath);
   }
-  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
+  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(),
+    processStartedAt: new Date(performance.timeOrigin).toISOString(), host: os.hostname() };
   const file = path.join(lockPath, 'owner.json');
   try {
     fs.writeFileSync(file, JSON.stringify(owner, null, 2), { mode: 0o600, flag: 'wx' });
@@ -34,4 +89,4 @@ function acquireOwnership(lockPath) {
   };
 }
 
-module.exports = { acquireOwnership };
+module.exports = { acquireOwnership, staleOwner };

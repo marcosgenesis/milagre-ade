@@ -243,7 +243,11 @@ function App() {
 
   useEffect(() => {
     let updated = false;
-    const off = window.milagre.onRuntimeConnection?.(state => { updated = true; setHostConnection(state); });
+    const off = window.milagre.onRuntimeConnection?.(state => {
+      updated = true;
+      setHostConnection(state);
+      if (state.notice) setNotice(state.notice);
+    });
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
@@ -945,8 +949,13 @@ function App() {
         }} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">{restartingHost ? "Restarting…" : "Restart host"}</button>
       </div>}
       {!hostConnection.connected && <div role="status" data-host-disconnected className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]">
-        <p className="font-medium">Reconnecting to your computer</p>
-        <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+        {hostConnection.failed ? <>
+          <p className="font-medium">Couldn't restart Milagre's background host</p>
+          <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
+        </> : <>
+          <p className="font-medium">Reconnecting to your computer</p>
+          <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+        </>}
       </div>}
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}

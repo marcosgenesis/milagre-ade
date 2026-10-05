@@ -27,14 +27,38 @@ test('two detached starts attach to one daemon and reconnect preserves its PID',
   assert.equal((await again.call('daemon:status')).pid, a.pid);
 });
 
-test('stale ownership is reported and never silently removed', async t => {
-  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-bootstrap-stale-')));
+test('a live owner\'s lock is reported and never removed', async t => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-bootstrap-live-')));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dataDir, 'runtime.lock'));
-  const record = JSON.stringify({ pid: 2147483647, token: 'preserve-me', startedAt: '2000-01-01' });
+  // This test's own process: alive, and started before the lock was taken.
+  const record = JSON.stringify({ pid: process.pid, token: 'preserve-me', startedAt: new Date().toISOString() });
   await fs.writeFile(path.join(dataDir, 'runtime.lock/owner.json'), record);
   await assert.rejects(ensureDaemon({ dataDir, version: '1', cwd: dataDir, startupTimeoutMs: 300 }), /owned|ownership|start|lock/i);
   assert.equal(await fs.readFile(path.join(dataDir, 'runtime.lock/owner.json'), 'utf8'), record);
+});
+
+test('a host that crashed is started again over its lock and socket', async t => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-bootstrap-crashed-')));
+  const clients = [];
+  t.after(async () => {
+    for (const client of clients) { try { await client.call('daemon:stop'); } catch {} client.close(); }
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+  const options = { dataDir, version: '1', cwd: dataDir };
+  const first = await ensureDaemon(options);
+  const { pid } = await first.call('daemon:status');
+  const closed = once(first, 'close');
+  process.kill(pid, 'SIGKILL');
+  await closed;
+  // A crash leaves both behind.
+  assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'runtime.lock/owner.json'), 'utf8')).pid, pid);
+  assert.ok(await fs.stat(socketPath(dataDir)));
+  const again = await ensureDaemon(options);
+  clients.push(again);
+  const status = await again.call('daemon:status');
+  assert.notEqual(status.pid, pid);
+  assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'runtime.lock/owner.json'), 'utf8')).pid, status.pid);
 });
 
 test('a reachable older daemon is rejected without starting a competing runtime', async t => {

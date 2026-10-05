@@ -266,6 +266,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
       await push.close();
       await sender.close();
       await runtime.close();
+      // Saved: tell every client this stop was asked for, so a desktop doesn't start the host again (a crash sends nothing).
+      broadcast('daemon:stopping', {});
       const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
       for (const socket of clients.keys()) socket.end();
       // Do not let a client that never closes its side keep shutdown alive.
@@ -278,6 +280,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
   try {
     socketPath = pathFor(dataDir);
     prepareSocketDirectory(socketPath);
+    // This host owns the data folder (createRuntime took its lock), so a socket file here is one a crashed host left.
+    await fs.rm(socketPath, { force: true });
     server.listen(socketPath);
     await once(server, 'listening');
     listening = true;

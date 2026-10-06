@@ -18,6 +18,7 @@ const MANIFEST = {
   'test-prompt-skills.cjs': { platforms: ['darwin'], reason: 'skill tooltip never shows on hover under xvfb, #238' },
   'test-sidebar-resize.cjs': { platforms: ['darwin'], reason: 'reads the width mid-transition on Linux, #239' },
   'test-subagents.cjs': { platforms: ['darwin'], reason: 'eyes do not follow the pointer under xvfb, #240' },
+  'test-sidebar-usage.cjs': { platforms: ['darwin'], reason: 'usage card text differs on Linux, #254' },
 }
 
 function walk(dir, out) {

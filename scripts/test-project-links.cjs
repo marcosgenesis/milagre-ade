@@ -26,6 +26,7 @@ async function main() {
   for (const name of ['food-api', 'food-web']) {
     const folder = path.join(dir, name); projects.push(folder); await fs.mkdir(folder);
     execFileSync('git', ['init', '-qb', 'main', folder]); await fs.writeFile(path.join(folder, 'status.txt'), 'Original\n');
+    for (let index = 0; index < 12; index++) await fs.writeFile(path.join(folder, `a-${String(index).padStart(2, '0')}.bin`), Buffer.from([0, 0]));
     execFileSync('git', ['-C', folder, 'add', '.']); execFileSync('git', ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Fixture']);
   }
   let providerCalls = 0;
@@ -93,6 +94,78 @@ async function main() {
     for (const member of session.worktrees) assert.equal(await fs.readFile(path.join(member.worktreePath, 'status.txt'), 'utf8'), 'Shared edit\n');
     assert.equal(await evaluate(`document.querySelector('[data-chat-pane]').textContent.includes('RDFood / Link')`), false);
     assert.ok(await evaluate(`document.body.textContent.includes('2 Worktrees')`)); await shot('shared-chat');
+    assert.ok(await evaluate(`!!document.querySelector('[data-changes-toggle]')`), 'Shared Chats use the same right Changes toggle as Project Chats');
+    await evaluate(`document.querySelector('[data-changes-toggle]').click()`);
+    await waitFor(() => evaluate(`document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file="status.txt"]').length === 2`), 'changes in both owned Worktrees');
+    assert.equal(await evaluate(`document.querySelector('[data-changes-panel]').getBoundingClientRect().width`), 320);
+    assert.equal(await evaluate(`document.querySelector('[data-changes-panel] [data-diff-counts="total"]').textContent`), '+2−2', 'Totals include both Projects');
+    await shot('link-changes');
+    const apiId = session.worktrees.find(member => member.projectPath === projects[0]).projectId;
+    const webId = session.worktrees.find(member => member.projectPath === projects[1]).projectId;
+    const group = id => `[data-link-changes-project=${JSON.stringify(id)}]`;
+    await evaluate(`document.querySelector(${JSON.stringify(group(apiId) + ' [data-project-collapse]')}).click()`);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file]').length`), 1, 'Collapsing one Project preserves the other tree');
+    await evaluate(`document.querySelector(${JSON.stringify(group(apiId) + ' [data-project-collapse]')}).click()`);
+    const apiRoot = session.worktrees.find(member => member.projectId === apiId).worktreePath;
+    const webRoot = session.worktrees.find(member => member.projectId === webId).worktreePath;
+    for (const folder of [apiRoot, webRoot]) for (let index = 0; index < 12; index++) await fs.writeFile(path.join(folder, `a-${String(index).padStart(2, '0')}.bin`), Buffer.from([0, 1]));
+    await fs.writeFile(path.join(apiRoot, 'status.txt'), 'Only API changes\n');
+    await fs.writeFile(path.join(webRoot, 'status.txt'), 'Only web changes\n');
+    await evaluate(`document.querySelector('[data-diff-refresh]').click()`);
+    await waitFor(() => evaluate(`document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file]').length === 26`), 'changed binary files precede the selected file in both members');
+    await evaluate(`document.querySelector(${JSON.stringify(group(apiId) + ' [data-diff-tree-file="status.txt"]')}).click()`);
+    try { await waitFor(() => evaluate(`document.querySelector('[data-diff-view]')?.textContent.includes('Only API changes')`), 'API diff uses API Worktree'); }
+    catch (error) { console.error('Diff diagnostic:', await evaluate(`(() => { const view = document.querySelector('[data-diff-view]'); return { text: view?.textContent, scrollTop: view?.scrollTop, height: view?.clientHeight, scrollHeight: view?.scrollHeight, files: [...document.querySelectorAll('[data-diff-file]')].map(file => ({ path: file.dataset.diffFile, top: file.getBoundingClientRect().top })) }; })()`)); throw error; }
+    assert.equal(await evaluate(`document.querySelector('[data-diff-view]').textContent.includes('Only web changes')`), false);
+    assert.ok(await evaluate(`(() => { const view = document.querySelector('[data-diff-view]'); const file = view.querySelector('[data-diff-file="status.txt"]'); return view.scrollTop > 0 && file.getBoundingClientRect().top < view.getBoundingClientRect().bottom; })()`), 'First selection scrolls to a file that arrives with the member list');
+    await evaluate(`document.querySelector(${JSON.stringify(group(webId) + ' [data-diff-tree-file="status.txt"]')}).click()`);
+    await waitFor(() => evaluate(`document.querySelector('[data-diff-view]')?.textContent.includes('Only web changes')`), 'same file name in web uses web Worktree');
+    assert.equal(await evaluate(`document.querySelector('[data-diff-view]').textContent.includes('Only API changes')`), false);
+    assert.ok(await evaluate(`(() => { const view = document.querySelector('[data-diff-view]'); const file = view.querySelector('[data-diff-file="status.txt"]'); return view.scrollTop > 0 && file.getBoundingClientRect().top < view.getBoundingClientRect().bottom; })()`), 'Changing members also scrolls to the selected file');
+    await evaluate(`document.querySelector('[data-diff-view]').scrollTop = 0`);
+    await fs.writeFile(path.join(webRoot, 'reading-position.txt'), 'Refresh keeps the reading position\n');
+    await evaluate(`document.querySelector('[data-diff-refresh-all]').click()`);
+    await waitFor(() => evaluate(`!!document.querySelector('[data-diff-view] [data-diff-file="reading-position.txt"]')`), 'diff list refreshed while reading another file');
+    await delay(150);
+    assert.ok(await evaluate(`document.querySelector('[data-diff-view]').scrollTop < 5`), 'Refresh preserves manual scrolling instead of repeating the last selection');
+    await fs.unlink(path.join(webRoot, 'reading-position.txt'));
+    for (const folder of [apiRoot, webRoot]) for (let index = 0; index < 12; index++) await fs.writeFile(path.join(folder, `a-${String(index).padStart(2, '0')}.bin`), Buffer.from([0, 0]));
+    await fs.writeFile(path.join(webRoot, 'web-only.txt'), 'Web-only file\n');
+    await evaluate(`document.querySelector('[data-diff-refresh-all]').click()`);
+    await waitFor(() => evaluate(`!!document.querySelector(${JSON.stringify(group(webId) + ' [data-diff-tree-file="web-only.txt"]')}) && document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file]').length === 3`), 'diff toolbar refresh also updates grouped trees');
+    await shot('link-project-diff');
+    await evaluate(`document.querySelector('[data-diff-back]').click()`);
+    await evaluate(`document.querySelector('button[aria-label="Changes mode"]').click()`); await click('Committed');
+    await waitFor(() => evaluate(`document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file]').length === 0 && document.querySelectorAll('[data-link-changes-project] [data-diff-base]').length === 2`), 'each Project compares its own recorded base');
+    execFileSync('git', ['-C', apiRoot, 'add', 'status.txt']);
+    execFileSync('git', ['-C', apiRoot, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'API-only fixture change']);
+    await evaluate(`document.querySelector('[data-diff-refresh]').click()`);
+    await waitFor(() => evaluate(`document.querySelectorAll('[data-link-changes-project] [data-diff-tree-file]').length === 1 && !!document.querySelector(${JSON.stringify(group(apiId) + ' [data-diff-tree-file="status.txt"]')})`), 'refresh shows committed changes in the API only');
+    assert.equal(await evaluate(`document.querySelector('[data-changes-panel] [data-diff-counts="total"]').textContent`), '+1−1');
+    await evaluate(`document.querySelector('button[aria-label="Changes mode"]').click()`); await click('Uncommitted');
+    await waitFor(() => evaluate(`!!document.querySelector(${JSON.stringify(group(webId) + ' [data-diff-tree-file="status.txt"]')}) && !document.querySelector(${JSON.stringify(group(apiId) + ' [data-diff-tree-file="status.txt"]')})`), 'uncommitted mode excludes the committed member file');
+    await fs.rename(webRoot, webRoot + '-moved');
+    try {
+      await evaluate(`document.querySelector('[data-diff-refresh]').click()`);
+      await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(group(webId))}).textContent.includes("isn't one of the open project's chats")`), 'an unavailable Worktree has its own notice');
+      assert.ok(await evaluate(`document.querySelector(${JSON.stringify(group(apiId))}).textContent.includes('No uncommitted changes')`), 'One member error leaves the other Project readable');
+    } finally { await fs.rename(webRoot + '-moved', webRoot); }
+    await fs.writeFile(path.join(webRoot, 'web-only.txt'), 'Web-only file\n');
+    await evaluate(`document.querySelector('[data-diff-refresh]').click()`);
+    await waitFor(() => evaluate(`!!document.querySelector(${JSON.stringify(group(webId) + ' [data-diff-tree-file="web-only.txt"]')})`), 'refresh restores a recovered member and finds an untracked file');
+    await evaluate(`document.querySelector(${JSON.stringify(group(webId) + ' [data-project-actions]')}).click()`);
+    await shot('link-project-actions');
+    await click('Commit and open PR…');
+    await waitFor(() => evaluate(`!!document.querySelector('[data-git-dialog]')`), 'Project menu opens scoped Git dialog');
+    assert.ok(await evaluate(`document.querySelector('[data-git-dialog] header').textContent.includes('food-web')`));
+    await waitFor(() => evaluate(`document.querySelector('[data-git-dialog]').textContent.includes('web-only.txt')`), 'Git dialog reads the explicit web member Worktree');
+    assert.equal(await evaluate(`!!document.querySelector('dialog[aria-label="Choose Project for Git"]')`), false, 'Project row already identifies the Git target');
+    await evaluate(`document.querySelector('[data-git-dialog] button[aria-label="Close"]').click()`);
+    await evaluate(`document.querySelector('[data-changes-toggle]').click()`);
+    await waitFor(() => evaluate(`!document.querySelector('[data-changes-panel]')`), 'right bar hidden');
+    assert.equal(await evaluate(`!!document.querySelector('[data-diff-view]')`), false);
+    await evaluate(`[...document.querySelectorAll('button[data-row]')].find(button => button.textContent.includes('Update status.txt')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 140, clientY: 200 }))`);
+    await waitFor(() => evaluate(`!![...document.querySelectorAll('[data-menu-row]')].find(button => button.textContent === 'Commit and open PR…' && !button.disabled)`), 'shared Chat Git action is available');
     await click('Commit and open PR…'); await waitFor(() => evaluate(`!!document.querySelector('dialog[aria-label="Choose Project for Git"]')`), 'Git member chooser');
     assert.equal(await evaluate(`[...document.querySelectorAll('dialog button')].find(button=>button.textContent==='Continue').disabled`), true); await shot('choose-git-project'); await click('Cancel');
     await input('textarea[aria-label="Prompt"]', 'Keep this Link draft'); await selector(); await waitFor(() => evaluate(`!!document.querySelector('[data-project-item]')`), 'Project menu rows'); await evaluate(`[...document.querySelectorAll('[data-project-item] [data-menu-row]')].find(button => button.textContent.includes('food-api')).click()`);

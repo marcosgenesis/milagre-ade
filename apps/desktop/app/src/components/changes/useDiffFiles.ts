@@ -39,7 +39,9 @@ function patchKey(cwd: string, mode: DiffMode, file: DiffFileEntry) {
  * the user opened with "Show diff" stay opened until the folder or mode changes.
  */
 export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: string; mode: DiffMode; active: boolean }) {
-  const [list, setList] = useState<DiffList>({ state: "idle" });
+  const scope = JSON.stringify([cwd, base, mode]);
+  const [snapshot, setSnapshot] = useState<{ scope: string; list: DiffList }>({ scope, list: { state: "idle" } });
+  const list: DiffList = snapshot.scope === scope ? snapshot.list : { state: "idle" };
   const [, setVersion] = useState(0);
   const cache = useRef(new Map<string, PatchState>());
   const queue = useRef<(() => void)[]>([]);
@@ -60,23 +62,24 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
 
   const refresh = useCallback(async () => {
     const { cwd, base, mode } = request.current;
+    const scope = JSON.stringify([cwd, base, mode]);
     const current = ++generation.current;
-    setList((previous) => (previous.state === "ready" ? previous : { state: "loading" }));
+    setSnapshot(previous => ({ scope, list: previous.scope === scope && previous.list.state === "ready" ? previous.list : { state: "loading" } }));
     try {
       const result = await window.milagre.git.diffFiles({ cwd, base, mode });
       if (current === generation.current) {
         dropPatches();
-        setList({ state: "ready", ...result });
+        setSnapshot({ scope, list: { state: "ready", ...result } });
       }
     } catch (error) {
-      if (current === generation.current) setList({ state: "error", message: error instanceof Error ? error.message : "Couldn't read the changes" });
+      if (current === generation.current) setSnapshot({ scope, list: { state: "error", message: error instanceof Error ? error.message : "Couldn't read the changes" } });
     }
   }, [dropPatches]);
 
   useEffect(() => {
     dropPatches();
     forced.current.clear();
-    setList({ state: "idle" });
+    setSnapshot({ scope: JSON.stringify([cwd, base, mode]), list: { state: "idle" } });
     if (active && cwd) void refresh();
     // Invalidates a read still running for the old folder or mode.
     return () => { generation.current++; };

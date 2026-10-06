@@ -1,5 +1,6 @@
 import type { NamedProjectLink } from '@milagre/shared/model';
 import { ProjectAvatarStack } from './ProjectAvatarStack';
+import { useProjectImages } from '../lib/project-images';
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -190,27 +191,6 @@ export function RailButton({
       )}
     </button>
   );
-}
-
-// The other listed projects' avatars, looked up once per run: the lookup can ask GitHub.
-const projectImages = new Map<string, string | null>();
-
-function useProjectImages(paths: string[]) {
-  const [, setLoaded] = useState(0);
-  const key = paths.join("\n");
-  useEffect(() => {
-    let live = true;
-    for (const path of paths) {
-      if (projectImages.has(path)) continue;
-      projectImages.set(path, null);
-      window.milagre?.getProjectImage(path).then((src) => {
-        projectImages.set(path, src);
-        if (live) setLoaded((count) => count + 1);
-      }, () => {});
-    }
-    return () => { live = false; };
-  }, [key]);
-  return (path: string) => projectImages.get(path) ?? null;
 }
 
 function WorkspaceMenu({

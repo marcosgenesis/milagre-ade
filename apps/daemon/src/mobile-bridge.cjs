@@ -15,7 +15,7 @@ const { createConfinement } = require('./confine.cjs');
 
 // Characters of a data URL the phone gets for a Project's icon (about 450 KB of image).
 const MAX_PROJECT_IMAGE = 600_000;
-const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
+const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'project:set-icon', 'chat:runs',
   'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
@@ -397,7 +397,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
           if (request.method === 'link:open' && result?.link) result = { id: result.link.id, name: result.link.name };
           // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
-          if (request.method === 'project:image' && typeof result === 'string' && result.length > MAX_PROJECT_IMAGE) result = null;
+          if ((request.method === 'project:image' || request.method === 'project:set-icon') && typeof result === 'string' && result.length > MAX_PROJECT_IMAGE) result = null;
           }
         } else throw failure(404, 'Unknown endpoint');
         reply(200, { result: result ?? null });

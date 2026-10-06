@@ -276,10 +276,19 @@ function createRuntime(options) {
   commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
   commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
-  commands.handle("project:image", async (_event, projectPath) => {
+  async function projectImage(projectPath) {
     await knownFolder(projectPath);
+    const { icon } = await projectSettings().get(projectPath);
+    if (icon) return icon;
     await environmentReady;
     return resolveProjectImage(projectPath);
+  }
+  commands.handle("project:image", (_event, projectPath) => projectImage(projectPath));
+  // The icon the user chose in Settings, or null to go back to the repository's own.
+  commands.handle("project:set-icon", async (_event, projectPath, icon) => {
+    await knownFolder(projectPath);
+    await projectSettings().setIcon(projectPath, icon ?? null);
+    return projectImage(projectPath);
   });
   // Packaged builds get their release version from electron-builder metadata, not the source package.json.
   commands.handle("app:version", () => version);

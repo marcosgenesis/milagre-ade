@@ -74,6 +74,8 @@ declare global {
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
+      /** Saves a chosen icon (an image data URL), or null to go back to the repository's own; returns the icon now shown. */
+      setProjectIcon: (projectPath: string, icon: string | null) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       /** `setupNote`: why the repo's setup file was ignored. */
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;

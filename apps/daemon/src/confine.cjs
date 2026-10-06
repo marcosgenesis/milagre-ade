@@ -51,6 +51,7 @@ const PATHS = Object.freeze({
   // The search names no path; its results are cut down to the folder (filterResult).
   'project:find': none,
   'project:image': ([projectPath]) => [projectPath],
+  'project:set-icon': ([projectPath]) => [projectPath],
   'chat:runs': none,
   'chat:send': ([request]) => [request?.projectPath, ...(request?.cwd === undefined ? [] : [request.cwd]), ...(Array.isArray(request?.files) ? request.files.map(attached) : [])],
   'chat:resume': ([projectPath]) => [projectPath],

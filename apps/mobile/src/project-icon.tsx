@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Image, View } from 'react-native';
 import { Folder01Icon } from '@hugeicons/core-free-icons';
 import type { Client } from './client';
@@ -8,6 +8,16 @@ import { colors } from './theme';
 // Desktop's project avatars: the repository's own icon or favicon, else its GitHub owner's avatar. Read once per
 // computer and Project for the app's life; a Mac without project:image, or a Project without one, keeps the folder.
 const images = new Map<string, Promise<string | null>>();
+const listeners = new Set<() => void>();
+let version = 0;
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+
+/** Shows the icon the computer now returns, after one is chosen or reset in Settings. */
+export function setProjectImage(client: Client, path: string, uri: string | null) {
+  images.set(`${client.url}|${path}`, Promise.resolve(uri));
+  version++;
+  for (const listener of listeners) listener();
+}
 
 function projectImage(client: Client, path: string) {
   const key = `${client.url}|${path}`;
@@ -21,13 +31,14 @@ function projectImage(client: Client, path: string) {
 
 export function ProjectIcon({ client, path, size = 28 }: { client: Client | null; path: string; size?: number }) {
   const [source, setSource] = useState<{ key: string; uri: string | null } | null>(null);
+  const changed = useSyncExternalStore(subscribe, () => version);
   const key = client ? `${client.url}|${path}` : '';
   useEffect(() => {
     if (!client) return;
     let live = true;
     void projectImage(client, path).then(uri => { if (live) setSource({ key: `${client.url}|${path}`, uri }); });
     return () => { live = false; };
-  }, [client, path]);
+  }, [client, path, changed]);
   const uri = source?.key === key ? source.uri : null;
   const frame = { width: size, height: size, borderRadius: size / 4, borderCurve: 'continuous' } as const;
   return uri ? <Image source={{ uri }} accessibilityIgnoresInvertColors style={[frame, { backgroundColor: colors.field }]} />

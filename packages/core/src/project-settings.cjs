@@ -14,6 +14,12 @@ function normalizeSetupCommand(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// A chosen Project icon: a small image data URL, kept under the size the phone accepts.
+const MAX_ICON = 600_000;
+function normalizeIcon(value) {
+  return typeof value === "string" && value.length <= MAX_ICON && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : null;
+}
+
 function createProjectSettings(file) {
   let queue = Promise.resolve();
 
@@ -58,7 +64,7 @@ function createProjectSettings(file) {
   return {
     async get(projectPath) {
       const entry = (await read({ strict: false })).projects[path.resolve(projectPath)] ?? {};
-      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand) };
+      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand), icon: normalizeIcon(entry.icon) };
     },
     // An empty list removes the setting, which brings the default back.
     async setFilesToCopy(projectPath, filesToCopy) {
@@ -77,6 +83,16 @@ function createProjectSettings(file) {
         else delete entry.setupCommand;
       });
       return { setupCommand: command };
+    },
+    // null removes the chosen icon, which brings the repository's own back.
+    async setIcon(projectPath, icon) {
+      const value = icon === null ? null : normalizeIcon(icon);
+      if (icon !== null && !value) throw new Error("Choose a PNG, JPEG, WebP or GIF image under 450 KB.");
+      await update(projectPath, (entry) => {
+        if (value) entry.icon = value;
+        else delete entry.icon;
+      });
+      return { icon: value };
     },
   };
 }

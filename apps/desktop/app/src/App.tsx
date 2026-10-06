@@ -73,6 +73,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
+import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore } from "./lib/draft-store";
 import { restoredChatsNotice } from "./lib/restored-chats";
@@ -110,7 +111,6 @@ type FailedSend = PendingSend & { draft: string; error: string; target: Prepared
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
-  const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
   const projectRef = useRef<OpenProject | null>(null);
   const projectsSeen = useRef(new Map<string, Pick<OpenProject, "path" | "name">>());
   const projectNavigation = useRef(0);
@@ -225,6 +225,8 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  // Which Project the Settings page shows; any recent Project can be picked there, the open one by default.
+  const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -254,17 +256,7 @@ function App() {
     idle(() => { for (const view of LAZY_VIEWS) view.preload(); });
   }, []);
 
-  useEffect(() => {
-    const projectPath = project?.path;
-    if (!projectPath) return;
-    let cancelled = false;
-    window.milagre.getProjectImage(projectPath).then((src) => {
-      if (!cancelled) setProjectImage({ path: projectPath, src });
-    }).catch(() => {
-      if (!cancelled) setProjectImage({ path: projectPath, src: null });
-    });
-    return () => { cancelled = true; };
-  }, [project?.path]);
+  const projectImage = useProjectImages([project?.path ?? ""]);
 
   async function loadInitialProject() {
     setLoading(true);
@@ -1047,7 +1039,7 @@ function App() {
   const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
   const openSettings = useEvent(() => setView("settings"));
   const openCanvas = useEvent(() => { changes.closeDiff(); setView("canvas"); });
-  const openProjectSettings = useEvent(() => { setSettingsSection("project"); setView("settings"); });
+  const openProjectSettings = useEvent(() => { setSettingsProject(null); setSettingsSection("project"); setView("settings"); });
   const openCommandPalette = useEvent(() => setCommandPaletteOpen(true));
   // Saved message cards also receive this callback: keep their memoization during sends and streamed updates.
   const openLinkedChat = useEvent((key: string) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key)));
@@ -1097,7 +1089,7 @@ function App() {
       { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
       { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
       { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
-      { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: current.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
+      { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: current.name, keywords: "worktree setup files", run: openProjectSettings },
     ];
     if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
     commands.push(...settingsCommands(getSettings(), updateSettings));
@@ -1163,7 +1155,7 @@ function App() {
         key={project.path}
         fill
         workspaceName={project.name}
-        workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
+        workspaceImage={projectImage(project.path)}
         onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)}
         onOpenProject={openProjectFromSidebar}
         recents={chats}
@@ -1184,7 +1176,7 @@ function App() {
       </div>
       {view === "settings" && (
         <div className="flex shrink-0 py-3 pl-3">
-          <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
+          <SettingsNav section={settingsSection} project={settingsProject ?? project} current={project} onSelect={setSettingsSection} onSelectProject={(picked) => { setSettingsProject(picked); setSettingsSection("project"); }} onBack={() => setView("chat")} />
         </div>
       )}
 
@@ -1196,7 +1188,7 @@ function App() {
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {notice && <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>{notice}</NoticeCard>}
-            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
+            <SettingsPanel section={settingsSection} project={settingsProject ?? project} models={models} update={update} />
           </div>
         )}
         {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} linkedWork={linkedWork} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}

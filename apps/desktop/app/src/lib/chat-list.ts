@@ -1,5 +1,6 @@
-import type { ChatMessage } from "../model";
-export { chatTitle } from "@milagre/shared/chats";
+import type { AgentSession, ChatMessage } from "../model";
+import { comparePins } from "@milagre/shared/chats";
+export { chatTitle, pinOrderAt } from "@milagre/shared/chats";
 
 /** What the mark at the left of a chat row shows; the first that applies wins. */
 export type ChatMark = "question" | "waiting" | "delegated" | "running" | "unread" | "idle";
@@ -17,10 +18,32 @@ export function chatMark({ asking = false, waiting, delegated = false, running, 
 /** How the sidebar orders chats: by when they started, or by their latest message. Newest first either way. */
 export type ChatOrder = "created" | "recent";
 
-/** Chats newest first. Message ids only grow, so a chat's first message dates its start and its last one its latest activity. */
-export function orderChats<T extends { sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
+/**
+ * Pinned chats first, in their manual order, so a finishing turn never moves them; then the rest newest first.
+ * Message ids only grow, so a chat's first message dates its start and its last one its latest activity.
+ */
+export function orderChats<T extends { session: Pick<AgentSession, "pinned" | "pin_order">; sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
   const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
-  return [...chats].sort((a, b) => key(b) - key(a));
+  return [...chats].sort((a, b) => comparePins(a.session, b.session) || key(b) - key(a));
+}
+
+/** Where a dragged chat lands on a row: on the line above or below it, or on the row itself. */
+export type DropZone = "before" | "after" | "on";
+/** What dropping does. `link` links the two chats' Worktrees; `none` leaves everything as it is. */
+export type DropIntent = "reorder" | "pin" | "unpin" | "link" | "none" | { invalid: "same-worktree" | "linked" };
+
+/**
+ * What dropping `source` at `zone` of `target` does. A null target is the empty Pinned section.
+ * `linked`: a Link already joins the two chats' Worktrees.
+ */
+export function dropIntent(source: { pinned?: boolean; worktree?: string }, target: { pinned?: boolean; worktree?: string } | null, zone: DropZone, linked = false): DropIntent {
+  if (!target) return source.pinned ? "none" : "pin";
+  if (zone === "on") {
+    if (source.worktree && source.worktree === target.worktree) return { invalid: "same-worktree" };
+    return linked ? { invalid: "linked" } : "link";
+  }
+  if (target.pinned) return source.pinned ? "reorder" : "pin";
+  return source.pinned ? "unpin" : "none";
 }
 
 /** A line count in a few characters: 980, 2.1k, 14k, 2.1m. */

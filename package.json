@@ -36,6 +36,7 @@
     "benchmark:chat-flow": "node scripts/benchmark-chat-flow.cjs",
     "benchmark:mobile-preview": "node scripts/benchmark-mobile-preview.cjs",
     "test:chat-order": "node scripts/test-chat-order.cjs",
+    "test:chat-pins": "node scripts/test-chat-pins.cjs",
     "test:command-palette": "node scripts/test-command-palette.cjs",
     "test:archive-enter": "node scripts/test-archive-enter.cjs",
     "test:phone": "node scripts/test-phone.cjs",

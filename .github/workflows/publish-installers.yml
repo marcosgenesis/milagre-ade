@@ -31,11 +31,11 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out released commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag }}
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -159,7 +159,7 @@ jobs:
           fi
       - name: Stage signed macOS artifacts
         if: inputs.platforms == 'all'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-macos
           path: |-
@@ -177,12 +177,12 @@ jobs:
     steps:
       - &a1
         name: Check out released commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag }}
       - &a2
         name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -225,7 +225,7 @@ jobs:
           node scripts/test-desktop.cjs --packaged $executable
           if ($LASTEXITCODE -ne 0) { throw 'Installed desktop check failed' }
       - name: Stage signed Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-windows
           path: |-
@@ -290,7 +290,7 @@ jobs:
           "release/Milagre-${RELEASE_TAG#v}-x86_64.AppImage" --appimage-extract > /dev/null
           xvfb-run -a npm run test:desktop -- --packaged squashfs-root/AppRun
       - name: Stage signed Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-linux
           path: |-
@@ -319,7 +319,7 @@ jobs:
       - name: Install metadata dependencies
         run: npm ci --ignore-scripts
       - name: Collect signed installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: signed-*
           merge-multiple: true

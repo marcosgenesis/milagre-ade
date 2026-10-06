@@ -46,7 +46,7 @@
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "package:linux": "npm run build && electron-builder --linux AppImage deb rpm --x64 --publish never",
     "package:managers": "node scripts/generate-package-managers.cjs",
-    "test:release": "node --test scripts/release-workflow.test.cjs scripts/package-managers.test.cjs scripts/update-feeds.test.cjs scripts/linux-repository.test.cjs",
+    "test:release": "node --test scripts/release-workflow.test.cjs scripts/package-managers.test.cjs scripts/update-feeds.test.cjs scripts/linux-repository.test.cjs scripts/ci-workflow.test.cjs",
     "package:mac:local": "npm run package:mac -- --config.mac.identity=- --config.mac.notarize=false",
     "test:worktree-setup": "node scripts/test-worktree-setup.cjs",
     "test:monorepo": "node --test scripts/monorepo.test.cjs",

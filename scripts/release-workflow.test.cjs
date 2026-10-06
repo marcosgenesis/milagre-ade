@@ -129,9 +129,23 @@ test('an accepted disk image is stapled', t => {
   assert.match(f.calls(), /xcrun stapler staple/)
 })
 
-test('merges to main only create a draft candidate, never a macOS build', () => {
-  assert.deepEqual(Object.keys(releaseWorkflow.jobs), ['release'])
-  assert.equal(releaseWorkflow.jobs.release['runs-on'], 'ubuntu-latest')
+test('a candidate is created only after CI succeeded on that main commit, and from that commit', () => {
+  assert.deepEqual(releaseWorkflow.on, { workflow_run: { workflows: ['CI'], types: ['completed'], branches: ['main'] } })
+  const job = releaseWorkflow.jobs.release
+  assert.equal(
+    job.if,
+    "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}",
+  )
+  const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout'))
+  assert.equal(checkout.with.ref, '${{ github.event.workflow_run.head_sha }}')
+  assert.equal(checkout.with['fetch-depth'], 0)
+  assert.equal(checkout.with['persist-credentials'], false)
+  const runs = job.steps.map(step => step.run).filter(Boolean)
+  assert.deepEqual(runs, ['npm ci', 'npm run release'])
+  assert.ok(!JSON.stringify(releaseWorkflow).includes('package:mac'))
+})
+
+test('release candidates are created as drafts', () => {
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../.releaserc.json'), 'utf8'))
   const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github')
   assert.equal(github?.[1]?.draftRelease, true)

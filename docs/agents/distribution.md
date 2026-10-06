@@ -56,6 +56,8 @@ Installs set to Beta in Settings read `beta-mac.yml`; Stable installs read `late
 
 Promotion is unchanged: **Publish installers** publishes the untouched draft as stable. A stable release now uploads both `latest-mac.yml` and `beta-mac.yml` (same installers), so beta installs move to the stable build once it ships.
 
+If `gh release create` succeeded but the asset upload failed, the next run sees a beta for that commit and skips it. Delete the broken prerelease and its tag with `gh release delete <betaTag> --cleanup-tag --yes`, then rerun the workflow. With no draft candidate, a scheduled run does nothing.
+
 Required repository secrets:
 
 | Purpose | Secrets |

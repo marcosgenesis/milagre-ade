@@ -17,7 +17,7 @@ function pickBetaCandidate({ requested, runNumber, exec = defaultExec }) {
     if (!draft) throw new Error(`${requested} is not a draft stable release candidate`)
   } else {
     draft = drafts.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
-    if (!draft) throw new Error('No draft release candidate to ship to beta')
+    if (!draft) return { tag: '', version: '', betaTag: '', changed: false }
   }
   const tag = draft.tagName
   const base = tag.slice(1)

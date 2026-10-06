@@ -45,7 +45,12 @@ test('a beta of another version does not suppress this candidate', () => {
   assert.equal(pickBetaCandidate({ runNumber: 8, exec }).changed, true)
 })
 
-test('fails clearly when there is no draft candidate', () => {
+test('a scheduled run with no draft candidate does nothing instead of failing', () => {
   const exec = fakeExec({ releases: [release('v1.2.0', '2026-10-01T10:00:00Z')], commits: {} })
-  assert.throws(() => pickBetaCandidate({ runNumber: 1, exec }), /No draft release candidate/)
+  assert.deepEqual(pickBetaCandidate({ runNumber: 1, exec }), { tag: '', version: '', betaTag: '', changed: false })
+})
+
+test('an explicit request still fails when no draft exists', () => {
+  const exec = fakeExec({ releases: [release('v1.2.0', '2026-10-01T10:00:00Z')], commits: {} })
+  assert.throws(() => pickBetaCandidate({ requested: 'v1.2.0', runNumber: 1, exec }), /not a draft/)
 })

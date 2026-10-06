@@ -104,6 +104,8 @@ jobs:
           rm -rf "$GNUPGHOME"
 
   desktop-checks:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:

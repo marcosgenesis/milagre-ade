@@ -56,7 +56,7 @@ test('Windows and Linux native tests run on PRs without building an installer', 
   assert.ok(!runs.includes('package:'), 'native tests never package')
 })
 
-test('native tests run only when a PR touches desktop code; the JavaScript job always runs', () => {
+test('native tests and Electron checks run only when a PR touches desktop code; the JavaScript job always runs', () => {
   const changes = ci.jobs.changes
   assert.ok(changes, 'a changes job decides what a PR touched')
   const filter = changes.steps.find(step => step.id === 'filter')
@@ -65,8 +65,10 @@ test('native tests run only when a PR touches desktop code; the JavaScript job a
   assert.ok(desktop.includes('apps/desktop/**') && desktop.includes('packages/**'))
   assert.ok(!desktop.includes('apps/mobile/**'), 'mobile-only PRs skip the desktop jobs')
   assert.equal(changes.outputs.desktop, "${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}")
-  assert.equal(ci.jobs['native-tests'].needs, 'changes')
-  assert.equal(ci.jobs['native-tests'].if, "needs.changes.outputs.desktop == 'true'")
+  for (const name of ['native-tests', 'desktop-checks']) {
+    assert.equal(ci.jobs[name].needs, 'changes', `${name} waits for the change detection`)
+    assert.equal(ci.jobs[name].if, "needs.changes.outputs.desktop == 'true'", `${name} is skipped on PRs without desktop changes`)
+  }
   assert.equal(ci.jobs.javascript.if, undefined)
 })
 

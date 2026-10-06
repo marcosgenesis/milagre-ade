@@ -874,6 +874,35 @@ test('the transcript follows new content, also after the agent settings sheet op
   assert.equal(scrolls, 2);
 });
 
+test('Go to bottom returns the mobile transcript to the end and resumes following', () => {
+  const screen = chatHost({ effects: true });
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const jump = () => find(screen.render(), node => node.type === 'PillButton' && node.props.title === 'Go to bottom');
+  const scrolls = [];
+  page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'No button when the end is visible, including short chats');
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });
+  page().props.onEndVisible(false);
+  assert.ok(jump(), 'The keyboard-aware end callback reveals the button');
+  page().props.onContentSizeChange(0, 1900);
+  assert.equal(scrolls.length, 0, 'New output leaves earlier messages in place');
+  jump().props.onPress();
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), 'The jump reaches the end without intermediate scroll events disabling follow');
+  assert.equal(jump(), undefined);
+  page().props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 2, 'Following resumes after the jump');
+  page().props.onEndVisible(false);
+  assert.ok(jump());
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'Scrolling back to the end manually hides the button');
+  page().props.onEndVisible(false);
+  screen.params.id = '42';
+  screen.render();
+  assert.equal(jump(), undefined, 'Switching Chats clears the previous button state');
+});
+
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
   const screen = chatHost();
   screen.params.id = '42';

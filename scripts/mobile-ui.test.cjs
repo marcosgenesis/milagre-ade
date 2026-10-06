@@ -404,6 +404,70 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+function subagentsHost({ call = async () => {} } = {}) {
+  const react = hookHost();
+  const calls = [];
+  const state = { sessions: { 7: { id: 7, subagents: ['running', 'completed', 'failed', 'cancelled', 'unknown'].map(status => ({ id: status, title: status, status, transcript: [] })) } } };
+  const session = { snapshot: { project: { path: '/project', state } }, client: { async call(method, args) {
+    calls.push({ method, args: Array.from(args) });
+    await call(method, args);
+    const edits = require('@milagre/shared/project-edits');
+    const next = method === 'chat:archive-finished-subagents' ? edits.archiveFinishedSubagents(state, args[1]) : edits.archiveSubagent(state, args[1], args[2], args[3]);
+    state.sessions = next.sessions;
+  } }, refresh: async () => {}, expectActivity() {} };
+  const { default: AgentsSheet } = load('app/agents.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View' },
+    'expo-router': { router: { back() {} }, useLocalSearchParams: () => ({ id: '7' }) },
+    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }),
+    '@milagre/shared/project-edits': require('@milagre/shared/project-edits'),
+    '../session': { useSession: () => session }, '../subagent-item': { SubagentItem: 'SubagentItem' }, '../icons': { Icon: 'Icon' },
+    '../ui': { CircleButton: 'CircleButton', IconButton: 'IconButton', ListRow: 'ListRow', ErrorNotice: 'ErrorNotice', PageScroll: 'PageScroll', colors: {}, styles: {} },
+  });
+  const render = () => { react.begin(); return AgentsSheet(); };
+  const button = title => find(render(), node => node.props?.title === title || node.props?.label === title);
+  return { render, button, calls, state, session };
+}
+
+test('mobile archives finished subagents without offering archived browsing', async () => {
+  const host = subagentsHost();
+  const archive = host.button('Archive finished subagents');
+  assert.ok(archive, 'the sheet must offer bulk archive');
+  await archive.props.onPress();
+  assert.deepEqual(host.calls[0], { method: 'chat:archive-finished-subagents', args: ['/project', 7] });
+  assert.deepEqual(host.state.sessions[7].subagents.filter(agent => agent.archived).map(agent => agent.id), ['completed', 'failed', 'cancelled']);
+  assert.equal(host.button('Archive finished subagents').props.disabled, true);
+  assert.equal(host.button('Archived (3)'), undefined);
+  assert.equal(host.button('Restore completed'), undefined);
+  assert.equal(find(host.render(), node => node.type === 'SubagentItem' && node.props.agent.archived), undefined);
+  await host.button('Archive running').props.onPress();
+  assert.deepEqual(host.calls[1], { method: 'chat:archive-subagent', args: ['/project', 7, 'running', true] });
+  assert.equal(find(host.render(), node => node.type === 'SubagentItem' && node.props.agent.id === 'running'), undefined);
+});
+
+test('mobile blocks duplicate archive taps and reports a failed request without hiding entries', async () => {
+  const pending = deferred();
+  const host = subagentsHost({ call: () => pending.promise });
+  const archive = host.button('Archive finished subagents');
+  assert.ok(archive, 'the sheet must offer bulk archive');
+  const first = archive.props.onPress();
+  await archive.props.onPress();
+  assert.equal(host.calls.length, 1);
+  assert.equal(host.button('Archive finished subagents').props.disabled, true);
+  pending.reject(new Error('Computer disconnected'));
+  await first;
+  assert.match(find(host.render(), node => node.type === 'ErrorNotice').props.message, /Computer disconnected/);
+  assert.equal(host.state.sessions[7].subagents.some(agent => agent.archived), false);
+  assert.equal(host.button('Archive finished subagents').props.disabled, false);
+});
+
+test('archived-only subagents hide the mobile Chat menu action and pill', () => {
+  const chat = chatHost();
+  chat.params.id = '7';
+  chat.session.snapshot.project.state.sessions[7] = { id: 7, worktree_id: 1, subagents: [{ id: 'done', status: 'completed', archived: true }] };
+  assert.equal(find(chat.render(), node => node.type === 'ToolbarMenuAction' && node.props.children === 'Subagents'), undefined);
+  assert.equal(find(chat.render(), node => node.type === 'SubagentChip'), undefined);
+});
+
 test('the mobile composer loads skills from the selected Chat Worktree', () => {
   const chat = chatHost();
   chat.session.snapshot.project.state.worktrees[2] = { id: 2, name: 'feature', path: '/worktrees/feature', project_id: 1 };

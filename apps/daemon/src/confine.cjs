@@ -54,6 +54,8 @@ const PATHS = Object.freeze({
   'agent:models': none,
   'agent:cli-status': none,
   'chat:patch': ([projectPath]) => [projectPath],
+  'chat:archive-subagent': ([projectPath]) => [projectPath],
+  'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
   'worktree:pull-request': ([worktreePath]) => [worktreePath],
   'project:branches': ([projectPath]) => [projectPath],
   'skills:list': ([projectPath]) => [projectPath],

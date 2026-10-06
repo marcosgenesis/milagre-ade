@@ -35,6 +35,7 @@ import type { AgentPort, DiffStat, PullRequest } from "@/model";
 import { portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
+import { useDismiss } from "../../lib/use-dismiss";
 
 const toneClass = { red: "text-red", orange: "text-orange" } as const;
 
@@ -584,25 +585,7 @@ function ChatMenu({
     // Checked once per opening; the menu remounts each time it opens.
   }, []);
 
-  useEffect(() => {
-    const close = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!menuRef.current?.contains(target) && !trigger.current?.contains(target)) onClose();
-    };
-    const closeOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener("pointerdown", close, true);
-    window.addEventListener("scroll", closeOnScroll, true);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
-    return () => {
-      document.removeEventListener("pointerdown", close, true);
-      window.removeEventListener("scroll", closeOnScroll, true);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", onClose);
-    };
-  }, [onClose, trigger]);
+  useDismiss(true, onClose, (target) => !!(menuRef.current?.contains(target) || trigger.current?.contains(target)));
 
   const run = (action: () => void) => () => {
     onClose();

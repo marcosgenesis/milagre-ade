@@ -235,6 +235,15 @@
 
 /* ── base ─────────────────────────────────────────────── */
 
+/* The title bar moves the window, except while a popover is open: a press on a drag region never reaches
+ * the page, so it couldn't close the popover (lib/use-dismiss.ts). The first press then closes it instead. */
+.title-drag {
+  -webkit-app-region: drag;
+}
+html[data-popover-open] .title-drag {
+  -webkit-app-region: no-drag;
+}
+
 html {
   height: 100%;
   min-height: 100%;

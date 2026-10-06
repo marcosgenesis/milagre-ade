@@ -80,7 +80,7 @@ This starts Vite at `http://127.0.0.1:5180` and opens Electron.
 ```sh
 npm run typecheck
 npm run build
-npm run test:agent
+npm test -- --unit
 ```
 
 To try mobile without a provider account:

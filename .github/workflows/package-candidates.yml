@@ -29,6 +29,9 @@ on:
       - 'distribution/**'
 permissions:
   contents: read
+concurrency:
+  group: build-package-candidates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   package:
     strategy:
@@ -54,12 +57,12 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Check out candidate
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Validate stable release tag
         run: |
           node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) { console.error("Expected vX.Y.Z"); process.exit(1); }'
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -109,7 +112,7 @@ jobs:
           sudo apt-get install -y ./release/*.deb
           desktop-file-validate /usr/share/applications/milagre.desktop
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          xvfb-run -a npm run test:desktop -- --packaged /opt/Milagre/milagre
+          xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre
       - name: Install and exercise Windows NSIS
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -126,7 +129,7 @@ jobs:
         if: matrix.platform == 'macos'
         run: |-
           app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
-          npm run test:desktop -- --packaged "$app"
+          node scripts/test-desktop.cjs --packaged "$app"
           node scripts/test-packaged-simulator-helper.cjs "$app"
       - name: Sign and verify Linux candidates with temporary test key
         if: matrix.platform == 'linux'
@@ -144,19 +147,19 @@ jobs:
       - name: Exercise Linux AppImage payload
         run: |-
           "release/Milagre-${RELEASE_TAG#v}-x86_64.AppImage" --appimage-extract > /dev/null
-          xvfb-run -a npm run test:desktop -- --packaged squashfs-root/AppRun
+          xvfb-run -a node scripts/test-desktop.cjs --packaged squashfs-root/AppRun
         if: matrix.platform == 'linux'
       - name: Generate package metadata from installer bytes
         run: npm run package:managers -- --tag "$RELEASE_TAG" --platform "${{ matrix.platform }}"
       - name: Upload native desktop screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.platform }}
           path: ${{ runner.temp }}/package-screenshots
           if-no-files-found: ignore
       - name: Upload experimental installers and metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: experimental-${{ matrix.platform }}-${{ inputs.tag }}
           if-no-files-found: error

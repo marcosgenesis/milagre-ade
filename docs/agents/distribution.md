@@ -71,7 +71,7 @@ After a signed Windows EXE is public, validate the attached manifest with `winge
 
 Windows uses a local named pipe with mutual HMAC authentication. NTFS permissions restrict its token to the current Windows SID and SYSTEM. Unauthenticated peers receive no events or commands. Unix retains its private socket transport. Windows CLI shims run through their JavaScript entry points with literal arguments; Linux setup falls back to `sh`.
 
-Run `npm run test:release`, `npm run test:monorepo`, `npm run test:agent`, and `npm run build`. Real Windows behavior must pass its native runner before support is announced.
+Run `npm test -- --unit` and `npm run build`. Real Windows behavior must pass its native runner before support is announced.
 
 ## Evidence from this implementation
 

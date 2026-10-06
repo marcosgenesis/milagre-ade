@@ -71,7 +71,7 @@ async function browserChecks() {
 }
 
 // Record actual Chromium paints with their elapsed timing, without slowing the animation.
-// MILAGRE_SCREENSHOT_DIR=/tmp/chat-titles npm run test:chat-titles (requires ffmpeg).
+// MILAGRE_SCREENSHOT_DIR=/tmp/chat-titles npm test -- --only chat-titles (requires ffmpeg).
 async function captureTransition(win, evaluate) {
   const fs = require("node:fs/promises");
   const { execFileSync } = require("node:child_process");

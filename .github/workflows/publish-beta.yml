@@ -1,0 +1,67 @@
+# Ships the newest draft candidate to beta installs as vX.Y.Z-beta.<run>. Stable promotion still goes
+# through "Publish installers" on the untouched draft. Beta installs move to the stable X.Y.Z when it ships.
+name: Publish beta
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft candidate to ship to beta (vX.Y.Z); empty means the newest draft
+        type: string
+        required: false
+  schedule:
+    - cron: '0 9 * * 1-5'
+permissions:
+  contents: write
+concurrency:
+  group: publish-beta
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      version: ${{ steps.pick.outputs.version }}
+      beta_tag: ${{ steps.pick.outputs.beta_tag }}
+      changed: ${{ steps.pick.outputs.changed }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: pick
+        env:
+          REQUESTED: ${{ inputs.tag }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: node scripts/pick-beta-candidate.cjs >> "$GITHUB_OUTPUT"
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      version: ${{ needs.prepare.outputs.version }}
+      channel: beta
+      require_draft: false
+    secrets: inherit
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signed-macos
+          path: release
+      - name: Publish the beta prerelease
+        env:
+          BETA_TAG: ${{ needs.prepare.outputs.beta_tag }}
+          SOURCE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          test -f release/beta-mac.yml
+          notes=$(gh release view "$SOURCE_TAG" --json body --jq .body)
+          gh release create "$BETA_TAG" --target "$(git rev-parse HEAD)" --prerelease --title "$BETA_TAG" --notes "Beta build of $SOURCE_TAG."$'\n\n'"$notes" release/*.dmg release/*.zip release/*.blockmap release/beta-mac.yml

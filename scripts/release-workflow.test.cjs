@@ -305,3 +305,17 @@ test('the stable macOS leg calls the reusable build on the latest channel and pu
   assert.match(build.run, /--config\.publish\.channel="\$\{CHANNEL\}" --config\.generateUpdatesFilesForAllChannels=true/)
   assert.ok(buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Require a stable draft release').if.includes('require_draft'))
 })
+
+const betaWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-beta.yml'), 'utf8'))
+test('a beta is a separate prerelease built from the newest draft candidate on the beta channel', () => {
+  assert.deepEqual(Object.keys(betaWorkflow.on), ['workflow_dispatch', 'schedule'])
+  const build = betaWorkflow.jobs.build
+  assert.equal(build.uses, './.github/workflows/build-macos.yml')
+  assert.equal(build.with.channel, 'beta')
+  assert.equal(build.with.require_draft, false)
+  assert.notEqual(build.with.publish, true)
+  const publish = JSON.stringify(betaWorkflow.jobs.publish.steps)
+  assert.ok(publish.includes('--prerelease'))
+  assert.ok(publish.includes('beta-mac.yml'))
+  assert.ok(!publish.includes('--latest'), 'a beta never becomes the latest release')
+})

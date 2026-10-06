@@ -111,6 +111,14 @@ function createRuntime(options) {
     if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
     handlers.set(name, handler);
   } };
+  const simulators = options.simulators ?? require("./simulators.cjs").createSimulators();
+  commands.handle("simulator:list", () => simulators.list());
+  for (const method of ["open", "offer", "status", "control", "input", "close"]) {
+    commands.handle(`simulator:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
+      return simulators[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
   const searchFiles = createFileSearch();
   const environmentReady = options.environmentReady ?? loadLoginEnvironment().then(({ source }) => {
     if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
@@ -788,6 +796,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
+      await simulators.close();
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -822,13 +831,14 @@ function createRuntime(options) {
 
   return {
     methods: Object.freeze([...handlers.keys()]),
-    invoke(method, args = []) {
+    invoke(method, args = [], context = null) {
       return accept(() => {
         if (!handlers.has(method)) throw new Error(`Unknown command: ${method}`);
         if (!Array.isArray(args)) throw new Error("Command arguments must be an array");
-        return handlers.get(method)(null, ...args);
+        return handlers.get(method)(context, ...args);
       });
     },
+    disconnect: clientId => simulators.disconnect(clientId),
     openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,

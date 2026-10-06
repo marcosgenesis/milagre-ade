@@ -118,6 +118,46 @@ export interface AgentSession {
   resumeTurn?: { stoppedAt?: number };
 }
 
+/** A named Link owns one conversation across an isolated Worktree in each member Project. */
+export type ChatScope = { kind: 'project'; projectPath: string } | { kind: 'link'; linkId: string };
+export interface NamedProjectLink {
+  id: string;
+  name: string;
+  projectIds: string[];
+  createdAt: string;
+}
+export interface WorktreeBinding {
+  projectId: string;
+  projectPath: string;
+  worktreePath: string;
+  branch: string;
+  base: string;
+}
+export interface LinkChatSession extends Omit<AgentSession, 'worktree_id'> {
+  workspacePath: string;
+  worktrees: WorktreeBinding[];
+}
+export interface LinkPreparation {
+  operationId: string;
+  chatId: number;
+  status: 'reserved' | 'creating' | 'setup' | 'ready' | 'failed';
+  members: Array<WorktreeBinding & { created?: boolean; setupDone?: boolean }>;
+  workspacePath: string;
+  error?: string;
+  retainedPaths?: string[];
+}
+export interface LinkState {
+  next_id: number;
+  sessions: Record<string, LinkChatSession>;
+  messages: ChatMessage[];
+  preparations: Record<string, LinkPreparation>;
+}
+export interface OpenLink {
+  link: NamedProjectLink;
+  state: LinkState;
+  projects: Array<{ id: string; path: string; name: string }>;
+}
+
 
 
 export interface ChatMessage {

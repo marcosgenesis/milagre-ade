@@ -80,4 +80,9 @@ function selectTests({ unit, electron, filters }) {
   return { unit: pickedUnit, electron: pickedElectron, skipped }
 }
 
-module.exports = { discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST, WORKSPACES }
+/** Chromium's GPU process sometimes fails to start under Xvfb on the Linux CI runner; one retry absorbs it. */
+function shouldRetry({ platform, ci, attempt }) {
+  return platform === 'linux' && Boolean(ci) && attempt === 1
+}
+
+module.exports = { shouldRetry, discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST, WORKSPACES }

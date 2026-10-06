@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { test } = require('node:test')
-const { discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST } = require('./test-runner.cjs')
+const { shouldRetry, discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST } = require('./test-runner.cjs')
 const root = path.join(__dirname, '..')
 
 test('discovers every node:test file and every Electron check', () => {
@@ -53,4 +53,11 @@ test('a platform skip prints the manifest reason when it has one', () => {
     { file: 'scripts/test-windows-cli.cjs', reason: 'needs win32' },
   ])
   assert.match(MANIFEST['test-sidebar-resize.cjs'].reason, /#\d+/)
+})
+
+test('an Electron check is retried once, only on Linux CI', () => {
+  assert.equal(shouldRetry({ platform: 'linux', ci: 'true', attempt: 1 }), true)
+  assert.equal(shouldRetry({ platform: 'linux', ci: 'true', attempt: 2 }), false)
+  assert.equal(shouldRetry({ platform: 'linux', ci: undefined, attempt: 1 }), false)
+  assert.equal(shouldRetry({ platform: 'darwin', ci: 'true', attempt: 1 }), false)
 })

@@ -70,6 +70,10 @@ function load(file, modules, extra = '') {
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
+const archiveProgress = load('archive-progress.tsx', {
+  'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View' },
+  './loading-logo': { LoadingLogo: 'LoadingLogo' }, './ui': { styles: {} },
+});
 const enterAnimation = { duration() { return this; }, easing() { return this; }, withInitialValues() { return this; }, reduceMotion() { return this; } };
 const reanimatedStub = { default: { View: 'AnimatedView' }, FadeInDown: enterAnimation, Easing: { bezier() {} }, ReduceMotion: { System: 'system' } };
 
@@ -385,6 +389,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     'expo-crypto': { randomUUID: require('node:crypto').randomUUID },
+    '../archive-progress': archiveProgress,
     '../chat-actions': load('chat-actions.ts', { 'react-native': { Alert: { alert } }, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': { confirmSheet: (...args) => alert(...args), confirm: async () => true } }),
     '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
     '../message-navigation': { MessageNavigation: 'MessageNavigation' },
@@ -592,6 +597,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     '@milagre/shared/chats': { ...require('@milagre/shared/chats'), isListedChat: () => true }, './session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
+    './archive-progress': archiveProgress,
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
     '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
     './accounts-section': { AccountsSection: 'AccountsSection' }, './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
@@ -1108,6 +1114,7 @@ test('late Chat rename cannot pop another screen after its form loses focus', as
   let cleanup, backs = 0;
   const session = { client: { call: () => saving.promise }, snapshot: { project: { path: '/A', state: { sessions: { 1: { id: 1, title: 'Chat' } } } }, runs: { runs: {} } }, isSelected: () => true, refresh: async () => {} };
   const { default: Form } = load('app/chat-details.tsx', {
+    '../archive-progress': archiveProgress,
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
     'expo-router': { Redirect: 'Redirect', router: { back: () => backs++ }, useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => { cleanup = fn(); } },
     '../session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
@@ -2089,4 +2096,47 @@ test('mobile TSX preview colors native text in both themes and preserves selecti
   const dark = render();
   assert.notEqual(keyword(dark), keyword(light));
   assert.notEqual(keyword(dark), tag(dark));
+});
+
+function archiveIndicator(tree) {
+  const component = find(tree, node => node.type === archiveProgress.ArchiveProgress);
+  return component && find(component.type(component.props), node => node.props.accessibilityRole === 'progressbar');
+}
+
+test('sidebar archive shows progress during a delayed request and clears it on failure', async () => {
+  const project = archiveProject();
+  const patch = deferred();
+  const nav = navigationHost(deferred().promise, { alert: pressDanger([]), session: {
+    client: { ...project.client, url: 'mac', call: (method, args) => method === 'chat:patch' ? patch.promise : project.call(method, args) },
+    recent: [{ path: '/p' }], snapshot: project.snapshot, expectActivity() {}, refresh: async () => {},
+  } });
+  nav.more(nav.row('chat')).props.onSelect('archive');
+  await settleAll();
+  assert.ok(archiveIndicator(nav.render()), 'archive feedback must survive closing the action sheet');
+  nav.more(nav.row('chat')).props.onSelect('archive');
+  assert.equal(project.calls.filter(([method]) => method === 'worktree:roots').length, 1);
+  patch.reject(new Error('disk full'));
+  await settleAll();
+  assert.equal(archiveIndicator(nav.render()), undefined);
+  assert.equal(find(nav.render(), node => node.type === 'ErrorNotice').props.message, 'disk full');
+});
+
+test('Chat header shows archive progress until the delayed request completes', async () => {
+  const project = archiveProject();
+  const patch = deferred();
+  const screen = chatHost({ alert: pressDanger([]), call: (method, args) => method === 'chat:patch' ? patch.promise : project.call(method, args) });
+  screen.session.snapshot = project.snapshot;
+  screen.session.client.snapshot = async () => project.snapshot;
+  screen.params.id = '5';
+  delete screen.params.worktreeId;
+  const menuAction = () => find(screen.render(), node => node.type === 'ToolbarMenuAction' && node.props.children === 'Archive');
+  menuAction().props.onPress();
+  await settleAll();
+  const header = () => find(screen.render(), node => node.type === 'Screen').props.options.headerTitle();
+  assert.ok(archiveIndicator(header()));
+  assert.equal(menuAction().props.disabled, true);
+  patch.resolve();
+  await settleAll();
+  assert.equal(archiveIndicator(header()), undefined);
+  assert.equal(screen.router.replaced, '/projects');
 });

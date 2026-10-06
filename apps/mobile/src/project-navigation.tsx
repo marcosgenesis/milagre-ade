@@ -18,6 +18,7 @@ import { ProjectIcon, ProjectIcons } from './project-icon';
 import { ProjectSearch } from './project-search';
 import { chatMenu, runChatAction } from './chat-actions';
 import { confirm } from './confirm-store';
+import { ArchiveProgress } from './archive-progress';
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -53,6 +54,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const [show, setShow] = useState<Show>('all');
   const [page, setPage] = useState<'add' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [archiving, setArchiving] = useState<Set<string>>(new Set());
+  const archiveRequests = useRef(new Set<string>());
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const alive = useRef(true);
@@ -137,12 +140,20 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   async function act(projectPath: string, chat: AgentSession, action: string) {
     const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
     if (!copy || !session.client) return;
+    const archiveKey = `${projectPath}#${chat.id}`;
+    if (archiveRequests.current.has(archiveKey)) return;
+    if (action === 'archive' && !chat.archived) archiveRequests.current.add(archiveKey);
     setError('');
     try {
       const result = await runChatAction({ action, chat, running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`], client: session.client, projectPath: copy.project.path, state: copy.project.state, link: copy.project.link,
+        onConfirm: () => setArchiving(previous => new Set(previous).add(archiveKey)),
         refresh: () => projectPath === currentPath ? session.refresh() : load(projectPath), expectActivity: session.expectActivity, notify: message => { if (alive.current) setError(message); } });
       if ((result === 'hidden' || result === 'removed') && projectPath === currentPath && chat.id === activeChatId) onNavigate('/projects');
     } catch (e) { if (alive.current) setError((e as Error).message); }
+    finally {
+      archiveRequests.current.delete(archiveKey);
+      if (alive.current) setArchiving(previous => { const next = new Set(previous); next.delete(archiveKey); return next; });
+    }
   }
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
   async function projectAction(projectPath: string, name: string, action: string) {
@@ -214,6 +225,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         </PullDown>
       </View>
       {busy && <View accessible accessibilityRole="progressbar" accessibilityLabel="Opening..." accessibilityLiveRegion="polite" style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><LoadingLogo size={22} /><Text style={s.secondary}>Opening...</Text></View>}
+      {archiving.size > 0 && <ArchiveProgress />}
       {error ? <ErrorNotice message={error} /> : null}
     </View>
     <FlatList data={rows} keyExtractor={row => row.key} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 20 }}

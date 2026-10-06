@@ -70,6 +70,58 @@ function load(file, modules, extra = '') {
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
+const enterAnimation = { duration() { return this; }, easing() { return this; }, withInitialValues() { return this; }, reduceMotion() { return this; } };
+const reanimatedStub = { default: { View: 'AnimatedView' }, FadeInDown: enterAnimation, Easing: { bezier() {} }, ReduceMotion: { System: 'system' } };
+
+test('mobile slash suggestions filter skills and insert at the caret while preserving surrounding text', () => {
+  const react = hookHost();
+  let draft = 'Please /tl afterwards';
+  const { PromptField } = load('prompt-field.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Text: 'Text', View: 'View' },
+    'react-native-reanimated': reanimatedStub,
+    '@milagre/shared/prompt-skills': require('../packages/shared/src/prompt-skills.mjs'),
+    './use-rpc': { useRpc: () => ({ data: { skills: [
+      { name: 'other', description: 'A description mentioning tldr.' },
+      { name: 'tldr', description: 'Rewrite for a skimming reader.' },
+      { name: 'docs', description: 'Read documentation.' },
+      { name: 'plugin:review-code', description: 'Review code.' },
+      { name: 'docs.v2', description: 'Read version two documentation.' },
+    ] } }) },
+    './ui': { Field: 'Field', ListRow: 'ListRow', PageScroll: 'PageScroll', colors: { ink: 'ink', accentInk: 'accent' } },
+  });
+  function render() { react.begin(); return PromptField({ client: {}, projectPath: '/project', draft, onChangeText: value => { draft = value; } }); }
+  const field = () => find(render(), node => node.type === 'Field');
+  field().props.onFocus();
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 10, end: 10 } } });
+  const suggestion = find(render(), node => node.type === 'ListRow' && node.props.title === '/tldr');
+  assert.equal(find(render(), node => node.type === 'ListRow').props.title, '/tldr', 'name prefixes come before description matches');
+  assert.ok(suggestion, 'a partial slash skill must open a suggestion');
+  assert.equal(find(render(), node => node.type === 'ListRow' && node.props.title === '/docs'), undefined);
+  suggestion.props.onPress();
+  assert.equal(draft, 'Please /tldr afterwards');
+  assert.deepEqual({ ...field().props.selection }, { start: 13, end: 13 });
+  assert.equal(find(render(), node => node.type === 'ListRow'), undefined, 'choosing a skill closes suggestions');
+  assert.ok(find(field(), node => node.type === 'Text' && node.props.children === '/tldr' && node.props.style.color === 'accent'));
+  for (const punctuation of ['.', ',', ':']) {
+    draft = `Please /tl${punctuation} afterwards`;
+    field().props.onSelectionChange({ nativeEvent: { selection: { start: 10, end: 10 } } });
+    find(render(), node => node.type === 'ListRow' && node.props.title === '/tldr').props.onPress();
+    assert.equal(draft, `Please /tldr${punctuation} afterwards`, 'completion preserves sentence punctuation');
+    assert.equal(find(render(), node => node.type === 'ListRow'), undefined);
+  }
+  for (const [partial, name] of [['plugin:', 'plugin:review-code'], ['docs.', 'docs.v2']]) {
+    draft = `/${partial}`;
+    field().props.onSelectionChange({ nativeEvent: { selection: { start: draft.length, end: draft.length } } });
+    find(render(), node => node.type === 'ListRow' && node.props.title === `/${name}`).props.onPress();
+    assert.equal(draft, `/${name} `, 'qualified prefixes do not leave duplicate punctuation');
+  }
+  draft = '/';
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 1, end: 1 } } });
+  assert.ok(find(render(), node => node.type === 'ListRow' && node.props.title === '/docs'), 'a bare slash opens the full catalog');
+  field().props.onBlur();
+  assert.equal(find(render(), node => node.type === 'ListRow'), undefined);
+});
 
 test('mobile skill input preserves edits and clears its description when the caret or catalog changes', () => {
   const react = hookHost();
@@ -78,13 +130,14 @@ test('mobile skill input preserves edits and clears its description when the car
   const { PromptField } = load('prompt-field.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Text: 'Text', View: 'View' },
+    'react-native-reanimated': reanimatedStub,
     '@milagre/shared/prompt-skills': require('../packages/shared/src/prompt-skills.mjs'),
     './use-rpc': { useRpc: () => ({ data: catalog }) },
-    './ui': { Field: 'Field', colors: { ink: 'ink', accentInk: 'accent' } },
+    './ui': { Field: 'Field', ListRow: 'ListRow', PageScroll: 'PageScroll', colors: { ink: 'ink', accentInk: 'accent' } },
   });
   function render() { react.begin(); const tree = PromptField({ client: {}, projectPath: '/project', draft, onChangeText: value => { draft = value; } }); react.flush(); return tree; }
   const field = () => find(render(), node => node.type === 'Field');
-  const description = () => find(render(), node => node.type === 'Text' && node.props.children === 'Rewrite for a skimming reader.');
+  const description = () => find(render(), node => (node.type === 'Text' && node.props.children === 'Rewrite for a skimming reader.') || (node.type === 'ListRow' && node.props.subtitle === 'Rewrite for a skimming reader.'));
   assert.equal('value' in field().props, false, 'native attributed children must not be combined with value');
   assert.ok(find(field(), node => node.type === 'Text' && node.props.children === '/tldr' && node.props.style.color === 'accent'));
   field().props.onFocus();

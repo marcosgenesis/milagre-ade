@@ -6,7 +6,7 @@ import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
-import type { RegisteredProject, Snapshot } from './client';
+import type { RegisteredProject } from './client';
 import { isLinkScopeKey } from '@milagre/shared/chat-scopes';
 import { usePendingChats, useSession, type MobilePendingChat } from './session';
 import { chatMark, type ChatMark } from './indicators';
@@ -32,14 +32,22 @@ const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unre
 const labels: Record<ChatMark, string> = { idle: '', running: 'Running', question: 'Needs reply', waiting: 'Needs approval', interrupted: 'Interrupted', failed: 'Failed', unread: 'Unread' };
 
 /** The same project tree is the first-run destination and the drawer over a Chat: every Project's Chats, their ⋯ actions and filters. */
-export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number }) {
+type NavigationProps = { onNavigate: Destination; onClose?: () => void; activeChatId?: number };
+export function ProjectNavigation(props: NavigationProps) {
+  const { client } = useSession();
+  // A computer's paths, errors and in-flight UI work never belong to another computer.
+  return <ProjectNavigationContent key={client?.url || ''} {...props} />;
+}
+
+function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: NavigationProps) {
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
-  const { reloadProjects, previewProject } = session;
+  const { reloadProjects, previewProject, cachedProject } = session;
   const currentPath = session.snapshot?.project.path;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([currentPath || session.recent[0]?.path].filter(Boolean) as string[]));
-  const [copies, setCopies] = useState<Record<string, Snapshot>>({});
+  // Snapshots live in the session, so closing the drawer or switching Projects keeps them.
+  const [revision, setRevision] = useState(0);
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [show, setShow] = useState<Show>('all');
@@ -54,9 +62,9 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const load = useCallback((projectPath: string) => {
     const existing = pending.current.get(projectPath);
     if (existing) return existing;
-    const work = previewProject(projectPath).then(copy => {
+    const work = previewProject(projectPath).then(() => {
       if (!alive.current) return;
-      setCopies(previous => ({ ...previous, [projectPath]: copy }));
+      setRevision(value => value + 1);
       setFailures(previous => { const next = { ...previous }; delete next[projectPath]; return next; });
     }).catch(e => { if (alive.current) setFailures(previous => ({ ...previous, [projectPath]: e.message })); })
       .finally(() => { pending.current.delete(projectPath); });
@@ -66,17 +74,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== 'all';
   useEffect(() => {
-    let cancelled = false;
-    // Search reads every Project; ordinary browsing only reads expanded groups.
     const paths = session.recent.filter(item => searching || expanded.has(item.path)).map(item => item.path);
-    void (async () => { for (const projectPath of paths) { if (cancelled) break; await load(projectPath); } })();
-    return () => { cancelled = true; };
+    // One slow Project must not hold up the other expanded groups.
+    void Promise.all(paths.map(load));
   }, [expanded, searching, session.recent, load]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
     for (const project of session.recent) {
-      const saved = project.path === currentPath && session.snapshot ? session.snapshot : copies[project.path];
+      const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
       const previews = Object.values(pendingChats).filter(item => item.hostId === session.client?.url && item.projectPath === project.path);
       const projected = saved && previews.reduce((state, item) => withPendingChat(state, item.preview), saved.project.state);
       const copy = saved && projected ? { ...saved, project: { ...saved.project, state: projected } } : saved;
@@ -92,7 +98,8 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       const marked = Object.values(copy?.project.state.sessions || {}).map(chat => {
         const run = copy?.runs.runs[`${copy.project.path}#${chat.id}`];
         const pending = pendingById.get(chat.id);
-        return { chat, run, pending, mark: pending && !pending.accepted ? 'running' as const : chatMark(chat, run, byChat.get(chat.id) || []) };
+        const sortId = pending && !byChat.get(chat.id)?.some(message => message.clientMessageId !== pending.preview.message.clientMessageId) ? pending.preview.sortId : chat.id;
+        return { chat, run, pending, sortId, mark: pending && !pending.accepted ? 'running' as const : chatMark(chat, run, byChat.get(chat.id) || []) };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const chats = marked.filter(({ chat, run }) => (show === 'archived') === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
@@ -100,18 +107,19 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         .filter(({ mark }) => show !== 'running' || mark === 'running')
         .filter(({ chat }) => !needle || [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some(text => text?.toLowerCase().includes(needle)))
         // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => (b.pending?.preview.sortId ?? b.chat.id) - (a.pending?.preview.sortId ?? a.chat.id));
+        .sort((a, b) => b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       const section = project.link ? 'Links' : 'Projects';
       if (session.recent.some(item => item.link) && !result.some(row => row.kind === 'section' && row.name === section)) result.push({ key: `section:${section}`, path: '', kind: 'section', name: section });
       result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open, members: project.projects });
       if (!open) continue;
       for (const { chat, mark, pending } of chats) result.push({ key: `${project.path}#${chat.id}`, path: project.path, kind: 'chat', chat, pending, worktree: pending?.newWorktree ? 'New worktree' : copy?.project.state.worktrees[chat.worktree_id]?.name || 'Worktree', mark });
-      if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: 'Could not load chats. Tap to retry.', failed: true });
+      if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: copy ? 'Could not refresh chats. Tap to retry.' : 'Could not load chats. Tap to retry.', failed: true });
       else if (!copy || !chats.length) result.push({ key: `${project.path}:notice`, path: project.path, kind: 'notice', message: !copy ? 'Loading chats...' : searching ? 'No matching chats' : 'No chats yet. Start one with +.' });
     }
     return result;
-  }, [copies, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
+  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.
@@ -127,7 +135,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
   // behind the navigation leaves it for the project list.
   async function act(projectPath: string, chat: AgentSession, action: string) {
-    const copy = projectPath === currentPath && session.snapshot ? session.snapshot : copies[projectPath];
+    const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
     if (!copy || !session.client) return;
     setError('');
     try {
@@ -231,7 +239,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         if (item.kind === 'notice') return <Pressable accessibilityRole={item.failed ? 'button' : 'text'} disabled={!item.failed} onPress={() => void load(item.path)} style={s.notice}><Text style={[s.detail, item.failed && { color: colors.red }]}>{item.message}</Text></Pressable>;
         const title = item.chat.title || item.chat.generatedTitle || 'New Chat';
         const selected = currentPath === item.path && activeChatId === item.chat.id;
-        const copy = item.path === currentPath && session.snapshot ? session.snapshot : copies[item.path];
+        const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
         const menu = chatMenu(item.chat, copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id]);
         // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
         return <View style={[s.chat, { backgroundColor: selected ? colors.hover : 'transparent' }]}>

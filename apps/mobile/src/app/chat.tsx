@@ -114,7 +114,7 @@ export default function ChatScreen() {
   const allMessages = session.snapshot?.project.state.messages;
   const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
   const savedMessages = useMemo(() => params.id && allMessages ? allMessages.filter(m => m.session_id === Number(params.id)) : [], [allMessages, params.id]);
-  const messages = useMemo(() => pending ? pendingCanonicalId !== null ? (allMessages || []).filter(message => message.session_id === pendingCanonicalId) : [pending.preview.message] : savedMessages, [pending, pendingCanonicalId, allMessages, savedMessages]);
+  const messages = useMemo(() => pending ? pendingCanonicalId !== null ? (allMessages || []).filter(message => message.session_id === pendingCanonicalId) : [...savedMessages, pending.preview.message] : savedMessages, [pending, pendingCanonicalId, allMessages, savedMessages]);
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
@@ -194,8 +194,8 @@ export default function ChatScreen() {
   const branchName = newWorktree ? base || 'Choose branch' : worktree?.name || 'Choose branch';
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== 'ready';
   const title = chat?.title || chat?.generatedTitle || pending?.preview.session.title || 'New Chat';
-  async function action(work: () => Promise<unknown>) {
-    if (busy) return false;
+  async function action(work: () => Promise<unknown>, allowPending = false) {
+    if (actionBusy || (!allowPending && pending)) return false;
     setBusy(true); setError('');
     try { await work(); session.expectActivity(); await session.refresh(); return true; }
     catch (e) { setError((e as Error).message); return false; }
@@ -220,19 +220,16 @@ export default function ChatScreen() {
     const sending = withAttachments ? attachments : [];
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
-    const firstMessage = savedMessages.length === 0;
     const clearsDraft = sent === draft;
     const key = `${client.url}|${chatId}`;
     const operationId = project.link ? composer.linkOperations.forSend(key, JSON.stringify([sent, sending.map(item => item.id)]), randomUUID) : null;
-    const preview = firstMessage ? createPendingChat({ state: project.state, worktreeId, sessionId: params.id ? Number(params.id) : null, body: sent, images: sending.flatMap(item => item.image ? [item.image] : []), files: sending.filter(item => !item.image).map(item => item.path || item.name), model: model.id, provider: actualProvider }) : null;
-    if (preview) {
-      pendingStore.setPendingChats(current => ({ ...current, [key]: { preview, hostId: client.url, projectPath: sendingProjectPath, originChatId: chatId, originSessionId: params.id ? Number(params.id) : null, worktreeId, newWorktree, accepted: false } }));
-      if (clearsDraft) composer.setDrafts(current => ({ ...current, [chatId]: '' }));
-      const sentIds = new Set(sending.map(item => item.id));
-      composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(item => !sentIds.has(item.id)) }));
-      following.current = true;
-      Keyboard.dismiss();
-    }
+    const preview = createPendingChat({ state: project.state, worktreeId, sessionId: params.id ? Number(params.id) : null, body: sent, images: sending.flatMap(item => item.image ? [item.image] : []), files: sending.filter(item => !item.image).map(item => item.path || item.name), model: model.id, provider: actualProvider });
+    pendingStore.setPendingChats(current => ({ ...current, [key]: { preview, hostId: client.url, projectPath: sendingProjectPath, originChatId: chatId, originSessionId: params.id ? Number(params.id) : null, worktreeId, newWorktree, accepted: false } }));
+    if (clearsDraft) composer.setDrafts(current => ({ ...current, [chatId]: '' }));
+    const sentIds = new Set(sending.map(item => item.id));
+    composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(item => !sentIds.has(item.id)) }));
+    following.current = true;
+    Keyboard.dismiss();
     const options = sendOptions(model, preferences);
     let accepted = false;
     try {
@@ -250,17 +247,17 @@ export default function ChatScreen() {
         }
         target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
       }
-      if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], preview: { ...current[key].preview, targetSessionId: target.sessionId } } } : current);
+      pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], preview: { ...current[key].preview, targetSessionId: target.sessionId } } } : current);
       const result = project.link
-        ? await client.call<{ sessionId: number }>('link:send', [{ linkId: project.link.link.id, sessionId: params.id ? Number(params.id) : null, operationId, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }])
-        : await client.call<{ sessionId: number }>('chat:send', [{ projectPath: sendingProjectPath, ...target, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }]);
+        ? await client.call<{ sessionId: number }>('link:send', [{ linkId: project.link.link.id, sessionId: params.id ? Number(params.id) : null, operationId, clientMessageId: preview.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }])
+        : await client.call<{ sessionId: number }>('chat:send', [{ projectPath: sendingProjectPath, ...target, clientMessageId: preview.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }]);
       accepted = true;
       if (operationId) composer.linkOperations.accepted(key, operationId);
       const promote = current();
-      if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], accepted: true, promoted: promote, preview: { ...current[key].preview, targetSessionId: result.sessionId } } } : current);
+      pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], accepted: true, promoted: promote, preview: { ...current[key].preview, targetSessionId: result.sessionId, acceptedSessionId: result.sessionId } } } : current);
       const destination = `${sendingProjectPath}#${result.sessionId}`;
-      if (clearsDraft || firstMessage) composer.setDrafts(current => {
-        const remaining = !firstMessage && clearsDraft && current[chatId] === sent ? '' : current[chatId] || '';
+      if (clearsDraft || destination !== chatId) composer.setDrafts(current => {
+        const remaining = current[chatId] || '';
         const preserved = destination !== chatId ? current[destination] || '' : '';
         const next = { ...current, [destination]: [preserved, remaining].filter(Boolean).join('\n') };
         if (destination !== chatId) delete next[chatId];
@@ -287,7 +284,7 @@ export default function ChatScreen() {
       }
       await session.refresh();
     } catch (e) {
-      if (!accepted && preview) {
+      if (!accepted) {
         pendingStore.setPendingChats(current => { const next = { ...current }; delete next[key]; return next; });
         if (clearsDraft) composer.setDrafts(current => ({ ...current, [chatId]: [draft, current[chatId]].filter(Boolean).join('\n\n') }));
         composer.setAttachments(current => ({ ...current, [chatId]: [...sending, ...(current[chatId] || []).filter(item => !sending.some(sent => sent.id === item.id))] }));
@@ -344,6 +341,8 @@ export default function ChatScreen() {
     </Stack.Toolbar.Menu>
   </Stack.Toolbar>;
   const question = run?.questions[0];
+  const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
+  const liveReply = run ? <ChatReply key="run" run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /> : null;
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
@@ -360,14 +359,17 @@ export default function ChatScreen() {
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{project.link ? 'One Chat, with a new Worktree in each linked Project on your computer.' : newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
       {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
-      {messages.slice(-visible).map(message => <View key={message.id} nativeID={`chat-message-${message.id}`} onLayout={({ nativeEvent: { layout } }) => {
+      {messages.slice(-visible).flatMap(message => [
+        ...(liveReply && message === pendingInput ? [liveReply] : []),
+        <View key={message.clientMessageId ?? message.id} nativeID={`chat-message-${message.id}`} onLayout={({ nativeEvent: { layout } }) => {
         messagePositions.current.set(message.id, layout.y);
         if (navigationTarget.current === message.id) {
           navigationTarget.current = null;
           scroll.current?.scrollTo({ y: Math.max(0, layout.y - insets.top - 72), animated: true });
         }
-      }}><ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /></View>)}
-      {run && <ChatReply run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />}
+      }}><ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /></View>,
+      ])}
+      {!pendingInput && liveReply}
       {(run || pending) && <ThinkingIndicator startedAt={pending?.preview.startedAt ?? run?.startedAt} label={run?.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
       {error ? <ErrorNotice message={error} /> : null}{session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo('/')} /> : null}
@@ -388,8 +390,8 @@ export default function ChatScreen() {
         <View style={{ flex: 1 }} />
         <SubagentChip agents={agents} onPress={() => headerAction('agents')} />
       </View>}
-      {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}
-      {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
+      {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={actionBusy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); }, true)} />)}
+      {question ? <Questions key={question.requestId} request={question} busy={actionBusy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); }, true)} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
         {!params.id && !project.link && <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
           <PullDown label="Choose isolation" nativeTrigger={{ title: isolation === 'local' ? 'Local' : 'New worktree', systemImage: isolation === 'local' ? 'laptopcomputer' : 'arrow.triangle.branch', disabled: targetDisabled }} sections={[{ title: 'Isolation', items: [{ id: 'local', title: 'Local', systemImage: 'laptopcomputer', checked: isolation === 'local', disabled: targetDisabled }, { id: 'worktree', title: 'New worktree', systemImage: 'arrow.triangle.branch', checked: isolation === 'worktree', disabled: targetDisabled }] }]} onSelect={id => { if (!targetDisabled) setIsolation(id === 'worktree' ? 'worktree' : 'local'); }}>
@@ -408,7 +410,7 @@ export default function ChatScreen() {
           <AgentControls model={model} onToggle={() => { router.push({ pathname: '/model-sheet', params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: '1' } : {}) } }); }} />
           <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />
-          {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
+          {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={actionBusy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]), true)} />}
           {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp01Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
         </View>
       </View>}

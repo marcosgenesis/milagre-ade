@@ -32,7 +32,8 @@ function Fixture() {
     body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
   }));
   return <div style={{ height: "100%", padding: 12 }}>
-    <ChatComposer messages={messages}
+    {/* Exercise the fully expanded history, as when Find is open; paging has its own regression. */}
+    <ChatComposer findOpen messages={messages}
       imageDraft={{ images: [], files: [], removeFile: noop, attachFiles: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false}
       pullRequestAction={prAction ? { ...prAction, onRun: () => window.resolveClicks++ } : undefined}

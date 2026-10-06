@@ -52,6 +52,32 @@ function forPhone(project) {
     : session]));
   return { ...project, state: { ...state, messages, sessions } };
 }
+/** A drawer-only projection. Empty message bodies are metadata, never a readable transcript. */
+function forChatList(project, runs) {
+  const byChat = new Map();
+  for (const message of project.state.messages) {
+    let row = byChat.get(message.session_id);
+    if (!row) { row = { first: message }; byChat.set(message.session_id, row); }
+    row.last = message;
+    if (message.role !== 'assistant') {
+      row.lastInput = message;
+    }
+  }
+  const sessions = Object.fromEntries(Object.entries(project.state.sessions).map(([id, session]) => {
+    const { subagents, handoverDraft, ...metadata } = session;
+    return [id, { ...metadata, ...(handoverDraft === undefined ? {} : { handoverDraft: '' }) }];
+  }));
+  // Keep listing/order and failure metadata, plus every input identity: an acknowledgement may still
+  // be outstanding when another user or linked Chat sends a later message. Preserve source order.
+  const boundaries = new Set([...byChat.values()].flatMap(row => [row.first, row.lastInput, row.last]));
+  const messages = project.state.messages.filter(message => message.clientMessageId || boundaries.has(message))
+    .map(({ id, session_id, role, outcome, clientMessageId }) => ({ id, session_id, role, outcome, clientMessageId, body: '', context: null }));
+  const marks = Object.fromEntries(Object.entries(runs.runs || {}).map(([key, run]) => [key, {
+    model: run.model, startedAt: run.startedAt, approvals: run.approvals, questions: run.questions, answered: {}, text: '', steps: [],
+  }]));
+  return { previewOnly: true, project: { ...project, state: { ...project.state, sessions, messages, tasks: {} } }, runs: { ...runs, runs: marks } };
+}
+
 // Steps at the end of a streaming turn, and any still running, keep this much of the end of their output.
 const LIVE_STEPS = 3;
 const LIVE_DETAIL = 4096;
@@ -292,7 +318,10 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           const projectPath = target.searchParams.get('projectPath');
           const [scope, runs] = await Promise.all([readScope(projectPath), client.call('chat:runs')]);
           const slim = scope.link ? { link: forPhone(scope.link) } : { project: forPhone(scope.project) };
-          reply(200, { result: { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) } }, { etag: true });
+          const result = !scope.link && target.searchParams.get('view') === 'chats'
+            ? forChatList(scope.project, projectRuns(runs, projectPath))
+            : { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) };
+          reply(200, { result }, { etag: true });
           return;
         }
         // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.
@@ -420,4 +449,4 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   } catch (error) { await close(); throw error; }
   return { url, close, lost };
 }
-module.exports = { startMobileBridge, forPhone, runsForPhone, METHODS };
+module.exports = { startMobileBridge, forPhone, forChatList, runsForPhone, METHODS };

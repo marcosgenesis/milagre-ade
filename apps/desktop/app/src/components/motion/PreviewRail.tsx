@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useId, useLayoutEffect, useRef, useState } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 
 export interface PreviewRailItem {
@@ -100,14 +100,14 @@ export function PreviewRail({
     return () => observer.disconnect();
   }, [displayedId, items, itemSize, showPreview]);
 
-  function selectItem(item: PreviewRailItem) {
+  const selectItem = useCallback((item: PreviewRailItem) => {
     if (activeId === undefined) setInternalActiveId(item.id);
     onActiveChange?.(item.id);
     onItemSelect?.(item);
-  }
+  }, [activeId, onActiveChange, onItemSelect]);
 
-  return (
-    <motion.div ref={rootRef} layoutRoot className={`isolate relative flex w-full ${className}`}>
+  // The scrolled content changes independently; reuse its navigation until a rail input changes.
+  const navigation = useMemo(() => <>
       <nav
         aria-label={label}
         onPointerLeave={() => setHoveredId(null)}
@@ -184,6 +184,12 @@ export function PreviewRail({
           ))}
         </div>
       ) : null}
+  </>, [items, label, selectedId, highlightedId, displayedIndex, railClassName, rowTemplate, reduce, selectItem,
+    showPreview, previewSide, previewContainerClassName, displayedId, previewBounds, previewClassName, uid, renderPreview]);
+
+  return (
+    <motion.div ref={rootRef} layoutRoot className={`isolate relative flex w-full ${className}`}>
+      {navigation}
 
       <div className="min-h-0 min-w-0 flex-1">{children}</div>
     </motion.div>

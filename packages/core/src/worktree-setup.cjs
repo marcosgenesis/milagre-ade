@@ -110,6 +110,7 @@ function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(e
   });
 }
 
+// oxlint-disable-next-line no-control-regex -- matches ANSI escape sequences in setup output
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** The last `lines` lines of command output, without colour codes or trailing blank lines. */

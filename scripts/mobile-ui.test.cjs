@@ -1603,6 +1603,7 @@ test('relay transports: one per Mac, replaced by a new code, closed in the backg
   const phoneRandom = n => new Uint8Array(n);
   const { relayRuntime } = load('relay-native.ts', {
     'react-native': { AppState: { addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } } },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- empty classes stub expo-file-system constructors in the test
     'expo-file-system': { Directory: class {}, File: class {}, Paths: {} },
     './relay-transport': { createRelayTransport: options => { const transport = { options, closed: 0, close() { transport.closed++; } }; made.push(transport); return transport; } },
     './phone-identity': { phoneIdentity: async () => identity, phoneRandom },
@@ -2027,6 +2028,7 @@ test('mobile file preview renders text and reports unreadable, empty, and trunca
   let result = { data: null, error: '', refresh() {} };
   const { default: FilePreview } = load('app/file-preview.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- empty stub standing in for expo-file-system's File constructor
     'expo-file-system': { File: class {}, FileMode: { ReadOnly: 'readOnly' } },
     'react-native': { Platform: { OS: 'ios' }, Text: 'Text', View: 'View' },
     'expo-router': { Stack: { Screen: 'Screen' }, useLocalSearchParams: () => ({ path: '/project/ui.tsx' }) },

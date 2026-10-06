@@ -13,7 +13,7 @@ function blockOf(element: Element, cache: Map<Element, Element>): Element {
   const cached = cache.get(element);
   if (cached) return cached;
   let block = element;
-  while (block.parentElement && /^inline/.test(getComputedStyle(block).display)) block = block.parentElement;
+  while (block.parentElement && getComputedStyle(block).display.startsWith('inline')) block = block.parentElement;
   cache.set(element, block);
   return block;
 }

@@ -146,6 +146,7 @@ export function MessageScroller({
       if (typeof externalViewportRef === "function") {
         externalViewportRef(node);
       } else if (externalViewportRef) {
+        // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
         externalViewportRef.current = node;
       }
     },
@@ -209,6 +210,7 @@ export function MessageScroller({
 
     const messages = Array.from(content.querySelectorAll<HTMLElement>('[data-slot="message"]'));
     // The first assistant message after each one, found in a single backwards pass.
+    // oxlint-disable-next-line unicorn/no-new-array -- array is pre-sized and filled by index on purpose
     const responses: Array<HTMLElement | undefined> = new Array(messages.length);
     let nextAssistant: HTMLElement | undefined;
     for (let index = messages.length - 1; index >= 0; index -= 1) {

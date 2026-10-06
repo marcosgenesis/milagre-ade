@@ -181,7 +181,7 @@ function createSimulators(options = {}) {
         if (event.kind === 'rotate') { releaseHeld(device); device.generation++; device.rotation = { orientation: event.orientation, at: now() }; }
         try { device.channel.send(event); } catch { revoke(device); return { accepted: false }; }
         if (event.kind === 'touch') device.touch = event.phase === 'end' ? null : event;
-        if (event.kind === 'key') event.phase === 'down' ? device.keys.add(event.usage) : device.keys.delete(event.usage);
+        if (event.kind === 'key') { if (event.phase === 'down') device.keys.add(event.usage); else device.keys.delete(event.usage); }
         v.heartbeat = now();
         return { accepted: true };
       });

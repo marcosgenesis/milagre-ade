@@ -85,5 +85,6 @@ function SimulatorFrame({ api, deviceId, onClose }: { api: SimulatorApi; deviceI
     window.addEventListener("message", receive);
     return () => { window.removeEventListener("message", receive); bridge.dispose(); };
   }, [api, deviceId, onClose]);
+  // oxlint-disable-next-line react/iframe-missing-sandbox -- flagged for review, see PR body
   return <iframe ref={frame} onLoad={syncTheme} title="Live simulator" data-slot="simulator-frame" srcDoc={html} sandbox="allow-scripts allow-same-origin" allow="autoplay" className="min-h-0 w-full flex-1 border-0 bg-black" />;
 }

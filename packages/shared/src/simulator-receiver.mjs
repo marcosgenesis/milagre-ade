@@ -33,6 +33,7 @@ export function createSimulatorInputQueue(send, failed, limit = 32) {
   const drain = async () => {
     if (sending || disposed) return;
     sending = true;
+    // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- dispose() and the catch/push paths flip `disposed` from other closures while the loop awaits send()
     try { while (queue.length && !disposed) await send(queue.shift()); }
     catch (error) { if (!disposed) { disposed = true; queue = []; failed(error); } }
     finally { sending = false; }
@@ -117,6 +118,7 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
   let heartbeat = null, deadline = null, disconnected = null, rotationTimer = null, rotatingGeneration = null, frames = false, active = false, stopped = false, claiming = false;
   const pending = new Map(), pointers = new Map();
   const post = data => {
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- flagged for review, see PR body
     if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(data));
     else window.parent.postMessage(data, '*');
   };

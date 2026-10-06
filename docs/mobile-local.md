@@ -12,6 +12,20 @@ Your Mac runs the agents and must stay awake and online. Desktop and phone share
 
 The pairing code grants access to your agents. Keep it private. New phones can pair for 10 minutes after the code is shown; existing paired phones continue to work. **Reset access** forgets paired phones and creates a new token.
 
+## View a running simulator or emulator
+
+1. Start an iOS simulator in Xcode or an Android emulator on an Apple silicon Mac. For Android, install Android SDK Platform Tools; Milagre finds `adb` through `ANDROID_HOME`, `ANDROID_SDK_ROOT`, the standard macOS SDK directory, or `PATH`.
+2. Open a Chat on desktop or the paired phone and select the phone-icon **Simulators** pill beside Subagents.
+3. Choose a device if more than one is running. Tap or drag its live screen; use the **Home** and **Rotate** icons and the device's onscreen keyboard. Android also has **Back**.
+
+The list is machine-wide, labeled **On this Mac**. Opening the viewer starts capture; closing it stops capture without shutting down the simulator. One viewer controls each device. **Take control** transfers control from another viewer. Hiding the app closes the stream; use **Retry** after returning.
+
+This version supports iOS simulators and Android emulators hosted on Apple silicon Macs. Physical Android devices are excluded. It uses the existing mobile WebView and requires no new mobile runtime. Hardware keyboard injection remains outside this version. The controls bar follows the app theme, including changes while viewing. If the picture updates but controls do not respond, restart that simulator in Xcode and reopen the viewer. Xcode can report successful input delivery while the guest ignores it, especially around startup; Milagre does not restart devices automatically. Android capture can also fail when ADB stalls after a saved emulator snapshot; retry, or cold-boot that emulator manually if it persists.
+
+Video uses WebRTC directly between the Mac and viewer. The existing authenticated phone connection carries signaling and input. Connecting Chats through the public relay does not, by itself, relay video across restrictive networks. Local connections work without TURN; remote connections may need a TURN service.
+
+For a configured TURN service, start the daemon with `MILAGRE_SIMULATOR_TURN_URLS` (comma-separated `turn:` or `turns:` URLs), `MILAGRE_SIMULATOR_TURN_USERNAME`, and `MILAGRE_SIMULATOR_TURN_CREDENTIAL`. Use issued, time-limited client credentials, not the service's administrative key. Milagre passes these credentials only to authenticated viewers and its private helper. Automatic TURN provisioning and credential renewal are not implemented. Physical-phone, cellular and forced-TURN verification remain release gates.
+
 ## Try the demo
 
 From the repository root:
@@ -184,3 +198,10 @@ node scripts/check-mobile-providers.cjs --run
 ```
 
 This uses the installed Codex and Claude accounts for one short no-tool prompt each in an isolated temporary Project. It checks the full mobile HTTP/socket/core path, restarts the host and verifies the token, saved Chats, provider session IDs and replies. It is excluded from normal tests and CI because it consumes provider quota. The saved temporary Project path is printed for inspection.
+
+
+### Android capture packaging
+
+`npm run build` prepares the pinned scrcpy 4.0 server used by Expo Device Hub 0.15.1. It verifies SHA-256 `84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a` before packaging. The helper package and server remain outside ASAR so the installed app does not download into its signed bundle. A clean desktop build needs GitHub access once; later builds reuse the verified artifact. Run `node scripts/prepare-simulator-helper.cjs` before invoking electron-builder directly.
+
+Android has a separate helper process per viewed device. Closing the last viewer for one emulator ends that capture without affecting another emulator or shutting either emulator down. Video uses WebRTC; typed input and signaling use the existing authenticated Milagre connection. TURN credentials are passed privately to the helper environment and configured on its host, not accepted from viewer offers.

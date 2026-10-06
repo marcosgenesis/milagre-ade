@@ -1,5 +1,6 @@
 import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from '@milagre/shared/model';
 import type { Result } from "@milagre/shared/result";
+import type { SimulatorApi } from "@milagre/shared/simulator";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
@@ -61,6 +62,7 @@ export type CanvasSnapshot = {
 declare global {
   interface Window {
     milagre: {
+      simulators: SimulatorApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
       restartHost: () => Promise<void>;

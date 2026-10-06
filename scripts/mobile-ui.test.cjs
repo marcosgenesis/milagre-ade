@@ -971,6 +971,26 @@ test('the transcript follows new content, also after the agent settings sheet op
   assert.equal(scrolls, 2);
 });
 
+test('a long Chat opens hidden and jumps to its newest message without animating', () => {
+  const screen = chatHost();
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  let first = page();
+  first.props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  assert.equal(first.props.style.opacity, 0);
+  first.props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 0, 'waits for the viewport before placing');
+  first.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]));
+  const placed = page();
+  assert.equal(placed.props.style.opacity, 1);
+  placed.props.onContentSizeChange(0, 2100);
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }, { animated: true }]));
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  assert.equal(page().props.style.opacity, 0, 'switching Chats hides the next transcript until it is placed');
+});
+
 test('mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling', () => {
   const screen = chatHost();
   screen.params.id = '42';
@@ -1018,6 +1038,9 @@ test('Go to bottom returns the mobile transcript to the end and resumes followin
   const scrolls = [];
   page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
   page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page().props.onContentSizeChange(0, 1800);
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), 'Opening places the Chat at its end');
+  scrolls.length = 0;
   page().props.onEndVisible(true);
   assert.equal(jump(), undefined, 'No button when the end is visible, including short chats');
   page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });

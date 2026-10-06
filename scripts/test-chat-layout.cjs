@@ -118,6 +118,19 @@ async function browserChecks() {
       })()`);
       assert.ok(distance <= 1, `Chat ${id} must open at the bottom before paint; distance: ${distance}`);
       assert.equal(await evaluate(`!!(${jumpButton})`), false, 'A newly opened Chat does not inherit the jump button');
+      // Messages measure themselves after the first paint; the opened Chat must not visibly scroll while they do.
+      const positions = await evaluate(`new Promise(resolve => {
+        const viewport = document.querySelector('[aria-label="Conversation"]');
+        const seen = [];
+        const started = performance.now();
+        const sample = () => {
+          seen.push([Math.round(viewport.scrollTop), Math.round(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop)]);
+          if (performance.now() - started < 800) requestAnimationFrame(sample); else resolve(seen);
+        };
+        requestAnimationFrame(sample);
+      })`);
+      const tops = positions.map(([top]) => top);
+      assert.ok(Math.max(...tops) - Math.min(...tops) <= 1 && positions.at(-1)[1] <= 1, `Chat ${id} must stay at the bottom without scrolling after it opens; positions: ${JSON.stringify(positions.filter((item, index) => !index || item[0] !== positions[index - 1][0]))}`);
     }
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 15');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
@@ -221,7 +234,7 @@ async function browserChecks() {
     await delay(250);
     assert.ok(!consoleErrors.some((message) => message.includes("Maximum update depth")), "A narrow composer with an empty draft settles");
     assert.equal(await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top'), compactTop, "The empty prompt is compact again");
-    console.log("PASS: long chats open at the bottom before paint, including after reading older messages");
+    console.log("PASS: long chats open at the bottom before paint and stay there while messages measure, including after reading older messages");
     console.log("PASS: Go to bottom appears while reading earlier messages, hides at the bottom, and resumes following new messages");
     console.log("PASS: PR action pill placement, click action, disabled state, tones, and removal");
     console.log("PASS: fast mode appears for Codex models and the Opus models that have it, the prompt expands on wrapping, and a narrow empty prompt settles");

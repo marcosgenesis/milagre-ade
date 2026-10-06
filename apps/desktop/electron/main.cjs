@@ -19,6 +19,8 @@ async function startDesktop() {
 const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
 let updateState = { status: "idle", version: null, progress: 0 };
 let updateCheck = null;
+const { createReleaseChannelStore, configureUpdater, isChannelNotPublished } = require("./release-channel.cjs");
+const releaseChannel = createReleaseChannelStore({ file: path.join(app.getPath("userData"), "release-channel.json") });
 function publishUpdateState(nextState) {
   updateState = { ...updateState, ...nextState };
   for (const window of BrowserWindow.getAllWindows()) {
@@ -31,12 +33,14 @@ function checkForUpdates() {
   if (!app.isPackaged) return Promise.resolve(publishUpdateState({ status: "unavailable" }));
   if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
   if (updateCheck) return updateCheck;
+  configureUpdater(autoUpdater, releaseChannel.get());
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   publishUpdateState({ status: "checking", version: null, progress: 0 });
   updateCheck = autoUpdater.checkForUpdates().then(
     () => updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState,
     (error) => {
+      if (isChannelNotPublished(error)) return publishUpdateState({ status: "up-to-date" });
       console.warn("Milagre update check failed:", error.message);
       return publishUpdateState({ status: "error" });
     },
@@ -46,6 +50,17 @@ function checkForUpdates() {
 
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
+ipcMain.handle("update:channel", () => releaseChannel.get());
+// The new channel is saved first. A running or finished download keeps its state; the channel applies on the next check.
+ipcMain.handle("update:set-channel", async (_event, channel) => {
+  const next = releaseChannel.set(channel);
+  if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
+  if (updateCheck) await updateCheck.catch(() => {});
+  if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
+  publishUpdateState({ status: "idle", version: null, progress: 0 });
+  void checkForUpdates();
+  return next;
+});
 // Installing replaces the host bundle too. Save and stop it before the updater runs.
 ipcMain.handle("update:install", async () => {
   await runtime.close({ stopHost: true });

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -385,16 +385,26 @@ function updateDescription(update: UpdateState | null): string {
   }
 }
 
-function AboutSettings({ update }: { update: UpdateState | null }) {
+export function AboutSettings({ update }: { update: UpdateState | null }) {
   const [version, setVersion] = useState<string | null>(null);
+  const [channel, setChannel] = useState<ReleaseChannel | null>(null);
   useEffect(() => {
     void window.milagre.getAppVersion().then(setVersion);
+    void window.milagre.getReleaseChannel().then(setChannel);
   }, []);
   const electron = navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1];
   const chrome = navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1];
   return (
     <Group title="Milagre">
       <Row label="Version"><span className="tabular-nums">{version ?? "…"}</span></Row>
+      <Row label="Release channel" description={channel === "beta" ? "Beta gets a build most days main changes. Switch back to Stable any time; you keep the version you have until the next stable release." : "Stable gets releases after they have run on Beta."}>
+        <Select<ReleaseChannel>
+          label="Release channel"
+          value={channel ?? "stable"}
+          onChange={(next) => { setChannel(next); void window.milagre.setReleaseChannel(next); }}
+          options={[{ value: "stable", label: "Stable" }, { value: "beta", label: "Beta" }]}
+        />
+      </Row>
       <Row label="Updates" description={updateDescription(update)}>
         <button
           type="button"

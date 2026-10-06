@@ -367,6 +367,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             await confine?.check(projectPath);
             await scopeRoots(projectPath);
             const folder = path.join(uploads, randomUUID());
+            // oxlint-disable-next-line no-control-regex -- strips control characters from an uploaded file name
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
             const save = async () => {

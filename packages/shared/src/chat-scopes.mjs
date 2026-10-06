@@ -6,7 +6,7 @@ export function isLinkScopeKey(key) { return typeof key === 'string' && key.star
 
 export function scopeKey(scope) {
   if (scope?.kind === 'link' && validLinkId(scope.linkId)) return PREFIX + scope.linkId;
-  if (scope?.kind === 'project' && typeof scope.projectPath === 'string' && (/^\//.test(scope.projectPath) || /^[a-z]:[\\/]/i.test(scope.projectPath))) return scope.projectPath;
+  if (scope?.kind === 'project' && typeof scope.projectPath === 'string' && (scope.projectPath.startsWith('/') || /^[a-z]:[\\/]/i.test(scope.projectPath))) return scope.projectPath;
   throw new Error('Choose a valid Project or Link.');
 }
 

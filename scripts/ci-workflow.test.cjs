@@ -20,10 +20,10 @@ test('every CI job has a timeout', () => {
 })
 
 test('CI typechecks once and builds the renderer without a second typecheck', () => {
-  const runs = ci.jobs.javascript.steps.map(step => step.run).filter(Boolean)
-  assert.ok(runs.includes('npm run typecheck'))
-  assert.ok(runs.includes('npm run build:renderer --workspace milagre'))
-  assert.ok(!runs.includes('npm run build'))
+  const runs = new Set(ci.jobs.javascript.steps.map(step => step.run).filter(Boolean))
+  assert.ok(runs.has('npm run typecheck'))
+  assert.ok(runs.has('npm run build:renderer --workspace milagre'))
+  assert.ok(!runs.has('npm run build'))
 })
 
 test('desktop agent tests do not repeat the renderer logic tests', () => {
@@ -87,4 +87,10 @@ test('Electron checks run on Ubuntu under xvfb with screenshots kept as an artif
   const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact'))
   assert.equal(upload.if, 'always()')
   assert.equal(upload.with.path, '${{ runner.temp }}/electron-screenshots')
+})
+
+test('CI lints every workspace with oxlint and keeps the mobile ESLint rules', () => {
+  const runs = new Set(ci.jobs.javascript.steps.map(step => step.run).filter(Boolean))
+  assert.ok(runs.has('npm run lint'))
+  assert.ok(runs.has('npm run lint --workspace @milagre/mobile'))
 })

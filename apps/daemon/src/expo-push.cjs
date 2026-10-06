@@ -64,6 +64,7 @@ function createExpoPush({ fetcher = fetch, accessToken = process.env.EXPO_PUSH_A
     }
   }
   async function deliver({ message, isCurrent }) {
+    // oxlint-disable-next-line no-unmodified-loop-condition -- close() sets closed while a send awaits
     for (let attempt = 0; !closed && isCurrent(); attempt++) {
       try {
         const data = await request('send', message);
@@ -86,6 +87,7 @@ function createExpoPush({ fetcher = fetch, accessToken = process.env.EXPO_PUSH_A
   function pump() {
     if (processing || closed) return;
     processing = (async () => {
+      // oxlint-disable-next-line no-unmodified-loop-condition -- close() sets closed while a send awaits
       while (queue.length && !closed) {
         const entry = queue.shift();
         try { await deliver(entry); } catch { report(); } finally { entry.resolve(); }

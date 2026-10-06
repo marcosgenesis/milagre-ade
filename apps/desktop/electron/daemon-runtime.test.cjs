@@ -303,7 +303,7 @@ test('a restart whose new host fails to start says why, and its retries start on
   let hostStarted = false;
   t.after(async () => { if (hostStarted) await desktop.close({ stopHost: true }).catch(() => {}); else await desktop.close().catch(() => {}); });
   await assert.rejects(desktop.restartHost(), /ENOENT|no-such-host/);
-  assert.ok(events.some(event => event.channel === 'runtime:connection' && /^Host unavailable/.test(event.payload.message ?? '')));
+  assert.ok(events.some(event => event.channel === 'runtime:connection' && (event.payload.message ?? '').startsWith('Host unavailable')));
   // The next retry starts a host again instead of only trying to connect.
   hostStarted = true;
   options.executable = process.execPath;

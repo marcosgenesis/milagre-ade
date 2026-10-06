@@ -32,7 +32,7 @@ function metadata(content, file) {
       // Common hand-written skills use unquoted colons in a one-line description.
       // Keep full YAML support, but treat that field as text on this retry.
       const repaired = fields.replace(/^description:[ \t]+([^\r\n]+)$/m, (line, value) => {
-        if (/^["'|>\[{]/.test(value.trim())) return line;
+        if (/^["'|>[{]/.test(value.trim())) return line;
         return `description: ${JSON.stringify(value.trim())}`;
       });
       data = parse(repaired, { maxAliasCount: 0 });

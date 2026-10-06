@@ -91,6 +91,7 @@ async function browserChecks() {
     let recording = true;
     const capture = (async () => {
       let frame = 0;
+      // oxlint-disable-next-line no-unmodified-loop-condition -- the finally block below sets recording to false while this loop awaits
       while (recording) {
         const started = Date.now();
         fs.writeFileSync(path.join(directory, `${String(frame++).padStart(5, "0")}.png`), (await window.webContents.capturePage()).toPNG());

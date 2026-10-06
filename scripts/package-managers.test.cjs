@@ -128,6 +128,7 @@ test('expected installer names match electron-builder target expansion', async (
   const packager = new Packager({ projectDir: path.join(__dirname, '..'), config: { extraMetadata: { version: '1.2.3' } } });
   await packager.validateConfig();
   // validateConfig does not start packaging or construct AppInfo; no downloads/signing are needed here.
+  // oxlint-disable-next-line no-underscore-dangle -- the test stubs electron-builder's private _appInfo field, which has no public setter
   packager._appInfo = new AppInfo(packager, null);
   const macos = new MacPackager(packager);
   const windows = new WinPackager(packager);

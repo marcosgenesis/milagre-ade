@@ -9,9 +9,9 @@ async function check(app, platform) {
   let stderr='';child.stderr.on('data',chunk=>{stderr=(stderr+chunk).slice(-8000);});
   try {
     await new Promise((resolve,reject)=>{
-      let output='';
+      let output='', finished=false;
       const timeout=setTimeout(()=>finish(Error('Packaged simulator helper startup timed out.')),20000);
-      const finish=error=>{clearTimeout(timeout);child.stdout.off('data',onData);child.off('exit',onExit);child.off('error',finish);error?reject(error):resolve();};
+      const finish=error=>{if(finished)return;finished=true;clearTimeout(timeout);child.stdout.off('data',onData);child.off('exit',onExit);child.off('error',finish);if(error){reject(error);return;}resolve();};
       const onData=chunk=>{output=(output+chunk).slice(-32768);if(/http:\/\/(?:localhost|127\.0\.0\.1):\d+\/\?token=[A-Za-z0-9_-]+\s/.test(output))finish();};
       const onExit=code=>finish(Error(`Packaged ${platform} helper exited ${code}. ${/Cannot find package '[^']+'/.exec(stderr)?.[0] ?? 'Check its packaged dependencies.'}`));
       child.stdout.on('data',onData);child.once('exit',onExit);child.once('error',finish);

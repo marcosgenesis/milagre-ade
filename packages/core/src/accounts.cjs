@@ -17,6 +17,7 @@ async function inspectAccount(provider, { command, env }) {
       try {
         const raw = String(stdout); const info = JSON.parse(raw.slice(raw.indexOf('{')));
         resolve({ state: info.loggedIn ? 'ready' : 'signed-out', email: text(info.email), plan: text(info.subscriptionType || info.authMethod) });
+      // oxlint-disable-next-line promise/no-multiple-resolved -- the catch only runs when parsing threw before resolve, and a promise ignores later resolves anyway
       } catch { resolve({ state: 'error', message: 'Could not check this account. Try Refresh.' }); }
     })?.stdin?.end();
   });

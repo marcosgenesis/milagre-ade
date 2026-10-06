@@ -51,6 +51,7 @@ export function wordChanges(oldText: string, newText: string): { old: Range[]; n
   const a = tokenize(oldText);
   const b = tokenize(newText);
   // lcs[i][j] = longest common token run of a[i..] and b[j..]
+  // oxlint-disable-next-line unicorn/no-new-array -- array is pre-sized and filled by index on purpose
   const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {

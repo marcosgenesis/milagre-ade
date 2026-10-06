@@ -105,6 +105,7 @@ function createSimulatorHelper(options = {}) {
             child.removeListener('error', onExit);
             // Drain all later output without retaining helper URLs or credentials.
             child.stdout.resume();
+            // oxlint-disable-next-line eslint/no-unused-expressions, promise/no-multiple-resolved -- flagged for review, see PR body
             error ? reject(error) : resolve();
           };
           const onExit = () => finish(new Error('Simulator helper could not start. Check Xcode, then reopen the viewer.'));

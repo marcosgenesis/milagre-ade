@@ -141,6 +141,12 @@ test('a candidate is created only after CI succeeded on that main commit, and fr
   assert.ok(!JSON.stringify(releaseWorkflow).includes('package:mac'))
 })
 
+test('release candidates are created as drafts', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../.releaserc.json'), 'utf8'))
+  const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github')
+  assert.equal(github?.[1]?.draftRelease, true)
+})
+
 test('a candidate is not published without the auto-updater metadata, and publishes with it', t => {
   const f = fixture(t)
   fs.writeFileSync(path.join(f.root, 'bin/gh'), '#!/bin/bash\nprintf \'gh %s\\n\' "$*" >> "$CALL_LOG"\n', { mode: 0o755 })

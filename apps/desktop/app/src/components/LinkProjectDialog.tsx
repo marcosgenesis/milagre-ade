@@ -5,7 +5,7 @@ import { ipcErrorMessage } from '@milagre/shared/result';
 import { ScrollArea } from './primitives/ScrollArea';
 import { ProjectAvatarStack } from './ProjectAvatarStack';
 type Project = { id: string; name: string; path: string };
-export function LinkProjectDialog({ currentPath, onClose, onCreated }: { currentPath?: string; onClose: () => void; onCreated: (link: NamedProjectLink) => void }) {
+export function LinkProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (link: NamedProjectLink) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -16,7 +16,7 @@ export function LinkProjectDialog({ currentPath, onClose, onCreated }: { current
   useEffect(() => {
     dialog.current?.showModal();
     let live = true;
-    void window.milagre.listProjects().then(rows => { if (!live) return; setProjects(rows); setSelected(rows.filter(project => project.path === currentPath).map(project => project.id)); }).catch(error => setError(ipcErrorMessage(error)));
+    void window.milagre.listProjects().then(rows => { if (!live) return; setProjects(rows); }).catch(error => setError(ipcErrorMessage(error)));
     return () => { live = false; dialog.current?.close(); };
   }, []);
   const filtered = projects.filter(project => `${project.name} ${project.path}`.toLowerCase().includes(search.toLowerCase()));

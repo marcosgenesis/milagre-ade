@@ -56,9 +56,15 @@ async function main() {
     await selector(); await waitFor(() => evaluate(`document.body.textContent.includes('Link projects')`), 'Project selector actions');
     assert.ok(await evaluate(`document.body.textContent.includes('Copy project path')`)); assert.equal(await evaluate(`document.body.textContent.includes('Import project')`), false); await shot('project-selector');
     await click('Link projects…'); await waitFor(() => evaluate(`!!document.querySelector('#link-name') && document.querySelectorAll('dialog input[type=checkbox]').length === 2`), 'Link creation dialog');
-    assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]:checked').length`), 1);
+    assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]:checked').length`), 0, 'Opening Link projects leaves membership choices to the user');
     assert.equal(await evaluate(`document.querySelector('dialog button[type=submit]').disabled`), true);
-    await input('#link-name', 'RDFood'); await input('input[aria-label="Search projects"]', 'food-web');
+    await shot('create-link-empty');
+    await input('#link-name', 'RDFood');
+    assert.equal(await evaluate(`document.querySelector('dialog button[type=submit]').disabled`), true);
+    await evaluate(`document.querySelector('dialog input[type=checkbox]').click()`);
+    assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]:checked').length`), 1);
+    assert.equal(await evaluate(`document.querySelector('dialog button[type=submit]').disabled`), true, 'One explicitly selected Project is insufficient');
+    await input('input[aria-label="Search projects"]', 'food-web');
     assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]').length`), 1); await evaluate(`document.querySelector('dialog input[type=checkbox]').click()`);
     await input('input[aria-label="Search projects"]', ''); await shot('create-link'); await click('Create Link');
     await waitFor(() => evaluate(`document.querySelector('[data-workspace-trigger]')?.textContent.includes('RDFood') && !document.querySelector('#link-name')`), 'selected Link');

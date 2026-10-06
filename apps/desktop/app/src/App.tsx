@@ -1042,7 +1042,7 @@ function App() {
     );
   }
 
-  const linkDialog = linkDialogOpen ? <LinkProjectDialog currentPath={selectedLink ? undefined : project?.path} onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
+  const linkDialog = linkDialogOpen ? <LinkProjectDialog onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
   if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSelectedLink(null); setView('settings'); }} onCanvas={() => { setSelectedLink(null); setView('canvas'); }} usage={sidebarUsage} />{linkDialog}</>;
 
   if (loading || !project || !state || splash === "intro") {

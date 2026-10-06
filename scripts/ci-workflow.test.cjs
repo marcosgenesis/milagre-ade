@@ -31,3 +31,12 @@ test('desktop agent tests do not repeat the renderer logic tests', () => {
   assert.equal(desktop['test:agent'], 'node --test electron/*.test.cjs')
   assert.equal(desktop['test:ui'], 'node --test "app/src/**/*.test.ts"')
 })
+
+test('every action is pinned to a full SHA with its version in a comment', () => {
+  for (const name of fs.readdirSync(path.join(__dirname, '../.github/workflows'))) {
+    const text = fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8')
+    for (const line of text.split('\n').filter(line => /^\s*-?\s*uses:/.test(line))) {
+      assert.match(line, /uses: (\.\/\S+|[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+)/, `${name}: ${line.trim()}`)
+    }
+  }
+})

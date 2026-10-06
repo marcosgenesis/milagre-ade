@@ -69,6 +69,40 @@ async function browserChecks() {
     await delay(250);
     if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "message-rail.png"), image.toPNG()));
     assert.equal(await evaluate('document.querySelectorAll("[data-slot=preview-rail-item]").length'), 15, "Long Chats show at most 15 navigation lines");
+    const jumpButton = `document.querySelector('button[aria-label="Go to bottom"]')`;
+    const distanceFromBottom = `(() => { const v = document.querySelector('[aria-label="Conversation"]'); return v.scrollHeight - v.clientHeight - v.scrollTop; })()`;
+    const readEarlier = `(() => {
+      const viewport = document.querySelector('[aria-label="Conversation"]');
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+      viewport.scrollTo({ top: 0, behavior: 'instant' });
+      viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+    })()`;
+    await waitFor(`!(${jumpButton})`);
+    await delay(250);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-at-bottom.png"), image.toPNG()));
+    await evaluate(readEarlier);
+    await waitFor(`!!(${jumpButton})`);
+    assert.ok(await evaluate(`(() => { const button = (${jumpButton}); const rect = button.getBoundingClientRect(); return button.textContent.trim() === '' && rect.width === rect.height && getComputedStyle(button).backdropFilter !== 'none'; })()`), 'The jump button is a circular glass icon with an accessible label');
+    assert.ok(await evaluate(`(${jumpButton}).getBoundingClientRect().bottom < document.querySelector('[data-promptbar]').getBoundingClientRect().top`), 'Go to bottom sits above the composer');
+    assert.ok(await evaluate(`(() => { const button = (${jumpButton}); const rect = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)); })()`), 'The jump button receives clicks through the bottom fade');
+    await delay(250);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-scrolled-up.png"), image.toPNG()));
+    await evaluate('window.setMessageCount(55)');
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 55');
+    assert.ok(await evaluate(`${distanceFromBottom} > 56`), 'New messages preserve the position while reading earlier messages');
+    await evaluate(`(${jumpButton}).click()`);
+    await waitFor(`${distanceFromBottom} <= 1 && !(${jumpButton})`);
+    await evaluate('window.setMessageCount(60)');
+    await waitFor(`document.querySelectorAll("[data-slot=preview-rail-item]").length === 60 && ${distanceFromBottom} <= 1 && !(${jumpButton})`);
+    await evaluate(readEarlier);
+    await waitFor(`!!(${jumpButton})`);
+    await evaluate(`document.querySelector('[aria-label="Conversation"]').scrollTo({ top: 1e9, behavior: 'instant' })`);
+    await waitFor(`!(${jumpButton})`);
+    await evaluate('window.setMessageCount(1)');
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 0');
+    assert.equal(await evaluate(`!!(${jumpButton})`), false, 'Short chats have no jump button');
+    await evaluate('window.setMessageCount(50)');
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 15');
     for (const [id, count] of [[2, 200], [1, 50], [3, 50]]) {
       // Leaving an older chat scrolled up must not disable following in the next.
       await evaluate(`(() => {
@@ -83,6 +117,7 @@ async function browserChecks() {
         return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
       })()`);
       assert.ok(distance <= 1, `Chat ${id} must open at the bottom before paint; distance: ${distance}`);
+      assert.equal(await evaluate(`!!(${jumpButton})`), false, 'A newly opened Chat does not inherit the jump button');
     }
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 15');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
@@ -187,6 +222,7 @@ async function browserChecks() {
     assert.ok(!consoleErrors.some((message) => message.includes("Maximum update depth")), "A narrow composer with an empty draft settles");
     assert.equal(await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top'), compactTop, "The empty prompt is compact again");
     console.log("PASS: long chats open at the bottom before paint, including after reading older messages");
+    console.log("PASS: Go to bottom appears while reading earlier messages, hides at the bottom, and resumes following new messages");
     console.log("PASS: PR action pill placement, click action, disabled state, tones, and removal");
     console.log("PASS: fast mode appears for Codex models and the Opus models that have it, the prompt expands on wrapping, and a narrow empty prompt settles");
     console.log("PASS: message previews stay inside the conversation and above the prompt");

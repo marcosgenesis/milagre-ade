@@ -2,7 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { Button as NativeButton, Host, Picker, Switch } from '@expo/ui';
 import { Button as IOSButton, HStack as IOSHStack, Host as IOSHost, Image as IOSImage, Menu as IOSMenu, Picker as IOSPicker, Rectangle, Section as IOSSection, Text as IOSText, Toggle as IOSToggle } from '@expo/ui/swift-ui';
-import { accessibilityLabel, contentShape, disabled as nativeDisabled, font, foregroundStyle, frame, lineLimit, menuOrder, padding, tint, pickerStyle, shapes, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
+import { accessibilityLabel, buttonBorderShape, buttonStyle, contentShape, disabled as nativeDisabled, font, foregroundStyle, frame, labelStyle, lineLimit, menuOrder, padding, tint, pickerStyle, shapes, tag, controlSize } from '@expo/ui/swift-ui/modifiers';
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 import * as Haptics from 'expo-haptics';
 import { ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon } from '@hugeicons/core-free-icons';
@@ -85,6 +85,13 @@ export function ListRow({ title, subtitle, subtitleLines = 1, onPress, onLongPre
 }
 export function IconButton({ label, icon, onPress, disabled = false, filled = false, loading = false, tone = 'ink2', size = 36 }: { label: string; icon: IconData; onPress: () => void; disabled?: boolean; filled?: boolean; loading?: boolean; tone?: Tone; size?: number }) {
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled, busy: loading }} hitSlop={4} disabled={disabled || loading} onPress={() => { tap(); onPress(); }} style={({ pressed }) => ({ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: filled ? colors.ink : 'transparent', opacity: disabled ? 0.35 : pressed ? 0.5 : 1 })}>{loading ? <ActivityIndicator color={filled ? colors.onInk : colors.ink2} /> : <Icon icon={icon} size={20} tone={filled ? 'onInk' : tone} />}</Pressable>;
+}
+/** Native Liquid Glass on iOS 26; SwiftUI supplies the fallback on older iOS. */
+export function GlassIconButton({ label, systemImage, icon, onPress }: { label: string; systemImage: React.ComponentProps<typeof IOSButton>['systemImage']; icon: IconData; onPress: () => void }) {
+  if (Platform.OS !== 'ios') return <CircleButton label={label} icon={icon} onPress={onPress} />;
+  return <Host ignoreSafeArea="all" matchContents>
+    <IOSButton label={label} systemImage={systemImage} onPress={() => { tap(); onPress(); }} modifiers={[buttonStyle('glass'), controlSize('large'), labelStyle('iconOnly'), buttonBorderShape('circle'), tint({ type: 'hierarchical', style: 'primary' }), accessibilityLabel(label)]} />
+  </Host>;
 }
 /** A bar button for the native header; iOS draws the round glass background itself. */
 export function HeaderButton({ label, icon, onPress }: { label: string; icon: IconData; onPress?: () => void }) {

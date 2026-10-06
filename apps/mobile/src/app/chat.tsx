@@ -3,7 +3,7 @@ import type Reanimated from 'react-native-reanimated';
 import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Add01Icon, ArrowUp01Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { sessionForWorktree } from '@milagre/shared/model';
 import { createPendingChat, pendingChatSessionId } from '@milagre/shared/chats';
 import { messageNavigationIndices } from '@milagre/shared/message-navigation';
@@ -26,7 +26,7 @@ import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
 import { useOpenProject } from '../use-open-project';
-import { ErrorNotice, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { PromptField } from '../prompt-field';
 import { archiveFromPhone } from '../archive';
 import { confirmSheet } from '../confirm-store';
@@ -53,6 +53,20 @@ export default function ChatScreen() {
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
+  const scrollKey = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}|${params.id ?? `new:${params.worktreeId}`}`;
+  const [jumpState, setJumpState] = useState({ key: scrollKey, visible: false });
+  const showJumpToBottom = jumpState.key === scrollKey && jumpState.visible;
+  const onEndVisible = useCallback((visible: boolean) => {
+    setJumpState(current => current.key === scrollKey && current.visible === !visible ? current : { key: scrollKey, visible: !visible });
+  }, [scrollKey]);
+  const jumpToBottom = useCallback(() => {
+    following.current = true;
+    scroll.current?.scrollToEnd({ animated: false });
+    setJumpState({ key: scrollKey, visible: false });
+  }, [scrollKey]);
+  useEffect(() => {
+    following.current = true;
+  }, [scrollKey]);
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
@@ -317,7 +331,7 @@ export default function ChatScreen() {
     {sidebar}
     {more}
     <PanelSwipe panels={panels}>
-    <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <KeyboardChatScrollView key={scrollKey} ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" onEndVisible={onEndVisible} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
@@ -340,7 +354,10 @@ export default function ChatScreen() {
         find this scroll view (it only follows each view's first child), so the blur is drawn here. */}
     <EdgeFade edge="top" height={insets.top + 72} />
     <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
-    <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    {showJumpToBottom && <View pointerEvents="box-none" style={{ height: 56, alignItems: 'center', zIndex: 1 }}>
+      <GlassIconButton label="Go to bottom" systemImage="chevron.down" icon={ArrowDown01Icon} onPress={jumpToBottom} />
+    </View>}
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />
     <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}>

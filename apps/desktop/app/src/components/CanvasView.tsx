@@ -202,7 +202,7 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack, focus
       else if (node.data.endpoint.worktree_path) await window.milagre.setWorktreePosition(node.data.endpoint.project_id, node.data.endpoint.worktree_path, node.position);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
-  return <section data-canvas className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-window bg-surface shadow-card">
+  return <section data-canvas className="mt-[60px] flex min-h-0 flex-1 flex-col overflow-hidden rounded-window bg-surface shadow-card">
     <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
       <button type="button" className="rounded-lg px-2 py-1 text-sm text-ink-2 hover:bg-hover-2" onClick={onBack}>Back to chat</button>
       <h1 className="flex-1 text-sm font-semibold text-ink">Projects and Links</h1>

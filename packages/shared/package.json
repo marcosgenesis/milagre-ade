@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./prompt-skills": {
+      "types": "./src/prompt-skills.d.mts",
+      "default": "./src/prompt-skills.mjs"
+    },
     "./model": "./src/model.ts",
     "./git-diff": "./src/git-diff.ts",
     "./agent-runs": {

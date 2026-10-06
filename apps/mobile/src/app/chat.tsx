@@ -25,7 +25,8 @@ import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
 import { useOpenProject } from '../use-open-project';
-import { ErrorNotice, Field, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { PromptField } from '../prompt-field';
 import { archiveFromPhone } from '../archive';
 import { confirmSheet } from '../confirm-store';
 
@@ -326,7 +327,7 @@ export default function ChatScreen() {
           </PullDown>
         </View>}
         {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
-        <Field label="Message" hideLabel placeholder="Message the agent" multiline autoCorrect spellCheck autoCapitalize="sentences" value={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} style={{ backgroundColor: 'transparent', minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }} />
+        <PromptField key={chatId} client={client} projectPath={worktree?.path ?? project.path} draft={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
           <PullDown label="Add photos or files" nativeTrigger={{ systemImage: 'plus', disabled: attachmentDisabled }} sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle', disabled: attachmentDisabled }, { id: 'camera', title: 'Take Photo', systemImage: 'camera', disabled: attachmentDisabled }, { id: 'files', title: 'Choose Files', systemImage: 'folder', disabled: attachmentDisabled }] }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
             <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: attachmentDisabled ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>

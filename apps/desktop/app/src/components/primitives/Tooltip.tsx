@@ -3,7 +3,34 @@ import { createPortal } from "react-dom";
 import { openModal } from "../../lib/modal";
 import { shortcutModifier, useShortcutHints } from "../../lib/shortcut-hints";
 
-const SHOW_DELAY = 400;
+export const TOOLTIP_SHOW_DELAY = 400;
+
+/** Shared tooltip presentation for ordinary triggers and text hit-tested under a native input. */
+export function TooltipBubble({ label, rect, align = "start", side = "top", wrap = false, hint }: {
+  label: string;
+  rect: DOMRect;
+  align?: "start" | "end";
+  side?: "top" | "bottom";
+  wrap?: boolean;
+  hint?: string;
+}) {
+  return createPortal(
+    <span
+      role="tooltip"
+      className={`pointer-events-none fixed z-[60] flex items-center gap-2 ${wrap ? "max-w-[280px] whitespace-normal leading-snug" : "whitespace-nowrap"} rounded-[8px] bg-ink px-2 py-1 text-[12px] font-medium text-surface shadow-overlay`}
+      style={{
+        ...(side === "top" ? { top: rect.top - 6 } : { top: rect.bottom + 6 }),
+        ...(align === "start" ? { left: rect.left } : { right: window.innerWidth - rect.right }),
+        transform: side === "top" ? "translateY(-100%)" : undefined,
+        animation: "fade-in 120ms ease-out both",
+      }}
+    >
+      {label}
+      {hint && <span data-shortcut-hint className="opacity-60">{hint}</span>}
+    </span>,
+    document.body,
+  );
+}
 
 export default function Tooltip({
   label,
@@ -57,29 +84,14 @@ export default function Tooltip({
     <span
       ref={triggerRef}
       className={`inline-flex ${className}`}
-      onPointerEnter={() => show(SHOW_DELAY)}
+      onPointerEnter={() => show(TOOLTIP_SHOW_DELAY)}
       onPointerLeave={hide}
       onPointerDown={hide}
       onFocus={(event) => { if (event.target.matches(":focus-visible")) show(0); }}
       onBlur={hide}
     >
       {children}
-      {rect && createPortal(
-        <span
-          role="tooltip"
-          className={`pointer-events-none fixed z-[60] flex items-center gap-2 ${wrap ? "max-w-[280px] whitespace-normal leading-snug" : "whitespace-nowrap"} rounded-[8px] bg-ink px-2 py-1 text-[12px] font-medium text-surface shadow-overlay`}
-          style={{
-            ...(side === "top" ? { top: rect.top - 6 } : { top: rect.bottom + 6 }),
-            ...(align === "start" ? { left: rect.left } : { right: window.innerWidth - rect.right }),
-            transform: side === "top" ? "translateY(-100%)" : undefined,
-            animation: "fade-in 120ms ease-out both",
-          }}
-        >
-          {label}
-          {hint && <span data-shortcut-hint className="opacity-60">{hint}</span>}
-        </span>,
-        document.body,
-      )}
+      {rect && <TooltipBubble label={label} rect={rect} align={align} side={side} wrap={wrap} hint={hint} />}
       {hintRect && !rect && createPortal(
         <kbd aria-hidden="true" data-shortcut-hint className="pointer-events-none fixed z-[70] rounded border border-line bg-surface px-1.5 py-0.5 text-[11px] text-ink shadow-raised"
           style={{ top: hintRect.top + hintRect.height / 2, left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2, transform: "translate(-50%, -50%)" }}>

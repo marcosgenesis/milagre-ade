@@ -24,6 +24,8 @@ import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
 import { useSkills } from "./useSkills";
 import { ScrollArea } from "./primitives/ScrollArea";
+import { promptSkillParts } from "../lib/prompt-skills";
+import { PromptHighlights } from "./PromptHighlights";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -147,7 +149,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const menu: "at" | "slash" | null = plusOpen ? "at" : token?.kind ?? null;
   const tokenQuery = plusOpen ? "" : token?.query ?? "";
   const fileSearch = useProjectFiles(projectPath, tokenQuery, menu === "at" && !plusOpen);
-  const { skills, warnings: skillWarnings, loading: skillsLoading } = useSkills(projectPath, menu === "slash");
+  const { skills, warnings: skillWarnings, loading: skillsLoading } = useSkills(projectPath, menu === "slash" || /(^|\s)\//.test(draft));
   const skillRows = ["bundled", "workspace", "user"].flatMap((scope) => skills.filter((skill) => skill.scope === scope).map((skill) => ({
     key: `skill:${skill.name}`, name: `/${skill.name}`, desc: skill.description,
     group: scope === "bundled" ? "Milagre skills" : scope === "workspace" ? "Workspace skills" : "User skills", source: skill.provider, path: skill.path,
@@ -156,6 +158,9 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     ...COMMANDS.filter((command) => !skills.some((skill) => skill.name.toLowerCase() === command.key)).map((command) => ({ ...command, group: "Milagre skills" })),
     ...skillRows,
   ];
+  const skillParts = promptSkillParts(draft, commands.map(command => command.name.slice(1)));
+  const hasSkill = skillParts.some(part => part.skill);
+  const inputTextClass = expanded ? "min-h-[68px] px-2 py-2 text-[14px] leading-5" : "min-h-7 px-1 py-[5px] text-[13px] leading-[18px]";
   const rows: MenuRow[] = menu === "at"
     ? plusOpen ? SOURCES : fileSearch.files.map(path => ({ key: `file:${path}`, name: path.split("/").at(-1) || path, desc: path, path }))
     : menu === "slash"
@@ -455,7 +460,10 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
           <div className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}>
             <button type="button" aria-label="Add attachments and sources" aria-expanded={plusOpen} onClick={() => { setModelOpen(false); setPlusOpen((current) => !current); inputRef.current?.focus(); }} className={`flex size-7 shrink-0 items-center justify-center text-ink-3 transition-colors hover:bg-hover hover:text-ink ${plusOpen ? "bg-hover" : ""}`}><Icon icon={Add01Icon} size={16} /></button>
-            <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : handoverBrief && lockedProvider ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is` : "Prompt or mention a file with @"} aria-label="Prompt" className={`${expanded ? "col-span-full col-start-1 row-start-1 min-h-[68px] px-2 py-2 text-[14px] leading-5" : "col-start-2 row-start-1 min-h-7 px-1 py-[5px] text-[13px] leading-[18px] placeholder-shown:whitespace-nowrap placeholder:truncate"} min-w-0 w-full resize-none overflow-hidden bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
+            <div className={`relative min-w-0 w-full ${expanded ? "col-span-full col-start-1 row-start-1" : "col-start-2 row-start-1"}`}>
+              {hasSkill && <PromptHighlights inputRef={inputRef} parts={skillParts} descriptions={new Map(commands.map(command => [command.name.toLowerCase(), command.desc]))} className={inputTextClass} />}
+              <textarea onPaste={(event) => void imageDraft.onPaste(event)} ref={inputRef} rows={1} value={draft} onSelect={event => setCaret(event.currentTarget.selectionStart)} onChange={(event) => { setCaret(event.target.selectionStart); onDraftChange(event.target.value); setDismissed(false); setPlusOpen(false); }} onKeyDown={handleKeyDown} placeholder={running ? "Steer the agent…" : handoverBrief && lockedProvider ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is` : "Prompt or mention a file with @"} aria-label="Prompt" className={`${inputTextClass} ${expanded ? "" : "placeholder-shown:whitespace-nowrap placeholder:truncate"} ${hasSkill ? "prompt-input-highlighted" : "text-ink"} relative block min-w-0 w-full resize-none overflow-hidden bg-transparent caret-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`} />
+            </div>
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-2 row-start-2 justify-self-start" : "col-start-3 row-start-1"}`}>
             <button type="button" aria-expanded={modelOpen} onClick={(event) => { anchorTo(event.currentTarget, 360); setPlusOpen(false); setPermissionOpen(false); setEffortOpen(false); setModelOpen((current) => !current); }} className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"><ProviderLogo provider={selectedModel.provider} size={13} /><span className="max-w-28 truncate">{selectedModel.name}</span><Icon icon={ArrowDown01Icon} size={12} /></button>
             {effortLevels.length > 0 && <button type="button" aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`} aria-expanded={effortOpen} onClick={(event) => { anchorTo(event.currentTarget, 320); setPlusOpen(false); setModelOpen(false); setPermissionOpen(false); setEffortOpen((current) => !current); }} className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}><EffortMeter level={effortIndex} total={effortLevels.length} /><span className="hidden min-[900px]:inline">{effortLabel}</span></button>}

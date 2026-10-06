@@ -65,7 +65,10 @@ async function browserChecks() {
   }
   try {
     await window.loadURL(process.argv[2]);
-    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length > 0');
+    await delay(250);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "message-rail.png"), image.toPNG()));
+    assert.equal(await evaluate('document.querySelectorAll("[data-slot=preview-rail-item]").length'), 15, "Long Chats show at most 15 navigation lines");
     for (const [id, count] of [[2, 200], [1, 50], [3, 50]]) {
       // Leaving an older chat scrolled up must not disable following in the next.
       await evaluate(`(() => {
@@ -81,7 +84,7 @@ async function browserChecks() {
       })()`);
       assert.ok(distance <= 1, `Chat ${id} must open at the bottom before paint; distance: ${distance}`);
     }
-    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
+    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 15');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
     assert.equal(await evaluate(`!!(${resolveButton})`), false);
     await evaluate('window.setPrAction({ label: "Resolve conflicts", tone: "red" })');
@@ -111,11 +114,15 @@ async function browserChecks() {
     if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, "pill-address-review.png"), image.toPNG()));
     await evaluate('window.setPrAction(null)');
     await waitFor(`!(${resolveButton}) && !(${updateButton})`);
-    for (const [height, count, draft] of [[600, 50, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 18, ""]]) {
+    for (const [height, count, draft] of [[600, 200, ""], [360, 50, ""], [360, 50, "A multiline prompt\nthat expands the composer"], [600, 18, ""], [600, 15, ""], [600, 14, ""]]) {
       window.setContentSize(800, height);
       await evaluate(`window.setMessageCount(${count})`);
       await evaluate(`window.setDraft(${JSON.stringify(draft)})`);
-      await waitFor(`document.querySelectorAll("[data-slot=preview-rail-item]").length === ${count}`);
+      await waitFor(`document.querySelectorAll("[data-slot=preview-rail-item]").length === ${Math.min(count, 15)}`);
+      await waitFor(`document.querySelector('[data-slot="preview-rail-item"]')?.getAttribute('aria-label') === 'Go to assistant message 1 of ${count}'`);
+      const labels = await evaluate(`[...document.querySelectorAll('[data-slot="preview-rail-item"]')].map(button => button.getAttribute('aria-label'))`);
+      assert.equal(labels[0], `Go to assistant message 1 of ${count}`, "The first message stays reachable");
+      assert.equal(labels.at(-1), `Go to assistant message ${count} of ${count}`, "The latest message stays reachable");
       await delay(450);
       for (const edge of ["first", "last"]) {
         const target = await evaluate(`(() => {
@@ -183,6 +190,7 @@ async function browserChecks() {
     console.log("PASS: PR action pill placement, click action, disabled state, tones, and removal");
     console.log("PASS: fast mode appears for Codex models and the Opus models that have it, the prompt expands on wrapping, and a narrow empty prompt settles");
     console.log("PASS: message previews stay inside the conversation and above the prompt");
+    console.log("PASS: navigation stays capped at 15 lines across the full Chat");
     app.exit(0);
   } catch (error) {
     console.error(error);

@@ -380,6 +380,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
+    '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
+    '../message-navigation': { MessageNavigation: 'MessageNavigation' },
     '../prompt-field': { PromptField: 'PromptField' },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
@@ -872,6 +874,30 @@ test('the transcript follows new content, also after the agent settings sheet op
   find(tree, node => node.type === 'AgentControls').props.onToggle();
   page.props.onContentSizeChange(0, 1000);
   assert.equal(scrolls, 2);
+});
+
+test('mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling', () => {
+  const screen = chatHost();
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  screen.session.snapshot.project.state.messages = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, session_id: 42, role: 'assistant', body: `Message ${index + 1}` }));
+  const tree = screen.render();
+  const rail = find(tree, node => node.type === 'MessageNavigation');
+  assert.ok(rail, 'Chats have a navigation rail');
+  assert.equal(rail.props.items.length, 15);
+  assert.equal(rail.props.items[0].index, 0);
+  assert.equal(rail.props.items.at(-1).index, 99);
+  const page = find(tree, node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  page.props.ref.current = { scrollTo: options => scrolls.push(options), scrollToEnd: options => scrolls.push({ end: true, ...options }) };
+  rail.props.onSelect(0);
+  const earlier = screen.render();
+  const target = find(earlier, node => node.props?.nativeID === 'chat-message-1');
+  assert.ok(target, 'selecting an unloaded message mounts it');
+  target.props.onLayout({ nativeEvent: { layout: { y: 84 } } });
+  assert.equal(scrolls.at(-1).y, 12, 'the first message stays below the transparent header');
+  find(earlier, node => node.type === 'MessageNavigation').props.onSelect(99);
+  assert.equal(scrolls.at(-1).end, true, 'the latest tick returns to live output');
 });
 
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {

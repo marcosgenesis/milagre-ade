@@ -40,3 +40,9 @@ test('every action is pinned to a full SHA with its version in a comment', () =>
     }
   }
 })
+
+test('CI runs the unit suite through the single test command', () => {
+  const runs = ci.jobs.javascript.steps.map(step => step.run).filter(Boolean)
+  assert.ok(runs.includes('npm test -- --unit'))
+  assert.ok(!runs.some(run => /npm run test:/.test(run)), 'no per-suite scripts left in CI')
+})

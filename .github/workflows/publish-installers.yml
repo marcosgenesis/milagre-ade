@@ -128,7 +128,7 @@ jobs:
       - name: Exercise signed macOS app
         run: |-
           app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
-          npm run test:desktop -- --packaged "$app"
+          node scripts/test-desktop.cjs --packaged "$app"
       - name: Refresh feeds after DMG notarization
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -258,7 +258,7 @@ jobs:
           sudo apt-get install -y ./release/*.deb
           desktop-file-validate /usr/share/applications/milagre.desktop
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          xvfb-run -a npm run test:desktop -- --packaged /opt/Milagre/milagre
+          xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre
       - name: Import repository signing key
         env:
           PRIVATE_KEY: ${{ secrets.LINUX_REPOSITORY_PRIVATE_KEY }}
@@ -288,7 +288,7 @@ jobs:
       - name: Exercise Linux AppImage payload
         run: |-
           "release/Milagre-${RELEASE_TAG#v}-x86_64.AppImage" --appimage-extract > /dev/null
-          xvfb-run -a npm run test:desktop -- --packaged squashfs-root/AppRun
+          xvfb-run -a node scripts/test-desktop.cjs --packaged squashfs-root/AppRun
       - name: Stage signed Linux artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

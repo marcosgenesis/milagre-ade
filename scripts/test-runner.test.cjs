@@ -13,6 +13,7 @@ test('discovers every node:test file and every Electron check', () => {
   const electron = discoverElectronChecks(root)
   assert.ok(electron.includes('scripts/test-chat-titles.cjs'))
   assert.deepEqual(electron, [...electron].sort())
+  assert.ok(!electron.includes('scripts/test-runner.cjs') && !electron.includes('scripts/test-runner.test.cjs'))
 })
 
 test('--only narrows by name and an unmatched name fails loudly', () => {

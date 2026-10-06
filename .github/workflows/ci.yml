@@ -32,19 +32,9 @@ jobs:
         run: npm run typecheck:mobile
       - name: Typecheck relay
         run: npm run typecheck:relay
-      - name: Test relay
-        run: npm run test:relay
       - name: Lint mobile
         run: npm run lint --workspace @milagre/mobile
-      - name: Test mobile transport
-        run: npm run test:mobile
       - name: Build renderer
         run: npm run build:renderer --workspace milagre
-      - name: Test agent runner
-        run: npm run test:agent
-      - name: Test UI logic
-        run: npm run test:ui
-      - name: Test workspace and packaging contracts
-        run: npm run test:monorepo
-      - name: Test release safeguards
-        run: npm run test:release
+      - name: Test
+        run: npm test -- --unit

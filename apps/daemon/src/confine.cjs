@@ -18,12 +18,21 @@ const chatProject = chatId => (typeof chatId === 'string' ? projectOfKey(chatId)
 // A file the phone attached: inside the folder, or one it uploaded itself.
 const attached = file => ({ file });
 const none = () => [];
+const denySimulator = () => { throw refused(); };
 
 /**
  * The paths in each command the phone may call, by argument shape (see core's runtime). A command missing here is
  * refused while the bridge is confined, so a command added to the bridge later stays closed until it is listed.
  */
 const PATHS = Object.freeze({
+  // Simulators are machine-wide. A demo Project never grants access to the host's devices.
+  'simulator:list': denySimulator,
+  'simulator:open': denySimulator,
+  'simulator:offer': denySimulator,
+  'simulator:status': denySimulator,
+  'simulator:control': denySimulator,
+  'simulator:input': denySimulator,
+  'simulator:close': denySimulator,
   'push:register': none,
   'push:unregister': none,
   'push:focus': ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),

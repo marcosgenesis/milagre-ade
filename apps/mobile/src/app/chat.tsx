@@ -13,6 +13,7 @@ import { useComposer, usePendingChats, useSession } from '../session';
 import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
+import { SimulatorChip } from '../simulator';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { ChatReply } from '../chat-reply';
 import { ThinkingIndicator } from '../running-logo';
@@ -310,9 +311,10 @@ export default function ChatScreen() {
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />
     <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}>
-      {(blockers.length > 0 || agents.length > 0) && !question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }}>
+      {!question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 8 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />
+        <SimulatorChip />
         <SubagentChip agents={agents} onPress={() => headerAction('agents')} />
       </View>}
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}

@@ -15,6 +15,7 @@ const { createConfinement } = require('./confine.cjs');
 // Characters of a data URL the phone gets for a Project's icon (about 450 KB of image).
 const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
+  'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',

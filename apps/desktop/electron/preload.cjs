@@ -4,6 +4,15 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** @type {Window["milagre"]} */
 const bridge = {
+  simulators: {
+    list: () => ipcRenderer.invoke("simulator:list"),
+    open: request => ipcRenderer.invoke("simulator:open", request),
+    offer: request => ipcRenderer.invoke("simulator:offer", request),
+    status: request => ipcRenderer.invoke("simulator:status", request),
+    control: request => ipcRenderer.invoke("simulator:control", request),
+    input: request => ipcRenderer.invoke("simulator:input", request),
+    close: request => ipcRenderer.invoke("simulator:close", request),
+  },
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
   onRuntimeConnection: (callback) => {

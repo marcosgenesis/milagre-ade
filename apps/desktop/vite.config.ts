@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { SIMULATOR_RECEIVER_SCRIPT } from "@milagre/shared/simulator-receiver";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
@@ -9,7 +11,8 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 // the media protocol and GitHub avatars. Dev keeps Vite's inline client and HMR socket, so this applies to builds only.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // The simulator iframe embeds this exact bundled receiver, with data kept outside its executable script.
+  `script-src 'self' 'sha256-${createHash("sha256").update(SIMULATOR_RECEIVER_SCRIPT).digest("base64")}'`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: milagre-media: https:",
   "media-src 'self' blob: milagre-media:",
@@ -18,7 +21,7 @@ const CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "frame-src 'none'",
+  "frame-src 'self'",
 ].join("; ");
 const contentSecurityPolicy = {
   name: "milagre-csp",

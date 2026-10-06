@@ -53,6 +53,14 @@ export default function ChatScreen() {
   const following = useRef(true);
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
+  const contentHeight = useRef(0);
+  // A Chat opens already at its newest message: the transcript stays hidden until the first jump to the end.
+  const [placed, setPlaced] = useState(false);
+  const place = () => {
+    if (placed || !viewport.current || !contentHeight.current) return;
+    if (contentHeight.current > viewport.current) scroll.current?.scrollToEnd({ animated: false });
+    setPlaced(true);
+  };
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
   const pr = usePullRequest(worktreeOf);
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
@@ -290,7 +298,7 @@ export default function ChatScreen() {
     {sidebar}
     {more}
     <PanelSwipe panels={panels}>
-    <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} style={{ opacity: placed ? 1 : 0 }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; place(); }} onContentSizeChange={(_, height) => { contentHeight.current = height; if (!placed) place(); else if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}

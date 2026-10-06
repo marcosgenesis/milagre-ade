@@ -874,6 +874,23 @@ test('the transcript follows new content, also after the agent settings sheet op
   assert.equal(scrolls, 2);
 });
 
+test('a long Chat opens hidden and jumps to its newest message without animating', () => {
+  const screen = chatHost();
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  let first = page();
+  first.props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  assert.equal(first.props.style.opacity, 0);
+  first.props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 0, 'waits for the viewport before placing');
+  first.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]));
+  const placed = page();
+  assert.equal(placed.props.style.opacity, 1);
+  placed.props.onContentSizeChange(0, 2100);
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }, { animated: true }]));
+});
+
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
   const screen = chatHost();
   screen.params.id = '42';

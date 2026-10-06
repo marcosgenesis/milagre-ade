@@ -16,7 +16,7 @@ function createReleaseChannelStore({ file }) {
   return {
     get: () => channel,
     set(next) {
-      if (next !== "stable" && next !== "beta") throw new Error(`Unknown release channel: ${next}`);
+      if (next !== "stable" && next !== "beta") throw new Error(`Unknown release channel: ${next}; one of ${CHANNELS.join(", ")}`);
       fs.writeFileSync(file, JSON.stringify({ channel: next }));
       channel = next;
       return channel;
@@ -31,4 +31,4 @@ function configureUpdater(autoUpdater, channel) {
 }
 /** @param {any} error */
 const isChannelNotPublished = error => error?.code === "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND";
-module.exports = { createReleaseChannelStore, configureUpdater, isChannelNotPublished, CHANNELS };
+module.exports = { createReleaseChannelStore, configureUpdater, isChannelNotPublished };

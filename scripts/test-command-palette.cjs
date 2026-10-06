@@ -18,6 +18,7 @@ window.addEventListener('keydown', event => { if (event.key === 'Escape' && !eve
 window.agentEvent = payload => window.agentHandlers.forEach(handler => handler(payload));
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
   patchChat: async () => { throw new Error("Chat could not be saved: disk full"); },
@@ -48,6 +49,14 @@ async function browserChecks() {
     throw Error(`Timed out: ${source}`);
   }
   const key = (key, extra = {}) => evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true, ...${JSON.stringify(extra)} }))`);
+  async function screenshot(name) {
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    const fs = require('node:fs');
+    fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    window.webContents.invalidate();
+    await delay(200);
+    fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name), (await window.webContents.capturePage()).toPNG());
+  }
   const open = async (extra = { metaKey: true }) => { await key('k', extra); await waitFor('!!document.querySelector("dialog[open] input")'); };
   const search = async text => {
     await evaluate(`(() => { const input = document.querySelector('dialog input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -61,14 +70,23 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelectorAll("[data-shortcut-hint]").length'), 0);
     await key('Meta', { metaKey: true });
     await waitFor('document.querySelectorAll("[data-shortcut-hint]").length > 0');
+    await screenshot('hints-dark.png');
+    await evaluate('document.documentElement.classList.remove("dark")');
+    await screenshot('hints-light.png');
+    await evaluate('document.documentElement.classList.add("dark")');
+    assert.ok(await evaluate('[...document.querySelectorAll("kbd[data-shortcut-hint]")].every(el => getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily)'), 'Shortcut hints use the app font instead of the browser monospace default');
+    assert.equal(await evaluate('document.querySelector("kbd[aria-label=\\"Command + Shift + D\\"]").querySelectorAll("svg").length'), 2, 'Changes hint draws Command and Shift consistently');
+    assert.ok(await evaluate('[...document.querySelectorAll("kbd[data-shortcut-hint]")].every(el => { const rect = el.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth; })'), 'Floating badges stay inside the viewport');
+    await evaluate('document.querySelector("[data-changes-toggle]").dispatchEvent(new PointerEvent("pointerover", { bubbles: true }))');
+    await waitFor('!!document.querySelector("[role=tooltip] kbd")');
+    assert.equal(await evaluate('document.querySelector("[role=tooltip] kbd").getAttribute("aria-label")'), 'Command + Shift + D', 'Hover tooltips name the modifier icons for assistive technology');
+    await screenshot('tooltip-dark.png');
+    await evaluate('document.querySelector("[data-changes-toggle]").dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: document.body }))');
     assert.ok(await evaluate('[...document.querySelectorAll("[data-shortcut-hint]")].some(el => el.textContent.includes("1"))'), 'Holding Command reveals chat numbers');
     await evaluate("window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true }))");
     await waitFor('document.querySelectorAll("[data-shortcut-hint]").length === 0');
     await key('Meta', { metaKey: true });
     await waitFor('document.querySelectorAll("[data-shortcut-hint]").length > 0');
-    window.webContents.invalidate();
-    await delay(200);
-    require('node:fs').writeFileSync('/tmp/milagre-command-hints.png', (await window.webContents.capturePage()).toPNG());
     await evaluate("window.dispatchEvent(new Event('blur'))");
     await waitFor('document.querySelectorAll("[data-shortcut-hint]").length === 0');
     await key('Meta', { metaKey: true, repeat: true });
@@ -91,6 +109,10 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelectorAll("dialog kbd").length'), 0, 'Palette keycaps are hidden until Command is held');
     await key('Meta', { metaKey: true });
     await waitFor('document.querySelectorAll("dialog kbd").length > 0');
+    await screenshot('palette-hints-dark.png');
+    await evaluate('document.documentElement.classList.remove("dark")');
+    await screenshot('palette-hints-light.png');
+    await evaluate('document.documentElement.classList.add("dark")');
     assert.equal(await evaluate('document.querySelectorAll("body > [data-shortcut-hint], aside [data-shortcut-hint]").length'), 0, 'Hints stay scoped to the open palette');
     await evaluate("window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true }))");
     await waitFor('document.querySelectorAll("dialog kbd").length === 0');
@@ -158,17 +180,14 @@ async function browserChecks() {
     await search('add palette');
     assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Add a command palette")'), 'Search matches multiple words');
     await search('');
-    const fs = require('node:fs');
-    window.webContents.invalidate();
-    await delay(250);
-    fs.writeFileSync('/tmp/milagre-command-palette-dark.png', (await window.webContents.capturePage()).toPNG());
+    await screenshot('palette-dark.png');
     for (const [width, height] of [[390, 500], [1000, 760]]) {
       window.setContentSize(width, height);
       await evaluate('document.documentElement.classList.remove("dark")');
       await delay(100);
       assert.ok(await evaluate('(() => { const b = document.querySelector("dialog").getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight; })()'), 'Palette fits the viewport');
     }
-    fs.writeFileSync('/tmp/milagre-command-palette-light.png', (await window.webContents.capturePage()).toPNG());
+    await screenshot('palette-light.png');
     await search('appearance');
     await key('Enter');
     await waitFor('!!document.querySelector("[aria-label=\\"Settings navigation\\"]")');
@@ -197,11 +216,7 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[aria-label=\\"Agent question\\"]")');
     await open();
     assert.ok(await evaluate('!!document.querySelector("[aria-label=\\"Agent question\\"]")'), 'The question card stays while the palette is open');
-    if (process.env.MILAGRE_SCREENSHOT_DIR) {
-      await delay(250);
-      require('node:fs').mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
-      require('node:fs').writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'palette-over-question.png'), (await window.webContents.capturePage()).toPNG());
-    }
+    await screenshot('palette-over-question.png');
     await key('Escape');
     await waitFor('!document.querySelector("dialog")');
     await key('n', { metaKey: true });
@@ -216,11 +231,7 @@ async function browserChecks() {
     await evaluate(`[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.includes('Mark as unread')).click()`);
     await waitFor(`document.body.textContent.includes('Could not update Chat: Chat could not be saved: disk full')`);
     assert.ok(await evaluate('document.body.textContent.includes("Add a command palette")'));
-    if (process.env.MILAGRE_SCREENSHOT_DIR) {
-      await delay(250);
-      require('node:fs').mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
-      require('node:fs').writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'chat-action-failure.png'), (await window.webContents.capturePage()).toPNG());
-    }
+    await screenshot('chat-action-failure.png');
     console.log('PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation, shortcuts over a waiting question card');
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }

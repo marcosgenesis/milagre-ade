@@ -5,6 +5,7 @@ import { Add01Icon, BubbleChatIcon, CodeIcon, Copy01Icon, FolderOpenIcon, GitBra
 import { filterCommands, type Command } from "../lib/commands";
 import { useShortcutHints } from "../lib/shortcut-hints";
 import { ScrollArea } from "./primitives/ScrollArea";
+import { ShortcutKeys } from "./primitives/ShortcutKeys";
 
 const icons = { add: Add01Icon, chat: BubbleChatIcon, folder: FolderOpenIcon, settings: Settings01Icon, git: GitBranchIcon, editor: CodeIcon, copy: Copy01Icon, unread: BubbleChatIcon, search: Search01Icon };
 
@@ -101,7 +102,7 @@ export function CommandPalette({ commands, onClose, onError }: {
         <input ref={input} role="combobox" aria-label="Search commands, chats, and projects" aria-autocomplete="list" aria-expanded="true" aria-controls={listId} aria-activedescendant={selected ? `${listId}-${selectedIndex}` : undefined}
           value={query} onChange={(event) => { setQuery(event.target.value); setSelectedId(null); }} placeholder="Search commands, chats, and projects…"
           className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3" />
-        {showHints && <kbd data-shortcut-hint className="rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-3">esc</kbd>}
+        {showHints && <ShortcutKeys shortcut="esc" />}
       </div>
       <ScrollArea id={listId} role="listbox" aria-label="Commands" className="p-1.5">
         {Array.from(new Set(results.map((command) => command.group))).map((group) => (
@@ -114,14 +115,18 @@ export function CommandPalette({ commands, onClose, onError }: {
                 <HugeiconsIcon icon={icons[command.icon]} size={17} strokeWidth={1.8} className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{command.label}</span>
                 {command.detail && <span className="max-w-[45%] truncate text-[11px] text-ink-3">{command.detail}</span>}
-                {showHints && command.shortcut && <kbd data-shortcut-hint className="shrink-0 rounded bg-inset px-1.5 py-0.5 text-[11px] text-ink-3">{command.shortcut}</kbd>}
+                {showHints && command.shortcut && <ShortcutKeys shortcut={command.shortcut} />}
               </div>
             ))}
           </div>
         ))}
         {!results.length && <div role="status" className="px-4 py-10 text-center text-[13px] text-ink-3">No results for “{query}”</div>}
       </ScrollArea>
-      <div className={`flex shrink-0 gap-4 border-t border-line px-4 py-2.5 text-[11px] text-ink-3 ${showHints ? "" : "invisible"}`}><span>↑ ↓ Navigate</span><span>↵ Run</span><span className="ml-auto">esc Close</span></div>
+      <div className={`flex shrink-0 gap-4 border-t border-line px-4 py-2.5 text-[11px] text-ink-3 ${showHints ? "" : "invisible"}`}>
+        <span className="inline-flex items-center gap-1.5">{showHints ? <ShortcutKeys shortcut="↑↓" plain /> : "↑ ↓"}Navigate</span>
+        <span className="inline-flex items-center gap-1.5">{showHints ? <ShortcutKeys shortcut="↵" plain /> : "↵"}Run</span>
+        <span className="ml-auto inline-flex items-center gap-1.5">{showHints ? <ShortcutKeys shortcut="esc" plain /> : "esc"}Close</span>
+      </div>
     </dialog>, document.body,
   );
 }

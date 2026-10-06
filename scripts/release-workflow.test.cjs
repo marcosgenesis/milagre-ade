@@ -129,12 +129,16 @@ test('an accepted disk image is stapled', t => {
   assert.match(f.calls(), /xcrun stapler staple/)
 })
 
-test('merges to main only create a draft candidate, never a macOS build', () => {
-  assert.deepEqual(Object.keys(releaseWorkflow.jobs), ['release'])
-  assert.equal(releaseWorkflow.jobs.release['runs-on'], 'ubuntu-latest')
-  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../.releaserc.json'), 'utf8'))
-  const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github')
-  assert.equal(github?.[1]?.draftRelease, true)
+test('a candidate is created only after CI succeeded on that main commit, and from that commit', () => {
+  assert.deepEqual(releaseWorkflow.on, { workflow_run: { workflows: ['CI'], types: ['completed'], branches: ['main'] } })
+  const job = releaseWorkflow.jobs.release
+  assert.equal(job.if, "${{ github.event.workflow_run.conclusion == 'success' }}")
+  const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout'))
+  assert.equal(checkout.with.ref, '${{ github.event.workflow_run.head_sha }}')
+  assert.equal(checkout.with['fetch-depth'], 0)
+  const runs = job.steps.map(step => step.run).filter(Boolean)
+  assert.deepEqual(runs, ['npm ci', 'npm run release'])
+  assert.ok(!JSON.stringify(releaseWorkflow).includes('package:mac'))
 })
 
 test('a candidate is not published without the auto-updater metadata, and publishes with it', t => {

@@ -9,7 +9,7 @@ function validProjectGroup(group) {
 
 function createProjectGroup(groups, projects, request, now = () => new Date()) {
   const name = typeof request?.name === 'string' ? request.name.trim() : '';
-  // oxlint-disable-next-line no-control-regex -- pre-existing, see PR body
+  // oxlint-disable-next-line no-control-regex -- the pattern matches terminal or control characters on purpose
   if (!name || name.length > 100 || /[\x00-\x1f]/.test(name)) throw new Error('Give the Link a name of 1 to 100 characters.');
   const ids = request?.projectIds;
   if (!Array.isArray(ids) || ids.length < 2 || new Set(ids).size !== ids.length) throw new Error('Choose at least two distinct Projects.');

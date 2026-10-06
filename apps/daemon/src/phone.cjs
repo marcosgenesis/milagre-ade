@@ -1,4 +1,3 @@
-// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { preparePrivateDirectory, assertPrivate } = require('@milagre/core/private-files');
 const fs = require('node:fs/promises');
 const path = require('node:path');

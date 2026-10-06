@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 import type { AgentSession, ChatMessage, ModelOption } from "../model";
 import { handoverBlocker, handoverLinks, handoverModel, handoverNotes, isHandoverChat, otherProvider } from "./handover.ts";
 

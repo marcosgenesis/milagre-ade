@@ -9,23 +9,17 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   Add01Icon,
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   AiBrowserIcon,
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   AiChat01Icon,
   ArrowDown01Icon,
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   Attachment01Icon,
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   CommandIcon,
   GitBranchIcon,
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
 } from "@hugeicons/core-free-icons";
-// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
 import { Notice } from "./Notice";
@@ -516,7 +510,6 @@ export function ChatComposer({
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
 

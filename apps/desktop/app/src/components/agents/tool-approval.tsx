@@ -119,7 +119,6 @@ export function ToolApproval({
 
   useEffect(() => {
     if (!isPending && detailsOpen) {
-      // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
       setInternalOpen(false);
       onOpenChange?.(false);
     }

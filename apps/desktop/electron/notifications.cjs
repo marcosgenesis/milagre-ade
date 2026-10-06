@@ -79,7 +79,6 @@ class AttentionNotifier {
     } else if (event.type === "permission-resolved" || event.type === "question-resolved") {
       this.close(keyOf(chatId, event.requestId));
     } else if (isTerminal(event)) {
-      // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
       for (const key of [...this.open.keys()]) if (key.startsWith(`${chatId}\n`)) this.close(key);
     }
     this.updateBadge();
@@ -129,7 +128,6 @@ class AttentionNotifier {
   }
 
   closeAll() {
-    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const key of [...this.open.keys()]) this.close(key);
     for (const notification of this.completionNotifications.values()) notification.close();
     this.completionNotifications.clear();

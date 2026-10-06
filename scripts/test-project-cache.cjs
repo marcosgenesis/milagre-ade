@@ -285,7 +285,6 @@ async function main() {
         if (id.startsWith('\0cache-stub:')) return transformWithEsbuild(stubs[id.slice('\0cache-stub:'.length, -4)], id.slice(1), { loader: 'tsx', jsx: 'automatic' });
       },
       configureServer(server) {
-        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           const match = /^\/__cache\/(desktop|mobile)$/.exec(request.url);
           if (!match) return next();

@@ -51,7 +51,6 @@ export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup:
  */
 export function unspokenThought(activity: ActivityEntry[], answer: string): string {
   if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
-  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
   return thought?.type === "step" ? thought.step.detail?.trim() ?? "" : "";
 }

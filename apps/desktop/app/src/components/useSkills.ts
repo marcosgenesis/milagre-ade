@@ -11,7 +11,6 @@ export function useSkills(projectPath: string, open: boolean) {
     if (!open) return;
     let cancelled = false;
     if (typeof window.milagre.listSkills !== "function") {
-      // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
       setResult({ path: projectPath, catalog: { skills: [], warnings: ["Restart Milagre to enable skill discovery."] } });
       setLoading(false);
       return;

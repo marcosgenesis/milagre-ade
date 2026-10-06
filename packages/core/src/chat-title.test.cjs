@@ -62,7 +62,6 @@ test('main process names first messages once, persists and broadcasts across pro
   assert.deepEqual(h.calls[0], { prompt: 'when I switch chats the scroll jumps', provider: 'codex' });
   h.replies[0]('Preserve chat scroll position');
   h.replies[1]('Fix authentication');
-  // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
   await Promise.all([...h.titles.pending.values()]);
   await h.states.flush();
   const session = h.saved.get('/alpha').sessions[first.sessionId];

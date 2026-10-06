@@ -23,7 +23,7 @@ export default function Layout() {
   const theme = { ...base, colors: { ...base.colors, primary: palette.accent, background: palette.page, card: palette.page, text: palette.ink, border: palette.line } };
   // Titles sit inline in a transparent top bar; content blurs softly as it scrolls under it (iOS 26 scroll edge effect).
   const sheet = { presentation: 'formSheet', sheetGrabberVisible: true, sheetCornerRadius: 28, headerShown: false, contentStyle: { backgroundColor: palette.page } } as const;
-  // oxlint-disable-next-line react/style-prop-object -- pre-existing, see PR body
+  // oxlint-disable-next-line react/style-prop-object -- React Native style object; the rule targets web DOM styles
   return <GestureHandlerRootView style={{ flex: 1 }}><KeyboardProvider><SessionProvider><PushProvider><SidePanelsProvider><ThemeProvider value={theme}><StatusBar style="auto" /><UpdateShell><Stack screenOptions={{ headerTransparent: true, headerStyle: { backgroundColor: 'transparent' }, scrollEdgeEffects: { top: 'soft' }, headerTintColor: palette.ink, headerTitleStyle: { color: palette.ink, fontWeight: '600', fontSize: 17 }, contentStyle: { backgroundColor: palette.page }, headerShadowVisible: false, headerBackButtonDisplayMode: 'minimal' }}>
     <Stack.Screen name="index" options={{ title: 'Computers' }} />
     <Stack.Screen name="settings" options={{ title: 'Settings' }} />

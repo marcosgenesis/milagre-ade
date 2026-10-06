@@ -42,7 +42,6 @@ test("picks a model from the chat's provider", () => {
   assert.equal(modelForChat(codex, "claude", [], catalog), opus);
 });
 
-// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
 
 test("an answer is kept on its chat's run, and a second chat with the same request id is unaffected", () => {

@@ -176,7 +176,7 @@ test('a second tap while a Chat is archiving asks nothing and removes nothing', 
   const alert: ShowAlert = (_title, _message, buttons) => { shown++; press = () => buttons.find(button => button.text === 'Archive and remove worktree')!.onPress!(); };
   const request = { client, alert, projectPath: '/work/shop', state: state(), chat: session(2, 2), running: false, notify: () => {}, refresh: async () => {} };
   const first = archiveFromPhone(request);
-  // oxlint-disable-next-line no-unmodified-loop-condition -- pre-existing, see PR body
+  // oxlint-disable-next-line no-unmodified-loop-condition -- the flag is set by a callback or another async task while the loop awaits; the linter cannot see that
   for (let i = 0; i < 5 && !press; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(await archiveFromPhone(request), 'busy');
   press!();

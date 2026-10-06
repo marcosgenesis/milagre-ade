@@ -84,7 +84,6 @@ async function main() {
     name: 'link-dialog-fixture',
     resolveId(id) { if (id === '/__link-dialog.tsx') return id; },
     load(id) { if (id === '/__link-dialog.tsx') return fixture; },
-    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     configureServer(server) { server.middlewares.use(async (request, response, next) => {
       if (request.url !== '/__link-dialog') return next();
       response.setHeader('Content-Type', 'text/html');

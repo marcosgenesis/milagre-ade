@@ -51,7 +51,6 @@ test('named Links reject invalid and repeated membership', async t => {
     { name: 'Link', projectIds: [projects[0].id, '/unknown/.git'] },
   ]) await assert.rejects(registry.createProjectGroup(request));
   await registry.createProjectGroup({ name: 'RDFood', projectIds: projects.map(p => p.id) });
-  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   await assert.rejects(registry.createProjectGroup({ name: 'Again', projectIds: projects.map(p => p.id).reverse() }), /already/i);
   assert.equal((await registry.listProjectGroups()).length, 1);
 });

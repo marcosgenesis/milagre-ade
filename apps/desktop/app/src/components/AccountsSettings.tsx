@@ -17,7 +17,6 @@ export function AccountsSettings() {
     try { setSnapshot(await window.milagre.listAccounts(refresh)); setError(""); }
     catch { setError("Could not load accounts. Check the computer connection, then refresh."); }
   }, []);
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { void load(); return window.milagre.onAccountsChanged?.(() => void load()); }, [load]);
   const signingIn = snapshot?.providers.some(p => p.accounts.some(a => a.state === "signing-in"));
   useEffect(() => {

@@ -7,7 +7,6 @@ async function readCloudflare(dataDir) {
   const file = path.join(dataDir, 'cloudflare.json');
   let config;
   try { assertPrivate(file); config = JSON.parse(await fs.readFile(file, 'utf8')); }
-  // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
   catch (error) { if (error.code === 'ENOENT') throw new Error('No Cloudflare tunnel is set up for this profile. Run `npm run mobile:cloudflare -- --domain your.domain` first.'); throw error; }
   const info = await fs.stat(file);
   if (process.platform !== 'win32' && (info.mode & 0o777) !== 0o600) throw new Error(`${file} must have permissions 0600; it holds the tunnel and Access secrets.`);

@@ -210,7 +210,7 @@ test("claudeModel stops the query when the call is aborted", async () => {
   const loadSdk = async () => ({
     query: (request) => {
       options = request.options;
-      // oxlint-disable-next-line require-yield -- pre-existing, see PR body
+      // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
       return (async function* () {
         await new Promise((_, reject) => request.options.abortController.signal.addEventListener("abort", () => reject(new Error("aborted"))));
       })();

@@ -20,7 +20,6 @@ const RESUME_PROMPT = "Milagre, the app running you, closed while you were worki
 // folded into the runs is numbered, so a window that loads mid-turn takes the runs (see `snapshot`)
 // and skips the events they already hold.
 // A message the user sends replaces the brief waiting as a draft and any resume a quit left.
-// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const withoutDraft = ({ handoverDraft, resumeTurn, ...rest }) => rest;
 
 // A new chat in a worktree takes its chat that has no messages yet, if there is one (not a handover still
@@ -378,7 +377,6 @@ class ChatHost {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const session = latest.sessions[target];
       if (!session?.handoverPending) return latest;
-      // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
       const { handoverPending, ...rest } = session;
       return { ...latest, sessions: { ...latest.sessions, [target]: draft === undefined ? rest : { ...rest, handoverDraft: draft } } };
     });

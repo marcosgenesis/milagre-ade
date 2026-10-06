@@ -13,7 +13,7 @@ function blockOf(element: Element, cache: Map<Element, Element>): Element {
   const cached = cache.get(element);
   if (cached) return cached;
   let block = element;
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
   while (block.parentElement && /^inline/.test(getComputedStyle(block).display)) block = block.parentElement;
   cache.set(element, block);
   return block;

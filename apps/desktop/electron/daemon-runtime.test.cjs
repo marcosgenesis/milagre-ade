@@ -303,7 +303,7 @@ test('a restart whose new host fails to start says why, and its retries start on
   let hostStarted = false;
   t.after(async () => { if (hostStarted) await desktop.close({ stopHost: true }).catch(() => {}); else await desktop.close().catch(() => {}); });
   await assert.rejects(desktop.restartHost(), /ENOENT|no-such-host/);
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
   assert.ok(events.some(event => event.channel === 'runtime:connection' && /^Host unavailable/.test(event.payload.message ?? '')));
   // The next retry starts a host again instead of only trying to connect.
   hostStarted = true;

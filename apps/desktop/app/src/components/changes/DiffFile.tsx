@@ -270,7 +270,7 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
     path: file.path,
     actions,
     selected: (h, line, side) => draft !== null && draft.hunk === h && line >= lo && line <= hi && draft.side === side,
-    // oxlint-disable-next-line react/no-unstable-nested-components -- pre-existing, see PR body
+    // oxlint-disable-next-line react/no-unstable-nested-components -- slot is a render callback invoked by the diff library, not a component
     slot: (h, line) => {
       const key = `${h}:${line}`;
       const cards = (placed.get(key) ?? []).filter((comment) => comment.id !== draft?.editing);

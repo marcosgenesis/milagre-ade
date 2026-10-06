@@ -130,9 +130,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const canUseFastMode = capability.fastMode;
   const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
   // The provider tab follows the open chat, and a locked chat always opens on its own provider.
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { setProvider(lockedProvider ?? selectedModel.provider); }, [lockedProvider, selectedModel.provider]);
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { if (modelOpen) { setProvider(lockedProvider ?? selectedModel.provider); onModelPickerOpen(); } }, [modelOpen]);
   const [query, setQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,7 +173,6 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0 || handoverBrief !== undefined;
 
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setActive(0);
     setEngaged(false);
   }, [menu, tokenQuery, projectPath, skills]);

@@ -243,7 +243,6 @@ async function main() {
     name: 'command-palette-fixture',
     resolveId(id) { if (id === '/__commands.tsx') return id; },
     load(id) { if (id === '/__commands.tsx') return fixture; },
-    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     configureServer(server) { server.middlewares.use(async (request, response, next) => {
       if (request.url !== '/__commands') return next();
       response.setHeader('Content-Type', 'text/html');

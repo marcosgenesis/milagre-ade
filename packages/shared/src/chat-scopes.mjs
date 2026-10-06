@@ -6,7 +6,7 @@ export function isLinkScopeKey(key) { return typeof key === 'string' && key.star
 
 export function scopeKey(scope) {
   if (scope?.kind === 'link' && validLinkId(scope.linkId)) return PREFIX + scope.linkId;
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
   if (scope?.kind === 'project' && typeof scope.projectPath === 'string' && (/^\//.test(scope.projectPath) || /^[a-z]:[\\/]/i.test(scope.projectPath))) return scope.projectPath;
   throw new Error('Choose a valid Project or Link.');
 }

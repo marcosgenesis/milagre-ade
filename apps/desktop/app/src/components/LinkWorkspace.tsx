@@ -86,7 +86,6 @@ export function LinkWorkspace({ opened, state, agents, preferences, drafts, onSw
   }), [owner]);
   useEffect(() => { void window.milagre.setOpenChat(chatId).catch(error => setError(ipcErrorMessage(error))); }, [chatId]);
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (initialSessionId !== undefined) { latest.current.selection++; drafts.newSelection(scope); setSessionId(initialSessionId); }
   }, [initialSessionId]);
   useEffect(() => {

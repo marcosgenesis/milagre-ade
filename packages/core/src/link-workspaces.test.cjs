@@ -67,7 +67,6 @@ test('failure to create the second member rolls back only untouched created root
   await assert.rejects(fs.stat(prep.members[0].worktreePath), { code: 'ENOENT' });
 });
 test('crash recovery verifies a created member before continuing the remaining set', async t => {
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   const { link, store, registry, workspaces } = await fixture(t);
   // Interrupt after the first creation record is durably saved, rather than deleting it.
   const request = { link, chatId: 1, prompt: '', operationId: randomUUID() };

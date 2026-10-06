@@ -42,7 +42,7 @@ test("suggestWorktreeName falls back to the prompt's first words", async () => {
 
 test("suggestWorktreeName gives up when Haiku runs past the timeout", async () => {
   const loadSdk = async () => ({
-    // oxlint-disable-next-line require-yield -- pre-existing, see PR body
+    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
     query: ({ options }) => (async function* () {
       await new Promise((resolve, reject) => options.abortController.signal.addEventListener("abort", () => reject(new Error("aborted"))));
     })(),

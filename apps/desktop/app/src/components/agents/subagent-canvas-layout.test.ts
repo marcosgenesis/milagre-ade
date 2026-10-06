@@ -135,7 +135,6 @@ test("coincident bots separate deterministically and use the drag direction", ()
   assert.ok(result.beta.x < target.x);
   assert.ok(result.gamma.x < target.x);
   assertSeparated(result);
-  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   assert.deepEqual(moveAgentWithCollisions(Object.fromEntries(Object.entries(points).reverse()), "dragged", target), result);
 });
 

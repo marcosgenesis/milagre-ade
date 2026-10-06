@@ -103,7 +103,6 @@ async function browserChecks() {
   window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
   const evaluate = async (source) => {
     try { return await window.webContents.executeJavaScript(source); }
-    // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
     catch (error) { throw new Error(`${source}: ${error.message}`); }
   };
   async function screenshot(name) {
@@ -125,7 +124,6 @@ async function browserChecks() {
     window.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
   };
   const count = () => evaluate('document.querySelector("[data-find-count]")?.textContent ?? null');
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   const activeTop = () => evaluate('(() => { const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return Math.round(r.top); })()');
   const activeOffset = () => evaluate('(() => { const range = [...CSS.highlights.get("find-active")][0]; return range.startContainer.data.slice(0, range.startOffset).length + range.startContainer.data.length * 1000; })()');
   const inView = () => evaluate('(() => { const v = document.querySelector("section"); const vr = v.getBoundingClientRect(); const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return r.top >= vr.top && r.bottom <= vr.bottom; })()');
@@ -135,7 +133,6 @@ async function browserChecks() {
     await window.loadURL(process.argv[3]);
     await waitFor('!!document.querySelector("[aria-label=\\"New chat\\"]") && !!document.querySelector("[aria-label=Conversation]")');
     const bar = '!!document.querySelector("[data-find-bar]")';
-    // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
     const text = () => evaluate('document.querySelector("[aria-label=Conversation]").textContent');
     // Open chat 1 (has messages).
     await evaluate('window.openChatWith("Chat one needle")');
@@ -288,7 +285,6 @@ async function main() {
       resolveId(id) { if (id.startsWith("/__find_")) return id; },
       load(id) { if (id === "/__find_fixture.tsx") return fixture; if (id === "/__find_app_fixture.tsx") return appFixture; },
       configureServer(server) {
-        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           const entry = { "/__find__": "/__find_fixture.tsx", "/__find_app__": "/__find_app_fixture.tsx" }[request.url];
           if (!entry) return next();

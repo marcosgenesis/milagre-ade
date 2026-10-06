@@ -32,7 +32,6 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
   }, []);
 
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setNow(Date.now());
   }, [usage.updatedAt]);
 

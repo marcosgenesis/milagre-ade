@@ -64,7 +64,6 @@ export function clearAnswered(runs: AgentRuns, chatId: string, requestId: string
 /** The model to use for a chat. A chat bound to a provider never runs another provider's model. */
 export function modelForChat(selected: ModelOption, provider: ModelProvider | undefined, messages: ChatMessage[], catalog: ModelOption[]): ModelOption {
   if (!provider || selected.provider === provider) return selected;
-  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   const lastUsed = [...messages].reverse().find((message) => catalog.some((option) => option.id === message.model && option.provider === provider));
   return catalog.find((option) => option.id === lastUsed?.model) ?? catalog.find((option) => option.provider === provider) ?? selected;
 }

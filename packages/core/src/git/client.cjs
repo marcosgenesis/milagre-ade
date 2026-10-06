@@ -34,7 +34,7 @@ function isRead(args) {
 /** Adapt existing promise-based process injection at a module boundary. */
 function callbackExec(exec) {
   return (command, args, options, done) => {
-    // oxlint-disable-next-line promise/no-callback-in-promise -- pre-existing, see PR body
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
     Promise.resolve().then(() => exec(command, args, options)).then(result => done(null, result.stdout, result.stderr), error => done(error, error.stdout, error.stderr));
   };
 }

@@ -16,7 +16,7 @@ async function waitFor(read, description) {
 }
 async function cdp(url) {
   const socket = new WebSocket(url); await once(socket, 'open'); let id = 0; const pending = new Map();
-  // oxlint-disable-next-line no-unused-expressions -- pre-existing, see PR body
+  // oxlint-disable-next-line no-unused-expressions -- directive or optional call used for its side effect; nothing to assign
   socket.addEventListener('message', ({ data }) => { const response = JSON.parse(data), request = pending.get(response.id); if (!request) return; pending.delete(response.id); clearTimeout(request.timer); response.error ? request.reject(new Error(response.error.message)) : request.resolve(response.result); });
   return { close: () => socket.close(), call(method, params = {}) { return new Promise((resolve, reject) => { const requestId = ++id; const timer = setTimeout(() => { pending.delete(requestId); reject(new Error(`Timed out: ${method}`)); }, 20000); pending.set(requestId, { resolve, reject, timer }); socket.send(JSON.stringify({ id: requestId, method, params })); }); } };
 }

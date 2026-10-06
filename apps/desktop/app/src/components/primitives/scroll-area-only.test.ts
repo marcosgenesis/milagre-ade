@@ -11,7 +11,7 @@ function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
-    // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
+    // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
     return /\.tsx$/.test(entry.name) && path !== OWNER ? [path] : [];
   });
 }

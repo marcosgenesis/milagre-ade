@@ -49,7 +49,6 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
       return;
     }
     if (typeof IntersectionObserver === "undefined") {
-      // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
       setNear(true);
       return;
     }

@@ -688,7 +688,6 @@ function childSnapshotRpc(snapshot, onRead = () => {}) {
   const thread=structuredClone(snapshot());
   if(method==='thread/read'){onRead();return {thread:{...thread,turns:[]}};}
   assert.equal(method,'thread/turns/list');
-  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   return {data:[...thread.turns].reverse(),nextCursor:null};
  }};
 }

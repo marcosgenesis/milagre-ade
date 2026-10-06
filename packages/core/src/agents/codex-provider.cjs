@@ -337,7 +337,6 @@ class CodexSession {
     const newest = await this.rpc.request("thread/turns/list", {
       threadId, limit: previous?.cursor ? 1 : 20, sortDirection: "desc", itemsView: "full",
     }, { timeoutMs: 5000 });
-    // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
     if (!previous?.cursor) return { ...thread, turns: [...newest.data].reverse(), cursor: newest.backwardsCursor };
     const turns = [];
     let cursor = previous.cursor;
@@ -362,7 +361,6 @@ class CodexSession {
 
   async pollSubagents() {
     this.childHistory ??= new Map();
-    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const agent of [...(this.state.subagents?.values() ?? [])]) {
       if (this.closed) return;
       const previous = this.childHistory.get(agent.id);

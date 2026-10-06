@@ -32,7 +32,6 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "package:repositories": "node scripts/generate-linux-repository.cjs",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
     "prepare": "lefthook install"
   },
   "devDependencies": {

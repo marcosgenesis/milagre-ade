@@ -4,7 +4,6 @@ export function useProjectFiles(root: string, query: string, enabled: boolean) {
   const [result, setResult] = useState({ root: '', query: '', files: [] as string[], error: '' });
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (!enabled) { setLoading(false); return; }
     let current = true;
     setLoading(true);

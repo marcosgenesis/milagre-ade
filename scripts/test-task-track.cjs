@@ -66,10 +66,8 @@ async function browserChecks() {
   window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
   const evaluate = async (source) => {
     try { return await window.webContents.executeJavaScript(source); }
-    // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
     catch (error) { throw new Error(`${source}: ${error.message}`); }
   };
-  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   const clickLabel = label => evaluate(`[...document.querySelectorAll("button")].find(button => button.getAttribute("aria-label") === ${JSON.stringify(label)}).click()`);
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
@@ -147,7 +145,6 @@ async function main() {
       resolveId(id) { if (id === "/__task_track_fixture.tsx") return id; },
       load(id) { if (id === "/__task_track_fixture.tsx") return fixture; },
       configureServer(server) {
-        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           if (request.url !== "/__task_track__") return next();
           const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__task_track_fixture.tsx"></script></body></html>');

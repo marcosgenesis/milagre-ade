@@ -121,7 +121,7 @@ function App() {
   const selectedLinkRef = useRef(selectedLink); selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  // oxlint-disable-next-line react/use-memo -- pre-existing, see PR body
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
   const linkStatesRef = useRef(linkStates); linkStatesRef.current = linkStates;
@@ -135,7 +135,7 @@ function App() {
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
-  // oxlint-disable-next-line react/use-memo -- pre-existing, see PR body
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const draftStore = useMemo(createDraftStore, []);
   const setDraft = draftStore.set;
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
@@ -271,13 +271,12 @@ function App() {
   async function loadInitialProject() {
     setLoading(true);
     setStartupError(null);
-    // oxlint-disable-next-line react/immutability -- pre-existing, see PR body
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     try { adoptProject(await window.milagre.getCurrentProject()); }
     catch (error) { setStartupError(ipcErrorMessage(error)); }
     finally { setLoading(false); }
   }
 
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { void loadInitialProject(); }, []);
   useEffect(() => window.milagre.onLinkState?.(update => setLinkStates(previous => ({ ...previous, [update.linkId]: update.state }))), []);
 
@@ -290,7 +289,7 @@ function App() {
     });
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
-      // oxlint-disable-next-line react/immutability -- pre-existing, see PR body
+      // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
       for (const next of snapshot.projects) receiveState(next.path, next.state);
       for (const next of snapshot.links ?? []) setLinkStates(previous => ({ ...previous, [next.linkId]: next.state }));
     });
@@ -311,7 +310,7 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
-  // oxlint-disable-next-line react/preserve-manual-memoization -- pre-existing, see PR body
+  // oxlint-disable-next-line react/preserve-manual-memoization -- the dependency list is deliberately narrower than the compiler infers; the omitted values derive from the listed ones
   const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
@@ -319,10 +318,8 @@ function App() {
   useEffect(() => {
     if (!restoringSend) return;
     imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setRestoringSend(null);
   }, [restoringSend]);
-  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
   const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
   const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
@@ -330,7 +327,6 @@ function App() {
   useEffect(() => {
     if (!pendingSend?.sent) return;
     const latest = states[pendingSend.projectPath];
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (!latest || pendingChatSessionId(latest, pendingSend) !== null) setPendingSend(null);
   }, [pendingSend, states]);
   const sidebarState = useMemo(() => {
@@ -341,7 +337,7 @@ function App() {
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
   const displayedMessages = useMemo(() => pendingHere && pendingSend
     ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : [...messages, pendingSend.message]
-    // oxlint-disable-next-line react/preserve-manual-memoization -- pre-existing, see PR body
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the dependency list is deliberately narrower than the compiler infers; the omitted values derive from the listed ones
     : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
@@ -380,7 +376,6 @@ function App() {
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
     if (selectedSessionId !== null) return;
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setSelectedModel(resolveModel(models, defaultModelId, providerForId(defaultModelId)));
     setPermissionMode(defaultPermissionMode);
   }, [selectedSessionId, defaultModelId, defaultPermissionMode, models]);
@@ -428,7 +423,6 @@ function App() {
   useEffect(() => {
     if (!selectedSession?.provider) return;
     const next = modelForChat(selectedModel, selectedSession.provider, messages, models);
-    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
@@ -457,7 +451,7 @@ function App() {
     }
     return grouped;
   }, [sidebarState?.messages]);
-  // oxlint-disable-next-line react/use-memo -- pre-existing, see PR body
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
   const chats = useMemo(() => {
@@ -473,7 +467,6 @@ function App() {
         const failed = failedSends.find(send => send.projectPath === project?.path && session.id === send.session.id);
         const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
         // The commit dialog's notes aren't replies: they don't hide a failed turn.
-        // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
         const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
         return {
           id: String(session.id),
@@ -493,7 +486,6 @@ function App() {
       });
     // Rows that came out the same stay the same objects, so only a changed chat's row renders.
     return previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows);
-  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }, [sidebarState, pendingSend, failedSends, pendingCanonicalId, messagesBySession, chatOrder, asking, waiting, delegated, running, pullRequests, chatPrs, agentPorts, project]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
@@ -629,7 +621,6 @@ function App() {
   useEffect(() => { void window.milagre.setKeepAwake(keepAwake).catch(() => {}); }, [keepAwake]);
 
   const unreadChatIds = useMemo(
-    // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
     () => (state && project ? Object.values(state.sessions).filter(session => session.unread && !session.archived).map(session => chatKey(project.path, session.id)) : []),
     [state?.sessions, project?.path],
   );
@@ -678,7 +669,7 @@ function App() {
   // Clicking a notification opens its chat, in another project too.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const owner = projectOfKey(chatId);
-    // oxlint-disable-next-line react/immutability -- pre-existing, see PR body
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     if (isLinkScopeKey(owner)) { void selectLink(owner.slice('milagre-link:'.length), sessionIdFromKey(chatId)); return; }
     const current = projectRef.current;
     const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
@@ -686,7 +677,7 @@ function App() {
     const separator = chatId.lastIndexOf("#");
     if (separator <= 0) return;
     pendingNotificationChat.current = chatId;
-    // oxlint-disable-next-line react/immutability -- pre-existing, see PR body
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     void switchProject(chatId.slice(0, separator));
   }), []);
 
@@ -807,7 +798,7 @@ function App() {
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(next => {
-      // oxlint-disable-next-line promise/no-callback-in-promise -- pre-existing, see PR body
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
       if (projectRef.current?.path === project.path) setBranches(next);
     }).catch(() => {});
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
@@ -960,7 +951,6 @@ function App() {
     setFindOpen(true);
     setFindSignal((current) => current + 1);
   }
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
 
   useEffect(() => {
@@ -1061,7 +1051,6 @@ function App() {
     onCommit: (id) => latest.current.openGitDialog(Number(id)),
     onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
     onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
-  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }), []);
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
@@ -1073,7 +1062,6 @@ function App() {
   // Saved message cards also receive this callback: keep their memoization during sends and streamed updates.
   const openLinkedChat = useEvent((key: string) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key)));
   const sidebarUsage = useMemo(
-    // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
     () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
     [showUsageInSidebar, usage.snapshot, usage.loading],
   );

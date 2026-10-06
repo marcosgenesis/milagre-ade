@@ -32,7 +32,6 @@ export function PortTrack({ ports, onStop }: { ports?: AgentPort[]; onStop?: (pi
   const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: 320 });
   const empty = !ports?.length;
   // The last server stopping closes the list; a later one starts closed.
-  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { if (empty) setOpened(false); }, [empty]);
   if (!ports?.length) return null;
   return <div className="flex" data-slot="port-track">

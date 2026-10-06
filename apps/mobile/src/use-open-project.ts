@@ -32,7 +32,6 @@ export function useOpenProject(params: { projectPath?: string; hostId?: string; 
       if (live && copy && copy.project.path !== target) router.setParams({ projectPath: copy.project.path });
     }).catch(e => { if (live) setFailure({ path: target, error: openFailure((e as Error).message) }); });
     return () => { live = false; };
-  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }, [client, chatId, attempt])); // eslint-disable-line react-hooks/exhaustive-deps -- `attempt` reloads after Retry
   const retry = useCallback(() => { setFailure(null); setAttempt(value => value + 1); }, []);
   return { wanted, error: wanted && failure?.path === wanted ? failure.error : '', retry };

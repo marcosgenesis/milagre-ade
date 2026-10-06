@@ -318,7 +318,7 @@ function WorkspaceMenu({
             <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
           </button>
         ))}
-        <div className="my-1 h-px bg-line" />
+        {!selectedLink && <div className="my-1 h-px bg-line" />}
         <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Projects</p>
         {projects.map((row) => {
           return (

@@ -46,7 +46,9 @@ window.milagre = new Proxy({
         state.sessions[sessionId] ??= { id: sessionId, worktree_id: request.worktreeId, agent_name: "Local chat", status: "Created" };
         state.sessions[sessionId].provider = request.provider;
         state.messages.push({ id: state.next_id++, session_id: sessionId, body: request.body, images: request.images, files: request.files, clientMessageId: request.clientMessageId, context: null, role: "user", model: request.model });
-        listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: structuredClone(state) }));
+        const publish = () => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: structuredClone(state) }));
+        // A large Project's state is read in pages, so it can reach the window after the reply.
+        if (window.holdState) { window.holdState = false; window.releaseState = publish; } else publish();
         window.ackSend = () => resolve({ sessionId });
       };
     });
@@ -308,6 +310,19 @@ async function browserChecks() {
     await evaluate('window.saveSend(); window.ackSend()');
     await waitFor(acknowledged);
     assert.equal(await occurrences('Recovered follow-up'), 1);
+
+    const rows = body => evaluate(`[...document.querySelectorAll('aside [data-row]')].filter(row => row.textContent.includes(${JSON.stringify(body)})).length`);
+    await newChat('Local');
+    await send('Reply before state');
+    await waitFor('window.calls.sent.length === 13');
+    await evaluate('window.holdState = true; window.saveSend(); window.ackSend()');
+    await delay(150);
+    assert.equal(await rows('Reply before state'), 1, 'the new Chat stays listed while its saved state is on the way');
+    assert.equal(await occurrences('Reply before state'), 1, 'the message stays on screen while its saved state is on the way');
+    await evaluate('window.releaseState()');
+    await delay(100);
+    assert.equal(await rows('Reply before state'), 1);
+    assert.equal(await occurrences('Reply before state'), 1, 'the saved message replaces the preview');
     assert.deepEqual(consoleErrors, []);
     console.log('PASS: immediate first messages and follow-ups, steering, acknowledgement without remounting, next drafts, attachment recovery, retries and background navigation');
     app.exit(0);

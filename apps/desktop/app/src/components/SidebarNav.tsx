@@ -13,6 +13,7 @@ import {
   FolderAddIcon,
   FolderOpenIcon,
   GitMergeIcon,
+  Link04Icon,
   Search01Icon,
   Settings01Icon,
   SidebarLeft01Icon,
@@ -382,7 +383,7 @@ function WorkspaceMenu({
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
-        {onLinkProject && <button data-menu-row type="button" role="menuitem" onClick={() => go(onLinkProject)} className="relative z-10 flex h-9 items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"><span className="flex size-5 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span><span className="text-[13.5px]">Link projects…</span></button>}
+        {onLinkProject && <button data-menu-row type="button" role="menuitem" onClick={() => go(onLinkProject)} className="relative z-10 flex h-9 items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"><span className="flex size-5 items-center justify-center text-ink-2"><HugeIcon icon={Link04Icon} size={16} /></span><span className="text-[13.5px]">Link projects…</span></button>}
       </GlideMenu>
       </ScrollArea>
     </div>,

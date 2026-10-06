@@ -55,6 +55,7 @@ export default function ChatScreen() {
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
+  const contentHeight = useRef(0);
   const scrollKey = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}|${params.id ?? `new:${params.worktreeId}`}`;
   const [jumpState, setJumpState] = useState({ key: scrollKey, visible: false });
   const showJumpToBottom = jumpState.key === scrollKey && jumpState.visible;
@@ -68,9 +69,18 @@ export default function ChatScreen() {
   }, [scrollKey]);
   useEffect(() => {
     following.current = true;
+    contentHeight.current = 0;
   }, [scrollKey]);
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
+  // A Chat opens already at its newest message: the transcript stays hidden until the first jump to the end.
+  const [placedKey, setPlacedKey] = useState<string | null>(null);
+  const placed = placedKey === scrollKey;
+  const place = () => {
+    if (placed || !viewport.current || !contentHeight.current) return;
+    if (contentHeight.current > viewport.current) scroll.current?.scrollToEnd({ animated: false });
+    setPlacedKey(scrollKey);
+  };
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
   const pr = usePullRequest(session.snapshot?.project.link ? undefined : worktreeOf);
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
@@ -343,7 +353,7 @@ export default function ChatScreen() {
     {more}
     <PanelSwipe panels={panels}>
     {/* The header clearance is in paddingTop; an automatic iOS inset would add it a second time. */}
-    <KeyboardChatScrollView key={scrollKey} ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" onEndVisible={onEndVisible} contentInsetAdjustmentBehavior="never" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <KeyboardChatScrollView key={scrollKey} ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" onEndVisible={onEndVisible} contentInsetAdjustmentBehavior="never" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} style={{ opacity: placed ? 1 : 0 }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; place(); }} onContentSizeChange={(_, height) => { contentHeight.current = height; if (!placed) place(); else if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}

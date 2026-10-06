@@ -574,6 +574,7 @@ test('launch restoration shows the splash animation while the saved Chat opens',
 function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [] } = {}) {
   const react = hookHost();
   const routes = [];
+  const secondaryRoutes = [];
   const opened = [];
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
   const session = { pendingChats: {}, client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
@@ -593,14 +594,14 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
     './accounts-section': { AccountsSection: 'AccountsSection' }, './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
-  const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
+  const render = () => { react.begin(); return ProjectNavigation({ onNavigate: (route, secondary) => { routes.push(route); secondaryRoutes.push(secondary); } }); };
   const rows = () => find(render(), node => node.type === 'FlatList');
   const row = (kind, index = 0) => { const list = rows(); return list.props.renderItem({ item: list.props.data.filter(item => item.kind === kind)[index] }); };
   // A row's tap target is the menu that also has onPress; its ⋯ is the menu without one.
   const open = node => find(node, child => child.type === 'PullDown' && child.props.onPress);
   const more = node => find(node, child => child.type === 'PullDown' && !child.props.onPress);
   const filter = () => find(render(), node => node.type === 'PullDown' && node.props.label === 'Filter Chats');
-  return { state, session, routes, opened, calls, render, rows, row, open, more, filter };
+  return { state, session, routes, secondaryRoutes, opened, calls, render, rows, row, open, more, filter };
 }
 
 test('a sidebar Chat opens at once, leaving its Project to load in the Chat', () => {
@@ -630,16 +631,12 @@ test('Add project opens the computer search, and a pick opens its Chat at once',
   assert.equal(find(nav.render(), node => node.type === 'ProjectSearch'), undefined, 'the search is put away');
 });
 
-test('Settings open inside the sidebar and go back to the Projects', () => {
+test('Settings push onto the native stack from project navigation, preserving the screen to go back to', () => {
   const nav = navigationHost(deferred().promise);
   find(nav.render(), node => node.type === 'IconButton' && node.props.label === 'Settings').props.onPress();
-  const settings = nav.render();
-  assert.ok(find(settings, node => node.type === 'SettingsView'));
-  assert.equal(nav.routes.length, 0, 'nothing navigates behind the sidebar');
-  find(settings, node => node.type === 'SettingsView').props.onOpen('usage');
-  assert.ok(find(nav.render(), node => node.type === 'UsageSection'));
-  find(nav.render(), node => node.props?.label === 'Back to Settings').props.onPress();
-  find(nav.render(), node => node.props?.label === 'Back to Projects').props.onPress();
+  assert.deepEqual(nav.routes, ['/settings']);
+  assert.deepEqual(nav.secondaryRoutes, [true], 'push Settings rather than replacing the originating screen');
+  assert.equal(find(nav.render(), node => node.type === 'SettingsView'), undefined, 'Settings is not a custom drawer page');
   assert.ok(find(nav.render(), node => node.type === 'FlatList'));
 });
 
@@ -974,6 +971,26 @@ test('the transcript follows new content, also after the agent settings sheet op
   assert.equal(scrolls, 2);
 });
 
+test('a long Chat opens hidden and jumps to its newest message without animating', () => {
+  const screen = chatHost();
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  let first = page();
+  first.props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  assert.equal(first.props.style.opacity, 0);
+  first.props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 0, 'waits for the viewport before placing');
+  first.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]));
+  const placed = page();
+  assert.equal(placed.props.style.opacity, 1);
+  placed.props.onContentSizeChange(0, 2100);
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }, { animated: true }]));
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  assert.equal(page().props.style.opacity, 0, 'switching Chats hides the next transcript until it is placed');
+});
+
 test('mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling', () => {
   const screen = chatHost();
   screen.params.id = '42';
@@ -1021,6 +1038,9 @@ test('Go to bottom returns the mobile transcript to the end and resumes followin
   const scrolls = [];
   page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
   page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page().props.onContentSizeChange(0, 1800);
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), 'Opening places the Chat at its end');
+  scrolls.length = 0;
   page().props.onEndVisible(true);
   assert.equal(jump(), undefined, 'No button when the end is visible, including short chats');
   page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });

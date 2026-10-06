@@ -14,7 +14,8 @@
         "expo-router",
         "vite",
         "app-builder-lib",
-        "builder-util"
+        "builder-util",
+        "expo-device-hub"
       ],
       "ignore": [
         "scripts/fixtures/mobile-prompt-skills.tsx"
@@ -73,6 +74,9 @@
       ],
       "project": [
         "src/**"
+      ],
+      "ignore": [
+        "src/simulators.d.cts"
       ]
     },
     "packages/shared": {

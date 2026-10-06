@@ -38,5 +38,8 @@
   },
   "optionalDependencies": {
     "expo-device-hub": "0.15.1"
+  },
+  "devDependencies": {
+    "ws": "^8.22.0"
   }
 }

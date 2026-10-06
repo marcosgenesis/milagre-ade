@@ -15,7 +15,7 @@ Every dropdown goes through `primitives/Select`; a native `<select>` opens macOS
 
 ## Popovers and menus
 
-Every transient surface (picker, menu, anchored popover) closes through `useDismiss` (`apps/desktop/app/src/lib/use-dismiss.ts`): a pointer press anywhere outside it or the window losing focus closes it; Escape stays with the component, which also returns focus. Don't add a `pointerdown` or `blur` listener of your own.
+Every transient surface (picker, menu, anchored popover) closes through `useDismiss` (`apps/desktop/app/src/lib/use-dismiss.ts`): a pointer press anywhere outside it or the window losing focus closes it, unless focus moved into an iframe inside it (the simulator and browser viewers); Escape stays with the component, which also returns focus. Don't add a `pointerdown` or `blur` listener of your own.
 
 - Pass `inside` so the panel and its trigger count as the surface; the trigger's own click still toggles.
 - A surface anchored to a trigger passes `follow`, its positioning function, and stays put through scrolls and resizes. A surface anchored to a point (the chat row's context menu) omits it and closes instead.

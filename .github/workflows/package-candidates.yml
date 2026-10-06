@@ -19,14 +19,7 @@ on:
       - 'scripts/**'
       - 'distribution/**'
   pull_request:
-    paths:
-      - '.github/workflows/package-candidates.yml'
-      - 'package*.json'
-      - 'apps/desktop/**'
-      - 'apps/daemon/**'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'distribution/**'
+    types: [labeled, synchronize, reopened]
 permissions:
   contents: read
 concurrency:
@@ -34,6 +27,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   package:
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview:installers') }}
     strategy:
       fail-fast: false
       matrix:

@@ -55,3 +55,10 @@ test('Windows and Linux native tests run on PRs without building an installer', 
   assert.ok(runs.includes('MILAGRE_LINUX_REPOSITORY_INTEGRATION=1'))
   assert.ok(!runs.includes('package:'), 'native tests never package')
 })
+
+test('installers build on main, on dispatch, and on PRs only with the preview:installers label', () => {
+  assert.deepEqual(candidates.on.pull_request.types, ['labeled', 'synchronize', 'reopened'])
+  assert.equal(candidates.on.pull_request.paths, undefined)
+  assert.deepEqual(candidates.on.push, { branches: ['main'], paths: candidates.on.push.paths })
+  assert.equal(candidates.jobs.package.if, "${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview:installers') }}")
+})

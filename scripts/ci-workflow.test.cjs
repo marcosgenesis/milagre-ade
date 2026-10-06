@@ -121,3 +121,11 @@ test('PR titles must be Conventional Commits', () => {
   assert.ok(title.test('fix(mobile): y'))
   assert.ok(!title.test('Update readme'))
 })
+
+test('mobile fingerprint check watches the native inputs, needs the approval label and never builds', () => {
+  const workflow = read('mobile-fingerprint.yml')
+  assert.deepEqual(workflow.on.pull_request.paths, ['apps/mobile/**', 'package-lock.json', 'packages/shared/**'])
+  const text = fs.readFileSync(path.join(__dirname, '../.github/workflows/mobile-fingerprint.yml'), 'utf8')
+  assert.ok(!/eas build/.test(text), 'the check never starts a build')
+  assert.ok(text.includes('native-build-approved'))
+})

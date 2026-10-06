@@ -28,7 +28,7 @@ Eight pages reviewed: Paseo, T3 Code, Conductor, Superset, Happy, Vibe Kanban, O
 | Visual | Dark, using the app's dark theme tokens and dark-mode screenshots |
 | Voice | Direct and calm, in the style of the README. English copy |
 | iPhone CTA | Public TestFlight link |
-| Brand assets | Reuse `apps/desktop/app/public/app-icon.svg`, wordmark in Inter, OG image cut from the hero |
+| Brand assets | Reuse `apps/desktop/app/public/app-icon.svg` beside the name set in the system font, OG image cut from the hero |
 | Stack | Astro, static output, in `apps/site` |
 | Hosting | Cloudflare Workers static assets on `milagre.cloud`, `www` redirects to apex |
 
@@ -71,7 +71,7 @@ The differentiator. Link Projects on the canvas; an agent reads linked context, 
 
 ### 5. "Your Mac does the work. Your phone keeps up."
 
-Pair by scanning the QR code in Settings > Phone. Follow running agents, reply, answer questions and approvals, attach files, inspect changes. The Mac must be awake and online. CTA: "Get the iPhone beta". Screenshot: the phone Chat list.
+Pair by scanning the QR code in Settings > Phone. Follow running agents, reply, answer questions and approvals, attach files, inspect changes. The Mac must be awake and online. CTA: "Get the iPhone beta". Visual: the HTML iPhone frame from the hero scene showing a Chat list, so no simulator capture is needed.
 
 ### 6. "Local-first"
 
@@ -95,14 +95,15 @@ apps/site/
   src/pages/index.astro   the page
   src/components/         Hero, HeroScene, Section, Faq, CopyCommand, Nav, Footer
   src/styles/tokens.css   dark tokens copied from apps/desktop/app/src/styles.css
-  public/                 app-icon.svg, og.png, screenshots/*.webp
+  src/assets/screenshots/ approval.png, sidebar.png, canvas.png (Astro converts to WebP at build)
+  public/                 app-icon.svg, og.png
 ```
 
 - **Downloads.** Release assets carry the version in their names (`Milagre-0.92.0-arm64.dmg`), so static links would go stale. The Worker serves `/download/mac-arm64` and `/download/mac-x64` by reading the latest release from the GitHub API, caching the result for 5 minutes, and redirecting (302) to the matching DMG. If GitHub fails, it redirects to `https://github.com/the-ptf/milagre-ade/releases/latest`.
 - **Arch.** Browsers cannot reliably tell Apple Silicon from Intel, so the primary button is Apple Silicon and the "Intel Mac" link sits beneath it.
 - **JavaScript.** The hero scene uses CSS animation. The only client script is the copy button for the brew command.
-- **Fonts.** Inter and the mono face, self-hosted, matching the app.
-- **Screenshots.** Captured from a real dark-mode run with demo data through the existing `scripts/test-*.cjs` harness (`MILAGRE_SCREENSHOT_DIR` pointed outside the repo), converted to WebP and committed under `apps/site/public/screenshots`. These are site assets, not PR evidence, so the "no screenshots in PR commits" rule does not apply to them. PR before/after images still go on the `screenshots` branch.
+- **Fonts.** The system stack (`ui-sans-serif, system-ui` and `ui-monospace, "SF Mono"`). The desktop app declares Inter but never loads it, so it renders in the system font; the site matches that and ships no font files.
+- **Screenshots.** Captured by `scripts/capture-site.cjs` from the real desktop renderer in dark mode with the README demo data (no personal data), committed as PNG under `apps/site/src/assets/screenshots`, and converted to WebP by `astro:assets` at build. These are site assets, not PR evidence, so the "no screenshots in PR commits" rule does not apply to them. PR before/after images still go on the `screenshots` branch.
 - **SEO.** Title, description, canonical URL, Open Graph and Twitter tags, `og.png` at 1200×630.
 
 ## Deployment

@@ -14,6 +14,7 @@ const state = { next_id: 4, projects: { 1: { id: 1, name: "shop" } },
   sessions: { 2: { id: 2, worktree_id: 1, agent_name: "Previous chat", provider: "claude", status: "Idle" } },
   messages: [{ id: 3, session_id: 2, role: "user", body: "Previous chat", context: null }], tasks: {} };
 const listeners = new Set();
+window.emitAgent = (sessionId, event) => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event }));
 window.calls = { created: 0, sent: [] };
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
@@ -101,17 +102,17 @@ async function browserChecks() {
   }
   async function send(body) {
     await type(body);
-    await waitFor(`(document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Send"]').disabled)`);
-    await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
+    await waitFor(`(document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Send"]').disabled) || !!document.querySelector('[aria-label="Stop agent"]')`);
+    await evaluate(`document.querySelector(${JSON.stringify(prompt)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
   }
   const acknowledged = `(document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Send"]').disabled) || !!document.querySelector('[aria-label="Stop agent"]')`;
   const transcript = `document.querySelector('[aria-label="Conversation"]')`;
   async function immediate(body) {
     await waitFor(`${transcript}?.textContent.includes(${JSON.stringify(body)})`);
-    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(prompt)}).value`), '', 'submitted draft clears before setup completes');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(prompt)}).value`), '', 'submitted draft clears before sending completes');
     assert.equal(await evaluate(`!!document.querySelector('[data-new-chat-pickers]')`), false, 'first message opens the conversation layout');
     assert.equal(await evaluate(`!!document.querySelector('[role="status"][aria-label^="Working with"]')`), true, 'working feedback appears before the backend completes');
-    assert.equal(await evaluate(`document.querySelector('[aria-label="Send"]').disabled`), true, 'duplicate submits are blocked during preparation');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Send"]')?.disabled || !!document.querySelector('[aria-label="Stop agent"]')`), true, 'preparation disables Send or keeps the live turn stoppable');
   }
   const occurrences = body => evaluate(`(${transcript}?.textContent.match(new RegExp(${JSON.stringify(body)}, 'g')) ?? []).length`);
   try {
@@ -230,15 +231,85 @@ async function browserChecks() {
     await waitFor(`document.querySelector(${JSON.stringify(prompt)}).value.includes('Recover after leaving') && document.body.textContent.includes('recovery.txt')`);
     await screenshot('background-failed-restored');
     await evaluate('window.saveSend(); window.ackSend()');
-    await waitFor(`document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Send"]').disabled`);
+    await waitFor(acknowledged);
     const beforeRecovery = await evaluate('window.calls.created');
     await send('Recover after leaving');
     await waitFor('window.calls.sent.length === 8');
     assert.equal(await evaluate('window.calls.created'), beforeRecovery, 'background failure restores its prepared Worktree for retry');
     await evaluate('window.saveSend(); window.ackSend()');
     await waitFor(acknowledged);
+
+    // Follow-ups must render while persistence is held, just like first messages.
+    await evaluate(`[...document.querySelectorAll('aside [data-row]')].find(row => row.textContent.includes('Previous chat')).click()`);
+    await waitFor(`${transcript}?.textContent.includes('Previous chat')`);
+    await evaluate(`[...document.querySelectorAll('button')].filter(el => el.textContent === 'Dismiss').forEach(el => el.click())`);
+    await type('A follow-up message');
+    await screenshot('follow-up-before-send');
+    await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
+    await waitFor('window.calls.sent.length === 9');
+    await immediate('A follow-up message');
+    assert.equal(await occurrences('Previous chat'), 1, 'previous messages stay visible');
+    assert.equal(await evaluate('window.calls.sent[8].sessionId'), 2, 'follow-up targets the existing Chat');
+    assert.equal(await evaluate(`document.querySelector('aside').textContent.includes('A follow-up message')`), false, 'follow-up keeps the original Chat title');
+    await evaluate(`window.followUpArticle = [...document.querySelectorAll('[data-slot="message"]')].find(el => el.textContent.includes('A follow-up message'))`);
+    assert.equal(await evaluate(`getComputedStyle(window.followUpArticle).animationName`), 'none', 'sent input is visible without a fade-in delay');
+    await screenshot('follow-up-pending');
+    await type('Draft typed while sending');
+    await evaluate(`document.querySelector(${JSON.stringify(prompt)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+    assert.equal(await evaluate('window.calls.sent.length'), 9, 'duplicate follow-up submits are blocked');
+    await evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['notes'], 'follow-up.txt', { type: 'text/plain' }));
+      document.querySelector(${JSON.stringify(prompt)}).dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }));
+    })()`);
+    await waitFor(`document.body.textContent.includes('follow-up.txt')`);
+    await evaluate('window.saveSend()');
+    await delay(100);
+    assert.equal(await occurrences('A follow-up message'), 1, 'saved follow-up replaces the preview before acknowledgement');
+    assert.equal(await evaluate(`window.followUpArticle === [...document.querySelectorAll('[data-slot="message"]')].find(el => el.textContent.includes('A follow-up message'))`), true, 'acknowledgement reuses the preview element');
+    await evaluate('window.ackSend()');
+    await waitFor(acknowledged);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(prompt)}).value`), 'Draft typed while sending');
+    assert.equal(await evaluate(`document.body.textContent.includes('follow-up.txt')`), true, 'acknowledgement keeps the next attachments');
+
+    await evaluate(`window.emitAgent(2, { type: 'text-delta', text: 'Reply still streaming' })`);
+    await waitFor(`${transcript}?.textContent.includes('Reply still streaming')`);
+    await send('A steering message');
+    await waitFor('window.calls.sent.length === 10');
+    await immediate('A steering message');
+    assert.equal(await evaluate(`(() => {
+      const articles = [...document.querySelectorAll('[data-slot="message"]')];
+      return articles.findIndex(el => el.textContent.includes('Reply still streaming')) < articles.findIndex(el => el.textContent.includes('A steering message'));
+    })()`), true, 'pending steering input follows the live reply');
+    await screenshot('steering-pending');
+    await type('Note typed during a failed send');
+    await evaluate('window.failSend()');
+    await waitFor(`document.querySelector('[role="alert"]')?.textContent.includes('Disk full')`);
+    assert.equal(await occurrences('A steering message'), 0, 'failure removes the unsaved preview');
+    assert.equal(await occurrences('Reply still streaming'), 1, 'failure keeps the live reply');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(prompt)}).value`), 'A steering message\n\nNote typed during a failed send');
+    assert.equal(await evaluate(`document.body.textContent.includes('follow-up.txt')`), true, 'failure restores submitted attachments');
+    await screenshot('follow-up-failed');
+
+    await send('Retry the follow-up');
+    await waitFor('window.calls.sent.length === 11');
+    await evaluate(`document.querySelector('[aria-label="New chat"]').click()`);
+    await waitFor(`!!document.querySelector('[data-new-chat-pickers]')`);
+    await type('Keep this other draft');
+    await evaluate('window.failSend()');
+    await waitFor(`document.querySelector('[aria-label="Send"]') && !document.querySelector('[aria-label="Send"]').disabled`);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(prompt)}).value`), 'Keep this other draft');
+    await evaluate(`[...document.querySelectorAll('aside [data-row]')].find(row => row.textContent.includes('Previous chat')).click()`);
+    await waitFor(`document.querySelector(${JSON.stringify(prompt)}).value.includes('Retry the follow-up')`);
+    assert.equal(await evaluate(`document.body.textContent.includes('follow-up.txt')`), true, 'background failure recovers follow-up attachments in its original Chat');
+    await send('Recovered follow-up');
+    await waitFor('window.calls.sent.length === 12');
+    assert.equal(await evaluate('window.calls.sent[11].sessionId'), 2);
+    await evaluate('window.saveSend(); window.ackSend()');
+    await waitFor(acknowledged);
+    assert.equal(await occurrences('Recovered follow-up'), 1);
     assert.deepEqual(consoleErrors, []);
-    console.log('PASS: immediate first messages, Local and new worktree sends, acknowledgement, next drafts, attachment recovery, retries and background navigation');
+    console.log('PASS: immediate first messages and follow-ups, steering, acknowledgement without remounting, next drafts, attachment recovery, retries and background navigation');
     app.exit(0);
   } catch (error) {
     console.error(error);

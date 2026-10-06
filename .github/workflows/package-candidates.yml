@@ -29,6 +29,9 @@ on:
       - 'distribution/**'
 permissions:
   contents: read
+concurrency:
+  group: build-package-candidates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   package:
     strategy:

@@ -587,18 +587,6 @@ function ChatMenu({
 
   useDismiss(true, onClose, (target) => !!(menuRef.current?.contains(target) || trigger.current?.contains(target)));
 
-  useEffect(() => {
-    const closeOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
-    };
-    window.addEventListener("scroll", closeOnScroll, true);
-    window.addEventListener("resize", onClose);
-    return () => {
-      window.removeEventListener("scroll", closeOnScroll, true);
-      window.removeEventListener("resize", onClose);
-    };
-  }, [onClose]);
-
   const run = (action: () => void) => () => {
     onClose();
     action();

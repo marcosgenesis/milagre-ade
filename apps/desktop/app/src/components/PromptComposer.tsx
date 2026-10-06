@@ -218,11 +218,13 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     setPlusOpen(false);
     setPermissionOpen(false);
     setEffortOpen(false);
-  }, (target) => !!target.closest("[data-picker-panel], [data-promptbar] button[aria-expanded]"));
+  }, (target) => !!target.closest("[data-picker-panel], [data-promptbar] button[aria-expanded]"), () => { if (lastAnchor.current) anchorTo(...lastAnchor.current); });
+  const lastAnchor = useRef<[HTMLElement, number] | null>(null);
 
   // Right-align the popover with its trigger, or left-align when that would leave the composer. It opens above the
   // composer, or, in the tall layout, right above its button; below the button when there's more room there.
   function anchorTo(trigger: HTMLElement, width: number) {
+    lastAnchor.current = [trigger, width];
     const root = popoverRootRef.current?.getBoundingClientRect();
     if (!root) return;
     const button = trigger.getBoundingClientRect();

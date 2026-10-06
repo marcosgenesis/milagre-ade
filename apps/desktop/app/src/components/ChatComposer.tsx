@@ -359,12 +359,18 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
     ? worktrees.filter((worktree) => worktree.name.toLowerCase().includes(search)).map((worktree) => ({ key: String(worktree.id), name: worktree.name, description: worktree.path.split("/").filter(Boolean).pop(), selected: worktree.id === selected?.id, choose: () => onWorktreeChange(worktree.id) }))
     : branches.filter((branch) => branch.toLowerCase().includes(search)).map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
 
-  useDismiss(menu !== null, () => setMenu(null), (target) => !!target.closest("[data-picker-panel], [data-new-chat-pickers] button[aria-expanded]"));
-
-  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+  const lastTrigger = useRef<HTMLElement | null>(null);
+  function place(trigger: HTMLElement) {
+    lastTrigger.current = trigger;
     const row = trigger.parentElement?.getBoundingClientRect();
     const button = trigger.getBoundingClientRect();
     setPopover({ left: button.left - (row?.left ?? button.left), maxHeight: window.innerHeight - button.bottom - 24 });
+  }
+
+  useDismiss(menu !== null, () => setMenu(null), (target) => !!target.closest("[data-picker-panel], [data-new-chat-pickers] button[aria-expanded]"), () => { if (lastTrigger.current) place(lastTrigger.current); });
+
+  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+    place(trigger);
     setQuery("");
     setMenu((current) => (current === next ? null : next));
   }

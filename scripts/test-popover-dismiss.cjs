@@ -19,8 +19,8 @@ function Fixture() {
   const model = MODEL_CATALOG[0];
   return <div style={{ width: '100%', maxWidth: 720, margin: '0 auto', paddingTop: 20 }}>
     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-      <Select label="Theme" value={theme} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onChange={setTheme} />
       <div data-testid="stopper" onPointerDown={event => event.stopPropagation()} style={{ width: 160, height: 40, background: '#eee' }}>stops propagation</div>
+      <div style={{ marginLeft: 'auto' }}><Select label="Theme" value={theme} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onChange={setTheme} /></div>
     </div>
     <div data-testid="transcript" style={{ height: 380 }} />
     <PromptComposer projectPath="/fixture" draft={draft} onDraftChange={setDraft}
@@ -105,8 +105,31 @@ async function browserChecks() {
     assert.equal(await panels(), 0);
     assert.equal(await evaluate(`document.querySelector('button[aria-label="Theme"]').textContent`), 'Dark', 'Choosing an option still works');
 
+    // Anchored surfaces follow their trigger through a scroll or resize; a press is what closes them.
+    await click(model);
+    await waitFor(`!!document.querySelector('[data-picker-panel] input')`);
+    assert.equal(await evaluate(`document.documentElement.hasAttribute('data-popover-open')`), true, 'The title bar releases its drag region while a picker is open');
+    await evaluate(`document.querySelector('[data-testid="transcript"]').dispatchEvent(new Event('scroll', { bubbles: false }))`);
+    await delay(50);
+    assert.equal(await panels(), 1, 'Scrolling outside keeps the picker open');
+    await window.setSize(980, 640);
+    await delay(200);
+    assert.equal(await panels(), 1, 'Resizing keeps the picker open');
+    await click('textarea');
+    assert.equal(await panels(), 0);
+    assert.equal(await evaluate(`document.documentElement.hasAttribute('data-popover-open')`), false, 'The drag region returns when nothing is open');
+
+    await click('button[aria-label="Theme"]');
+    const before = await evaluate(`document.querySelector('[role="listbox"]').getBoundingClientRect().left`);
+    await window.setSize(900, 640);
+    await delay(200);
+    assert.equal(await panels(), 1, 'Select survives a resize');
+    assert.notEqual(await evaluate(`document.querySelector('[role="listbox"]').getBoundingClientRect().left`), before, 'Select follows its trigger after a resize');
+    await click('textarea');
+    assert.equal(await panels(), 0);
+
     assert.deepEqual(errors, []);
-    console.log('PASS: composer pickers and Select close on any outside press, stay open on inside presses, and still toggle and choose');
+    console.log('PASS: composer pickers and Select close on any outside press, follow their trigger through scroll and resize, release the title-bar drag region, and still toggle and choose');
     app.exit(0);
   } catch (error) { console.error(error); console.error(errors); app.exit(1); }
 }

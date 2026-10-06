@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -69,23 +69,7 @@ export function Select<T extends string>({
     rows?.[index]?.focus({ preventScroll: false });
   }, [open]);
 
-  useDismiss(open, () => close(false), (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)));
-
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: Event) => {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      close(false);
-    };
-    const dismiss = () => close(false);
-    document.addEventListener("scroll", outside, true);
-    window.addEventListener("resize", dismiss);
-    return () => {
-      document.removeEventListener("scroll", outside, true);
-      window.removeEventListener("resize", dismiss);
-    };
-  }, [open]);
+  useDismiss(open, () => close(false), (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)), place);
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" || event.key === "Tab") {

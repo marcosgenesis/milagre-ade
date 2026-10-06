@@ -300,10 +300,33 @@ test('the stable macOS leg calls the reusable build on the latest channel and pu
   assert.equal(job.uses, './.github/workflows/build-macos.yml')
   assert.equal(job.with.channel, 'latest')
   assert.equal(job.with.publish, true)
-  assert.equal(job.secrets, 'inherit')
+  assert.deepEqual(job.secrets, Object.fromEntries(credentials.map(name => [name, `\${{ secrets.${name} }}`])))
   const build = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
-  assert.match(build.run, /--config\.publish\.channel="\$\{CHANNEL\}" --config\.generateUpdatesFilesForAllChannels=true/)
+  assert.match(build.run, /--config\.publish\.channel="\$\{CHANNEL\}"/)
+  assert.doesNotMatch(build.run, /generateUpdatesFilesForAllChannels/, 'the flag does nothing for the github provider')
   assert.ok(buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Require a stable draft release').if.includes('require_draft'))
+})
+
+test('a stable build mirrors its feed to the beta channel before the feeds are refreshed', () => {
+  const steps = buildWorkflow.jobs['package-macos'].steps
+  const names = steps.map(step => step.name)
+  const mirror = steps.find(step => step.name === 'Mirror the stable feed to the beta channel')
+  assert.ok(mirror, 'the mirror step exists')
+  assert.equal(mirror.if, "inputs.channel == 'latest'")
+  assert.match(mirror.run, /cp release\/latest-mac\.yml release\/beta-mac\.yml/)
+  assert.match(mirror.run, /exit 1/, 'a missing stable feed fails the build')
+  assert.ok(names.indexOf('Build macOS installers') < names.indexOf('Mirror the stable feed to the beta channel'))
+  assert.ok(names.indexOf('Mirror the stable feed to the beta channel') < names.indexOf('Refresh feeds after DMG notarization'))
+})
+
+test('the reusable macOS build requires exactly the five Apple secrets and callers pass them by name', () => {
+  assert.deepEqual(buildWorkflow.on.workflow_call.secrets, Object.fromEntries(credentials.map(name => [name, { required: true }])))
+  const named = Object.fromEntries(credentials.map(name => [name, `\${{ secrets.${name} }}`]))
+  assert.deepEqual(publishWorkflow.jobs['package-macos'].secrets, named)
+  assert.deepEqual(betaWorkflow.jobs.build.secrets, named)
+  for (const text of ['publish-beta.yml', 'publish-installers.yml'].map(name => fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8'))) {
+    assert.doesNotMatch(text, /secrets: inherit/)
+  }
 })
 
 const betaWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-beta.yml'), 'utf8'))

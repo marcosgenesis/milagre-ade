@@ -9,18 +9,13 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Add01Icon,
-  AiBrowserIcon,
-  AiChat01Icon,
   ArrowDown01Icon,
-  Attachment01Icon,
-  CommandIcon,
   GitBranchIcon,
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
 } from "@hugeicons/core-free-icons";
-import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, EffortLevel, ModelCapability, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
 import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";

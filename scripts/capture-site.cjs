@@ -43,21 +43,57 @@ async function capture(desktopUrl, canvasUrl) {
   await app.whenReady();
   const window = new BrowserWindow({ width: 1360, height: 860, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
   window.webContents.on('console-message', e => { if (e.level === 'error') console.error(e.message); });
-  const save = async name => {
+  // `rectCode` is page JavaScript returning a CSS-pixel rect; the capture is cropped to it, clamped to the window.
+  const save = async (name, rectCode) => {
     await window.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
     await delay(800);
-    fs.writeFileSync(path.join(output, name), (await window.webContents.capturePage()).toPNG());
+    const rect = rectCode && await window.webContents.executeJavaScript(`(() => {
+      const r = (${rectCode})();
+      const x = Math.max(0, Math.floor(r.x)), y = Math.max(0, Math.floor(r.y));
+      return { x, y, width: Math.min(innerWidth, Math.ceil(r.x + r.width)) - x, height: Math.min(innerHeight, Math.ceil(r.y + r.height)) - y };
+    })()`);
+    const image = rect ? await window.webContents.capturePage(rect) : await window.webContents.capturePage();
+    const size = image.getSize();
+    console.log(`${name}: ${size.width}x${size.height} px${rect ? ` from ${JSON.stringify(rect)}` : ''}`);
+    fs.writeFileSync(path.join(output, name), image.toPNG());
   };
+  // Page helper: the closest rounded, filled container around an element (a card or a panel).
+  const containerFn = `(el, minWidth, minRadius) => {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const filled = style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent';
+      if (parseFloat(style.borderTopLeftRadius) >= minRadius && filled && node.getBoundingClientRect().width >= minWidth) return node;
+    }
+    return el;
+  }`;
 
   await window.loadURL(desktopUrl);
   await waitFor(window, `!!document.querySelector('[data-row]') && !document.querySelector('.startup-splash-screen')`, 'desktop fixture');
-  await window.webContents.executeJavaScript(`[...document.querySelectorAll('button')].find(b => /^new chat$/i.test(b.getAttribute('aria-label') || ''))?.click()`);
-  await save('sidebar.png');
-
   await window.webContents.executeJavaScript(`[...document.querySelectorAll('button, a, [role="button"]')].find(el => el.textContent.includes('Swipe between Chat and Changes'))?.click()`);
   await waitFor(window, `document.body.innerText.includes('Run the swipe navigation checks')`, 'approval card');
-  await save('approval.png');
 
+  // Chat column: the approval card and the composer below it.
+  await save('approval.png', `() => {
+    const container = ${containerFn};
+    const text = [...document.querySelectorAll('*')].find(el => el.children.length === 0 && el.textContent.includes('Run the swipe navigation checks'));
+    const cardEl = container(text, 300, 8);
+    const card = cardEl.getBoundingClientRect();
+    const composer = container(document.querySelector('textarea[aria-label="Prompt"]'), 300, 8).getBoundingClientRect();
+    const left = Math.min(card.left, composer.left) - 32, top = Math.min(card.top, composer.top) - 32;
+    return { x: left, y: top, width: Math.max(card.right, composer.right) + 32 - left, height: Math.max(card.bottom, composer.bottom) + 32 - top };
+  }`);
+
+  // Sidebar: the panel from the Project header through the last Chat row, with the Swipe row active.
+  await save('sidebar.png', `() => {
+    const container = ${containerFn};
+    const rows = [...document.querySelectorAll('[data-row]')];
+    const panel = container(rows[0], 150, 12).getBoundingClientRect();
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    return { x: panel.left - 24, y: panel.top - 10, width: panel.width + 48, height: last.bottom + 24 - (panel.top - 10) };
+  }`);
+
+  // The canvas fixture in a smaller window so both Project cards and the Link fill the frame.
+  window.setContentSize(840, 520);
   await window.loadURL(canvasUrl);
   await waitFor(window, `!!document.querySelector('[data-canvas]') && document.body.innerText.includes('Backend')`, 'canvas fixture');
   await save('canvas.png');

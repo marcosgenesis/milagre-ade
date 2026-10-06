@@ -26,25 +26,25 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
     <Section id="approvals" title="Agents stop for you. You'll notice.">
       <p>A task can run for an hour and stop five minutes in for an approval or a question. Milagre puts both inside the Chat, so you answer where you read.</p>
       <p>Pick Ask approval, Auto or Full permissions for each agent.</p>
-      <Image slot="visual" src={approval} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="A Milagre Chat waiting for approval to run the swipe navigation checks" />
+      <Image slot="visual" src={approval} widths={[820, 1640]} sizes="(max-width: 860px) 100vw, 640px" alt="A Milagre Chat waiting for approval to run the swipe navigation checks" />
     </Section>
 
     <Section id="worktrees" title="Several changes at once, no mixed files" reverse>
       <p>Projects keep related Chats together. Each Chat gets its own Git Worktree, so parallel agents never edit the same files.</p>
       <p>Pull request status sits beside every Chat.</p>
-      <Image slot="visual" src={sidebar} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="The Milagre sidebar with six Chats, each on its own branch" />
+      <Image slot="visual" src={sidebar} widths={[260, 520]} sizes="(max-width: 860px) 70vw, 300px" style="width: 100%; max-width: 300px" alt="The Milagre sidebar with six Chats, each on its own branch" />
     </Section>
 
     <Section id="links" title="Agents that work across repos">
       <p>Link Projects on the canvas. An agent can read the linked side, delegate a change to that side's agent and negotiate a shared contract, such as an API shape, before either side writes code.</p>
-      <Image slot="visual" src={canvas} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="Two linked Projects, Frontend and Backend, on the Milagre canvas" />
+      <Image slot="visual" src={canvas} widths={[840, 1680]} sizes="(max-width: 860px) 100vw, 640px" alt="Two linked Projects, Frontend and Backend, on the Milagre canvas" />
     </Section>
 
     <Section id="phone" title="Your Mac does the work. Your phone keeps up." reverse>
       <p>Pair your iPhone by scanning the QR code in Settings &gt; Phone. Follow running agents, reply, answer questions and approvals, attach files and inspect changes.</p>
       <p>Your Mac runs the agents, so it needs to stay awake and online.</p>
       <p><a class="link" href={IPHONE_BETA_URL}>Get the iPhone beta</a></p>
-      <div slot="visual"><PhoneChats /></div>
+      <div slot="visual" aria-hidden="true"><PhoneChats /></div>
     </Section>
 
     <section id="local" class="plain container">

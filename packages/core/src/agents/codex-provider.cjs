@@ -9,7 +9,7 @@ const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { CODEX_FAST_TIER } = require("./models.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot } = require("./permissions.cjs");
+const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot, insideWorkspace } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
 // Outside Plan mode, Codex offers its question tool (request_user_input) only behind this feature.
@@ -18,12 +18,12 @@ const THREAD_CONFIG = { features: { default_mode_request_user_input: true } };
 
 // Milagre permission mode -> Codex policy. Ask asks before any command Codex doesn't already trust,
 // Auto only when Codex wants to go beyond the workspace sandbox, and Full never asks.
-function codexPolicy(permissionMode, cwd) {
+function codexPolicy(permissionMode, cwd, workspaceRoots = []) {
   if (permissionMode === "full") return { approvalPolicy: "never", sandbox: "danger-full-access", sandboxPolicy: { type: "dangerFullAccess" } };
   return {
     approvalPolicy: permissionMode === "auto" ? "on-request" : "untrusted",
     sandbox: "workspace-write",
-    sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+    sandboxPolicy: { type: "workspaceWrite", writableRoots: [...new Set([cwd, ...workspaceRoots])], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
   };
 }
 
@@ -96,8 +96,8 @@ async function readLatestChildTurn(rpc, threadId) {
 }
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, env, emit, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, env, emit, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
+  constructor({ cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
     // steps: ids of the tool steps started in this turn and not yet completed.
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
@@ -147,7 +147,7 @@ class CodexSession {
   }
 
   async beginTurn({ prompt, images = [], model, permissionMode, effort, fastMode = false }) {
-    const policy = codexPolicy(permissionMode, this.cwd);
+    const policy = codexPolicy(permissionMode, this.cwd, this.workspaceRoots);
     this.permissions.setMode(permissionMode);
     try {
       this.starting ??= this.start(model, policy);
@@ -235,7 +235,7 @@ class CodexSession {
     // The Chat's linked tools reach Codex as an MCP server in the thread's config (see linked-mcp-server.cjs).
     const url = this.linked ? await this.linked.url().catch(() => null) : null;
     const config = url ? { ...THREAD_CONFIG, mcp_servers: { milagre: { url, tool_timeout_sec: 86400 } } } : THREAD_CONFIG;
-    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled), config };
+    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled, this.workspaceInstructions), config };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;
@@ -409,7 +409,7 @@ class CodexSession {
     else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
     else if (method === "item/fileChange/requestApproval") {
       const request = codexFileRequest(id, params, this.fileChanges.get(params.itemId));
-      this.permissions.add(request, answer, { inWorkspace: !params.grantRoot && request.files.length > 0 && insideRoot(this.cwd, request.files) });
+      this.permissions.add(request, answer, { inWorkspace: !params.grantRoot && request.files.length > 0 && (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files)) });
     } else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });

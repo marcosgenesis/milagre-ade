@@ -7,7 +7,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { connectDesktopRuntime } = require("./daemon-runtime.cjs");
 const { loadLoginEnvironment } = require("@milagre/core/agents/environment");
-const { detectEditors, openInEditor } = require("@milagre/core/editors");
+const { detectEditors, openInEditor, requireWorktreeRoot } = require("@milagre/core/editors");
 const { copyImage, saveImage } = require("./generated-images.cjs");
 const { revealFolder } = require("./reveal.cjs");
 const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
@@ -54,7 +54,7 @@ ipcMain.handle("update:install", async () => {
 });
 
 // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
-ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { open: (target) => shell.openPath(target) }));
+ipcMain.handle("project:reveal", (_event, folder) => revealFolder(folder, { checkRoot: async root => { await checkEditorRoot(root); }, open: (target) => shell.openPath(target) }));
 
 // An image in a chat, generated or attached: copied to the clipboard, saved where the user picks, or either from its right-click menu (see generated-images.cjs).
 const copyImageFile = (file) => copyImage(file, { createFromPath: (target) => nativeImage.createFromPath(target), createFromBuffer: (bytes) => nativeImage.createFromBuffer(bytes), writeImage: (image) => clipboard.write([new ClipboardItem({ "image/png": new Blob([new Uint8Array(image.toPNG())], { type: "image/png" }) })]) });
@@ -77,7 +77,11 @@ const editors = () => (editorsFound ??= environmentReady.then(() => detectEditor
   throw error;
 }));
 ipcMain.handle("editor:list", async () => (await editors()).map(({ id, name }) => ({ id, name })));
-const openEditor = createEditorOpener({ editors, open: openInEditor });
+async function checkEditorRoot(root) {
+  try { return /** @type {string[]} */ (await runtime.invoke('link:workspace-roots', [root])); }
+  catch { return requireWorktreeRoot(root); }
+}
+const openEditor = createEditorOpener({ editors, open: openInEditor, checkRoot: checkEditorRoot });
 ipcMain.handle("editor:open", (_event, request) => openEditor(request));
 
 // Brings the window back from a notification click and tells it what to open.

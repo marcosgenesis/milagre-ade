@@ -170,6 +170,7 @@ const MessageSection = memo(function MessageSection({
 });
 
 interface ChatComposerProps {
+  scopeKind?: 'project' | 'link';
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
   findSignal?: number;
@@ -353,6 +354,7 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
 const EMPTY_SUBAGENTS: Subagent[] = [];
 
 export function ChatComposer({
+  scopeKind,
   imageDraft,
   projectPath,
   messages,
@@ -552,7 +554,7 @@ export function ChatComposer({
       </div>
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
-        {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
+        {isNewChat && scopeKind !== 'link' && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
         {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}

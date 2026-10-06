@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowRight01Icon, Comment01Icon, File01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import type { DiffFileEntry, DiffMode } from "../../electron";
@@ -45,37 +45,56 @@ export function ChangesPanel({ list, mode, onModeChange, onRefresh, onSelectFile
   commentCounts?: Record<string, number>;
 }) {
   const files = list.state === "ready" && list.isRepo ? list.files : undefined;
-  const tree = useMemo(() => buildDiffTree(files ?? []), [files]);
   const added = files?.reduce((sum, file) => sum + file.added, 0) ?? 0;
   const removed = files?.reduce((sum, file) => sum + file.removed, 0) ?? 0;
   const base = list.state === "ready" && list.isRepo ? list.base : null;
-  const message = list.state === "ready" && list.isRepo ? list.message : undefined;
 
   return (
     <aside data-changes-panel aria-label="Changes" className="flex min-h-0 w-[320px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
-      <div className="flex shrink-0 flex-col gap-1.5 border-b border-line px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <Select label="Changes mode" value={mode} options={MODES} onChange={onModeChange} width={180} />
-          <span className="flex-1" />
-          {files && files.length > 0 && <Counts total added={added} removed={removed} className="text-[12px]" />}
-          <Tooltip label="Refresh changes" side="bottom" align="end">
-            <button type="button" aria-label="Refresh changes" data-diff-refresh onClick={onRefresh} className="flex size-7 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink">
-              <span className={list.state === "loading" ? "animate-spin" : ""}><HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.8} color="currentColor" /></span>
-            </button>
-          </Tooltip>
-        </div>
+      <ChangesHeader mode={mode} onModeChange={onModeChange} onRefresh={onRefresh} loading={list.state === "loading"} totals={files?.length ? { added, removed } : undefined}>
         {mode === "committed" && base && <span data-diff-base className="truncate px-0.5 text-[11px] text-ink-3">since <span className="font-mono">{base}</span></span>}
-      </div>
+      </ChangesHeader>
       <ScrollArea className="flex-1 py-1.5">
-        {list.state === "error" && <Notice>{list.message}</Notice>}
-        {list.state === "ready" && !list.isRepo && <Notice>{list.message}</Notice>}
-        {list.state === "ready" && list.isRepo && mode === "committed" && list.base === null && <Notice>No base branch to compare with.</Notice>}
-        {files && files.length === 0 && message && <Notice>{message}</Notice>}
-        {files && files.length === 0 && !message && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
-        {files && files.length > 0 && <Tree nodes={tree} depth={0} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />}
+        <ChangeList list={list} mode={mode} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />
       </ScrollArea>
     </aside>
   );
+}
+
+/** Shared chrome for a Project's changes and a named Link's grouped changes. */
+export function ChangesHeader({ mode, onModeChange, onRefresh, loading, totals, children }: {
+  mode: DiffMode; onModeChange: (mode: DiffMode) => void; onRefresh: () => void; loading: boolean;
+  totals?: { added: number; removed: number }; children?: ReactNode;
+}) {
+  return <div className="flex shrink-0 flex-col gap-1.5 border-b border-line px-3 py-2.5">
+    <div className="flex items-center gap-2">
+      <Select label="Changes mode" value={mode} options={MODES} onChange={onModeChange} width={180} />
+      <span className="flex-1" />
+      {totals && <Counts total {...totals} className="text-[12px]" />}
+      <Tooltip label="Refresh changes" side="bottom" align="end">
+        <button type="button" aria-label="Refresh changes" data-diff-refresh onClick={onRefresh} className="flex size-7 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink">
+          <span className={loading ? "animate-spin" : ""}><HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.8} color="currentColor" /></span>
+        </button>
+      </Tooltip>
+    </div>
+    {children}
+  </div>;
+}
+
+export function ChangeList({ list, mode, ...treeProps }: { list: DiffList; mode: DiffMode } & TreeProps) {
+  const files = list.state === "ready" && list.isRepo ? list.files : undefined;
+  const tree = useMemo(() => buildDiffTree(files ?? []), [files]);
+  const base = list.state === "ready" && list.isRepo ? list.base : null;
+  const message = list.state === "ready" && list.isRepo ? list.message : undefined;
+  return <>
+    {list.state === "loading" && <Notice>Loading changes…</Notice>}
+    {list.state === "error" && <Notice>{list.message}</Notice>}
+    {list.state === "ready" && !list.isRepo && <Notice>{list.message}</Notice>}
+    {list.state === "ready" && list.isRepo && mode === "committed" && base === null && <Notice>No base branch to compare with.</Notice>}
+    {files && files.length === 0 && message && <Notice>{message}</Notice>}
+    {files && files.length === 0 && !message && !(mode === "committed" && base === null) && <Notice>{mode === "uncommitted" ? "No uncommitted changes." : "Nothing committed since the base branch."}</Notice>}
+    {files && files.length > 0 && <Tree nodes={tree} depth={0} {...treeProps} />}
+  </>;
 }
 
 function Notice({ children }: { children: string }) {

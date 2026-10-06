@@ -18,14 +18,15 @@ export function DiffView({ changes, prefs, comments }: { changes: Changes; prefs
   const reduced = useReducedMotion();
   const { list, load, patchFor, scrollTarget } = changes;
   const scroller = useRef<HTMLDivElement>(null);
+  const scrolledTarget = useRef<typeof scrollTarget>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const files = list.state === "ready" && list.isRepo ? list.files : [];
 
   useEffect(() => {
-    if (!scrollTarget) return;
+    if (!scrollTarget || scrolledTarget.current === scrollTarget) return;
     const node = [...(scroller.current?.querySelectorAll<HTMLElement>("[data-diff-file]") ?? [])].find((el) => el.dataset.diffFile === scrollTarget.path);
-    node?.scrollIntoView({ block: "start" });
-  }, [scrollTarget]);
+    if (node) { node.scrollIntoView({ block: "start" }); scrolledTarget.current = scrollTarget; }
+  }, [scrollTarget, files]);
 
   // Stable, so a file only re-renders when its own props change.
   const toggle = useCallback((path: string) => setCollapsed((previous) => {

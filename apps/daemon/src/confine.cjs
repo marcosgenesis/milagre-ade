@@ -18,6 +18,7 @@ const chatProject = chatId => (typeof chatId === 'string' ? projectOfKey(chatId)
 // A file the phone attached: inside the folder, or one it uploaded itself.
 const attached = file => ({ file });
 const none = () => [];
+const denied = () => { throw refused(); };
 
 /**
  * The paths in each command the phone may call, by argument shape (see core's runtime). A command missing here is
@@ -29,6 +30,12 @@ const PATHS = Object.freeze({
   'push:focus': ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),
   'daemon:status': none,
   'project:recent': none,
+  // Named Links span Projects. The single-folder demo must never expose them.
+  'project:registry': denied,
+  'link:list': denied,
+  'link:create': denied,
+  'link:open': denied,
+  'link:send': denied,
   'project:open': ([projectPath]) => [projectPath],
   // Takes a Project off the recent list; its folder is never touched.
   'project:forget': ([projectPath]) => [projectPath],
@@ -53,6 +60,8 @@ const PATHS = Object.freeze({
   'agent:models': none,
   'agent:cli-status': none,
   'chat:patch': ([projectPath]) => [projectPath],
+  'chat:archive-subagent': ([projectPath]) => [projectPath],
+  'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
   'worktree:pull-request': ([worktreePath]) => [worktreePath],
   'project:branches': ([projectPath]) => [projectPath],
   'skills:list': ([projectPath]) => [projectPath],

@@ -1,3 +1,8 @@
+import { LinkWorkspace } from './components/LinkWorkspace';
+import { LinkProjectDialog } from './components/LinkProjectDialog';
+import { createScopeDrafts } from './lib/link-scope';
+import type { LinkState, OpenLink } from '@milagre/shared/model';
+import { scopeKey, isLinkScopeKey, scopeFromKey } from '@milagre/shared/chat-scopes';
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
@@ -97,7 +102,9 @@ function latestSessionId(state: CoordinatorState) {
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
-type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number };
+// `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
+type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
+const NO_WORKTREE = -1;
 type PreparedSendTarget = { view: number; projectPath: string; sessionId: number | null; worktreeId: number };
 type FailedSend = PendingSend & { draft: string; error: string; target: PreparedSendTarget | null };
 
@@ -108,6 +115,13 @@ function App() {
   projectRef.current = project;
   // The latest state of every project the main process has sent this window; it's their only writer
   // (see ADR-0001). The ref leads, so callbacks read a state that arrived since the last render.
+  const [selectedLink, setSelectedLink] = useState<OpenLink | null>(null);
+  const selectedLinkRef = useRef(selectedLink); selectedLinkRef.current = selectedLink;
+  const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const scopeDrafts = useMemo(createScopeDrafts, []);
+  const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
+  const linkStatesRef = useRef(linkStates); linkStatesRef.current = linkStates;
   const [states, setStates] = useState<Record<string, CoordinatorState>>({});
   const statesRef = useRef(states);
   const state = project ? states[project.path] ?? null : null;
@@ -259,6 +273,7 @@ function App() {
   }
 
   useEffect(() => { void loadInitialProject(); }, []);
+  useEffect(() => window.milagre.onLinkState?.(update => setLinkStates(previous => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
     let updated = false;
@@ -270,6 +285,7 @@ function App() {
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
+      for (const next of snapshot.links ?? []) setLinkStates(previous => ({ ...previous, [next.linkId]: next.state }));
     });
     return () => { updated = true; off?.(); snapshotOff?.(); };
   }, []);
@@ -300,6 +316,12 @@ function App() {
   const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
   const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
   const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
+  // A large Project's state can reach the window after the send's reply; dropping the preview then would hide the new chat until it does.
+  useEffect(() => {
+    if (!pendingSend?.sent) return;
+    const latest = states[pendingSend.projectPath];
+    if (!latest || pendingChatSessionId(latest, pendingSend) !== null) setPendingSend(null);
+  }, [pendingSend, states]);
   const sidebarState = useMemo(() => {
     if (!state) return state;
     const recovered = failedSends.filter(send => send.projectPath === project?.path).reduce((current, send) => withPendingChat(current, send), state);
@@ -314,7 +336,8 @@ function App() {
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
-    const latest = statesRef.current[projectOfKey(chatId)];
+    const owner = projectOfKey(chatId);
+    const latest = isLinkScopeKey(owner) ? linkStatesRef.current[owner.slice("milagre-link:".length)] : statesRef.current[owner];
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
@@ -394,7 +417,9 @@ function App() {
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
-  function receiveState(projectPath: string, next: CoordinatorState) {
+  function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
+    if (isLinkScopeKey(projectPath)) { setLinkStates(previous => ({ ...previous, [scopeFromKey(projectPath).kind === 'link' ? projectPath.slice('milagre-link:'.length) : projectPath]: next as LinkState })); return; }
+    if (!('worktrees' in next)) return;
     statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
   }
@@ -504,8 +529,9 @@ function App() {
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
   // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
   useEffect(() => {
+    if (selectedLink) return;
     void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
-  }, [selectedSessionId, view, project?.path]);
+  }, [selectedSessionId, view, project?.path, selectedLink?.link.id]);
 
   // Archiving hides the chat for good; a turn still running in it is stopped first. The steps and their order
   // live in lib/archive-flow.ts, which is passed what it touches.
@@ -589,9 +615,9 @@ function App() {
     [state?.sessions, project?.path],
   );
   useEffect(() => {
-    if (!project) return;
+    if (!project || selectedLink) return;
     void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
-  }, [project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
+  }, [selectedLink?.link.id, project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
 
   // The main process notifies about a chat that waits on the user while Milagre is in the background.
   useEffect(() => {
@@ -602,8 +628,17 @@ function App() {
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
     if (event.type === "subagent-update") {
       const path = projectOfKey(chatId);
+      const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
+      if (linkId) setLinkStates(previous => { const cached = previous[linkId]; return cached ? { ...previous, [linkId]: applyAgentEvent(cached, {}, path, chatId, event).state } : previous; });
       const cached = statesRef.current[path];
       if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
+    }
+    const link = selectedLinkRef.current;
+    if (link && chatInProject(scopeKey({ kind: "link", linkId: link.link.id }), chatId)) {
+      const latest = linkStatesRef.current[link.link.id] ?? link.state;
+      const session = latest.sessions[sessionIdFromKey(chatId)];
+      if (session && !session.archived && (event.type === "turn-completed" || event.type === "turn-failed")) void window.milagre.notifyCompletion({ chatId, title: link.link.name, subtitle: chatTitle(session, latest.messages.filter(message => message.session_id === session.id)) }).catch(() => {});
+      return;
     }
     const current = projectRef.current;
     const latest = openState();
@@ -623,6 +658,8 @@ function App() {
   const pendingNotificationChat = useRef<string | null>(null);
   // Clicking a notification opens its chat, in another project too.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
+    const owner = projectOfKey(chatId);
+    if (isLinkScopeKey(owner)) { void selectLink(owner.slice('milagre-link:'.length), sessionIdFromKey(chatId)); return; }
     const current = projectRef.current;
     const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
     if (session) { openChat(session.id); return; }
@@ -659,6 +696,8 @@ function App() {
 
   // Switching projects leaves the other project's turns running; their marks come back with it.
   function adoptProject(nextProject: OpenProject) {
+    if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
+    setSelectedLink(null);
     advanceChatView();
     setStartupError(null);
     setLoading(false);
@@ -669,7 +708,9 @@ function App() {
     flushSync(() => {
       setProject(nextProject);
       selectInitialChat(nextProject.state, nextProject.path);
-      setDraft("");
+      const remembered = scopeDrafts.read({ kind: 'project', projectPath: nextProject.path });
+      if (remembered.sessionId !== null && nextProject.state.sessions[remembered.sessionId]) setSelectedSessionId(remembered.sessionId);
+      setDraft(remembered.text);
       setGitDialog(null);
       setView("chat");
     });
@@ -681,7 +722,7 @@ function App() {
   async function replaceProject(load: () => Promise<OpenProject | null>) {
     try {
       const next = await load();
-      if (next && next.path !== projectRef.current?.path) adoptProject(next);
+      if (next && (next.path !== projectRef.current?.path || selectedLinkRef.current)) adoptProject(next);
     } catch (error) {
       if (!projectRef.current) setStartupError(ipcErrorMessage(error));
       setNotice(ipcErrorMessage(error));
@@ -690,9 +731,18 @@ function App() {
 
   const openProject = () => replaceProject(() => window.milagre.openProject());
   const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
-  async function openCanvasChat(projectPath: string, sessionId: number) {
+  async function selectLink(id: string, sessionId?: number) {
     try {
-      if (projectRef.current?.path !== projectPath) adoptProject(await window.milagre.openCanvasProject(projectPath));
+      const next = await window.milagre.openNamedLink(id);
+      if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
+      advanceChatView();
+      setLinkStates(previous => ({ ...previous, [id]: next.state })); setLinkInitialSession(sessionId); setSelectedLink(next); setView('chat'); setNewChatError(null);
+    } catch (error) { setNotice(ipcErrorMessage(error)); }
+  }
+  async function openCanvasChat(projectPath: string, sessionId: number) {
+    if (isLinkScopeKey(projectPath)) { await selectLink(projectPath.slice('milagre-link:'.length), sessionId); return; }
+    try {
+      if (projectRef.current?.path !== projectPath || selectedLinkRef.current) adoptProject(await window.milagre.openCanvasProject(projectPath));
       openChat(sessionId);
     } catch (error) { setNotice(ipcErrorMessage(error)); }
   }
@@ -730,7 +780,10 @@ function App() {
     const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
     const firstMessage = messages.length === 0;
     const submittedDraft = draftStore.get();
-    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: selectedWorktree.id, body, images, files, model: model.id, provider: model.provider });
+    // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
+    const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
+    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || isolation === "local" ? selectedWorktree.id : NO_WORKTREE);
+    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: previewWorktreeId, body, images, files, model: model.id, provider: model.provider });
     setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
       message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
     });
@@ -750,11 +803,12 @@ function App() {
       tldrEnabled: getSettings().tldrEnabled,
     };
     let target: Awaited<ReturnType<typeof resolveSendTarget>> = null;
+    let sent = false;
     try {
       target = await resolveSendTarget(body);
       if (!target) return false;
       if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
-      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId } : pending);
+      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId, session: { ...pending.session, worktree_id: target!.worktreeId } } : pending);
       // The main process saves the message, then starts the Chat's turn, even if the user has navigated away.
       const { sessionId } = await agentRuns.send({
         projectPath: project.path,
@@ -769,6 +823,9 @@ function App() {
         ...options,
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
+      sent = true;
+      setPendingSend(pending => pending && pending.message.clientMessageId === preview.message.clientMessageId
+        ? { ...pending, sent: true, originSessionId: sessionId, originWorktreeId: target!.worktreeId } : pending);
       if (stillHere()) {
         setSelectedSessionId(sessionId);
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
@@ -792,7 +849,7 @@ function App() {
       }
       return false;
     } finally {
-      setPendingSend(null);
+      if (!sent) setPendingSend(null);
       sendInFlight.current = false;
       setPreparingView(null);
     }
@@ -861,6 +918,7 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
+      if (selectedLinkRef.current) return;
       if (event.defaultPrevented || event.isComposing || isModalOpen()) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.shiftKey) {
@@ -902,6 +960,7 @@ function App() {
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
+      if (selectedLinkRef.current) return;
       // A menu, picker or search that Escape closed has already consumed it.
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (findRef.current.open) {
@@ -931,6 +990,7 @@ function App() {
 
   useEffect(() => {
     function jumpToChat(event: KeyboardEvent) {
+      if (selectedLinkRef.current) return;
       if (view !== "chat" || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return;
       if (!(event.metaKey || event.ctrlKey) || !/^[1-9]$/.test(event.key)) return;
       if (isModalOpen() || document.querySelector('[role="menu"], [aria-label="Chat name"]')) return;
@@ -966,7 +1026,7 @@ function App() {
     () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
     [showUsageInSidebar, usage.snapshot, usage.loading],
   );
-  const composerWorktrees = useMemo(() => worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
+  const composerWorktrees = useMemo(() => worktrees.filter(worktree => !worktree.sharedChat).map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
 
   // Fast loads would cut the startup animation off at the bare legs, so the splash stays until the logo is whole,
   // then fades out over the app while the panes slide in. Same key in both trees keeps the logo from restarting.
@@ -990,6 +1050,9 @@ function App() {
       </main>
     );
   }
+
+  const linkDialog = linkDialogOpen ? <LinkProjectDialog onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
+  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSelectedLink(null); setView('settings'); }} linkedWork={linkedWork} onCanvasChat={(path, id) => void openCanvasChat(path, id)} usage={sidebarUsage} />{linkDialog}</>;
 
   if (loading || !project || !state || splash === "intro") {
     return <>{splashOverlay(false)}</>;
@@ -1072,6 +1135,7 @@ function App() {
         fill
         workspaceName={project.name}
         workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
+        onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)}
         onOpenProject={openProjectFromSidebar}
         recents={chats}
         activeId={view === "chat" ? pendingHere && pendingSend ? String(pendingCanonicalId ?? pendingSend.session.id) : selectedSession ? String(selectedSession.id) : null : null}
@@ -1215,6 +1279,7 @@ function App() {
         <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} commentCounts={diffComments.counts} />
       </ChangesPanelSlot>
       </div>
+      {linkDialog}
       {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
       {gitDialog && (
         <GitActionsDialog

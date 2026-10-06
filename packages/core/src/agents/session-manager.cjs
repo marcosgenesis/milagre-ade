@@ -49,15 +49,18 @@ class SessionManager {
     const existing = this.sessions.get(chatId);
     const tldrEnabled = request.tldrEnabled !== false;
     const accountId = request.accountId ?? "default";
-    const sameChat = existing && existing.provider === provider && existing.cwd === cwd;
+    const workspaceRoots = [...new Set(request.workspaceRoots ?? [])].sort();
+    const sameChat = existing && existing.provider === provider && existing.cwd === cwd && JSON.stringify(existing.workspaceRoots) === JSON.stringify(workspaceRoots) && existing.workspaceInstructions === request.workspaceInstructions;
     // System instructions are fixed for a provider session. Resume it between turns when
     // the preference changes, preserving its native history and any running reply.
     if (sameChat && !existing.session.closed && ((existing.tldrEnabled === tldrEnabled && existing.accountId === accountId) || existing.session.turnActive || existing.activeChildren?.size)) return existing;
     const resumeId = sameChat && !existing.session.closed ? existing.session.nativeId ?? request.resumeId : request.resumeId;
     if (existing) await this.closeEntry(chatId, existing);
-    const entry = { provider, cwd, tldrEnabled, accountId, session: null, idleTimer: null };
+    const entry = { provider, cwd, tldrEnabled, accountId, workspaceRoots, workspaceInstructions: request.workspaceInstructions, session: null, idleTimer: null };
     entry.session = this.createSession(provider, {
       cwd,
+      workspaceRoots: request.workspaceRoots,
+      workspaceInstructions: request.workspaceInstructions,
       resumeId,
       tldrEnabled,
       command: request.command,

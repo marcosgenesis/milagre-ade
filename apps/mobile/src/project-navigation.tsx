@@ -7,7 +7,8 @@ import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
-import type { Snapshot } from './client';
+import type { RegisteredProject, Snapshot } from './client';
+import { isLinkScopeKey } from '@milagre/shared/chat-scopes';
 import { usePendingChats, useSession, type MobilePendingChat } from './session';
 import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
@@ -17,14 +18,15 @@ import { ErrorNotice, Field, IconButton, PageScroll, PullDown, colors, styles } 
 import { SettingsView, type SettingsPage } from './app/settings';
 import { NotificationsView } from './app/notifications';
 import { UsageSection } from './usage-section';
-import { ProjectIcon } from './project-icon';
+import { ProjectIcon, ProjectIcons } from './project-icon';
 import { ProjectSearch } from './project-search';
 import { chatMenu, runChatAction } from './chat-actions';
 import { confirm } from './confirm-store';
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
-  | { kind: 'project'; name: string; expanded: boolean }
+  | { kind: 'project'; name: string; expanded: boolean; members?: RegisteredProject[] }
+  | { kind: 'section'; name: string }
   | { kind: 'chat'; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
   | { kind: 'notice'; message: string; failed?: boolean }
 );
@@ -105,7 +107,9 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
         .sort((a, b) => (b.pending?.preview.sortId ?? b.chat.id) - (a.pending?.preview.sortId ?? a.chat.id));
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
-      result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open });
+      const section = project.link ? 'Links' : 'Projects';
+      if (session.recent.some(item => item.link) && !result.some(row => row.kind === 'section' && row.name === section)) result.push({ key: `section:${section}`, path: '', kind: 'section', name: section });
+      result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open, members: project.projects });
       if (!open) continue;
       for (const { chat, mark, pending } of chats) result.push({ key: `${project.path}#${chat.id}`, path: project.path, kind: 'chat', chat, pending, worktree: pending?.newWorktree ? 'New worktree' : copy?.project.state.worktrees[chat.worktree_id]?.name || 'Worktree', mark });
       if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: 'Could not load chats. Tap to retry.', failed: true });
@@ -132,7 +136,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
     if (!copy || !session.client) return;
     setError('');
     try {
-      const result = await runChatAction({ action, chat, running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`], client: session.client, projectPath: copy.project.path, state: copy.project.state,
+      const result = await runChatAction({ action, chat, running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`], client: session.client, projectPath: copy.project.path, state: copy.project.state, link: copy.project.link,
         refresh: () => projectPath === currentPath ? session.refresh() : load(projectPath), expectActivity: session.expectActivity, notify: message => { if (alive.current) setError(message); } });
       if ((result === 'hidden' || result === 'removed') && projectPath === currentPath && chat.id === activeChatId) onNavigate('/projects');
     } catch (e) { if (alive.current) setError((e as Error).message); }
@@ -140,6 +144,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
   async function projectAction(projectPath: string, name: string, action: string) {
     if (action === 'new') { select(projectPath); return; }
+    if (isLinkScopeKey(projectPath)) { if (action === 'copy') await Clipboard.setStringAsync(name); return; }
     if (action === 'copy') { await Clipboard.setStringAsync(projectPath); return; }
     if (action !== 'remove' || !session.client) return;
     const client = session.client;
@@ -171,6 +176,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   }
   const footer = <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
     <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setPage('add')} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Link projects" disabled={busy} onPress={() => onNavigate('/link-projects', true)} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={Add01Icon} tone="ink2" size={18} /><Text style={s.secondary}>Link projects</Text></Pressable>
     <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => setPage('settings')} />
   </View>;
   if (page) return <View style={styles.screen}>
@@ -209,13 +215,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void reloadProjects().then(() => Promise.all([...expanded].map(load))).catch(e => setError(e.message)).finally(() => setRefreshing(false)); }} />}
       ListEmptyComponent={<Text style={[styles.muted, { padding: 20 }]}>{query.trim() ? 'No chats match your search.' : show !== 'all' ? 'No chats match this filter.' : 'Add a project from your computer to start a Chat.'}</Text>}
       renderItem={({ item }) => {
+        if (item.kind === 'section') return <Text style={[s.detail, { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 6, fontWeight: '500' }]}>{item.name}</Text>;
         if (item.kind === 'project') {
-          const menu = [{ items: [{ id: 'new', title: 'New Chat', systemImage: 'square.and.pencil' }, { id: 'copy', title: 'Copy path', systemImage: 'doc.on.doc' }] }, { items: [{ id: 'remove', title: 'Remove from list', systemImage: 'minus.circle', destructive: true }] }];
+          const linked = isLinkScopeKey(item.path);
+          const menu = [{ items: [{ id: 'new', title: 'New Chat', systemImage: 'square.and.pencil' }, { id: 'copy', title: linked ? 'Copy Link name' : 'Copy path', systemImage: 'doc.on.doc' }] }, ...(!linked ? [{ items: [{ id: 'remove', title: 'Remove from list', systemImage: 'minus.circle', destructive: true }] }] : [])];
           const choose = (action: string) => void projectAction(item.path, item.name, action);
           // A tap folds the group; a long press opens the Project's menu.
           return <View style={s.project}>
             <PullDown label={`${item.expanded ? 'Collapse' : 'Expand'} ${item.name}`} title={item.name} sections={menu} onSelect={choose} onPress={() => setExpanded(previous => { const next = new Set(previous); if (next.has(item.path)) next.delete(item.path); else next.add(item.path); return next; })} style={{ flex: 1 }}>
-              <View style={s.projectTitle}><ProjectIcon client={session.client} path={item.path} /><Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
+              <View style={s.projectTitle}>{item.members ? <ProjectIcons client={session.client} projects={item.members} /> : <ProjectIcon client={session.client} path={item.path} />}<Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
             </PullDown>
             <IconButton label={`New Chat in ${item.name}`} icon={Add01Icon} size={44} disabled={busy} onPress={() => select(item.path)} />
             <PullDown label={`Actions for ${item.name}`} title={item.name} sections={menu} onSelect={choose}>
@@ -227,13 +235,13 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         const title = item.chat.title || item.chat.generatedTitle || 'New Chat';
         const selected = currentPath === item.path && activeChatId === item.chat.id;
         const copy = item.path === currentPath && session.snapshot ? session.snapshot : copies[item.path];
-        const menu = chatMenu(item.chat, copy?.project.state.worktrees[item.chat.worktree_id]);
+        const menu = chatMenu(item.chat, copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id]);
         // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
         return <View style={[s.chat, { backgroundColor: selected ? colors.hover : 'transparent' }]}>
           <PullDown label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={item.pending ? [] : menu} onSelect={action => { if (!item.pending) void act(item.path, item.chat, action); }} onPress={() => select(item.path, item.chat.id, item.pending)} style={{ flex: 1 }}>
             <View style={s.chatBody}>
               <ChatMarkIcon mark={item.mark} />
-              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}><Icon icon={GitBranchIcon} tone="ink3" size={12} /><Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
+              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>{!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}<Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
             </View>
           </PullDown>
           {!item.pending && <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)}>

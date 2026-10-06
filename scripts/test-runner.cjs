@@ -7,7 +7,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'release', '.expo', 'ios', 'a
 
 /** Checks that need more than Node, Vite and Electron. Everything else runs anywhere. */
 const MANIFEST = {
-  'test-windows-cli.cjs': { platforms: ['win32'], args: [] , reason: 'Windows-only; candidates pass the npm prefix' },
+  'test-windows-cli.cjs': { platforms: ['win32'] },
   'test-ports.cjs': { needs: ['zsh', 'ps', 'lsof'] },
   'test-desktop.cjs': { needsBuild: true },
 }

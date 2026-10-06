@@ -11,4 +11,4 @@ desktop-file-validate /usr/share/applications/milagre.desktop
 mkdir -p /workspace
 cp -a "$source_dir"/. /workspace/
 chown -R tester:tester /workspace
-runuser -u tester -- bash -c 'cd /workspace; npm ci > /tmp/milagre-npm.log 2>&1; npm run build > /tmp/milagre-build.log 2>&1; xvfb-run -a npm run test:desktop -- --packaged /opt/Milagre/milagre'
+runuser -u tester -- bash -c 'cd /workspace; npm ci > /tmp/milagre-npm.log 2>&1; npm run build > /tmp/milagre-build.log 2>&1; xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre'

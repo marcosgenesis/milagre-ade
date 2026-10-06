@@ -1,5 +1,5 @@
 // Runs the real main process, preload, and built renderer against temporary legacy-format data.
-// npm run build && npm run test:desktop [-- --packaged <.app, unpacked directory, or executable>]
+// npm run build && npm test -- --only test-desktop [-- --packaged <.app, unpacked directory, or executable>]
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");

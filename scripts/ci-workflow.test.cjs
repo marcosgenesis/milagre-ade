@@ -41,6 +41,13 @@ test('every action is pinned to a full SHA with its version in a comment', () =>
   }
 })
 
+test('the release job waits for the required checks, not the change filter or desktop-checks', () => {
+  const needs = [ci.jobs.release.needs].flat()
+  assert.ok(needs.includes('javascript'))
+  assert.ok(!needs.includes('desktop-checks'))
+  assert.ok(!needs.includes('changes'))
+})
+
 test('CI runs the unit suite through the single test command', () => {
   const runs = ci.jobs.javascript.steps.map(step => step.run).filter(Boolean)
   assert.ok(runs.includes('npm test -- --unit'))

@@ -143,3 +143,30 @@ jobs:
           path: ${{ runner.temp }}/electron-screenshots
           if-no-files-found: ignore
           retention-days: 7
+
+  release:
+    # Every CI-green push to main becomes a release candidate: a tag and a DRAFT GitHub release.
+    # Drafts are invisible to installed apps; "Publish beta" or "Publish installers" ship one.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'the-ptf/milagre-ade'
+    needs: [javascript, native-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Create release candidate (tag and draft release)
+        run: npm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

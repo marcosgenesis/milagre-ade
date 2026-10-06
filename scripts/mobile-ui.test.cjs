@@ -900,6 +900,22 @@ test('mobile navigation spans a long Chat with at most 15 lines and loads older 
   assert.equal(scrolls.at(-1).end, true, 'the latest tick returns to live output');
 });
 
+test('the mobile rail stays above the composer when the keyboard lifts it', () => {
+  const keyboard = { height: { value: -300 }, progress: { value: 1 } };
+  const { MessageNavigation } = load('message-navigation.tsx', {
+    'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Pressable: 'Pressable', View: 'View' },
+    'react-native-reanimated': { default: { View: 'AnimatedView' }, useAnimatedStyle: fn => fn() },
+    'react-native-keyboard-controller': { useReanimatedKeyboardAnimation: () => keyboard },
+    './theme': { colors: {} },
+  });
+  const props = { items: [{ index: 0, label: 'First' }, { index: 99, label: 'Latest' }], onSelect() {}, top: 134, bottom: 152, keyboardOffset: 24 };
+  const bottom = tree => Object.assign({}, ...[tree.props.style].flat()).bottom;
+  assert.equal(bottom(MessageNavigation(props)), 428, 'the rail follows the composer by the keyboard height minus its lift offset');
+  keyboard.height.value = 0; keyboard.progress.value = 0;
+  assert.equal(bottom(MessageNavigation(props)), 152, 'closing the keyboard restores the rail bounds');
+});
+
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {
   const screen = chatHost();
   screen.params.id = '42';

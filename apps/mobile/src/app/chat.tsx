@@ -339,7 +339,7 @@ export default function ChatScreen() {
     {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
         find this scroll view (it only follows each view's first child), so the blur is drawn here. */}
     <EdgeFade edge="top" height={insets.top + 72} />
-    <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} />
+    <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
     <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />

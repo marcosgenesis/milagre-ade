@@ -252,3 +252,16 @@ test('relay images load at most 4 at a time, in order, and calls never wait behi
   assert.equal((await Promise.all(loads)).length, 10);
   assert.equal(media().length, 10);
 });
+
+test('drawer previews use a separate ETag route and accept full snapshots from an older host', async () => {
+  const routes: string[] = [];
+  const full = { project: { path: '/p' }, runs: { runs: {} } };
+  const client = createClient({ address: 'http://127.0.0.1:8787', token: 'token' }, async url => {
+    routes.push(String(url));
+    return new Response(JSON.stringify({ v: 1, result: full }));
+  });
+  assert.deepEqual(await client.preview('/p'), full);
+  await client.snapshot('/p');
+  assert.ok(routes[0].endsWith('/snapshot?projectPath=%2Fp&view=chats'));
+  assert.ok(routes[1].endsWith('/snapshot?projectPath=%2Fp'));
+});

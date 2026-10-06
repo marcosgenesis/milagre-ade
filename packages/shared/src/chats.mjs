@@ -33,7 +33,13 @@ export function createPendingChat({ state, worktreeId, sessionId = null, body, i
 /** The saved Chat may arrive over the live connection before the send response does. */
 export function pendingChatSessionId(state, pending) {
   if (!pending) return null;
-  return state.messages.find(message => message.clientMessageId === pending.message.clientMessageId)?.session_id ?? null;
+  const canonical = state.messages.find(message => message.clientMessageId === pending.message.clientMessageId);
+  if (canonical) return canonical.session_id;
+  // Older hosts omit clientMessageId. Only use their persisted input after the send response
+  // confirms its target; existing inputs and messages tagged by another client cannot match.
+  if (pending.acceptedSessionId == null) return null;
+  return state.messages.find(message => !message.clientMessageId && message.session_id === pending.acceptedSessionId
+    && message.id >= pending.sortId && message.role === 'user' && message.body === pending.message.body)?.session_id ?? null;
 }
 
 /** A display projection shared by desktop's sidebar and the phone's drawer; canonical input replaces its preview. */

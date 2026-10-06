@@ -8,7 +8,9 @@ import type { RelayTransport } from './relay-transport.ts';
 export type OpenProject = { path: string; name: string; state: CoordinatorState; link?: OpenLink };
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
-export type Snapshot = { project: OpenProject; runs: Runs };
+export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };
+/** Drawer metadata only. Never use it as the Chat screen's snapshot. Older hosts return a full Snapshot. */
+export type ProjectPreview = Omit<Snapshot, 'previewOnly'> & { previewOnly: true };
 export type RegisteredProject = { id: string; path: string; name: string };
 export type RecentProject = { path: string; name?: string; link?: NamedProjectLink; projects?: RegisteredProject[] };
 
@@ -222,6 +224,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: async (projectPath: string) => phoneSnapshot(await request<Snapshot | { link: OpenLink; runs: Runs }>('/snapshot?projectPath=' + encodeURIComponent(projectPath))),
+    preview: (projectPath: string) => request<ProjectPreview | Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath) + '&view=chats'),
     /** Just the Project's streaming turns: what a live "runs" signal fetches instead of the whole snapshot. */
     runs: (projectPath: string) => request<Runs>('/runs?projectPath=' + encodeURIComponent(projectPath)),
     /** The Project's live socket, through the same tunnel and Access headers as every request, or through the relay. */

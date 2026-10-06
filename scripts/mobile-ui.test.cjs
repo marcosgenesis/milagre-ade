@@ -399,7 +399,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   });
   const render = () => { react.begin(); const tree = ChatScreen(); react.flush(); return tree; };
   const field = () => { const props = find(render(), node => node.type === 'PromptField').props; return { ...props, value: props.draft }; };
-  const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
+  const send = () => find(render(), node => node.type === 'IconButton' && ['Send message', 'Send follow-up'].includes(node.props.label)).props.onPress();
   return { session, sending, params, field, send, render, router, calls };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -503,12 +503,13 @@ test('a mobile Link draft sends through its canonical owner and retries the same
 });
 
 test('browsing another Project in the drawer leaves the current Chat selected', async () => {
-  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path) });
+  const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path), preview: async path => ({ ...snapshot(path), previewOnly: true }) });
   await render().connect({ address: 'mac', token: 'token' });
   await render().open('/current');
   const before = render();
   const preview = await before.previewProject('/other');
   assert.equal(preview.project.path, '/other');
+  assert.equal(preview.previewOnly, true);
   assert.equal(render().snapshot.project.path, '/current');
   assert.equal(before.isSelected(), true);
 });
@@ -577,7 +578,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const secondaryRoutes = [];
   const opened = [];
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
-  const session = { pendingChats: {}, client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
+  const session = { pendingChats: {}, client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, cachedProject: () => undefined, ...extra };
   const native = { Alert: { alert, prompt() {} } };
   // Confirmations use the real sheet store, shown through the host's alert in the order the sheet would list them.
   const confirmStore = load('confirm-store.ts', {});
@@ -594,7 +595,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
     './accounts-section': { AccountsSection: 'AccountsSection' }, './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
-  const render = () => { react.begin(); return ProjectNavigation({ onNavigate: (route, secondary) => { routes.push(route); secondaryRoutes.push(secondary); } }); };
+  const render = () => { react.begin(); const tree = ProjectNavigation({ onNavigate: (route, secondary) => { routes.push(route); secondaryRoutes.push(secondary); } }); return typeof tree.type === 'function' ? tree.type(tree.props) : tree; };
   const rows = () => find(render(), node => node.type === 'FlatList');
   const row = (kind, index = 0) => { const list = rows(); return list.props.renderItem({ item: list.props.data.filter(item => item.kind === kind)[index] }); };
   // A row's tap target is the menu that also has onPress; its ⋯ is the menu without one.
@@ -1798,4 +1799,124 @@ test('mobile Accounts selects by tapping the row and manages accounts through it
     assert.ok(calls.some(c => c.join(':') === 'accounts:remove:codex:work'));
     assert.equal(find(render(), n => n.props.accessibilityLabel === 'work@example.test'), undefined);
   } finally { react.unmount(); }
+});
+
+function ongoingChatHost(options = {}) {
+  const screen = chatHost({ effects: true, ...options });
+  screen.params.id = '7';
+  const state = screen.session.snapshot.project.state;
+  state.sessions[7] = { id: 7, worktree_id: 1, agent_name: 'main', title: 'Existing Chat', provider: 'codex', status: 'Idle' };
+  state.messages = [
+    { id: 2, session_id: 7, role: 'user', body: 'Original question', context: null },
+    { id: 3, session_id: 7, role: 'assistant', body: 'Previous answer', context: null },
+  ];
+  screen.session.drafts['/p#7'] = 'Follow-up message';
+  return screen;
+}
+
+function transcriptMessages(screen) {
+  const messages = [];
+  find(screen.render(), node => { if (node.type === 'ChatReply' && node.props.message) messages.push(node.props.message); return false; });
+  return messages;
+}
+
+test('an ongoing mobile Chat shows a follow-up before attachment upload finishes and keeps its history', async () => {
+  const upload = deferred();
+  const screen = ongoingChatHost();
+  screen.session.client.upload = () => upload.promise;
+  screen.session.attachments['/p#7'] = [{ id: 'file', name: 'notes.txt', uri: 'file:///notes.txt', base64: 'YQ==' }];
+  screen.send();
+  const messages = transcriptMessages(screen);
+  assert.deepEqual(messages.map(message => message.body), ['Original question', 'Previous answer', 'Follow-up message']);
+  assert.equal(screen.field().value, '');
+  assert.deepEqual(Array.from(messages.at(-1).files), ['notes.txt']);
+  assert.equal(screen.calls.some(call => call.method === 'chat:send'), false, 'the preview is visible before uploading or contacting the agent');
+  upload.resolve({ path: '/p/notes.txt' }); await settle();
+  const request = screen.calls.find(call => call.method === 'chat:send').args[0];
+  assert.equal(request.sessionId, 7);
+  assert.equal(request.clientMessageId, messages.at(-1).clientMessageId);
+  screen.sending.resolve({ sessionId: 7 }); await settle();
+});
+
+test('an ongoing mobile Chat replaces only the acknowledged follow-up and preserves the next draft', async () => {
+  const screen = ongoingChatHost();
+  screen.send(); await settle();
+  const preview = transcriptMessages(screen).find(message => message.body === 'Follow-up message');
+  assert.ok(preview, 'a follow-up renders while the send response is still pending');
+  screen.field().onChangeText('Follow-up message');
+  const state = screen.session.snapshot.project.state;
+  state.messages = [...state.messages, { ...preview, id: 4, session_id: 7 }];
+  assert.deepEqual(transcriptMessages(screen).map(message => message.id), [2, 3, 4], 'the canonical message replaces its preview without dropping history or duplicating input');
+  screen.sending.resolve({ sessionId: 7 }); await settle();
+  assert.equal(screen.field().value, 'Follow-up message', 'an intentionally repeated next draft survives acknowledgement');
+  assert.equal(screen.params.id, '7');
+});
+
+test('a mobile follow-up to a running turn appears immediately and restores text and files after failure', async () => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.runs.runs['/p#7'] = { startedAt: Date.now(), questions: [], approvals: [], steps: [], body: 'Still working' };
+  screen.session.attachments['/p#7'] = [{ id: 'file', name: 'notes.txt', uri: 'file:///notes.txt', path: '/p/notes.txt' }];
+  screen.send();
+  assert.deepEqual(transcriptMessages(screen).map(message => message.body), ['Original question', 'Previous answer', 'Follow-up message']);
+  const order = [];
+  find(screen.render(), node => { if (node.type === 'ChatReply') order.push(node.props.run ? 'Live reply' : node.props.message.body); return false; });
+  assert.deepEqual(order, ['Original question', 'Previous answer', 'Live reply', 'Follow-up message'], 'steering input follows the reply already in progress');
+  screen.field().onChangeText('Next draft');
+  screen.sending.reject(new Error('Connection lost')); await settle();
+  assert.deepEqual(transcriptMessages(screen).map(message => message.body), ['Original question', 'Previous answer']);
+  assert.equal(screen.field().value, 'Follow-up message\n\nNext draft');
+  assert.equal(screen.session.attachments['/p#7'][0].id, 'file');
+  assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
+});
+
+
+test('a mobile follow-up keeps the existing Chat in its drawer position', () => {
+  const screen = ongoingChatHost();
+  const state = screen.session.snapshot.project.state;
+  state.next_id = 30;
+  state.sessions[20] = { id: 20, worktree_id: 1, agent_name: 'main', title: 'Newer Chat', status: 'Idle' };
+  state.messages.push({ id: 21, session_id: 20, role: 'user', body: 'Newer question', context: null });
+  screen.send();
+  const nav = navigationHost(Promise.resolve(), { session: { ...screen.session, recent: [{ path: '/p' }] } });
+  assert.deepEqual(Array.from(nav.rows().props.data.filter(row => row.kind === 'chat'), row => row.chat.id), [20, 7]);
+});
+
+
+test('mobile opens a long Chat with its newest 40 messages and loads another page on request', () => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.project.state.messages = Array.from({ length: 1000 }, (_, index) => ({ id: index + 1, session_id: 7, role: index % 2 ? 'assistant' : 'user', body: 'Message ' + index, context: null }));
+  assert.equal(transcriptMessages(screen).length, 40);
+  assert.equal(transcriptMessages(screen)[0].id, 961);
+  find(screen.render(), node => node.type === 'PillButton' && node.props.title?.startsWith('Show earlier messages')).props.onPress();
+  assert.equal(transcriptMessages(screen).length, 80);
+  assert.equal(transcriptMessages(screen)[0].id, 921);
+  assert.equal(transcriptMessages(screen).at(-1).id, 1000);
+});
+
+
+test('legacy mobile follow-up retires after acceptance and an untagged saved input', async () => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.project.state.next_id = 4;
+  screen.send(); await settle();
+  const state = screen.session.snapshot.project.state;
+  state.messages.push({ id: 4, session_id: 7, role: 'user', body: 'Follow-up message', context: null });
+  screen.sending.resolve({ sessionId: 7 }); await settle();
+  assert.deepEqual(transcriptMessages(screen).map(message => message.id), [2, 3, 4]);
+  const provider = sessionHost({});
+  const props = { hostId: 'mac', snapshot: screen.session.snapshot };
+  provider.pending(props).setPendingChats(() => screen.session.pendingChats);
+  provider.pending(props);
+  assert.deepEqual(Object.keys(provider.pending(props).pendingChats), []);
+});
+
+test('pending snapshot acknowledgement does not disable mobile Stop', async () => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.runs.runs['/p#7'] = { startedAt: Date.now(), questions: [], approvals: [], steps: [] };
+  screen.send(); await settle();
+  screen.sending.resolve({ sessionId: 7 }); await settle();
+  assert.ok(Object.keys(screen.session.pendingChats).length);
+  const stop = find(screen.render(), node => node.props?.label === 'Stop');
+  assert.equal(stop.props.disabled, false);
+  stop.props.onPress(); await settle();
+  assert.ok(screen.calls.some(call => call.method === 'agent:interrupt'));
 });

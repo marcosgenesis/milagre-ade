@@ -5,64 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
-const fixture = `
-import React from "react";
-import { createRoot } from "react-dom/client";
-import "/src/styles.css";
-const state = { next_id: 4, projects: { 1: { id: 1, name: "shop" } },
-  worktrees: { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } },
-  sessions: { 2: { id: 2, worktree_id: 1, agent_name: "Previous chat", provider: "claude", status: "Idle" } },
-  messages: [{ id: 3, session_id: 2, role: "user", body: "Previous chat", context: null }], tasks: {} };
-const listeners = new Set();
-window.emitAgent = (sessionId, event) => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event }));
-window.calls = { created: 0, sent: [] };
-window.milagre = new Proxy({
-  getRuntimeConnection: async () => ({ connected: true }),
-  getAgentPorts: async () => ({}),
-  getRuns: async () => ({ seq: 0, runs: {} }),
-  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
-  getCurrentProject: async () => ({ path: "/fixture", name: "shop", state: structuredClone(state) }),
-  listBranches: async () => ["main"],
-  getPathForFile: file => "/fixture/" + file.name,
-  createWorktree: () => {
-    window.calls.created++;
-    return new Promise((resolve, reject) => {
-      window.failCreate = () => reject(new Error("Setup failed"));
-      window.finishCreate = () => {
-        const id = state.next_id;
-        state.worktrees[id] = { id, name: "milagre/chat-" + id, path: "/worktrees/shop/chat-" + id, project_id: 1, base: "main" };
-        state.sessions[id + 1] = { id: id + 1, worktree_id: id, agent_name: "milagre/chat-" + id, status: "Created" };
-        state.next_id = id + 2;
-        resolve({ project: { path: "/fixture", name: "shop", state: structuredClone(state) }, worktreeId: id });
-      };
-    });
-  },
-  sendMessage: request => {
-    window.calls.sent.push(request);
-    return new Promise((resolve, reject) => {
-      window.failSend = () => reject(new Error("Disk full"));
-      window.saveSend = () => {
-        const sessionId = request.sessionId ?? state.next_id++;
-        state.sessions[sessionId] ??= { id: sessionId, worktree_id: request.worktreeId, agent_name: "Local chat", status: "Created" };
-        state.sessions[sessionId].provider = request.provider;
-        state.messages.push({ id: state.next_id++, session_id: sessionId, body: request.body, images: request.images, files: request.files, clientMessageId: request.clientMessageId, context: null, role: "user", model: request.model });
-        const publish = () => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: structuredClone(state) }));
-        // A large Project's state is read in pages, so it can reach the window after the reply.
-        if (window.holdState) { window.holdState = false; window.releaseState = publish; } else publish();
-        window.ackSend = () => resolve({ sessionId });
-      };
-    });
-  },
-  onAgentEvent: callback => { listeners.add(callback); return () => listeners.delete(callback); },
-  listEditors: async () => [],
-  getCachedUsage: async () => ({ providers: [] }),
-  readUsage: async () => ({ providers: [] }),
-  getUpdateState: async () => ({ status: "idle" }),
-}, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
-localStorage.setItem("milagre-settings", JSON.stringify({ defaultModelId: "claude-opus-5-5" }));
-const { default: App } = await import("/src/App");
-createRoot(document.getElementById("root")).render(<App />);
-`;
+const fixture = require('./fixtures/chat-send-feedback.cjs');
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
@@ -323,8 +266,59 @@ async function browserChecks() {
     await delay(100);
     assert.equal(await rows('Reply before state'), 1);
     assert.equal(await occurrences('Reply before state'), 1, 'the saved message replaces the preview');
+    for (const busy of [false, true]) {
+      await window.loadURL(process.argv[2] + '?long=1');
+      await waitFor(`!!document.querySelector('[data-slot="message"]')`);
+      assert.equal(await evaluate(`document.querySelectorAll('[data-slot="message"]').length`), 40, 'long chats initially mount only the newest page');
+      await delay(400);
+      await evaluate(`(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; })()`);
+      await delay(100);
+      await evaluate(`window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top`);
+      await clickText('Show earlier messages');
+      await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 80`);
+      assert.equal(await evaluate('window.historyAnchor.isConnected'), true, 'prepending history retains mounted messages');
+      await delay(100);
+      const anchorShift = await evaluate('Math.abs(window.historyAnchor.getBoundingClientRect().top - window.historyTop)');
+      assert.ok(anchorShift < 16, `prepending history preserves the reading position (moved ${anchorShift}px)`);
+      if (busy) {
+        await evaluate(`window.emitAgent(2, { type: 'turn-started' }); window.emitAgent(2, { type: 'text-delta', text: 'Ongoing work' })`);
+        await waitFor(`document.querySelector('[data-streaming]')?.textContent.includes('Ongoing work')`);
+        await evaluate(`window.renderedMessageIds = []; window.emitAgent(2, { type: 'text-delta', text: ' continues' })`);
+        await waitFor(`document.querySelector('[data-streaming]')?.textContent.includes('continues')`);
+        assert.equal(await evaluate('window.renderedMessageIds.filter(id => id > 0).length'), 0, 'streaming leaves the loaded saved message cards memoized');
+      }
+      await evaluate(`window.emitAgent(99, { type: 'turn-started' }); window.emitAgent(99, { type: 'text-delta', text: 'Other chat' })`);
+      await delay(100);
+      await evaluate('window.transcriptRenders = 0; window.railItemsRendered = 0');
+      for (let update = 0; update < 5; update++) {
+        await evaluate(`window.emitAgent(99, { type: 'text-delta', text: ' background output' })`);
+        await delay(50);
+      }
+      assert.equal(await evaluate('window.transcriptRenders'), 0, 'another running chat does not rebuild the open transcript');
+      assert.equal(await evaluate('window.railItemsRendered'), 0, 'another running chat does not rebuild the message navigation');
+      await evaluate('window.renderedMessageIds = []');
+      await send('Follow-up in a long chat');
+      await immediate('Follow-up in a long chat');
+      assert.equal(await evaluate('window.calls.sent.length'), 1, 'long-chat preview appears with persistence still pending');
+      assert.equal(await evaluate('window.renderedMessageIds.filter(id => id > 0).length'), 0, `sending in a long ${busy ? 'working' : 'idle'} chat leaves saved cards memoized`);
+      await screenshot(busy ? 'long-chat-working-follow-up' : 'long-chat-idle-follow-up');
+      await evaluate('window.saveSend(); window.ackSend()');
+      await waitFor(acknowledged);
+      assert.equal(await occurrences('Follow-up in a long chat'), 1, 'long-chat acknowledgement replaces the preview');
+      await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }))`);
+      await waitFor(`!!document.querySelector('[aria-label="Find in chat"]')`);
+      await waitFor(`document.querySelectorAll('[data-slot="message"]:not([data-streaming])').length === 301`);
+      await evaluate(`(() => {
+        const input = document.querySelector('[aria-label="Find in chat"]');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Previous chat 0');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await waitFor(`document.body.textContent.includes('1 of 1')`);
+      await screenshot('long-chat-search-history');
+
+    }
     assert.deepEqual(consoleErrors, []);
-    console.log('PASS: immediate first messages and follow-ups, steering, acknowledgement without remounting, next drafts, attachment recovery, retries and background navigation');
+    console.log('PASS: immediate first messages and follow-ups, steering, acknowledgement without remounting, next drafts, attachment recovery, retries, background navigation and memoized long-chat history during sends and streaming');
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -340,11 +334,25 @@ async function main() {
     server: { host: "127.0.0.1", port: 0 },
     plugins: [{
       name: "chat-send-feedback-fixture",
+      enforce: "pre",
+      transform(code, id) {
+        if (id.split('?')[0].endsWith('/motion/PreviewRail.tsx')) {
+          assert.ok(code.includes('const scale = highlighted'));
+          return code.replace('const scale = highlighted', 'window.railItemsRendered++; const scale = highlighted');
+        }
+        if (id.split('?')[0].endsWith('/components/ChatComposer.tsx')) {
+          // Count real saved-card renders without changing production components or timing assertions.
+          assert.ok(code.includes('const linked = linkedContext(message);'));
+          assert.ok(code.includes('const transcript = messages.slice(start);'));
+          return code.replace('const linked = linkedContext(message);', 'window.renderedMessageIds.push(message.id); const linked = linkedContext(message);')
+            .replace('const transcript = messages.slice(start);', 'window.transcriptRenders++; const transcript = messages.slice(start);');
+        }
+      },
       resolveId(id) { if (id === "/__chat_send_feedback_fixture.tsx") return id; },
       load(id) { if (id === "/__chat_send_feedback_fixture.tsx") return fixture; },
       configureServer(server) {
         server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__chat_send_feedback__") return next();
+          if (request.url.split('?')[0] !== "/__chat_send_feedback__") return next();
           const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_send_feedback_fixture.tsx"></script></body></html>');
           response.setHeader("Content-Type", "text/html");
           response.end(html);

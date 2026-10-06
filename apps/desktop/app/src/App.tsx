@@ -112,6 +112,8 @@ function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
   const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
   const projectRef = useRef<OpenProject | null>(null);
+  const projectsSeen = useRef(new Map<string, Pick<OpenProject, "path" | "name">>());
+  const projectNavigation = useRef(0);
   projectRef.current = project;
   // The latest state of every project the main process has sent this window; it's their only writer
   // (see ADR-0001). The ref leads, so callbacks read a state that arrived since the last render.
@@ -359,6 +361,7 @@ function App() {
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
     : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
+  const waitingStepIds = useMemo(() => run?.approvals.flatMap(request => request.stepId ? [request.stepId] : []), [run?.approvals]);
   const agentPorts = useAgentPorts();
   const isSending = preparingHere || Boolean(run);
   const usage = useUsage();
@@ -698,6 +701,7 @@ function App() {
   function adoptProject(nextProject: OpenProject) {
     if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
     setSelectedLink(null);
+    projectsSeen.current.set(nextProject.path, { path: nextProject.path, name: nextProject.name });
     advanceChatView();
     setStartupError(null);
     setLoading(false);
@@ -719,21 +723,38 @@ function App() {
   }
 
   // Opens a project in place of the one shown; a cancelled dialog, or the project already open, changes nothing.
-  async function replaceProject(load: () => Promise<OpenProject | null>) {
+  async function replaceProject(load: () => Promise<OpenProject | null>, path?: string) {
+    const navigation = ++projectNavigation.current;
+    const cached = path ? projectsSeen.current.get(path) : undefined;
+    const cachedState = path ? statesRef.current[path] : undefined;
+    if (cached && cachedState && (cached.path !== projectRef.current?.path || selectedLinkRef.current)) adoptProject({ ...cached, state: cachedState });
     try {
       const next = await load();
-      if (next && (next.path !== projectRef.current?.path || selectedLinkRef.current)) adoptProject(next);
+      if (navigation !== projectNavigation.current || !next) return;
+      if (next.path !== projectRef.current?.path || selectedLinkRef.current) adoptProject(next);
+      else {
+        // Revalidation updates the list without resetting a Chat or draft picked while it was in flight.
+        projectsSeen.current.set(next.path, { path: next.path, name: next.name });
+        // Host events may have supplied a newer state while this request was pending.
+        if (!path || statesRef.current[next.path] === cachedState) receiveState(next.path, next.state);
+        setProject(next);
+        const restored = restoredChatsNotice(next.restoredChats);
+        if (restored) setNotice(restored);
+      }
     } catch (error) {
+      if (navigation !== projectNavigation.current) return;
       if (!projectRef.current) setStartupError(ipcErrorMessage(error));
       setNotice(ipcErrorMessage(error));
     }
   }
 
   const openProject = () => replaceProject(() => window.milagre.openProject());
-  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath));
+  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath), projectPath);
   async function selectLink(id: string, sessionId?: number) {
+    const navigation = ++projectNavigation.current;
     try {
       const next = await window.milagre.openNamedLink(id);
+      if (navigation !== projectNavigation.current) return;
       if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
       advanceChatView();
       setLinkStates(previous => ({ ...previous, [id]: next.state })); setLinkInitialSession(sessionId); setSelectedLink(next); setView('chat'); setNewChatError(null);
@@ -741,10 +762,16 @@ function App() {
   }
   async function openCanvasChat(projectPath: string, sessionId: number) {
     if (isLinkScopeKey(projectPath)) { await selectLink(projectPath.slice('milagre-link:'.length), sessionId); return; }
+    if (!selectedLinkRef.current && projectRef.current?.path === projectPath) { openChat(sessionId); return; }
+    const navigation = ++projectNavigation.current;
     try {
-      if (projectRef.current?.path !== projectPath || selectedLinkRef.current) adoptProject(await window.milagre.openCanvasProject(projectPath));
+      if (projectRef.current?.path !== projectPath || selectedLinkRef.current) {
+        const next = await window.milagre.openCanvasProject(projectPath);
+        if (navigation !== projectNavigation.current) return;
+        adoptProject(next);
+      }
       openChat(sessionId);
-    } catch (error) { setNotice(ipcErrorMessage(error)); }
+    } catch (error) { if (navigation === projectNavigation.current) setNotice(ipcErrorMessage(error)); }
   }
 
   // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
@@ -1022,6 +1049,8 @@ function App() {
   const openCanvas = useEvent(() => { changes.closeDiff(); setView("canvas"); });
   const openProjectSettings = useEvent(() => { setSettingsSection("project"); setView("settings"); });
   const openCommandPalette = useEvent(() => setCommandPaletteOpen(true));
+  // Saved message cards also receive this callback: keep their memoization during sends and streamed updates.
+  const openLinkedChat = useEvent((key: string) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key)));
   const sidebarUsage = useMemo(
     () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
     [showUsageInSidebar, usage.snapshot, usage.loading],
@@ -1205,7 +1234,7 @@ function App() {
             tasks={run?.tasks}
             ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
             onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
-            waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
+            waitingStepIds={waitingStepIds}
             asking={Boolean(run?.questions.length)}
             runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
             lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
@@ -1217,7 +1246,7 @@ function App() {
               onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
             } : undefined}
             resume={project && selectedSession?.resumeTurn ? { onContinue: () => void window.milagre.resumeChat(project.path, selectedSession.id).catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)) } : undefined}
-            onOpenLinkedChat={(key) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
+            onOpenLinkedChat={openLinkedChat}
             handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
             models={models}
             cliStatus={cliStatus}

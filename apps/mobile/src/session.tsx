@@ -1,7 +1,7 @@
 import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createClient, type ClientHost, type Client, type RecentProject, type Snapshot } from './client';
+import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot, type ProjectPreview } from './client';
 import { relayRuntime } from './relay-native';
 import { syncProject } from './live';
 import { readPermission, savedHosts, savedNavigation, savePermission } from './hosts-native';
@@ -34,6 +34,17 @@ function useSessionState() {
   const selection = useRef<{ client: Client; path: string } | null>(null);
   // The last snapshot of each Project this session saw, so reopening one shows its Chats at once while it refreshes.
   const seen = useRef(new Map<string, Snapshot>());
+  const listed = useRef(new Map<string, Snapshot | ProjectPreview>());
+  const previews = useRef(new Map<Client, Map<string, Promise<Snapshot | ProjectPreview>>>());
+  // Keep streamed status and local refreshes in the copy a remounted drawer will read.
+  useEffect(() => {
+    if (client && snapshot) {
+      const key = `${client.url}|${snapshot.project.path}`;
+      seen.current.set(key, snapshot);
+      listed.current.set(key, snapshot);
+    }
+  }, [client, snapshot]);
+  const cachedProject = useCallback((path: string) => client ? listed.current.get(`${client.url}|${path}`) ?? seen.current.get(`${client.url}|${path}`) : undefined, [client]);
   /** The Project being opened, and whether its last copy is already on screen. */
   const [opening, setOpening] = useState<{ path: string; cached: boolean } | null>(null);
   // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
@@ -148,9 +159,34 @@ function useSessionState() {
     }
   };
   // Reading a drawer group does not select it or disturb the Chat behind the drawer.
-  const previewProject = useCallback(async (path: string) => {
-    if (!client) throw new Error('Connect to your computer first.');
-    return client.open(path);
+  const previewProject = useCallback((path: string): Promise<Snapshot | ProjectPreview> => {
+    if (!client) return Promise.reject(new Error('Connect to your computer first.'));
+    let pending = previews.current.get(client);
+    if (!pending) { pending = new Map(); previews.current.set(client, pending); }
+    const existing = pending.get(path);
+    if (existing) return existing;
+    const key = `${client.url}|${path}`;
+    const previous = listed.current.get(key) ?? seen.current.get(key);
+    const work = (async () => {
+      const linked = path.startsWith('milagre-link:');
+      const project = linked ? { path } : await client.call<OpenProject>('project:open', [path]);
+      const canonicalKey = `${client.url}|${project.path}`;
+      const canonicalPrevious = listed.current.get(canonicalKey) ?? seen.current.get(canonicalKey);
+      const copy = linked ? await client.open(path) : await client.preview(project.path);
+      // A live update or foreground open that landed meanwhile is newer than this preview.
+      const latest = listed.current.get(canonicalKey) ?? seen.current.get(canonicalKey);
+      const requested = listed.current.get(key) ?? seen.current.get(key);
+      const next = latest && latest !== canonicalPrevious ? latest : requested && requested !== previous ? requested : copy;
+      listed.current.set(key, next).set(canonicalKey, next);
+      // Only full snapshots can warm navigation. A summary must never erase already-read messages.
+      if (!next.previewOnly) seen.current.set(key, next).set(canonicalKey, next);
+      return next;
+    })().finally(() => {
+      pending.delete(path);
+      if (!pending.size) previews.current.delete(client);
+    });
+    pending.set(path, work);
+    return work;
   }, [client]);
   const reloadProjects = useCallback(async () => {
     if (!client) return;
@@ -202,7 +238,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, lastLocation, rememberChat, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
+  return { booted, lastLocation, rememberChat, cachedProject, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

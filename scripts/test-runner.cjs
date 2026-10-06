@@ -32,10 +32,11 @@ function discoverElectronChecks(root) {
 const WORKSPACES = { shared: 'packages/shared/', core: 'packages/core/', desktop: 'apps/desktop/', daemon: 'apps/daemon/', relay: 'apps/relay/', mobile: 'apps/mobile/', scripts: 'scripts/' }
 
 function parseArgs(argv) {
-  const filters = { unit: false, electron: false, workspace: null, only: null, changed: false, list: false }
+  const filters = { unit: false, electron: false, workspace: null, only: null, list: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--unit' || arg === '--electron' || arg === '--changed' || arg === '--list') filters[arg.slice(2)] = true
+    if (arg === '--changed') throw new Error('--changed is not implemented yet; use --only or --workspace')
+    if (arg === '--unit' || arg === '--electron' || arg === '--list') filters[arg.slice(2)] = true
     else if (arg === '--workspace' || arg === '--only') { filters[arg.slice(2)] = argv[++i]; if (!filters[arg.slice(2)]) throw new Error(`${arg} needs a value`) }
     else throw new Error(`Unknown option ${arg}`)
   }

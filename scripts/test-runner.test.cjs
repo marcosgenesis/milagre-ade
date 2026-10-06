@@ -40,3 +40,7 @@ test('platform and tool prerequisites skip checks with a reason instead of faili
 test('unknown flags are rejected', () => {
   assert.throws(() => parseArgs(['--watchh']), /Unknown option --watchh/)
 })
+
+test('--changed is rejected until it is implemented', () => {
+  assert.throws(() => parseArgs(['--changed']), /--changed is not implemented yet; use --only or --workspace/)
+})

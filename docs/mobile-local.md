@@ -184,8 +184,8 @@ Simulator notification injection bypasses Expo/APNs transport. Live APNs/FCM del
 ```sh
 npm run typecheck:mobile
 npm run lint --workspace @milagre/mobile
-npm run test:mobile
-npm run test:daemon
+npm test -- --workspace mobile
+npm test -- --workspace daemon
 npm run export:ios --workspace @milagre/mobile
 ```
 

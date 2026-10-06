@@ -12,7 +12,7 @@ Paste an image with Cmd+V (Ctrl+V on other platforms) to send image content with
 
 Type `@` to find tracked and untracked, non-ignored files in the chat's worktree. Search by filename or path and select with Enter or Tab. Images and videos appear as previews in the composer; other files appear as removable chips. The selected path is sent to the agent without inserting it into your message text. Results are limited and cached for five seconds. Switching chats clears attachment drafts.
 
-Restart Electron after updating to register the media protocol and file-search IPC. Run `npm run test:chat-attachments` for the Chromium integration checks, including video playback, attachment delivery and file selection without calling an agent.
+Restart Electron after updating to register the media protocol and file-search IPC. Run `npm test -- --only chat-attachments` for the Chromium integration checks, including video playback, attachment delivery and file selection without calling an agent.
 
 ## Notifications
 

@@ -1,4 +1,4 @@
-// Run with npm run test:worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
+// Run with npm test -- --only worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
 // the Setup command field in Settings, and the setup step in the chat of a new worktree, which starts without asking.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");

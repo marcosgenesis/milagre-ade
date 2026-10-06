@@ -14,7 +14,7 @@ function emptyState(projectName) {
 }
 
 /** The state matched with the worktrees git lists now; a state that already matches is returned as is. */
-function reconcileState(rawState, projectName, discoveredWorktrees) {
+function reconcileState(rawState, projectName, discoveredWorktrees, ownedWorktrees = new Map()) {
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
   const existingSessions = Object.values(state.sessions ?? {});
@@ -31,6 +31,11 @@ function reconcileState(rawState, projectName, discoveredWorktrees) {
     const previous = existingByPath.get(discovered.path);
     const worktree = previous ?? { id: allocateId(), project_id: 1, path: discovered.path, name: discovered.name };
     worktrees[worktree.id] = { ...worktree, project_id: 1, path: discovered.path, name: discovered.name };
+    const sharedChat = ownedWorktrees.get(discovered.path);
+    if (sharedChat) {
+      worktrees[worktree.id].sharedChat = sharedChat;
+      continue;
+    }
     // A worktree can hold several chats; keep them all and make sure it has at least one.
     const worktreeSessions = existingSessions.filter((session) => session.worktree_id === worktree.id);
     if (worktreeSessions.length === 0) worktreeSessions.push({ id: allocateId(), worktree_id: worktree.id, agent_name: discovered.name, status: "Created" });

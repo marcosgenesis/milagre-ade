@@ -128,4 +128,9 @@ test('mobile fingerprint check watches the native inputs, needs the approval lab
   const text = fs.readFileSync(path.join(__dirname, '../.github/workflows/mobile-fingerprint.yml'), 'utf8')
   assert.ok(!/eas build/.test(text), 'the check never starts a build')
   assert.ok(text.includes('native-build-approved'))
+  assert.ok(workflow.on.pull_request.types.includes('labeled') && workflow.on.pull_request.types.includes('unlabeled'))
+  assert.ok(Number.isInteger(workflow.jobs.fingerprint['timeout-minutes']))
+  const steps = workflow.jobs.fingerprint.steps
+  assert.ok(steps.find(step => step.name === 'Fingerprint main').run.includes('npx patch-package --patch-dir apps/mobile/patches'))
+  assert.ok(steps.find(step => step.name === 'Compare').run.includes('Could not read a fingerprint hash'))
 })

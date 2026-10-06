@@ -165,4 +165,15 @@ New desktop units: `LinkProjectDialog.tsx` creates a named Link; `ProjectAvatarS
 
 Recommended method: implement in this Chat using `superpowers:executing-plans`, in the existing isolated Worktree, followed by the required independent final review. All tasks share scope/lifecycle interfaces, so sequential implementation keeps those contracts in one context. The user has requested a local run; keep that as part of completion.
 
-This plan awaits review before product code or dependency installation begins.
+Approved and executed inline. The Link-only PR records the final validation and independent review. Import remains a separate PR.
+
+
+## Final verification
+
+Desktop/shared typecheck and production build passed. `test:agent` passed 1,368 tests (120 shared, 877 core, 223 desktop, 148 daemon); `test:ui` passed 218. The real Electron Project Links, canvas Links and Delegation checks passed. Claude and Codex edited both owned Worktrees while leaving main checkouts untouched. A real Codex continuation after restart preserved its native session, exact bindings and canonical transcript.
+
+Independent review found and verified fixes for interrupted ignored setup output, replacement directories, missing-member continuation markers, canonical canvas reads, and late acknowledgements across same-text drafts and scope navigation. No Critical/Important findings remain; no minor findings were deferred. Screenshot commit: `1fbc026ea858a61c7cd409e83354ea96135224de` on the orphan screenshots branch.
+
+Implementation rulings:
+- Keep LinkWorkspace as a separate scoped view using existing composer primitives. This avoids a fictional Project in ordinary App state; it requires keeping view behavior in step with Project Chats.
+- Reject unsupported Delegation into or from shared Link Chats explicitly while preserving read-only canvas tools and canonical transcript queries. Shared Delegation needs a later scope-aware protocol extension.

@@ -16,8 +16,15 @@ function createChatScopes({ projects, links, validateLink }) {
       if (!isLinkScopeKey(key)) return { cwd: state.worktrees[session.worktree_id]?.path };
       await validateLink(id);
       const fs = require('node:fs/promises');
+      const path = require('node:path');
+      const git = require('./git/client.cjs').createGit().read;
       for (const member of session.worktrees) {
-        try { if (await fs.realpath(member.worktreePath) !== member.worktreePath) throw new Error('Worktree target changed'); }
+        try {
+          if (await fs.realpath(member.worktreePath) !== member.worktreePath) throw new Error('Worktree target changed');
+          const registered = (await git.worktreeList(member.projectPath)).find(entry => entry.path === member.worktreePath && entry.name === member.branch);
+          if (!registered || await git.commonDir(member.worktreePath) !== await git.commonDir(member.projectPath)) throw new Error('Worktree identity changed');
+          if (await fs.realpath(path.join(session.workspacePath, member.alias)) !== member.worktreePath) throw new Error('Workspace alias changed');
+        }
         catch { throw new Error(`Project ${member.projectName || member.alias}: its shared Worktree is unavailable.`); }
       }
       return {

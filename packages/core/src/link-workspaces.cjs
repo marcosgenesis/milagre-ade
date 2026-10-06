@@ -86,7 +86,7 @@ function createLinkWorkspaces({ store, registry, ownProject, root = DEFAULT_WORK
         const exists = await fs.lstat(member.worktreePath).then(() => true, () => false);
         if (!exists) continue;
         try {
-          if (!member.created || await git.read.commitOf(member.worktreePath, 'HEAD') !== member.initialCommit || (await git.read.text(member.worktreePath, ['status', '--porcelain', '--untracked-files=all'])).trim()) throw new Error('Modified or unverified');
+          if (member.setupStarted && !member.setupDone || !member.created || await git.read.commitOf(member.worktreePath, 'HEAD') !== member.initialCommit || (await git.read.text(member.worktreePath, ['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim()) throw new Error('Modified or unverified');
           await git.write.checked(member.projectPath, ['worktree', 'remove', '--', member.worktreePath]);
           await git.write.checked(member.projectPath, ['branch', '-d', '--', member.branch]);
           member.created = false;

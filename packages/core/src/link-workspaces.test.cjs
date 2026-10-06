@@ -82,3 +82,17 @@ test('Project reconciliation references a shared Chat without a local starter', 
   assert.deepEqual(Object.values(state.worktrees)[0].sharedChat, owned.get('/work/api'));
   assert.deepEqual(state.sessions, {});
 });
+test('recovery retains an interrupted setup even when its changed files are ignored', async t => {
+  const { link, store, workspaces } = await fixture(t);
+  const request = { link, chatId: 1, prompt: 'recover', operationId: randomUUID() };
+  const prepared = await workspaces.prepareLinkChat(request);
+  const member = prepared.worktrees[0];
+  await fs.writeFile(path.join(member.projectPath, '.git', 'info', 'exclude'), '.env\n');
+  await fs.writeFile(path.join(member.worktreePath, '.env'), 'keep this setup output');
+  await store.update(link.id, state => { const prep = state.preparations[request.operationId]; return { ...state, preparations: { ...state.preparations, [request.operationId]: { ...prep, status: 'setup', members: prep.members.map((member, index) => index === 0 ? { ...member, setupCommand: 'setup', setupStarted: true, setupDone: false } : member) } } }; });
+  await store.flush(link.id);
+  await assert.rejects(workspaces.recoverLinkPreparations(link.id), /interrupted/);
+  const failed = (await store.get(link.id)).preparations[request.operationId];
+  assert.ok(failed.retainedPaths.includes(member.worktreePath));
+  assert.equal(await fs.readFile(path.join(member.worktreePath, '.env'), 'utf8'), 'keep this setup output');
+});

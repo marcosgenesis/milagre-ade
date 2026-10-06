@@ -78,3 +78,50 @@ test('Git accepts a selected member and refuses the aggregate workspace; editor 
   assert.deepEqual(await runtime.invoke('link:workspace-roots', [session.workspacePath]), session.worktrees.map(member => member.worktreePath));
   await assert.rejects(runtime.invoke('link:workspace-roots', ['/']), /workspace/);
 });
+test('a plain directory replacing a registered member Worktree cannot start a provider', async t => {
+  const { runtime, projects, created } = await fixture(t);
+  const link = await runtime.invoke('link:create', [{ name: 'Food', projectIds: projects.map(project => project.id) }]); await runtime.invoke('link:open', [link.id]);
+  const request = { linkId: link.id, sessionId: null, operationId: randomUUID(), body: 'Edit', provider: 'codex', model: 'test', permissionMode: 'auto' };
+  const sent = await runtime.invoke('link:send', [request]); await runtime.flush();
+  const session = (await runtime.invoke('link:snapshot', [link.id])).state.sessions[sent.sessionId];
+  const member = session.worktrees[0];
+  execFileSync('git', ['-C', member.projectPath, 'worktree', 'remove', member.worktreePath]); await fs.mkdir(member.worktreePath);
+  const count = created.length;
+  await assert.rejects(runtime.invoke('link:send', [{ ...request, sessionId: session.id, operationId: randomUUID() }]), /Worktree.*unavailable/);
+  assert.equal(created.length, count);
+});
+test('unavailable owned Worktrees keep an interrupted turn resumable after repair', async t => {
+  const { runtime, projects, dir, make } = await fixture(t);
+  const link = await runtime.invoke('link:create', [{ name: 'Food', projectIds: projects.map(project => project.id) }]); await runtime.invoke('link:open', [link.id]);
+  const sent = await runtime.invoke('link:send', [{ linkId: link.id, sessionId: null, operationId: randomUUID(), body: 'Edit', provider: 'codex', model: 'test', permissionMode: 'auto' }]); await runtime.flush();
+  const owner = scopeKey({ kind: 'link', linkId: link.id }); const resumeTurn = { stoppedAt: Date.now(), provider: 'codex', model: 'test', permissionMode: 'auto', prompt: 'Continue' };
+  const session = (await runtime.invoke('link:snapshot', [link.id])).state.sessions[sent.sessionId]; const root = session.worktrees[0].worktreePath;
+  await runtime.close();
+  const file = path.join(dir, 'profile', 'links', link.id, '.milagre', 'coordination.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8')); saved.sessions[sent.sessionId].resumeTurn = resumeTurn; await fs.writeFile(file, JSON.stringify(saved));
+  const next = make();
+  await fs.rename(root, root + '-moved');
+  try { await next.invoke('link:open', [link.id]); assert.deepEqual((await next.invoke('link:snapshot', [link.id])).state.sessions[sent.sessionId].resumeTurn, resumeTurn); }
+  finally { await fs.rename(root + '-moved', root); }
+  assert.equal(await next.invoke('chat:resume', [owner, sent.sessionId]), true);
+});
+test('shared Chats retain canvas reads and external readers see the canonical transcript', async t => {
+  const { runtime, projects, created } = await fixture(t);
+  const link = await runtime.invoke('link:create', [{ name: 'Food', projectIds: projects.map(project => project.id) }]); await runtime.invoke('link:open', [link.id]);
+  const request = { linkId: link.id, sessionId: null, operationId: randomUUID(), body: 'Edit', provider: 'codex', model: 'test', permissionMode: 'auto' };
+  const sent = await runtime.invoke('link:send', [request]); await runtime.flush();
+  const session = (await runtime.invoke('link:snapshot', [link.id])).state.sessions[sent.sessionId];
+  const member = session.worktrees[0], external = projects.find(project => project.id !== member.projectId);
+  await runtime.invoke('canvas:link-add', [{ project_id: member.projectId, worktree_path: member.worktreePath }, { project_id: external.id, worktree_path: external.path }]);
+  const tools = created[0].linked.tools;
+  assert.ok((await tools.find(tool => tool.name === 'linked_overview').run()).includes(external.path));
+  const current = await runtime.openProject(external.path), starter = Object.values(current.state.sessions)[0];
+  await runtime.invoke('chat:send', [{ projectPath: external.path, sessionId: starter.id, body: 'Read shared work', provider: 'codex', model: 'test', permissionMode: 'auto' }]); await runtime.flush();
+  for (let i = 0; i < 100 && created.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(created.length, 2, 'External provider started');
+  const ordinaryTools = created.at(-1).linked.tools;
+  const ref = chatKeyForScope({ kind: 'link', linkId: link.id }, session.id);
+  assert.match(await ordinaryTools.find(tool => tool.name === 'linked_overview').run(), new RegExp(ref));
+  assert.match(await ordinaryTools.find(tool => tool.name === 'read_linked_chat').run({ chat: ref }), /Changed both/);
+  await assert.rejects(ordinaryTools.find(tool => tool.name === 'delegate').run({ worktree: member.worktreePath, chat: ref, message: 'Edit this' }), /Delegation into a shared Link Chat is not supported/);
+});

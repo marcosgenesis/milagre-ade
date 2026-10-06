@@ -447,7 +447,7 @@ function createRuntime(options) {
     createSession: options.createSession ?? ((provider, options) => (provider === "codex"
       ? new CodexSession({ ...options, clientVersion: version })
       : new ClaudeSession(options))),
-    linkedFor: (chatId) => isLinkScopeKey(projectOfKey(chatId)) ? null : linked.forChat(chatId),
+    linkedFor: (chatId) => linked.forChat(chatId),
     onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
     onTurnStarted: () => ports.wake(),
     send: (chatId, event) => void chats.receive(chatId, event),
@@ -479,7 +479,7 @@ function createRuntime(options) {
   async function startAgentTurn(request) {
     if (closing) return { turnId: null, steered: false, cancelled: true };
     // The linked summary is read while the turn gets ready, so a Chat with Links starts no later than one without.
-    const linkedContext = agents.isTurnActive(request.chatId) || isLinkScopeKey(projectOfKey(request.chatId)) ? Promise.resolve("") : linked.context(request.chatId);
+    const linkedContext = agents.isTurnActive(request.chatId) ? Promise.resolve("") : linked.context(request.chatId);
     const images = decodeImages(request.images);
     // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
     const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
@@ -659,7 +659,14 @@ function createRuntime(options) {
   // A linked Project not open yet is opened here (ownership, reconciled Worktrees, interrupted turns), as the
   // canvas opens every Project it shows.
   async function linkedState(projectPath) {
-    return states.has(projectPath) ? states.get(projectPath) : (await readProject(projectPath)).state;
+    if (isLinkScopeKey(projectPath)) return linkStore.get(projectPath.slice('milagre-link:'.length));
+    if (states.has(projectPath)) {
+      const cached = await states.get(projectPath);
+      const known = new Set(Object.values(cached.worktrees).map(worktree => worktree.path));
+      const missingReference = linkStore.ids().some(id => Object.values(linkStore.cached(id)?.sessions ?? {}).some(session => session.worktrees.some(member => member.projectPath === projectPath && !known.has(member.worktreePath))));
+      if (!missingReference) return cached;
+    }
+    return (await readProject(projectPath)).state;
   }
   const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit });
   const linkWorkspaces = createLinkWorkspaces({ store: linkStore, registry: projectRegistry(), ownProject, root: options.worktreeRoot ?? DEFAULT_WORKTREE_ROOT, getSettings: projectPath => projectSettings().get(projectPath) });

@@ -2,7 +2,7 @@ import { LinkWorkspace } from './components/LinkWorkspace';
 import { LinkProjectDialog } from './components/LinkProjectDialog';
 import { createScopeDrafts } from './lib/link-scope';
 import type { LinkState, OpenLink } from '@milagre/shared/model';
-import { isLinkScopeKey, scopeFromKey } from '@milagre/shared/chat-scopes';
+import { scopeKey, isLinkScopeKey, scopeFromKey } from '@milagre/shared/chat-scopes';
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
@@ -116,6 +116,7 @@ function App() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
+  const linkStatesRef = useRef(linkStates); linkStatesRef.current = linkStates;
   const [states, setStates] = useState<Record<string, CoordinatorState>>({});
   const statesRef = useRef(states);
   const state = project ? states[project.path] ?? null : null;
@@ -287,7 +288,8 @@ function App() {
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
-    const latest = statesRef.current[projectOfKey(chatId)];
+    const owner = projectOfKey(chatId);
+    const latest = isLinkScopeKey(owner) ? linkStatesRef.current[owner.slice("milagre-link:".length)] : statesRef.current[owner];
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
@@ -537,9 +539,9 @@ function App() {
     [state?.sessions, project?.path],
   );
   useEffect(() => {
-    if (!project) return;
+    if (!project || selectedLink) return;
     void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
-  }, [project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
+  }, [selectedLink?.link.id, project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
 
   // The main process notifies about a chat that waits on the user while Milagre is in the background.
   useEffect(() => {
@@ -550,8 +552,17 @@ function App() {
   useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
     if (event.type === "subagent-update") {
       const path = projectOfKey(chatId);
+      const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
+      if (linkId) setLinkStates(previous => { const cached = previous[linkId]; return cached ? { ...previous, [linkId]: applyAgentEvent(cached, {}, path, chatId, event).state } : previous; });
       const cached = statesRef.current[path];
       if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
+    }
+    const link = selectedLinkRef.current;
+    if (link && chatInProject(scopeKey({ kind: "link", linkId: link.link.id }), chatId)) {
+      const latest = linkStatesRef.current[link.link.id] ?? link.state;
+      const session = latest.sessions[sessionIdFromKey(chatId)];
+      if (session && !session.archived && (event.type === "turn-completed" || event.type === "turn-failed")) void window.milagre.notifyCompletion({ chatId, title: link.link.name, subtitle: chatTitle(session, latest.messages.filter(message => message.session_id === session.id)) }).catch(() => {});
+      return;
     }
     const current = projectRef.current;
     const latest = openState();
@@ -900,7 +911,7 @@ function App() {
     () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
     [showUsageInSidebar, usage.snapshot, usage.loading],
   );
-  const composerWorktrees = useMemo(() => worktrees.map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
+  const composerWorktrees = useMemo(() => worktrees.filter(worktree => !worktree.sharedChat).map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
 
   // Fast loads would cut the startup animation off at the bare legs, so the splash stays until the logo is whole,
   // then fades out over the app while the panes slide in. Same key in both trees keeps the logo from restarting.
@@ -926,7 +937,7 @@ function App() {
   }
 
   const linkDialog = linkDialogOpen ? <LinkProjectDialog currentPath={selectedLink ? undefined : project?.path} onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
-  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSelectedLink(null); setView('settings'); }} onCanvas={() => { setSelectedLink(null); setView('canvas'); }} usage={sidebarUsage} />{linkDialog}</>;
+  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSelectedLink(null); setView('settings'); }} onCanvas={() => { setSelectedLink(null); setView('canvas'); }} usage={sidebarUsage} />{linkDialog}</>;
 
   if (loading || !project || !state || splash === "intro") {
     return <>{splashOverlay(false)}</>;

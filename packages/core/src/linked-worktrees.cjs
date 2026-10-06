@@ -1,3 +1,4 @@
+const { isLinkScopeKey } = require('@milagre/shared/chat-scopes');
 const path = require("node:path");
 const { chatKey, lastUserModel, projectOfKey, runStatus, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { activeWorktrees } = require("./project-identity.cjs");
@@ -33,21 +34,26 @@ function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit
   async function sides(chatId) {
     const projectPath = projectOfKey(chatId);
     const { projects, links } = await registry().snapshot();
-    const source = projects.find(entry => entry.path === projectPath);
-    const relevant = source ? links.filter(link => link.a.project_id === source.id || link.b.project_id === source.id) : [];
-    if (!relevant.length) return [];
     const state = await project(projectPath);
-    const own = state.worktrees[state.sessions[sessionIdFromKey(chatId)]?.worktree_id]?.path;
-    if (!own) return [];
-    const ids = new Set([source.id, ...relevant.flatMap(link => [link.a.project_id, link.b.project_id])]);
-    const reach = Object.fromEntries(await Promise.all([...ids].map(async (id) => {
-      const entry = projects.find(item => item.id === id);
-      return [id, entry ? await active(entry.path) : []];
-    })));
-    return linkedWorktrees({ project_id: source.id, worktree_path: own }, relevant, reach).map((item) => {
-      const entry = projects.find(candidate => candidate.id === item.project_id);
-      return { ...item, projectPath: entry.path, projectName: entry.name, sourceWorktree: own };
-    });
+    const session = state.sessions[sessionIdFromKey(chatId)];
+    const ownBindings = isLinkScopeKey(projectPath) ? session?.worktrees ?? [] : [{ projectId: projects.find(entry => entry.path === projectPath)?.id, worktreePath: state.worktrees[session?.worktree_id]?.path }];
+    const owned = new Set(ownBindings.map(member => member.worktreePath));
+    const found = new Map();
+    for (const member of ownBindings) {
+      const source = projects.find(entry => entry.id === member.projectId);
+      if (!source || !member.worktreePath) continue;
+      const relevant = links.filter(link => link.a.project_id === source.id || link.b.project_id === source.id);
+      if (!relevant.length) continue;
+      const ids = new Set([source.id, ...relevant.flatMap(link => [link.a.project_id, link.b.project_id])]);
+      const reach = Object.fromEntries(await Promise.all([...ids].map(async id => { const entry = projects.find(item => item.id === id); return [id, entry ? await active(entry.path) : []]; })));
+      for (const item of linkedWorktrees({ project_id: source.id, worktree_path: member.worktreePath }, relevant, reach)) {
+        if (owned.has(item.worktree_path)) continue;
+        const entry = projects.find(candidate => candidate.id === item.project_id);
+        const key = `${item.project_id}\0${item.worktree_path}`;
+        if (!found.has(key)) found.set(key, { ...item, projectPath: entry.path, projectName: entry.name, sourceWorktree: member.worktreePath });
+      }
+    }
+    return [...found.values()];
   }
 
   const reads = createLinkedReads({
@@ -111,6 +117,7 @@ function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit
         if (!side) return null;
         const state = await project(side.projectPath);
         const worktree = Object.values(state.worktrees).find(item => item.path === worktreePath);
+        if (worktree?.sharedChat) throw new Error("Delegation into a shared Link Chat is not supported. Read its canonical transcript instead.");
         return { link_id: side.link_id, projectPath: side.projectPath, projectName: side.projectName, branch: worktree?.name ?? path.basename(worktreePath) };
       },
       chat,
@@ -133,7 +140,7 @@ function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit
   const mcp = createLinkedMcpServer({ toolsFor });
 
   function toolsFor(chatId) {
-    if (!tools.has(chatId)) tools.set(chatId, linkedToolDefinitions(chatId, { reads, delegations }));
+    if (!tools.has(chatId)) tools.set(chatId, linkedToolDefinitions(chatId, { reads, delegations: isLinkScopeKey(projectOfKey(chatId)) ? { delegate: async () => { throw new Error('Delegation from a shared Link Chat is not supported. Use its canvas read tools.'); }, conclude: async () => { throw new Error('Shared Link Chats do not host Negotiations.'); } } : delegations }));
     return tools.get(chatId);
   }
 

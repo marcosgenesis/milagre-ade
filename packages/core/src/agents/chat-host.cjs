@@ -433,6 +433,7 @@ class ChatHost {
   /** Continues one chat a quit stopped, on the turn's saved options. Resolves false when it has nothing to continue. */
   async resumeChat(projectPath, sessionId) {
     if (this.runs[chatKey(projectPath, sessionId)]) return false;
+    await this.states.executionContext?.(projectPath, sessionId);
     let turn = null;
     // Taken from the latest state, so a chat resumes once.
     const { state, changed } = await this.states.update(projectPath, (latest) => {

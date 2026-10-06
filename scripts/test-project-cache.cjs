@@ -54,7 +54,7 @@ import { ProjectNavigation } from '/@fs/${path.resolve('apps/mobile/src/project-
 ${data}
 window.makeClient = host => ({
   url: host.address,
-  recent: async () => [{ path: '/alpha', name: 'alpha' }, { path: '/beta', name: 'beta' }],
+  recentScopes: async () => [{ path: '/alpha', name: 'alpha' }, { path: '/beta', name: 'beta' }],
   open: async path => ({ project: await window.request(host.address, path), runs: { runs: {}, seq: 0 } }),
   call: async (method, args) => method === 'project:recent' ? [{ path: '/alpha', name: 'alpha' }, { path: '/beta', name: 'beta' }] : method === 'project:open' ? { path: args[0] } : null,
   snapshot: async path => ({ project: await window.request(host.address, path), runs: { runs: {}, seq: 0 } }),
@@ -105,7 +105,7 @@ const stubs = {
   './app/settings': 'export const SettingsView = () => null;',
   './app/notifications': 'export const NotificationsView = () => null;',
   './usage-section': 'export const UsageSection = () => null;',
-  './project-icon': 'export const ProjectIcon = () => null;',
+  './project-icon': 'export const ProjectIcon = () => null; export const ProjectIcons = () => null;',
   './project-search': 'export const ProjectSearch = () => null;',
   './chat-actions': 'export const chatMenu = () => []; export const runChatAction = async () => {};',
   './confirm-store': 'export const confirm = async () => true;',

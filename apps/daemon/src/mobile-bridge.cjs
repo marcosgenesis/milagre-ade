@@ -18,6 +18,7 @@ const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
+  'accounts:list', 'accounts:add', 'accounts:select', 'accounts:login', 'accounts:cancel', 'accounts:remove',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'chat:archive-subagent', 'chat:archive-finished-subagents',
   'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',

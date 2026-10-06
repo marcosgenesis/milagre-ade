@@ -135,6 +135,9 @@ const bridge = {
     ipcRenderer.on("phone:status", listener);
     return () => ipcRenderer.removeListener("phone:status", listener);
   },
+  listAccounts: (refresh = false) => ipcRenderer.invoke("accounts:list", refresh),
+  accountAction: (action, provider, value) => ipcRenderer.invoke(`accounts:${action}`, provider, value),
+  onAccountsChanged: (callback) => { const listener = () => callback(); ipcRenderer.on("accounts:changed", listener); return () => ipcRenderer.removeListener("accounts:changed", listener); },
   readUsage: () => ipcRenderer.invoke("usage:read"),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),

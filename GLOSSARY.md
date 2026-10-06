@@ -6,6 +6,9 @@ Milagre coordinates coding agents across projects and git worktrees on one machi
 
 ### Work
 
+**Account**:
+A saved Claude or Codex sign-in on one computer. Each provider has one selected **Account** for that computer's **Projects**. Desktop and paired phones share the selection. A running reply keeps its existing **Account**; the next turn uses the selected one.
+
 **Project**:
 A git repository that has been opened in Milagre at least once. Every **Worktree** of the repository belongs to the same **Project**, whichever of its folders was opened.
 _Avoid_: folder, workspace, repo

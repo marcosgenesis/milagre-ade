@@ -47,6 +47,12 @@ const PATHS = Object.freeze({
   'chat:resume': ([projectPath]) => [projectPath],
   'agent:interrupt': ([chatId]) => [chatProject(chatId)],
   'agent:respond-permission': ([value]) => [chatProject(value?.chatId)],
+  'accounts:list': none,
+  'accounts:add': none,
+  'accounts:select': none,
+  'accounts:login': none,
+  'accounts:cancel': none,
+  'accounts:remove': none,
   'usage:read': none,
   'usage:cached': none,
   'agent:answer-question': ([value]) => [chatProject(value?.chatId)],
@@ -105,6 +111,8 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     const paths = PATHS[method];
     if (!paths || !Array.isArray(args)) throw refused();
     // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
+    if (method === 'accounts:list') return { result: { providers: [] } };
+    if (method.startsWith('accounts:')) throw failure(403, 'Accounts cannot be changed on this demo computer.');
     if (method === 'push:register') throw failure(403, NOTIFICATIONS_OFF);
     if (method === 'push:unregister') return { result: { registered: false } };
     if (method === 'push:focus') return { result: null };

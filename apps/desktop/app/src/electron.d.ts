@@ -204,6 +204,9 @@ declare global {
       /** Lets phones that have not paired yet do so for another ten minutes. */
       openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
+      listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      accountAction: (action: "add" | "select" | "login" | "cancel" | "remove", provider: ModelProvider, value: string) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      onAccountsChanged: (callback: () => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;

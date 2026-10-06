@@ -173,7 +173,9 @@ async function generateGitText(input, { provider = "claude", models = {}, timeou
 /** One Haiku 4.5 turn through the Agent SDK, with no tools, settings or saved session (as #37's naming call). */
 function claudeModel({ getCommand, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   return async ({ system, prompt, signal }) => {
-    const command = await getCommand();
+    const resolved = await getCommand();
+    const command = typeof resolved === "string" ? resolved : resolved?.command;
+    const env = typeof resolved === "object" ? resolved?.env : undefined;
     signal?.throwIfAborted();
     if (!command) throw new Error("The Claude CLI isn't installed.");
     const { query } = await loadSdk();
@@ -194,6 +196,7 @@ function claudeModel({ getCommand, loadSdk = () => import("@anthropic-ai/claude-
           persistSession: false,
           cwd: os.tmpdir(),
           pathToClaudeCodeExecutable: command,
+          ...(env ? { env } : {}),
           abortController,
         },
       });
@@ -219,10 +222,12 @@ const OUTPUT_SCHEMA = {
 /** One GPT-6 Luna turn in a short-lived, ephemeral, read-only `codex app-server` thread. */
 function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options), clientVersion = "0.0.0", outputSchema = OUTPUT_SCHEMA }) {
   return async ({ system, prompt, signal }) => {
-    const command = await getCommand();
+    const resolved = await getCommand();
+    const command = typeof resolved === "string" ? resolved : resolved?.command;
+    const env = typeof resolved === "object" ? resolved?.env : undefined;
     signal?.throwIfAborted();
     if (!command) throw new Error("Codex isn't installed.");
-    const rpc = createRpc({ command, cwd: os.tmpdir() });
+    const rpc = createRpc({ command, cwd: os.tmpdir(), ...(env ? { env } : {}) });
     let streamed = "";
     let final = null;
     const finished = new Promise((resolve, reject) => {

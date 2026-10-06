@@ -96,8 +96,8 @@ async function readLatestChildTurn(rpc, threadId) {
 }
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, emit, workspaceRoots, workspaceInstructions, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, emit, workspaceRoots, workspaceInstructions, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
+  constructor({ cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
     // steps: ids of the tool steps started in this turn and not yet completed.
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
@@ -223,7 +223,7 @@ class CodexSession {
   }
 
   async start(model, policy) {
-    const rpc = this.createRpc({ command: this.command, cwd: this.cwd });
+    const rpc = this.createRpc({ command: this.command, cwd: this.cwd, ...(this.env ? { env: this.env } : {}) });
     this.rpc = rpc;
     rpc.on("notification", ({ method, params }) => this.handleNotification(method, params));
     rpc.on("request", ({ id, method, params }) => this.handleServerRequest(id, method, params));
@@ -515,12 +515,12 @@ class CodexSession {
 
 // Reopening an idle chat need not start or resume an agent. Only its saved unknown children
 // are checked, and history items are never replayed as new output or fresh communications.
-async function recoverCodexSubagents({ cwd, command, agents, clientVersion = "0.0.0", createRpc = options => new CodexRpc(options) }) {
+async function recoverCodexSubagents({ cwd, command, env, agents, clientVersion = "0.0.0", createRpc = options => new CodexRpc(options) }) {
   const unknown = (agents ?? []).filter(agent => agent.status === "unknown" && !agent.archived);
   if (!command || !unknown.length) return [];
   let rpc;
   try {
-    rpc = createRpc({ command, cwd });
+    rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: 5000 });
     rpc.notify("initialized");

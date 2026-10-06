@@ -1,3 +1,4 @@
+const { createAccounts } = require("./accounts.cjs");
 const { createLinkStore } = require('./link-store.cjs');
 const { createLinkWorkspaces } = require('./link-workspaces.cjs');
 const { createChatScopes } = require('./chat-scopes.cjs');
@@ -49,7 +50,7 @@ const { createRecentProjects, launchProject, rememberProject, switchTarget } = r
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
 const { createLinkedWorktrees } = require("./linked-worktrees.cjs");
-const { createUsageReader } = require("./usage.cjs");
+const { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const { createFileSearch } = require("./project-files.cjs");
@@ -116,7 +117,22 @@ function createRuntime(options) {
   }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
-  const readUsage = options.readUsage ?? createUsageReader({ ready: () => environmentReady, store: usageStore });
+  const accountUsage = new Map();
+  function usageForAccounts() {
+    const claude = accounts.selected("claude"), codex = accounts.selected("codex");
+    const key = `${claude}-${codex}`;
+    if (!accountUsage.has(key)) {
+      const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
+      accountUsage.set(key, { key, store, read: createUsageReader({ ready: () => environmentReady, store,
+        readClaude: async () => {
+          const env = accounts.environment("claude", claude);
+          return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
+        },
+        readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
+      }) });
+    }
+    return accountUsage.get(key);
+  }
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
@@ -381,7 +397,7 @@ function createRuntime(options) {
     // The CLI check waits for the login environment and resolves the path the SDK starts directly (no shell). A
     // missing or broken Claude has no command, and the name stays the prompt's first words.
     const cli = await agentCli("claude");
-    const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, timeoutMs: 15_000 });
+    const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, env: cli.env, timeoutMs: 15_000 });
     if (closing) return;
     const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
     if (!name) return;
@@ -501,7 +517,7 @@ function createRuntime(options) {
     const context = agents.isTurnActive(request.chatId) ? "" : await linkedContext;
     const text = [prompt, setup.note, context].filter(Boolean).join("\n\n");
     try {
-      return await agents.startTurn({ ...request, prompt: text, images, command: cli.command });
+      return await agents.startTurn({ ...request, prompt: text, images, command: cli.command, env: cli.env, accountId: cli.accountId });
     } catch (error) {
       // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
       keepAwake.turnNotStarted(request.chatId);
@@ -517,7 +533,7 @@ function createRuntime(options) {
     startTurn: request => track(() => startAgentTurn(request), starting),
     readSubagents: async ({ cwd, agents }) => {
       const cli = await agentCli("codex");
-      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, clientVersion: version });
+      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
     },
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
     publish: publishAgentEvent,
@@ -537,13 +553,27 @@ function createRuntime(options) {
   const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.receive(chatId, event), keepAwake });
 
   // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
-  const agentCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+  const baseCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+  const accounts = createAccounts({ dataDir, cli: baseCli, ready: () => environmentReady, changed(provider) {
+    agentCliStatus.invalidate?.(provider);
+    agentModels.invalidate?.(provider);
+    emit("accounts:changed", {});
+  } });
+  const agentCli = async provider => ({ ...await baseCli(provider), env: accounts.environment(provider), accountId: accounts.selected(provider) });
+  agentCli.invalidate = provider => baseCli.invalidate?.(provider);
+  commands.handle("accounts:list", (_event, refresh) => accounts.list(refresh === true));
+  let accountMutation = Promise.resolve();
+  for (const method of ["add", "select", "login", "cancel", "remove"]) commands.handle(`accounts:${method}`, (_event, provider, value) => {
+    const pending = accountMutation.then(() => accounts[method](provider, value));
+    accountMutation = pending.catch(() => {});
+    return pending;
+  });
 
   const titleModels = options.titleModels ?? createChatTitleModels({ cli: agentCli, clientVersion: version });
   const chatTitles = new ChatTitles({ states: scopeStates, update: updateProject, generate: request => generateChatTitle(request, { models: titleModels }) });
 
-  commands.handle("usage:read", () => readUsage());
-  commands.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));
+  commands.handle("usage:read", async () => { if (options.readUsage) return options.readUsage(); await environmentReady; const usage = usageForAccounts(); return { ...await usage.read(), accountKey: usage.key }; });
+  commands.handle("usage:cached", () => { const usage = usageForAccounts(); return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key }; });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
   // environment is in (gh from a Finder launch). Its one-shot text call starts the CLI agentCli found.
@@ -754,6 +784,7 @@ function createRuntime(options) {
     closing = true;
     closed ??= (async () => {
       await Promise.allSettled([...active]);
+      accounts.close();
       keepAwake.quit();
       ports.close();
       diffs.close();
@@ -771,7 +802,7 @@ function createRuntime(options) {
       await states.close();
       await linkStore.close();
       await linked.close();
-      await usageStore.idle();
+      await Promise.all([usageStore.idle(), ...[...accountUsage.values()].map(item => item.store.idle())]);
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();

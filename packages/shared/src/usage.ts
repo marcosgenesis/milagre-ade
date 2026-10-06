@@ -72,7 +72,9 @@ export function seedSnapshot(current: UsageSnapshot | null, cached: UsageSnapsho
 // stays useful and "Updated Xm ago" stays truthful while showing the error.
 // Windows that have reset since are dropped: their old numbers no longer apply.
 export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapshot, now: number): UsageSnapshot {
+  if (previous?.accountKey !== next.accountKey) previous = null;
   return {
+    ...(next.accountKey ? { accountKey: next.accountKey } : {}),
     providers: next.providers.map((current) => {
       if (current.status !== "error") return current;
       const before = previous?.providers.find((item) => item.provider === current.provider);

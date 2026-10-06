@@ -22,11 +22,11 @@ const ACCOUNT_TIMEOUT_MS = 8_000;
 // first "{" (a notice line may come before it). Only an explicit `"loggedIn": false` on Anthropic's own API
 // (`"apiProvider": "firstParty"`) counts: on Bedrock, Vertex or Foundry the CLI authenticates through the
 // cloud account and `claude auth login` is no remedy. Anything unreadable is not a reason to flag the CLI.
-function claudeLoggedOut(command, { execFileImpl = execFile } = {}) {
+function claudeLoggedOut(command, { execFileImpl = execFile, env } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = execFileImpl(command, ["auth", "status"], { encoding: "utf8", timeout: AUTH_TIMEOUT_MS }, (error, stdout) => {
+      child = execFileImpl(command, ["auth", "status"], { encoding: "utf8", timeout: AUTH_TIMEOUT_MS, ...(env ? { env } : {}) }, (error, stdout) => {
         try {
           const text = String(stdout);
           const status = JSON.parse(text.slice(text.indexOf("{")));
@@ -45,10 +45,10 @@ function claudeLoggedOut(command, { execFileImpl = execFile } = {}) {
 }
 
 // A short-lived `codex app-server`, asked who is logged in. Any failure counts as logged in.
-async function codexLoggedOut(command, { cwd, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) } = {}) {
+async function codexLoggedOut(command, { cwd, env, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) } = {}) {
   let rpc;
   try {
-    rpc = createRpc({ command, cwd });
+    rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: AUTH_TIMEOUT_MS });
     rpc.notify("initialized");
@@ -72,7 +72,7 @@ async function inspect(name, { cli, loggedOut, cwd, clientVersion }) {
   const status = await cli(name);
   const state = cliState(status);
   if (state) return { state, message: status.problem };
-  const out = name === "codex" ? await loggedOut.codex(status.command, { cwd, clientVersion }) : await loggedOut.claude(status.command);
+  const out = name === "codex" ? await loggedOut.codex(status.command, { cwd, clientVersion, ...(status.env ? { env: status.env } : {}) }) : await loggedOut.claude(status.command, status.env ? { env: status.env } : {});
   return out ? { state: "logged-out", message: loginMessage(name) } : { state: "ready" };
 }
 

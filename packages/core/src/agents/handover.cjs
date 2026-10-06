@@ -100,7 +100,7 @@ async function generateBrief({ transcript, transcriptPath: file, provider, lastU
 function createHandoverModels({ cli, clientVersion }) {
   const getCommand = (provider) => async () => {
     const status = await cli(provider);
-    return status?.problem ? null : status?.command;
+    return status?.problem ? null : status;
   };
   return {
     claude: claudeModel({ getCommand: getCommand("claude") }),

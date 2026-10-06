@@ -497,8 +497,20 @@ export interface ProviderUsage {
 }
 
 export interface UsageSnapshot {
+  accountKey?: string;
   providers: ProviderUsage[];
 }
 
+/** Provider identities only. Credentials stay with the CLI on the connected computer. */
+export type ProviderAccount = {
+  id: string;
+  provider: ModelProvider;
+  label: string;
+  state: "unknown" | "ready" | "signed-out" | "signing-in" | "error";
+  email?: string;
+  plan?: string;
+  message?: string;
+};
+export type AccountsSnapshot = { providers: { provider: ModelProvider; selectedId: string; accounts: ProviderAccount[] }[] };
 export interface TranscriptState { next_id: number; sessions: Record<string, AgentSession | LinkChatSession>; messages: ChatMessage[]; }
 export type LinkSendRequest = Omit<ChatSendRequest, 'projectPath' | 'worktreeId'> & { linkId: string; operationId: string };

@@ -592,7 +592,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
     '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
-    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
+    './accounts-section': { AccountsSection: 'AccountsSection' }, './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: (route, secondary) => { routes.push(route); secondaryRoutes.push(secondary); } }); };
   const rows = () => find(render(), node => node.type === 'FlatList');
@@ -1752,4 +1752,50 @@ test('an accepted preview cannot assign its Chat id to a different requested Pro
   screen.render();
   assert.equal(screen.params.id, undefined);
   assert.equal(screen.session.pendingChats['mac|/p#new:1'].promoted, undefined);
+});
+
+test('mobile Accounts selects by tapping the row and manages accounts through its menu', async () => {
+  const react = hookHost({ effects: true });
+  const calls = [];
+  const accounts = { providers: [{ provider: 'codex', selectedId: 'default', accounts: [
+    { id: 'default', provider: 'codex', label: 'Connected CLI account', state: 'ready' },
+    { id: 'work', provider: 'codex', label: 'Work', email: 'work@example.test', state: 'ready' },
+  ] }] };
+  const session = { hostName: 'Preview Mac', refreshProviders: async () => { calls.push(['refreshProviders']); }, client: { call: async (method, args = []) => {
+    calls.push([method, ...args]);
+    const group = accounts.providers[0];
+    if (method === 'accounts:select') group.selectedId = args[1];
+    if (method === 'accounts:login') group.accounts.find(a => a.id === args[1]).state = 'signing-in';
+    if (method === 'accounts:cancel') group.accounts.find(a => a.id === args[1]).state = 'signed-out';
+    if (method === 'accounts:remove') { group.accounts = group.accounts.filter(a => a.id !== args[1]); group.selectedId = 'default'; }
+    return structuredClone(accounts);
+  } } };
+  const { AccountsForComputer: AccountsSection } = load('accounts-section.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View', Pressable: 'Pressable' },
+    '@hugeicons/core-free-icons': {},
+    '@milagre/shared/providers': require('@milagre/shared/providers'), './session': { useSession: () => session }, './icons': { ProviderLogo: 'ProviderLogo', Icon: 'Icon' },
+    './ui': { PillButton: 'Button', Field: 'Field', IconButton: 'IconButton', PullDown: 'PullDown', colors: {}, styles: {} },
+  });
+  const render = () => { react.begin(); return AccountsSection(); };
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const menu = () => find(render(), n => n.type === 'PullDown' && n.props.label === 'Actions for work@example.test');
+  try {
+    render(); await settle();
+    const row = find(render(), n => n.type === 'Pressable' && n.props.accessibilityRole === 'radio' && n.props.accessibilityLabel === 'work@example.test');
+    assert.ok(row, 'The account row is a directly selectable control');
+    row.props.onPress(); await settle();
+    assert.ok(calls.some(c => c.join(':') === 'accounts:select:codex:work'));
+    assert.equal(find(render(), n => n.props.accessibilityLabel === 'work@example.test').props.accessibilityState.checked, true);
+    assert.ok(calls.some(c => c[0] === 'refreshProviders'));
+    assert.equal(find(render(), n => n.props.title === 'Add account'), undefined);
+    assert.equal(find(render(), n => n.type === 'Field'), undefined);
+    assert.equal(menu().props.sections.flatMap(s => s.items.map(i => i.title)).join(','), 'Re-authenticate,Remove');
+    menu().props.onSelect('login'); await settle();
+    assert.ok(calls.some(c => c.join(':') === 'accounts:login:codex:work'));
+    menu().props.onSelect('cancel'); await settle();
+    assert.ok(calls.some(c => c.join(':') === 'accounts:cancel:codex:work'));
+    menu().props.onSelect('remove'); await settle();
+    assert.ok(calls.some(c => c.join(':') === 'accounts:remove:codex:work'));
+    assert.equal(find(render(), n => n.props.accessibilityLabel === 'work@example.test'), undefined);
+  } finally { react.unmount(); }
 });

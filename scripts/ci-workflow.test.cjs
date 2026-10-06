@@ -76,3 +76,13 @@ test('installers build on main, on dispatch, and on PRs only with the preview:in
   assert.deepEqual(candidates.on.push, { branches: ['main'], paths: candidates.on.push.paths })
   assert.equal(candidates.jobs.package.if, "${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview:installers') }}")
 })
+
+test('Electron checks run on Ubuntu under xvfb with screenshots kept as an artifact', () => {
+  const job = ci.jobs['desktop-checks']
+  assert.equal(job['runs-on'], 'ubuntu-latest')
+  const runs = job.steps.map(step => step.run).filter(Boolean)
+  assert.ok(runs.includes('xvfb-run -a npm test -- --electron'))
+  const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact'))
+  assert.equal(upload.if, 'always()')
+  assert.equal(upload.with.path, '${{ runner.temp }}/electron-screenshots')
+})

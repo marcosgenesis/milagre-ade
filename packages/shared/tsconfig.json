@@ -4,6 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedParameters": true,
+    "noUnusedLocals": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true

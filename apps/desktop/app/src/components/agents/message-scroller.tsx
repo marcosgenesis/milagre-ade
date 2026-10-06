@@ -3,7 +3,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   type ComponentPropsWithRef,
-  type ReactNode,
   type Ref,
   useCallback,
   useEffect,

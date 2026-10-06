@@ -4,7 +4,7 @@ import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 import { ScrollArea } from "../primitives/ScrollArea";
 import type { DiffFileEntry } from "../../electron";
 import { CommentCard, CommentSlot } from "./DiffComments";
-import { DiffFile, type DiffLayout } from "./DiffFile";
+import { DiffFile } from "./DiffFile";
 import { useCommentDraft, type CommentActions, type CommentStore, type CommentView } from "./useDiffComments";
 import type { Changes } from "./useChanges";
 import type { useDiffPreferences } from "./DiffPrefs";

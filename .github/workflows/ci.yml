@@ -46,8 +46,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Check lockfile sources and integrity
+        run: npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
       - name: Install dependencies
         run: npm ci
+      - name: Verify package signatures
+        run: npm audit signatures
       - name: Typecheck
         run: npm run typecheck
       - name: Lint

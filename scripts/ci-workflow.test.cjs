@@ -102,3 +102,35 @@ test('CI looks for dead code right after linting', () => {
   assert.equal(steps[lint + 1].run, 'npm run knip')
   assert.equal(require('../package.json').scripts.knip, 'knip')
 })
+
+test('CI lints the lockfile before installing and verifies signatures after', () => {
+  const steps = ci.jobs.javascript.steps
+  const install = steps.findIndex(step => step.run === 'npm ci')
+  assert.equal(steps[install - 1].run, 'npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity')
+  assert.equal(steps[install + 1].run, 'npm audit signatures')
+})
+
+test('PR titles must be Conventional Commits', () => {
+  const regex = '/^(feat|fix|perf|docs|refactor|chore|ci|test|style|build|revert)(\\([a-z0-9-]+\\))?!?: \\S/'
+  const workflow = read('pr-title.yml')
+  assert.deepEqual(workflow.on.pull_request.types, ['opened', 'edited', 'synchronize', 'reopened'])
+  const run = workflow.jobs.conventional.steps[0].run
+  assert.ok(run.includes(regex), 'workflow carries the expected regex')
+  const title = new Function(`return ${regex}`)()
+  assert.ok(title.test('feat!: x'))
+  assert.ok(title.test('fix(mobile): y'))
+  assert.ok(!title.test('Update readme'))
+})
+
+test('mobile fingerprint check watches the native inputs, needs the approval label and never builds', () => {
+  const workflow = read('mobile-fingerprint.yml')
+  assert.deepEqual(workflow.on.pull_request.paths, ['apps/mobile/**', 'package-lock.json', 'packages/shared/**'])
+  const text = fs.readFileSync(path.join(__dirname, '../.github/workflows/mobile-fingerprint.yml'), 'utf8')
+  assert.ok(!/eas build/.test(text), 'the check never starts a build')
+  assert.ok(text.includes('native-build-approved'))
+  assert.ok(workflow.on.pull_request.types.includes('labeled') && workflow.on.pull_request.types.includes('unlabeled'))
+  assert.ok(Number.isInteger(workflow.jobs.fingerprint['timeout-minutes']))
+  const steps = workflow.jobs.fingerprint.steps
+  assert.ok(steps.find(step => step.name === 'Fingerprint main').run.includes('npx patch-package --patch-dir apps/mobile/patches'))
+  assert.ok(steps.find(step => step.name === 'Compare').run.includes('Could not read a fingerprint hash'))
+})

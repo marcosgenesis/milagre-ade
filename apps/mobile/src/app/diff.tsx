@@ -3,6 +3,7 @@ import { FlatList, Text, View } from 'react-native';
 import { Redirect, Stack, useLocalSearchParams } from 'expo-router';
 import type { DiffFileEntry, DiffFileResult } from '@milagre/shared/git-diff';
 import { useSession } from '../session';
+import { memberForDiff } from '../chat-scope';
 import { useRpc } from '../use-rpc';
 import { LARGE_DIFF_LINES, diffRows, wordSegments, type DiffRow } from '../diff-rows';
 import { Counts, StatusBox } from '../diff-ui';
@@ -15,12 +16,12 @@ const MARKER = { add: '+', remove: '−', context: '' } as const;
 const MARKER_COLOR = { add: colors.green, remove: colors.red, context: colors.ink3 } as const;
 const code = { fontFamily: fonts.mono, fontSize: 12, lineHeight: 18 } as const;
 
-export type DiffTarget = { worktreeId: string; path: string; oldPath?: string; untracked?: string; binary?: string; mode: string; base?: string; status?: DiffFileEntry['status']; added?: string; removed?: string };
+export type DiffTarget = { worktreeId: string; memberId?: string; path: string; oldPath?: string; untracked?: string; binary?: string; mode: string; base?: string; status?: DiffFileEntry['status']; added?: string; removed?: string };
 
 export default function Diff() {
   const params = useLocalSearchParams<DiffTarget>();
   const session = useSession();
-  if (!session.client || !session.snapshot?.project.state.worktrees[Number(params.worktreeId)]) return <Redirect href="/" />;
+  if (!session.client || !memberForDiff(session.snapshot?.project, Number(params.worktreeId), params.memberId)) return <Redirect href="/" />;
   return <View style={styles.screen}>
     <Stack.Screen options={{ title: params.path.split('/').pop() || params.path }} />
     <DiffView target={params} />
@@ -30,7 +31,7 @@ export default function Diff() {
 /** Desktop's DiffFile, unified: hunk headers, one line-number gutter, +/− markers, row tints and changed-word highlights. */
 export function DiffView({ target }: { target: DiffTarget }) {
   const session = useSession();
-  const worktree = session.snapshot?.project.state.worktrees[Number(target.worktreeId)];
+  const worktree = memberForDiff(session.snapshot?.project, Number(target.worktreeId), target.memberId);
   const { path, oldPath, untracked, mode, base } = target;
   const added = Number(target.added || 0);
   const removed = Number(target.removed || 0);

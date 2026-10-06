@@ -1,3 +1,5 @@
+import type { NamedProjectLink } from '@milagre/shared/model';
+import { ProjectAvatarStack } from './ProjectAvatarStack';
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -74,6 +76,9 @@ const DEFAULT_RECENTS: SidebarRecent[] = [
 ];
 
 type SidebarNavProps = {
+  selectedLink?: { id: string; projects: Array<{ path: string; name: string }> };
+  onSwitchLink?: (id: string) => void;
+  onLinkProject?: () => void;
   workspaceName?: string;
   workspaceImage?: string | null;
   /** Runs the folder dialog. */
@@ -216,6 +221,7 @@ function WorkspaceMenu({
   onSwitchProject,
   onOpenProject,
   onForgetProject,
+  selectedLink, links, registeredProjects, onSwitchLink, onLinkProject,
 }: {
   position: { top: number; left: number };
   onClose: () => void;
@@ -226,6 +232,11 @@ function WorkspaceMenu({
   onSwitchProject?: (path: string) => void;
   onOpenProject?: () => void;
   onForgetProject?: (path: string) => void;
+  selectedLink?: SidebarNavProps['selectedLink'];
+  links: NamedProjectLink[];
+  registeredProjects: Array<{ id: string; path: string; name: string }>;
+  onSwitchLink?: (id: string) => void;
+  onLinkProject?: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
@@ -289,7 +300,7 @@ function WorkspaceMenu({
     >
       <ScrollArea className="p-1.5">
       <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
-        {projectMenuActions(IS_MAC).map((item) => (
+        {!selectedLink && projectMenuActions(IS_MAC).map((item) => (
           <button
             key={item.key}
             data-menu-row
@@ -307,7 +318,8 @@ function WorkspaceMenu({
             <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
           </button>
         ))}
-        <div className="my-1 h-px bg-line" />
+        {!selectedLink && <div className="my-1 h-px bg-line" />}
+        <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Projects</p>
         {projects.map((row) => {
           return (
             <div key={row.path} data-project-item className="group/project relative">
@@ -349,6 +361,15 @@ function WorkspaceMenu({
             </div>
           );
         })}
+        {links.length > 0 && <>
+          <div className="my-1 h-px bg-line" />
+          <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Links</p>
+          {links.map(link => <button key={link.id} data-menu-row data-link-row={link.id} type="button" role="menuitemradio" aria-checked={selectedLink?.id === link.id} onClick={() => go(() => onSwitchLink?.(link.id))} className="relative z-10 flex min-h-10 items-center gap-2 rounded-[8px] px-2 py-1 text-left outline-none focus-visible:bg-hover-2">
+            <ProjectAvatarStack projects={link.projectIds.map(id => registeredProjects.find(project => project.id === id) ?? { path: '', name: 'Project' })} />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[13.5px] text-ink">{link.name}</span><span className="block text-[11px] text-ink-3">{link.projectIds.length} Projects</span></span>
+            {selectedLink?.id === link.id && <IconCheckmark1Small size={18} />}
+          </button>)}
+        </>}
         <div className="my-1 h-px bg-line" />
         <button
           data-menu-row
@@ -361,6 +382,7 @@ function WorkspaceMenu({
           <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
           <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
         </button>
+        {onLinkProject && <button data-menu-row type="button" role="menuitem" onClick={() => go(onLinkProject)} className="relative z-10 flex h-9 items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"><span className="flex size-5 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span><span className="text-[13.5px]">Link projects…</span></button>}
       </GlideMenu>
       </ScrollArea>
     </div>,
@@ -372,6 +394,7 @@ function WorkspaceMenu({
 export default memo(function SidebarNav({
   workspaceName = WORKSPACE.name,
   workspaceImage,
+  selectedLink, onSwitchLink, onLinkProject,
   onOpenProject,
   activeTitle,
   activeId,
@@ -399,6 +422,8 @@ export default memo(function SidebarNav({
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
+  const [namedLinks, setNamedLinks] = useState<NamedProjectLink[]>([]);
+  const [registeredProjects, setRegisteredProjects] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
@@ -410,15 +435,16 @@ export default memo(function SidebarNav({
     onPick?.(item.id, item.label, item.prompt);
   }, [activeTitle, onPick]);
   const workspace = { name: workspaceName, image: workspaceImage, monogram: workspaceName.trim().slice(0, 1).toUpperCase() || "M" };
-  const projects = projectPath ? projectRows({ recent: recentProjects, currentPath: projectPath, currentName: workspaceName }) : [];
+  const projects = projectPath ? projectRows({ recent: recentProjects, currentPath: projectPath, currentName: workspaceName }) : recentProjects.map(project => ({ ...project, initial: project.name.slice(0, 1).toUpperCase(), current: false }));
 
   // Read on mount and again each time the menu opens, so a folder that's gone drops out.
   useEffect(() => {
-    if (!projectPath) return;
     let live = true;
     window.milagre?.listRecentProjects?.().then((list) => { if (live) setRecentProjects(Array.isArray(list) ? list : []); }, () => {});
+    void window.milagre?.listNamedLinks?.().then(links => { if (live) setNamedLinks(links); }).catch(() => {});
+    void window.milagre?.listProjects?.().then(projects => { if (live) setRegisteredProjects(projects); }).catch(() => {});
     return () => { live = false; };
-  }, [projectPath, workspaceOpen]);
+  }, [projectPath, workspaceOpen, selectedLink?.id]);
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
@@ -578,12 +604,13 @@ export default memo(function SidebarNav({
             onClick={() => (workspaceOpen ? setWorkspaceOpen(false) : openWorkspaceMenu())}
             className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
           >
-            <span className="sidebar-logo flex size-5 shrink-0 items-center justify-center text-ink">
-              <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />
+            <span className={`sidebar-logo flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
+              {selectedLink ? <ProjectAvatarStack projects={selectedLink.projects} /> : <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />}
             </span>
             <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">
               {workspace.name}
             </span>
+            {selectedLink && <span className="sidebar-copy mr-1 text-[11px] text-ink-3">Link</span>}
             <span className="sidebar-copy ml-1 flex shrink-0 text-ink-3">
               <IconChevronDownSmall size={16} />
             </span>
@@ -591,6 +618,7 @@ export default memo(function SidebarNav({
 
           {workspaceOpen && (
             <WorkspaceMenu
+              selectedLink={selectedLink} links={namedLinks} registeredProjects={registeredProjects} onSwitchLink={onSwitchLink} onLinkProject={onLinkProject}
               position={workspacePosition}
               workspace={workspace}
               projectPath={projectPath}

@@ -33,3 +33,10 @@ export function ProjectIcon({ client, path, size = 28 }: { client: Client | null
   return uri ? <Image source={{ uri }} accessibilityIgnoresInvertColors style={[frame, { backgroundColor: colors.field }]} />
     : <View style={[frame, { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field }]}><Icon icon={Folder01Icon} tone="ink2" size={size * 0.57} /></View>;
 }
+
+export function ProjectIcons({ client, projects }: { client: Client | null; projects: { id: string; path: string }[] }) {
+  const visible = projects.slice(0, 3);
+  return <View accessibilityLabel={`${projects.length} linked Projects`} style={{ width: 28 + Math.max(0, visible.length - 1) * 10, height: 28 }}>
+    {visible.map((project, index) => <View key={project.id} style={{ position: 'absolute', left: index * 10, top: 0 }}><ProjectIcon client={client} path={project.path} /></View>)}
+  </View>;
+}

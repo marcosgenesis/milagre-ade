@@ -627,6 +627,8 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-subagent-archive-finished]").disabled');
     await evaluate('document.querySelector("[data-subagent-archive-finished]").click()');
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===0');
+    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-track] > button")'), null, 'Archiving the last visible child hides the pill');
+    await screenshot('subagents-all-archived');
     await evaluate('document.querySelector("[data-subagent-archived-toggle]").click()');
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===2');
     await clickLabel('Restore Review authentication');

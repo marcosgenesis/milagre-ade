@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, Text, View } from 'react-native';
+import { RefreshControl, Text, View } from 'react-native';
 import { Redirect, Stack, router, useLocalSearchParams } from 'expo-router';
-import { ArrowDown01Icon, ArrowRight01Icon, File01Icon } from '@hugeicons/core-free-icons';
 import type { DiffFileEntry, DiffFilesResult, DiffMode } from '@milagre/shared/git-diff';
-import { buildDiffTree, type DiffTreeNode } from '@milagre/shared/diff-tree';
+import { buildDiffTree } from '@milagre/shared/diff-tree';
 import type { DiffTarget } from './diff';
 import { useSession } from '../session';
 import { useRpc } from '../use-rpc';
-import { Counts, StatusBox } from '../diff-ui';
-import { Icon } from '../icons';
-import { ErrorNotice, PageScroll, Segmented, colors, styles } from '../ui';
+import { Counts } from '../diff-ui';
+import { ChangeTree as Tree } from '../change-tree';
+import { LinkChangesView } from '../link-changes';
+import { ErrorNotice, PageScroll, Segmented, styles } from '../ui';
 
 const MODES = [{ value: 'uncommitted', title: 'Uncommitted' }, { value: 'committed', title: 'Committed' }];
 
@@ -24,8 +24,13 @@ export default function Changes() {
   </>;
 }
 
+export function ChangesView(props: { worktreeId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
+  const session = useSession();
+  return session.snapshot?.project.link ? <LinkChangesView chatId={props.worktreeId} header={props.header} onOpen={props.onOpen} /> : <ProjectChangesView {...props} />;
+}
+
 /** The Worktree's changed files as a folder tree with counts and status boxes; a file opens its diff, as a page unless `onOpen` shows it. */
-export function ChangesView({ worktreeId, header, onOpen }: { worktreeId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
+function ProjectChangesView({ worktreeId, header, onOpen }: { worktreeId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
   const session = useSession();
   const worktree = session.snapshot?.project.state.worktrees[worktreeId];
   const [mode, setMode] = useState<DiffMode>('uncommitted');
@@ -53,27 +58,4 @@ export function ChangesView({ worktreeId, header, onOpen }: { worktreeId: number
       : empty ? <Text style={[styles.muted, { textAlign: 'center', paddingVertical: 32 }]}>{empty}</Text>
       : <View style={[styles.card, { paddingVertical: 4, paddingHorizontal: 0, gap: 0 }]}><Tree nodes={tree} depth={0} onOpen={open} /></View>}
   </PageScroll>;
-}
-
-function Tree({ nodes, depth, onOpen }: { nodes: DiffTreeNode<DiffFileEntry>[]; depth: number; onOpen: (file: DiffFileEntry) => void }) {
-  return <>{nodes.map(node => <TreeRow key={node.path} node={node} depth={depth} onOpen={onOpen} />)}</>;
-}
-
-function TreeRow({ node, depth, onOpen }: { node: DiffTreeNode<DiffFileEntry>; depth: number; onOpen: (file: DiffFileEntry) => void }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const row = { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingLeft: 12 + depth * 14, paddingRight: 14 } as const;
-  if (node.type === 'file') return <Pressable accessibilityRole="button" accessibilityLabel={`${node.name}, ${node.file.status}`} onPress={() => onOpen(node.file)} style={({ pressed }) => [row, { backgroundColor: pressed ? colors.hover : 'transparent' }]}>
-    <Icon icon={File01Icon} tone="ink3" size={16} strokeWidth={1.6} />
-    <Text numberOfLines={1} ellipsizeMode="middle" style={[styles.text, { flex: 1, fontSize: 15 }]}>{node.name}</Text>
-    {!node.file.binary && <Counts added={node.file.added} removed={node.file.removed} />}
-    <StatusBox status={node.file.status} />
-  </Pressable>;
-  return <>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${node.name} folder`} accessibilityState={{ expanded: !collapsed }} onPress={() => setCollapsed(value => !value)} style={({ pressed }) => [row, { backgroundColor: pressed ? colors.hover : 'transparent' }]}>
-      <Icon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} tone="ink3" size={15} />
-      <Text numberOfLines={1} ellipsizeMode="head" style={{ flex: 1, color: colors.ink2, fontSize: 15 }}>{node.name}</Text>
-      <Counts added={node.added} removed={node.removed} />
-    </Pressable>
-    {!collapsed && <Tree nodes={node.children} depth={depth + 1} onOpen={onOpen} />}
-  </>;
 }

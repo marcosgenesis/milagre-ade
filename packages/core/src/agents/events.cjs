@@ -16,13 +16,14 @@ const LINKS_INSTRUCTIONS = [
   "When both sides must agree on something first (an API shape, a contract), open a Negotiation with delegate(negotiation: true). Each report then starts the other side's next turn, for up to 10 rounds; call conclude_negotiation(summary) once you agree. A turn handling a Delegation can't delegate, except inside a Negotiation.",
 ].join(" ");
 
-function milagreInstructions(tldrEnabled = true) {
+function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
   return [
     "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
     tldrEnabled ? TLDR_INSTRUCTIONS : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
     "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
+    ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }
 const MILAGRE_INSTRUCTIONS = milagreInstructions();

@@ -62,6 +62,7 @@ export type SidebarRecent = {
   /** A local Chat preview can be opened, but cannot be edited until the host accepts it. */
   pending?: boolean;
   label: string;
+  worktreeCount?: number;
   prompt?: string;
   /** The mark at the left of the row; idle when absent. */
   mark?: ChatMark;
@@ -245,7 +246,7 @@ export const ChatRow = memo(function ChatRow({
           type="button"
           onClick={() => onPick(item)}
           aria-current={active ? "page" : undefined}
-          className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+          className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
           }`}
         >
@@ -266,6 +267,7 @@ export const ChatRow = memo(function ChatRow({
             }`}
           >
             <ChatTitle label={item.label} />
+            {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
           </span>
         </button>
       )}

@@ -1,3 +1,4 @@
+const { isLinkScopeKey, scopeKey } = require('@milagre/shared/chat-scopes');
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { z } = require("zod");
@@ -31,7 +32,7 @@ function delegationReply(state, sessionId, delegationId) {
 function chatLabel(projectName, state, sessionId) {
   const session = state.sessions[sessionId];
   if (!session) return `${projectName} / unknown Chat`;
-  const worktree = state.worktrees[session.worktree_id];
+  const worktree = state.worktrees?.[session.worktree_id];
   return `${projectName} / ${worktree?.name ?? "unknown branch"} / ${chatTitle(session, state.messages.filter(message => message.session_id === sessionId))}`;
 }
 
@@ -63,7 +64,7 @@ function createLinkedReads(view) {
     const sides = await Promise.all((await view.sides(chatId)).map(async (item) => {
       const state = await view.state(item.projectPath);
       const worktree = Object.values(state.worktrees).find(entry => entry.path === item.worktree_path);
-      const chats = Object.values(state.sessions)
+      const ordinary = Object.values(state.sessions)
         .filter(session => session.worktree_id === worktree?.id && state.messages.some(message => message.session_id === session.id))
         .map((session) => {
           const ref = `${item.projectPath}#${session.id}`;
@@ -79,6 +80,16 @@ function createLinkedReads(view) {
             receiveOnly: view.receiveOnly(ref),
           };
         });
+      let chats = ordinary;
+      if (worktree?.sharedChat) {
+        const owner = scopeKey({ kind: 'link', linkId: worktree.sharedChat.linkId });
+        const shared = await view.state(owner);
+        const session = shared.sessions[worktree.sharedChat.sessionId];
+        if (session?.worktrees.some(member => member.worktreePath === item.worktree_path)) {
+          const ref = `${owner}#${session.id}`, messages = shared.messages.filter(message => message.session_id === session.id);
+          chats = [{ ref, title: chatTitle(session, messages), provider: session.provider ? providerName(session.provider) : undefined, status: runStatus(runs[ref]), archived: session.archived, activity: runs[ref] ? Number.MAX_SAFE_INTEGER : messages.at(-1)?.id ?? 0, lastReply: lastReply(shared, session.id), receiveOnly: true }];
+        }
+      }
       return { project: item.projectName, worktree: item.worktree_path, branch: worktree?.name ?? path.basename(item.worktree_path), diff: worktree?.diff, chats, open: view.open(item) };
     }));
     return buildLinkedSummary(sides);
@@ -89,12 +100,27 @@ function createLinkedReads(view) {
   async function readChat(chatId, chat, range = {}) {
     const projectPath = projectOfKey(String(chat));
     const sessionId = sessionIdFromKey(String(chat));
-    const sides = (await view.sides(chatId)).filter(item => item.projectPath === projectPath);
-    if (!sides.length) throw new Error("That Chat isn't in a linked Worktree.");
-    const state = await view.state(projectPath);
+    const visible = await view.sides(chatId);
+    let sides, state;
+    if (isLinkScopeKey(projectPath)) {
+      const id = projectPath.slice('milagre-link:'.length);
+      sides = [];
+      for (const item of visible) {
+        const memberState = await view.state(item.projectPath);
+        const worktree = Object.values(memberState.worktrees).find(entry => entry.path === item.worktree_path);
+        if (worktree?.sharedChat?.linkId === id && worktree.sharedChat.sessionId === sessionId) sides.push(item);
+      }
+      if (!sides.length) throw new Error("That Chat isn't in a linked Worktree.");
+      state = await view.state(projectPath);
+      if (!state.sessions[sessionId]?.worktrees.some(member => sides.some(side => side.worktree_path === member.worktreePath))) throw new Error("That Chat isn't in a linked Worktree.");
+    } else {
+      sides = visible.filter(item => item.projectPath === projectPath);
+      if (!sides.length) throw new Error("That Chat isn't in a linked Worktree.");
+      state = await view.state(projectPath);
+      const session = state.sessions[sessionId], worktree = state.worktrees[session?.worktree_id];
+      if (!session || !sides.some(item => item.worktree_path === worktree?.path)) throw new Error("That Chat isn't in a linked Worktree.");
+    }
     const session = state.sessions[sessionId];
-    const worktree = state.worktrees[session?.worktree_id];
-    if (!session || !sides.some(item => item.worktree_path === worktree?.path)) throw new Error("That Chat isn't in a linked Worktree.");
     const messages = state.messages.filter(message => message.session_id === sessionId);
     const end = Math.min(messages.length, range.end ?? messages.length);
     const start = Math.max(1, range.start ?? end - DEFAULT_MESSAGES + 1);

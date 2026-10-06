@@ -102,3 +102,13 @@ test("Codex reaches the tools over loopback MCP, one unguessable path per Chat",
   assert.deepEqual(called.result, { content: [{ type: "text", text: "summary of web" }], isError: false });
   assert.equal((await call(url.replace(/[a-f0-9]{48}$/, "0".repeat(48)), { jsonrpc: "2.0", id: 4, method: "tools/list" })).status, 404);
 });
+test('a canvas endpoint exposes one canonical shared transcript and rejects unlinked Link refs', async () => {
+  const { randomUUID } = require('node:crypto'); const { scopeKey } = require('@milagre/shared/chat-scopes');
+  const id = randomUUID(), owner = scopeKey({ kind: 'link', linkId: id });
+  const shared = { sessions: { 7: { id: 7, title: 'Across both', agent_name: 'Link', provider: 'codex', worktrees: [{ worktreePath: '/owned/api' }], workspacePath: '/workspace' } }, messages: [{ id: 1, session_id: 7, role: 'assistant', body: 'Canonical reply', context: null }] };
+  const project = { worktrees: { 1: { id: 1, path: '/owned/api', name: 'feature', sharedChat: { linkId: id, sessionId: 7 } } }, sessions: {}, messages: [] };
+  const reads = createLinkedReads({ sides: async () => [{ projectPath: '/api', projectName: 'API', worktree_path: '/owned/api' }], state: async key => key === owner ? shared : project, runs: () => ({}), open: () => [], receiveOnly: () => false });
+  assert.match(await reads.overview('/external#2'), new RegExp(owner + '#7'));
+  assert.match(await reads.readChat('/external#2', owner + '#7'), /Canonical reply/);
+  await assert.rejects(reads.readChat('/external#2', scopeKey({ kind: 'link', linkId: randomUUID() }) + '#7'), /isn't in a linked Worktree/);
+});

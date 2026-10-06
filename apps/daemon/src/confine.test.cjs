@@ -68,6 +68,8 @@ const callsAt = (target, demo) => [
   ['chat:send', [{ projectPath: demo, sessionId: 1, body: 'hi', files: [path.join(target, 'secret.png')], provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
   ['chat:resume', [target, 1]],
   ['chat:patch', [target, 1, { title: 'Renamed' }]],
+  ['chat:archive-subagent', [target, 1, 'child', true]],
+  ['chat:archive-finished-subagents', [target, 1]],
   ['agent:interrupt', [`${target}#1`]],
   ['agent:respond-permission', [{ chatId: `${target}#1`, requestId: 'x', decision: 'allow' }]],
   ['agent:answer-question', [{ chatId: `${target}#1`, requestId: 'x', answers: { next: ['A'] }, summary: 'A' }]],
@@ -162,6 +164,10 @@ test('.. and symlinks cannot lead out of the folder', async t => {
 
 test('inside the folder the phone browses, reads changes, sends and sees images; recent lists only the demo', async t => {
   const f = await fixture(t);
+  const confine = createConfinement({ allowedRoot: f.demo });
+  for (const [method, args] of [['chat:archive-subagent', [f.demo, 1, 'child', true]], ['chat:archive-finished-subagents', [f.demo, 1]]]) {
+    assert.deepEqual((await confine.checkCall(method, args)).args, args);
+  }
   const recentBefore = await f.owner.call('project:recent');
   assert.ok(recentBefore.some(entry => entry.path === f.outside), 'the owner side sees the other project');
   assert.equal((await f.rpc('project:open', [f.demo])).status, 200);

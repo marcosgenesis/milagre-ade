@@ -491,3 +491,20 @@ test("in a Negotiation only the side whose move it is sends the next round", asy
   await settled();
   assert.match(await fake.delegations.delegate("/api#1", { worktree: "/web", chat: "/web#2", message: "Round two" }), /^Round 2 sent/);
 });
+test('runtime shutdown waits for a Delegation completion save before releasing its profile', async t => {
+  const fixture = await linkedProjects(t);
+  let release, saving = false, block = false;
+  const renamed = fs.rename;
+  t.mock.method(fs, 'rename', async (...args) => {
+    if (block && path.basename(String(args[1])) === 'delegations.json') { saving = true; await new Promise(resolve => { release = resolve; }); block = false; }
+    return renamed(...args);
+  });
+  fixture.scripts.api = async session => { await session.call('delegate', delegation(fixture)); session.finish('Sent'); };
+  fixture.scripts.web = async () => {};
+  await fixture.send('api', 'Delegate'); await waitFor(() => fixture.sessionOf('web')?.turnActive);
+  await waitFor(async () => (await fixture.messages(fixture.chatOf('api'))).some(message => message.body === 'Sent'));
+  block = true; fixture.sessionOf('web').finish('Completed'); await waitFor(() => saving);
+  let closed = false; const closing = fixture.runtime.close().then(() => { closed = true; });
+  try { await new Promise(resolve => setTimeout(resolve, 100)); assert.equal(closed, false, 'Profile remains owned while its Delegation save is pending'); }
+  finally { release(); await closing; await new Promise(resolve => setTimeout(resolve, 100)); }
+});

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, type RefObject } from "react";
+import { useDismiss } from "../../lib/use-dismiss";
 
 /**
  * Positions a nonmodal popover above its trigger (right edges aligned, kept inside the window) and wires
@@ -30,12 +31,11 @@ export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: p
     return () => { window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
   }, [opened, preferred, height]);
 
+  useDismiss(opened, () => setOpened(false), (target) => !!(panel.current?.contains(target) || trigger.current?.contains(target)));
+
   useEffect(() => {
     if (!opened) return;
     const frame = requestAnimationFrame(() => (panel.current?.querySelector<HTMLButtonElement>("button") ?? panel.current)?.focus());
-    const outside = (event: PointerEvent) => {
-      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpened(false);
-    };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -43,9 +43,8 @@ export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: p
       setOpened(false);
       trigger.current?.focus();
     };
-    document.addEventListener("pointerdown", outside, true);
     document.addEventListener("keydown", escape, true);
-    return () => { cancelAnimationFrame(frame); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
+    return () => { cancelAnimationFrame(frame); document.removeEventListener("keydown", escape, true); };
   }, [opened]);
 
   return bounds;

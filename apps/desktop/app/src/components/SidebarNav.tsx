@@ -29,6 +29,7 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
+import { useDismiss } from "../lib/use-dismiss";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
 
@@ -461,17 +462,7 @@ export default memo(function SidebarNav({
     setWorkspaceOpen(true);
   };
 
-  useEffect(() => {
-    if (!workspaceOpen) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target as Element;
-      if (!target.closest("[data-workspace-trigger]") && !target.closest("[data-workspace-menu]")) {
-        setWorkspaceOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [workspaceOpen]);
+  useDismiss(workspaceOpen, () => setWorkspaceOpen(false), (target) => !!target.closest("[data-workspace-trigger], [data-workspace-menu]"));
 
   const collapse = () => {
     setCollapsed(true);

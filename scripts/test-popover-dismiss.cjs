@@ -1,0 +1,133 @@
+// Real mouse presses dismiss the composer pickers and Select from anywhere outside them. No agent calls.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { setTimeout: delay } = require('node:timers/promises');
+
+const fixture = `
+import React, { useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { PromptComposer } from '/src/components/PromptComposer';
+import { Select } from '/src/components/primitives/Select';
+import { MODEL_CATALOG, capabilityFor } from '/src/model';
+import '/src/styles.css';
+const noop = () => {};
+window.milagre = { listSkills: async () => ({ skills: [], warnings: [] }) };
+function Fixture() {
+  const [draft, setDraft] = useState('');
+  const [theme, setTheme] = useState('light');
+  const model = MODEL_CATALOG[0];
+  return <div style={{ width: '100%', maxWidth: 720, margin: '0 auto', paddingTop: 20 }}>
+    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+      <Select label="Theme" value={theme} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onChange={setTheme} />
+      <div data-testid="stopper" onPointerDown={event => event.stopPropagation()} style={{ width: 160, height: 40, background: '#eee' }}>stops propagation</div>
+    </div>
+    <div data-testid="transcript" style={{ height: 380 }} />
+    <PromptComposer projectPath="/fixture" draft={draft} onDraftChange={setDraft}
+      imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
+      onSend={noop} sendBlocked={false} running
+      models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+      capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
+      fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop} />
+  </div>;
+}
+createRoot(document.getElementById('root')).render(<Fixture />);
+`;
+
+async function browserChecks() {
+  const { app, BrowserWindow } = require('electron');
+  app.setPath('userData', fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'milagre-popover-dismiss-')));
+  await app.whenReady();
+  const window = new BrowserWindow({ width: 1000, height: 640, show: false, webPreferences: { backgroundThrottling: false } });
+  const evaluate = source => window.webContents.executeJavaScript(source);
+  const errors = [];
+  window.webContents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
+  const waitFor = async source => {
+    for (let i = 0; i < 200; i++) { if (await evaluate(source)) return; await delay(25); }
+    throw Error('Timed out: ' + source);
+  };
+  const screenshot = async name => {
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    window.webContents.invalidate();
+    await delay(250);
+    await window.webContents.capturePage();
+    await delay(100);
+    fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name + '.png'), (await window.webContents.capturePage()).toPNG());
+  };
+  // A real mouse press and release at the centre of the first element matching the selector.
+  const click = async selector => {
+    const point = await evaluate(`(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }; })()`);
+    window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point });
+    window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point });
+    await delay(150);
+  };
+  const panels = () => evaluate(`document.querySelectorAll('[data-picker-panel]').length`);
+  const model = '[data-promptbar] button[aria-expanded]:not([aria-label])';
+  const effort = '[data-promptbar] button[aria-label^="Thinking effort"]';
+  try {
+    await window.loadURL(process.argv[2]);
+    await waitFor(`!!document.querySelector('textarea')`);
+
+    await click(model);
+    await waitFor(`!!document.querySelector('[data-picker-panel] input')`);
+    await screenshot('model-picker-open');
+    await click('[data-picker-panel] input');
+    assert.equal(await panels(), 1, 'Pressing inside the picker keeps it open');
+    await click('textarea');
+    assert.equal(await panels(), 0, 'Pressing the prompt field closes the model picker');
+    assert.equal(await evaluate(`document.activeElement?.tagName`), 'TEXTAREA', 'The press still lands in the prompt field');
+    await screenshot('model-picker-closed');
+
+    await click(model);
+    assert.equal(await panels(), 1);
+    await click(model);
+    assert.equal(await panels(), 0, 'The trigger still toggles the picker closed');
+
+    await click(effort);
+    assert.equal(await panels(), 1);
+    await click('[data-testid="stopper"]');
+    assert.equal(await panels(), 0, 'A surface that stops propagation still closes the picker');
+
+    await click(model);
+    await click('[data-testid="transcript"]');
+    assert.equal(await panels(), 0, 'Pressing the transcript closes the picker');
+
+    await click('button[aria-label="Theme"]');
+    assert.equal(await panels(), 1);
+    await click('textarea');
+    assert.equal(await panels(), 0, 'Pressing elsewhere closes Select');
+    await click('button[aria-label="Theme"]');
+    await click('[data-testid="stopper"]');
+    assert.equal(await panels(), 0, 'Select closes over a surface that stops propagation');
+    await click('button[aria-label="Theme"]');
+    await click('[role="option"]:last-child');
+    assert.equal(await panels(), 0);
+    assert.equal(await evaluate(`document.querySelector('button[aria-label="Theme"]').textContent`), 'Dark', 'Choosing an option still works');
+
+    assert.deepEqual(errors, []);
+    console.log('PASS: composer pickers and Select close on any outside press, stay open on inside presses, and still toggle and choose');
+    app.exit(0);
+  } catch (error) { console.error(error); console.error(errors); app.exit(1); }
+}
+
+async function main() {
+  const { createServer } = await import('vite');
+  const server = await createServer({ configFile: path.resolve(__dirname, '../apps/desktop/vite.config.ts'), cacheDir: path.resolve(__dirname, '../node_modules/.vite-popover-dismiss'), server: { host: '127.0.0.1', port: 0 }, plugins: [{
+    name: 'popover-dismiss-fixture',
+    resolveId(id) { if (id === '/__popover-dismiss.tsx') return id; },
+    load(id) { if (id === '/__popover-dismiss.tsx') return fixture; },
+    configureServer(server) { server.middlewares.use(async (request, response, next) => {
+      if (request.url !== '/__popover-dismiss') return next();
+      response.setHeader('Content-Type', 'text/html');
+      response.end(await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__popover-dismiss.tsx"></script></body></html>'));
+    }); },
+  }] });
+  try {
+    await server.listen();
+    const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+    const child = require('node:child_process').spawn(require('electron'), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__popover-dismiss`], { env, stdio: 'inherit' });
+    process.exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', code => resolve(code ?? 1)); });
+  } finally { await server.close(); }
+}
+(process.versions.electron ? browserChecks() : main()).catch(error => { console.error(error); if (process.versions.electron) require('electron').app.exit(1); else process.exitCode = 1; });

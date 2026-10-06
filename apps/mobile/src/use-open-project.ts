@@ -8,7 +8,7 @@ import { useSession } from './session';
  * is showing, another Project can take over just before a navigation leaves it, and reopening this one would undo that.
  */
 /** A missing folder reads as one, not as the Mac's ENOENT. */
-export function openFailure(message: string) {
+function openFailure(message: string) {
   return /ENOENT|no such file or directory/i.test(message) ? 'Couldn\'t find that folder on your Mac. Check the path and try again.' : message;
 }
 

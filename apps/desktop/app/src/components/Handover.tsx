@@ -66,7 +66,7 @@ export function HandoverNote({ from, to, permissionMode, onDismiss }: { from: Mo
   );
 }
 
-export const HANDOVER_BRIEF_NAME = "Handover brief.md";
+const HANDOVER_BRIEF_NAME = "Handover brief.md";
 
 /**
  * The handover brief as an attachment: in the composer of a handed-over chat before its first message (it can't be
@@ -96,7 +96,7 @@ const BUTTON_PRIMARY = "inline-flex h-8 items-center gap-1.5 rounded-control bg-
 const BUTTON_SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-control border border-line bg-surface px-3 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40";
 
 /** The brief in a modal, as the GitActionsDialog is built: Edit and Preview tabs with Save and Cancel, or Preview alone with Close. */
-export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string; onSave?: (text: string) => Promise<void> | void; onClose: () => void }) {
+function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string; onSave?: (text: string) => Promise<void> | void; onClose: () => void }) {
   const editable = onSave !== undefined;
   const [tab, setTab] = useState<"edit" | "preview">(editable ? "edit" : "preview");
   const [text, setText] = useState(brief);

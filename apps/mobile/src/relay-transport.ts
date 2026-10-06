@@ -12,7 +12,7 @@ export type RelaySocket = {
 };
 export type RelayTimers = { setTimeout: (fn: () => void, ms: number) => unknown; clearTimeout: (id: unknown) => void };
 export type RelayResponse = { status: number; headers: Record<string, string>; body: Uint8Array };
-export type RelayLiveHandle = { close(): void };
+type RelayLiveHandle = { close(): void };
 export type RelayTransport = {
   request(method: 'GET' | 'POST', path: string, headers: Record<string, string>, body?: Uint8Array | string): Promise<RelayResponse>;
   /** Streams the bridge's live socket at `path`. `onStatus(true)` once subscribed, `onStatus(false)` when lost; it resubscribes by itself. */

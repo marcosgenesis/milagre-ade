@@ -20,7 +20,7 @@ export type DiffSelection = Pick<DiffComment, "side" | "start" | "end" | "snippe
 const MAX_SNIPPET_LINES = 40;
 const MARKER = { add: "+", remove: "-", context: " " } as const;
 
-export const rowText = (line: DiffLine) => MARKER[line.kind] + line.text;
+const rowText = (line: DiffLine) => MARKER[line.kind] + line.text;
 
 /** Whether a line is shown in the old (left) or new (right) column of a split view. */
 export function onSide(line: DiffLine, side: DiffSide) {

@@ -4,9 +4,9 @@ import type { ChatMessage, ModelProvider } from "../model";
 // What the "Commit and open PR" dialog shows and which steps its buttons run, from what git and gh
 // report about the chat's folder (electron/git-actions.cjs).
 
-export type GitFileStatus = "added" | "modified" | "deleted";
+type GitFileStatus = "added" | "modified" | "deleted";
 
-export interface GitFileChange {
+interface GitFileChange {
   path: string;
   status: GitFileStatus;
   added: number;
@@ -15,7 +15,7 @@ export interface GitFileChange {
   secret?: boolean;
 }
 
-export interface GitPullRequest {
+interface GitPullRequest {
   number: number | null;
   url: string;
   state: "OPEN";
@@ -83,7 +83,7 @@ export type GitPrResult =
 export type GitStep = "commit" | "push" | "pr";
 
 export const NO_ORIGIN = gitMessage(GIT_CODES.NO_ORIGIN);
-export const DETACHED = gitMessage(GIT_CODES.DETACHED);
+const DETACHED = gitMessage(GIT_CODES.DETACHED);
 export const DETACHED_COMMIT = gitMessage(GIT_CODES.DETACHED_COMMIT);
 export const GH_MISSING = gitMessage(GIT_CODES.GH_MISSING);
 export const TURN_RUNNING = "The agent is still working. Wait for the turn to end or stop it.";

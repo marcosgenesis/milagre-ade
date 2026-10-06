@@ -19,20 +19,22 @@ export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: 
  * Runs a choice from `chatMenu` against the Chat's Project. Archive asks first, as desktop does, with what removing the
  * Chat's worktree would lose, and stops a running Chat. Returns what archiving did, so a screen showing the Chat can leave.
  */
-export async function runChatAction({ action, chat, running, client, projectPath, state, link, refresh, expectActivity, notify }: {
+export async function runChatAction({ action, chat, running, client, projectPath, state, link, refresh, expectActivity, notify, onConfirm }: {
   action: string; chat: AgentSession; running: boolean; client: Client; projectPath: string; state: ArchiveRequest['state'];
   link?: OpenLink;
+  onConfirm?: () => void;
   refresh: () => Promise<unknown>; expectActivity: () => void; notify: (message: string) => void;
 }) {
   if (action === 'archive' && !chat.archived) {
     if (link) {
       if (!await confirm('Archive this shared Chat?', 'The Chat leaves the list. Its Worktrees and changes stay on your computer.', running ? 'Stop and archive' : 'Archive')) return;
+      onConfirm?.();
       expectActivity();
       await client.call('agent:interrupt', [`${projectPath}#${chat.id}`]);
       await client.call('chat:patch', [projectPath, chat.id, { archived: true }]);
       await refresh(); return 'hidden';
     }
-    return archiveFromPhone({ client, alert: confirmSheet, projectPath, state, chat, running, onConfirm: expectActivity, notify, refresh: async () => { await refresh(); } });
+    return archiveFromPhone({ client, alert: confirmSheet, projectPath, state, chat, running, onConfirm: () => { onConfirm?.(); expectActivity(); }, notify, refresh: async () => { await refresh(); } });
   }
   if (action === 'archive') await client.call('chat:patch', [projectPath, chat.id, { archived: false }]);
   if (action === 'read' || action === 'unread') await client.call('chat:patch', [projectPath, chat.id, { unread: action === 'unread' }]);

@@ -6,7 +6,10 @@ import { PromptField } from '../../apps/mobile/src/prompt-field';
 import { colors } from '../../apps/mobile/src/ui';
 import type { Client } from '../../apps/mobile/src/client';
 
-const catalog = { skills: [{ name: 'tldr', description: 'Rewrite text for a skimming reader while preserving facts and voice.' }] };
+const catalog = { skills: [
+  { name: 'tldr', description: 'Rewrite text for a skimming reader while preserving facts and voice.' },
+  { name: 'docs', description: 'Find documentation for a library or API.' },
+] };
 const immediate = { call: async () => catalog } as unknown as Client;
 const delayed = { call: () => new Promise(resolve => setTimeout(() => resolve(catalog), 5000)) } as unknown as Client;
 
@@ -18,7 +21,7 @@ function NativePromptSkills() {
   return <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.page, paddingTop: 80, paddingBottom: 40 }}>
     <View style={{ padding: 20, gap: 12 }}>
       <Text style={{ fontSize: 22, color: colors.ink }}>Skill composer</Text>
-      <Text style={{ color: colors.ink2 }}>Type a skill, then tap inside it to read its description.</Text>
+      <Text style={{ color: colors.ink2 }}>Type / to choose a skill.</Text>
       {button('Load catalog after 5 seconds', () => { setDraft('run /tldr'); setClient(delayed); })}
       {button('Dismiss keyboard', Keyboard.dismiss)}
       <Text accessibilityLabel="Last sent message" style={{ color: colors.ink2 }}>{sent}</Text>

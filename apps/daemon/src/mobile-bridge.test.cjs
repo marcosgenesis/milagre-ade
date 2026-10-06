@@ -46,6 +46,19 @@ test('mobile bridge forwards commands to the existing owner and reads cached sna
   assert.equal((await client.call('daemon:status')).version, 'test');
 });
 
+test('the phone can load the real skill catalog for its project', async t => {
+  const { project, rpc } = await fixture(t);
+  await rpc('project:open', [project]);
+  await fs.mkdir(path.join(project, '.agents', 'skills', 'phone-skill'), { recursive: true });
+  await fs.writeFile(path.join(project, '.agents', 'skills', 'phone-skill', 'SKILL.md'), '---\nname: phone-skill\ndescription: A skill from the project.\n---\nDo the work.\n');
+  const response = await rpc('skills:list', [project]);
+  assert.equal(response.status, 200);
+  const catalog = (await response.json()).result;
+  assert.ok(catalog.skills.some(skill => skill.name === 'phone-skill' && skill.description === 'A skill from the project.'));
+  assert.ok(catalog.skills.some(skill => skill.name === 'tldr'), 'bundled skills reach the phone');
+  assert.equal((await rpc('skills:list', [os.homedir()])).status, 409, 'the daemon still requires a known folder');
+});
+
 test('HTTP guard rejects unauthorized, cross-origin, malformed and unsupported requests', async t => {
   const { bridge, request, rpc, token } = await fixture(t);
   assert.equal((await fetch(bridge.url + '/snapshot')).status, 401);

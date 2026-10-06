@@ -17,7 +17,7 @@ const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
-  'worktree:pull-request', 'project:branches', 'worktree:create', 'git:diff-files', 'git:diff-file',
+  'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',
   // Archive's confirm step: whether the Chat's worktree is Milagre's and what removing it would lose, then the removal,
   // which the daemon checks again against what the phone saw after closing the Chat's agent.
   'worktree:roots', 'worktree:status', 'worktree:remove']);

@@ -91,7 +91,8 @@ FAQ, collapsed with `<details>`: "Is it free?", "Does my code leave my Mac?", "W
 apps/site/
   astro.config.mjs        static output
   wrangler.toml           Worker with static assets, routes for milagre.cloud and www
-  src/worker.ts           /download/* redirects; everything else served from assets
+  worker/handler.mjs      www redirect, /download/* redirects, everything else from assets
+  worker/worker.ts        Cloudflare entry
   src/pages/index.astro   the page
   src/components/         Hero, HeroScene, Section, Faq, CopyCommand, Nav, Footer
   src/styles/tokens.css   dark tokens copied from apps/desktop/app/src/styles.css

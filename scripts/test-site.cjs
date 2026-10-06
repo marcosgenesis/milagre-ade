@@ -77,10 +77,16 @@ async function browserChecks() {
   async function open({ width, height, mobile = false, reducedMotion = false }) {
     const window = new BrowserWindow({ width, height, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
     window.webContents.on("console-message", event => { if (event.level === "error") errors.push(event.message); });
-    window.webContents.debugger.attach();
-    if (mobile) await window.webContents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 3, mobile: true });
-    if (reducedMotion) await window.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     await window.loadURL(url);
+    if (mobile || reducedMotion) {
+      // Device emulation before the first navigation crashes Electron 44, so emulate after the first load and reload.
+      window.webContents.debugger.attach();
+      if (mobile) await window.webContents.debugger.sendCommand("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 3, mobile: true });
+      if (reducedMotion) await window.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+      const reloaded = new Promise(resolve => window.webContents.once("did-finish-load", resolve));
+      window.webContents.reload();
+      await reloaded;
+    }
     await window.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
     return window;
   }

@@ -49,6 +49,7 @@ const PATHS = Object.freeze({
   'chat:patch': ([projectPath]) => [projectPath],
   'worktree:pull-request': ([worktreePath]) => [worktreePath],
   'project:branches': ([projectPath]) => [projectPath],
+  'skills:list': ([projectPath]) => [projectPath],
   'worktree:create': ([value]) => [value?.projectPath],
   'git:diff-files': ([value]) => [value?.cwd],
   'git:diff-file': ([value]) => [value?.cwd],
@@ -111,6 +112,10 @@ function createConfinement({ allowedRoot, uploadsDir }) {
    * outside it and what the daemon says about the Mac. A project:open that landed outside the folder (a subfolder of a bigger repository) is refused.
    */
   async function filterResult(method, result) {
+    if (method === 'skills:list' && result && Array.isArray(result.skills)) {
+      const kept = await Promise.all(result.skills.map(skill => skill.scope === 'bundled' || (skill.scope === 'workspace' && allows(skill.path))));
+      return { skills: result.skills.filter((_skill, index) => kept[index]).map(skill => skill.scope === 'bundled' ? { ...skill, path: '' } : skill), warnings: [] };
+    }
     if (method === 'daemon:status' && result && typeof result === 'object') {
       const kept = { ...result };
       for (const key of HIDDEN_STATUS) delete kept[key];

@@ -62,6 +62,7 @@ const refusedBody = { v: 1, error: { message: REFUSED } };
 const callsAt = (target, demo) => [
   ['project:open', [target]],
   ['project:branches', [target]],
+  ['skills:list', [target]],
   ['chat:send', [{ projectPath: target, sessionId: 1, body: 'hi', provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
   ['chat:send', [{ projectPath: demo, cwd: target, sessionId: 1, body: 'hi', provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
   ['chat:send', [{ projectPath: demo, sessionId: 1, body: 'hi', files: [path.join(target, 'secret.png')], provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
@@ -103,6 +104,27 @@ async function assertRefusedEverywhere({ rpc, request, live, demo }, target) {
   assert.equal(upload.status, 403);
   assert.equal(await live(target), 403);
 }
+
+test('a confined skill catalog excludes user skills, outside symlinks and warning paths', async t => {
+  const f = await fixture(t);
+  const insideFile = path.join(f.demo, 'SKILL.md');
+  const outsideFile = path.join(f.outside, 'SKILL.md');
+  await fs.writeFile(insideFile, 'A local skill');
+  await fs.writeFile(outsideFile, 'An outside skill');
+  const linkedFile = path.join(f.demo, 'linked-SKILL.md');
+  await fs.symlink(outsideFile, linkedFile);
+  const confine = createConfinement({ allowedRoot: f.demo });
+  const result = await confine.filterResult('skills:list', { skills: [
+    { name: 'local', description: 'Local', path: insideFile, scope: 'workspace', provider: 'agents' },
+    { name: 'outside', description: 'Private', path: outsideFile, scope: 'workspace', provider: 'agents' },
+    { name: 'linked', description: 'Private', path: linkedFile, scope: 'workspace', provider: 'agents' },
+    { name: 'user', description: 'Private', path: insideFile, scope: 'user', provider: 'agents' },
+    { name: 'bundled', description: 'Public', path: '/app/internal/SKILL.md', scope: 'bundled', provider: 'milagre' },
+  ], warnings: ['Cannot read /private/skill'] });
+  assert.deepEqual(result.skills.map(skill => skill.name), ['local', 'bundled']);
+  assert.equal(result.skills[1].path, '');
+  assert.deepEqual(result.warnings, []);
+});
 
 test('every command the phone may call has a confinement rule, and no rule names a command it may not call', () => {
   assert.deepEqual([...METHODS].sort(), Object.keys(PATHS).sort());

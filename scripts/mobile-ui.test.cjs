@@ -2028,6 +2028,7 @@ test('mobile file preview renders text and reports unreadable, empty, and trunca
   let result = { data: null, error: '', refresh() {} };
   const { default: FilePreview } = load('app/file-preview.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- empty stub standing in for expo-file-system's File constructor
     'expo-file-system': { File: class {}, FileMode: { ReadOnly: 'readOnly' } },
     'react-native': { Platform: { OS: 'ios' }, Text: 'Text', View: 'View' },
     'expo-router': { Stack: { Screen: 'Screen' }, useLocalSearchParams: () => ({ path: '/project/ui.tsx' }) },

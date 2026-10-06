@@ -13,9 +13,7 @@ export function isAttachableImage(file: File): boolean {
 function readImage(file: File): Promise<ImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
     reader.onload = () => resolve({ id: crypto.randomUUID(), name: file.name || "Pasted image", dataUrl: String(reader.result) });
-    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
     reader.onerror = () => reject(new Error("Could not read the pasted image. Try again."));
     reader.readAsDataURL(file);
   });

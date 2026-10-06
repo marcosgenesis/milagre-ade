@@ -190,14 +190,10 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
       };
       abortConnect = end;
       handshake = timers.setTimeout(() => end(fail('lost')), HANDSHAKE);
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
       socket.onopen = () => { if (!over) { try { socket.send(hello.message); } catch { end(fail('lost')); } } };
       // A failed socket always closes afterwards, with the code that says why.
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
       socket.onerror = () => {};
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
       socket.onclose = event => end(fail(event?.code === CLOSE_HOST_OFFLINE ? 'host-offline' : 'lost'));
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- the handler is assigned once and never needs a second listener
       socket.onmessage = event => {
         if (over) return;
         const bytes = toBytes(event.data);

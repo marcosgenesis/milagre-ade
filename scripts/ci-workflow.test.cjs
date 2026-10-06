@@ -109,3 +109,15 @@ test('CI lints the lockfile before installing and verifies signatures after', ()
   assert.equal(steps[install - 1].run, 'npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity')
   assert.equal(steps[install + 1].run, 'npm audit signatures')
 })
+
+test('PR titles must be Conventional Commits', () => {
+  const regex = '/^(feat|fix|perf|docs|refactor|chore|ci|test|style|build|revert)(\\([a-z0-9-]+\\))?!?: \\S/'
+  const workflow = read('pr-title.yml')
+  assert.deepEqual(workflow.on.pull_request.types, ['opened', 'edited', 'synchronize', 'reopened'])
+  const run = workflow.jobs.conventional.steps[0].run
+  assert.ok(run.includes(regex), 'workflow carries the expected regex')
+  const title = new Function(`return ${regex}`)()
+  assert.ok(title.test('feat!: x'))
+  assert.ok(title.test('fix(mobile): y'))
+  assert.ok(!title.test('Update readme'))
+})

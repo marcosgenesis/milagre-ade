@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noUnusedParameters": true,
     "noUnusedLocals": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,

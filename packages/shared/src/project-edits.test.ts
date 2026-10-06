@@ -67,6 +67,14 @@ test("patchSession sets and clears fields, and keeps an unchanged state", () => 
   assert.equal(patchSession(initial, 99, { archived: true }), initial);
 });
 
+test("patchSession pins with an order, unpins, and ignores an order that isn't a number", () => {
+  const pinned = patchSession(chatState(), 1, { pinned: true, pin_order: 0 });
+  assert.deepEqual(pinned.sessions[1], { ...session, pinned: true, pin_order: 0 });
+  assert.equal(patchSession(pinned, 1, { pin_order: Number.NaN }), pinned);
+  assert.equal(patchSession(pinned, 1, { pin_order: "2" as never }), pinned);
+  assert.deepEqual(patchSession(pinned, 1, { pinned: false, pin_order: undefined }).sessions[1], session);
+});
+
 test("withDiffStats stores new stats and skips missing or unchanged ones", () => {
   const initial = chatState();
   assert.equal(withDiffStats(initial, { 2: { added: 3, removed: 1 }, 1: null, 9: { added: 1, removed: 1 } }), initial);

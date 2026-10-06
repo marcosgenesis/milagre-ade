@@ -119,6 +119,16 @@ function createRuntime(options) {
       return simulators[method === "close" ? "closeViewer" : method](request, context.clientId);
     });
   }
+  // `agents` is created below; ownership roots are read only once the service polls.
+  const browsers = options.browsers ?? require("./browsers.cjs").createBrowsers({ roots: () => agents.processes() });
+  commands.handle("browser:list", (_context, request) => browsers.list(request));
+  commands.handle("browser:attach", (_context, request) => browsers.attach(request));
+  for (const method of ["open", "frame", "status", "control", "input", "close"]) {
+    commands.handle(`browser:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Browser access requires an authenticated connection");
+      return browsers[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
   const searchFiles = createFileSearch();
   const environmentReady = options.environmentReady ?? loadLoginEnvironment().then(({ source }) => {
     if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
@@ -791,7 +801,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      await simulators.close();
+      await Promise.all([simulators.close(), browsers.close()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -833,7 +843,7 @@ function createRuntime(options) {
         return handlers.get(method)(context, ...args);
       });
     },
-    disconnect: clientId => simulators.disconnect(clientId),
+    disconnect: clientId => Promise.all([simulators.disconnect(clientId), browsers.disconnect(clientId)]).then(() => undefined),
     openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,

@@ -17,6 +17,7 @@ const { createConfinement } = require('./confine.cjs');
 const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
   'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
+  'browser:list', 'browser:attach', 'browser:open', 'browser:frame', 'browser:status', 'browser:control', 'browser:input', 'browser:close',
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'accounts:list', 'accounts:add', 'accounts:select', 'accounts:login', 'accounts:cancel', 'accounts:remove',

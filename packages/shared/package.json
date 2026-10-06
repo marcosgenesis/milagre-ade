@@ -76,6 +76,11 @@
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
     },
+    "./browser": "./src/browser.ts",
+    "./browser-receiver": {
+      "types": "./src/browser-receiver.d.mts",
+      "default": "./src/browser-receiver.mjs"
+    },
     "./message-navigation": "./src/message-navigation.ts"
   },
   "files": [
@@ -93,6 +98,7 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/simulator.ts",
+    "src/browser.ts",
     "src/message-navigation.ts"
   ],
   "scripts": {

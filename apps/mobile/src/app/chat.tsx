@@ -15,6 +15,7 @@ import { pickAttachments } from '../attachment-picker';
 import { appendAttachments, attachmentPrompt, prepareAttachments } from '../attachments';
 import { PullRequestAction, SubagentChip, usePullRequest } from '../status-indicators';
 import { SimulatorChip } from '../simulator';
+import { BrowserChip } from '../browser';
 import { KeyboardChatScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { ChatReply } from '../chat-reply';
 import { ThinkingIndicator } from '../running-logo';
@@ -389,6 +390,7 @@ export default function ChatScreen() {
       {!question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 8 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />
+        <BrowserChip chatId={params.id ? chatId : undefined} />
         <SimulatorChip />
         {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction('agents')} />}
       </View>}

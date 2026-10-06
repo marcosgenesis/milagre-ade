@@ -294,7 +294,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args, context);
         // An open may finish after its caller disconnects. Dispose that late session as well.
-        if (socket.destroyed && request.method.startsWith('simulator:')) await runtime.disconnect?.(context.clientId);
+        if (socket.destroyed && /^(simulator|browser):/.test(request.method)) await runtime.disconnect?.(context.clientId);
         if (request.method === 'link:open' && result?.link) view.linkId = result.link.id;
         if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
         await reply(result ?? null);

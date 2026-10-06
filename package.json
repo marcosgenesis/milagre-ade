@@ -23,6 +23,7 @@
     "test:image-generation": "node scripts/test-image-generation.cjs",
     "test:task-track": "node scripts/test-task-track.cjs",
     "test:ports": "node scripts/test-ports.cjs",
+    "test:browsers": "node scripts/test-browsers.cjs",
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
     "test:prompt-skills": "node scripts/test-prompt-skills.cjs",

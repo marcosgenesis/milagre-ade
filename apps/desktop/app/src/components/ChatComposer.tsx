@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, Subagent } from "../model";
@@ -274,6 +275,8 @@ interface ChatComposerProps {
   tasks?: AgentTask[];
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
+  /** The runtime's key for this Chat (`projectPath#id`), which browser ownership is recorded under. */
+  agentChatId?: string;
   /** Stops the command listening on one of the chat's ports. */
   onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
@@ -448,6 +451,7 @@ export function ChatComposer({
   waitingForSubagents = false,
   tasks,
   ports,
+  agentChatId,
   onStopPort,
   waitingStepIds,
   asking = false,
@@ -600,6 +604,7 @@ export function ChatComposer({
         )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+        <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
         <SimulatorTrack key={`simulator-${chatId}`} />
         <SubagentTrack key={chatId} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onOpenCanvas={() => setCanvasChat(chatId)} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>

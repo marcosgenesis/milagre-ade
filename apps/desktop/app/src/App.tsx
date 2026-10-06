@@ -1233,6 +1233,7 @@ function App() {
             waitingForSubagents={run?.waitingForSubagents}
             tasks={run?.tasks}
             ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+            agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
             onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
             waitingStepIds={waitingStepIds}
             asking={Boolean(run?.questions.length)}

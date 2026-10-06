@@ -3,10 +3,11 @@ import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, ArrowExpand01Icon, ArrowShrink01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
-import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme } from "@milagre/shared/simulator-receiver";
+import { createSimulatorBridge, createSimulatorReceiverHtml } from "@milagre/shared/simulator-receiver";
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
+import { viewerTheme } from "./viewerTheme";
 
 /** Running simulators belong to this Mac, independently of the current Chat or Worktree. */
 export function SimulatorTrack() {
@@ -60,16 +61,10 @@ export function SimulatorTrack() {
   </div>;
 }
 
-function simulatorTheme(): SimulatorTheme {
-  const root = document.documentElement, style = getComputedStyle(root);
-  const color = (name: string) => style.getPropertyValue(name).trim();
-  return { scheme: root.classList.contains("dark") ? "dark" : "light", surface: color("--surface"), ink: color("--ink"), ink2: color("--ink-2"), line: color("--line"), hover: color("--hover"), accent: color("--accent") };
-}
-
 function SimulatorFrame({ api, deviceId, onClose }: { api: SimulatorApi; deviceId: string; onClose(): void }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const html = useMemo(() => createSimulatorReceiverHtml({ deviceId, theme: simulatorTheme() }), [deviceId]);
-  const syncTheme = useCallback(() => frame.current?.contentWindow?.postMessage({ channel: "milagre-simulator-theme", theme: simulatorTheme() }, "*"), []);
+  const html = useMemo(() => createSimulatorReceiverHtml({ deviceId, theme: viewerTheme() }), [deviceId]);
+  const syncTheme = useCallback(() => frame.current?.contentWindow?.postMessage({ channel: "milagre-simulator-theme", theme: viewerTheme() }, "*"), []);
   useEffect(() => {
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });

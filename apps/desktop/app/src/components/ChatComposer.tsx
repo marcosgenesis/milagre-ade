@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
@@ -599,6 +600,7 @@ export function ChatComposer({
         )}
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+        <SimulatorTrack key={`simulator-${chatId}`} />
         <SubagentTrack key={chatId} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onOpenCanvas={() => setCanvasChat(chatId)} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>
 

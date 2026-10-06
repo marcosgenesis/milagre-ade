@@ -71,6 +71,11 @@
     "./diff-tree": "./src/diff-tree.ts",
     "./diff-layout": "./src/diff-layout.ts",
     "./usage": "./src/usage.ts",
+    "./simulator": "./src/simulator.ts",
+    "./simulator-receiver": {
+      "types": "./src/simulator-receiver.d.mts",
+      "default": "./src/simulator-receiver.mjs"
+    },
     "./message-navigation": "./src/message-navigation.ts"
   },
   "files": [
@@ -87,6 +92,7 @@
     "src/diff-tree.ts",
     "src/diff-layout.ts",
     "src/usage.ts",
+    "src/simulator.ts",
     "src/message-navigation.ts"
   ],
   "scripts": {

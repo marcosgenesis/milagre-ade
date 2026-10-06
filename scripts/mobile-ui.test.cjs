@@ -389,6 +389,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
     '../message-navigation': { MessageNavigation: 'MessageNavigation' },
     '../prompt-field': { PromptField: 'PromptField' },
+    '../simulator': { SimulatorChip: 'SimulatorChip' },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../loading-logo': { LoadingLogo: 'LoadingLogo' },
@@ -1753,6 +1754,81 @@ test('an accepted preview cannot assign its Chat id to a different requested Pro
   screen.render();
   assert.equal(screen.params.id, undefined);
   assert.equal(screen.session.pendingChats['mac|/p#new:1'].promoted, undefined);
+});
+
+function simulatorHost(client) {
+  const react = hookHost({ effects: true }), files = new Map(), listeners = new Set();
+  const native = { useColorScheme: () => 'light', Text: 'Text', View: 'View', Pressable: 'Pressable', AppState: { currentState: 'active', addEventListener(_name, fn) { listeners.add(fn); return { remove() { listeners.delete(fn); } }; } } };
+  class File {
+    constructor(_cache, name) { this.uri = 'file:///cache/' + name; }
+    write(value) { files.set(this.uri, value); }
+    get exists() { return files.has(this.uri); }
+    delete() { files.delete(this.uri); }
+  }
+  const source = load('simulator.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+    'expo-router': { router: { back() {}, push() {} }, useFocusEffect: fn => react.effect(fn, [fn]) },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 34 }) },
+    '@expo/dom-webview': { DomWebView: 'DomWebView' }, 'expo-file-system': { File, Paths: { cache: '/cache' } },
+    '@hugeicons/core-free-icons': {}, '@milagre/shared/simulator-receiver': require('../packages/shared/src/simulator-receiver.mjs'),
+    './session': { useSession: () => ({ client }) }, './icons': { Icon: 'Icon' }, './theme': { hex: () => ({ page: '#fafafb', surface: '#ffffff', ink: '#1f2124', ink2: '#62656b', line: '#ecedef', hover: '#f4f5f6', accent: '#0285ff' }) },
+    './ui': { CircleButton: 'CircleButton', PageScroll: 'PageScroll', PillButton: 'PillButton', colors: {}, styles: {} },
+  }, '\nexports.TestSimulatorWebView = SimulatorWebView;');
+  return { source, files, background() { native.AppState.currentState = 'background'; for (const fn of listeners) fn('background'); }, render(name, props) { react.begin(); const tree = source[name](props); react.flush(); return tree; }, cleanup() { react.cleanup(); } };
+}
+
+test('mobile simulator receiver is an OTA JS string cached locally; backgrounding closes a late open', async () => {
+  const gate = deferred(), calls = [], injected = [];
+  const client = { call: async (method, args) => { calls.push([method, args]); return method === 'simulator:open' ? gate.promise : null; } };
+  const h = simulatorHost(client);
+  h.render('TestSimulatorWebView', { client, deviceId: 'sim' }); await settle();
+  const tree = h.render('TestSimulatorWebView', { client, deviceId: 'sim' });
+  assert.equal(tree.type, 'DomWebView'); assert.match(tree.props.source.uri, /^file:\/\/\/cache\//);
+  assert.match(h.files.get(tree.props.source.uri), /RTCPeerConnection/);
+  assert.equal(tree.props.useExpoModulesBridge, false);
+  tree.props.ref.current = { injectJavaScript: value => injected.push(value) };
+  tree.props.onMessage({ nativeEvent: { data: JSON.stringify({ channel: 'milagre-simulator', id: 1, method: 'open', args: { deviceId: 'sim' } }) } });
+  h.background(); gate.resolve({ viewerId: 'late-viewer' }); await settle();
+  assert.ok(injected.some(script => script.includes('simulatorDispose')));
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.find(([method]) => method === 'simulator:close'))), ['simulator:close', [{ viewerId: 'late-viewer' }]]);
+  h.cleanup(); assert.equal(h.files.size, 0);
+});
+
+test('mobile simulator chooses the sole running device, but a list never starts capture', async () => {
+  const device = { id: 'one', name: 'iPhone', platform: 'ios', version: '26.2' };
+  for (const devices of [[device], [device, { ...device, id: 'two' }]]) {
+    const calls = [];
+    const h = simulatorHost({ url: 'mac', call: async method => { calls.push(method); return { supported: true, devices }; } });
+    h.render('SimulatorSheet', { hostId: 'mac' }); await settle();
+    const tree = h.render('SimulatorSheet', { hostId: 'mac' });
+    assert.equal(tree.props.style.paddingBottom, 34, 'controls clear the phone home indicator');
+    assert.equal(!!find(tree, node => node.props?.deviceId === 'one'), devices.length === 1);
+    assert.deepEqual(calls, ['simulator:list']);
+    if (devices.length === 2) assert.ok(find(tree, node => node.type === 'Pressable'));
+    h.cleanup();
+  }
+});
+
+test('simulator sheet preserves its native header and bounds chooser/viewer content below it', async t => {
+  const device = { id: 'one', name: 'iPhone', platform: 'ios', version: '27' };
+  for (const devices of [[device], [device, { ...device, id: 'two' }]]) {
+    const h = simulatorHost({ url: 'mac', call: async () => ({ supported: true, devices }) });
+    t.after(() => h.cleanup());
+    h.render('SimulatorSheet', { hostId: 'mac' }); await settle();
+    const tree = h.render('SimulatorSheet', { hostId: 'mac' });
+    const [header, body] = tree.props.children;
+    assert.equal(header.props.collapsable, false, 'Fabric must preserve one header view for native sheet sizing');
+    assert.equal(header.props.style.flexShrink, 0);
+    assert.equal(body.type, 'View'); assert.equal(body.props.collapsable, false);
+    assert.equal(body.props.style.flex, 1); assert.equal(body.props.style.minHeight, 0);
+    const scroll = find(body, node => node.type === 'PageScroll');
+    if (devices.length === 2) {
+      assert.equal(scroll.props.contentInsetAdjustmentBehavior, 'never', 'the body already sits below its own header');
+      assert.equal(scroll.props.automaticallyAdjustContentInsets, false);
+      assert.equal(scroll.props.style.flex, 1);
+    } else assert.ok(find(body, node => node.props?.deviceId === 'one'), 'the live viewer uses the same bounded body');
+    h.cleanup();
+  }
 });
 
 test('mobile Accounts selects by tapping the row and manages accounts through its menu', async () => {

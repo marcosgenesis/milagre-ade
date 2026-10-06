@@ -7,7 +7,7 @@
   "main": "apps/desktop/electron/main.cjs",
   "scripts": {
     "dev": "npm run dev --workspace milagre",
-    "build": "npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
+    "build": "node scripts/prepare-simulator-helper.cjs && npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
     "start": "npm run start --workspace milagre",
     "typecheck": "npm run typecheck --workspace @milagre/shared && npm run typecheck --workspace milagre",
     "test:agent": "npm run test --workspace @milagre/shared && npm run test --workspace @milagre/core && npm run test:agent --workspace milagre && npm run test:daemon",
@@ -64,9 +64,10 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/review-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs",
     "test:delegation": "node scripts/test-delegation.cjs",
+    "package:repositories": "node scripts/generate-linux-repository.cjs",
+    "test:simulators": "node scripts/test-simulators.cjs",
     "test:project-links": "node scripts/test-project-links.cjs",
-    "test:link-project-dialog": "node scripts/test-link-project-dialog.cjs",
-    "package:repositories": "node scripts/generate-linux-repository.cjs"
+    "test:link-project-dialog": "node scripts/test-link-project-dialog.cjs"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -83,7 +84,9 @@
     "productName": "Milagre",
     "asar": true,
     "asarUnpack": [
-      "node_modules/@milagre/core/src/bundled-skills/**/*"
+      "node_modules/@milagre/core/src/bundled-skills/**/*",
+      "node_modules/expo-device-hub/**/*",
+      "node_modules/node-datachannel/**/*"
     ],
     "files": [
       "dist/**/*",

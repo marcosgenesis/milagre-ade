@@ -2,6 +2,7 @@ const { isLinkScopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
 const { preparePrivateDirectory } = require('@milagre/core/private-files');
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require('./local-auth.cjs');
 const net = require('node:net');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs/promises');
 const { once } = require('node:events');
 const { createRuntime } = require('@milagre/core');
@@ -183,6 +184,8 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
     socket.once('close', () => { resultPages.clear(); });
     const view = { focused: false, projectPath: null, chatId: null };
+    // Never accept an actor supplied in RPC arguments. Each authenticated socket owns its viewer capabilities.
+    const context = Object.freeze({ clientId: randomUUID() });
     if (authenticated) views.set(socket, view);
     const connection = wire(socket, {
       maxFrameBytes,
@@ -196,7 +199,12 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     });
     if (authenticated) clients.set(socket, connection);
     socket.on('error', () => {});
-    socket.on('close', () => { clearTimeout(authenticationTimeout); if (!authenticated) unauthenticated--; sockets.delete(socket); clients.delete(socket); views.delete(socket); });
+    socket.on('close', () => {
+      clearTimeout(authenticationTimeout);
+      if (!authenticated) unauthenticated--;
+      sockets.delete(socket); clients.delete(socket); views.delete(socket);
+      Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
+    });
     async function dispatch(request) {
       const validId = Number.isSafeInteger(request?.id) || (typeof request?.id === 'string' && request.id.length <= 128);
       const id = validId ? request.id : null;
@@ -284,7 +292,9 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         // Only a desktop open (it passes takeNotice) takes the restored-chats notice; the phone's bridge opens without it.
         else if (request.method === 'project:open') result = await runtime.openProject(request.args[0], { takeNotice: request.args[1]?.takeNotice === true });
         else if (request.method === 'project:current' && view.projectPath) result = await runtime.invoke('project:snapshot', [view.projectPath]);
-        else result = await runtime.invoke(request.method, request.args);
+        else result = await runtime.invoke(request.method, request.args, context);
+        // An open may finish after its caller disconnects. Dispose that late session as well.
+        if (socket.destroyed && request.method.startsWith('simulator:')) await runtime.disconnect?.(context.clientId);
         if (request.method === 'link:open' && result?.link) view.linkId = result.link.id;
         if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
         await reply(result ?? null);

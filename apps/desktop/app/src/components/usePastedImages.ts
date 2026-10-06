@@ -21,6 +21,7 @@ function readImage(file: File): Promise<ImageAttachment> {
 
 export function usePastedImages(scope: string) {
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  const localFiles = useRef(new Map<string, File>());
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -38,6 +39,7 @@ export function usePastedImages(scope: string) {
 
   useEffect(() => {
     clear();
+    localFiles.current.clear();
     return () => { generation.current++; };
   }, [scope]);
 
@@ -82,6 +84,7 @@ export function usePastedImages(scope: string) {
         const path = window.milagre.getPathForFile(file);
         if (!path) { failed = true; continue; }
         paths.push(path);
+        localFiles.current.set(path, file);
         if (isAttachableImage(file) && images.length + nextImages.length < MAX_IMAGES) {
           try { nextImages.push({ ...await readImage(file), path }); } catch { /* The disk attachment still works. */ }
         }
@@ -110,7 +113,7 @@ export function usePastedImages(scope: string) {
     setFiles(current => [...new Set([...sentFiles, ...current])]);
   }
 
-  return { images, files, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, restore, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
+  return { images, files, localFiles: localFiles.current, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, restore, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
 }
 
 export type ImageDraft = ReturnType<typeof usePastedImages>;

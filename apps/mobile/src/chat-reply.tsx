@@ -6,6 +6,7 @@ import { Alert02Icon, ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon, Maxim
 import type { AgentRun } from '@milagre/shared/agent-runs';
 import type { ChatMessage, ChatStep } from '@milagre/shared/model';
 import { activitySummary, replyActivity, unspokenThought } from '@milagre/shared/reply-parts';
+import { FileChip } from './file-chip';
 import { Markdown } from './markdown';
 import { Icon } from './icons';
 import { ActivityTitle } from './activity-item';
@@ -56,14 +57,6 @@ function Thumbnail({ source, size }: { source: MediaValue; size: number }) {
   const ready = useMedia(source);
   const style = { width: size, height: size, borderRadius: 14, backgroundColor: colors.canvas };
   return ready ? <Image source={ready} resizeMode="cover" style={style} /> : <View style={style} />;
-}
-function FileChip({ path }: { path: string }) {
-  const name = path.split(/[\\/]/).pop() || path;
-  const ext = name.includes('.') ? name.split('.').pop()!.slice(0, 4).toUpperCase() : 'FILE';
-  return <View accessible accessibilityLabel={`Attached file ${name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingLeft: 8, paddingRight: 12, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.canvas, maxWidth: 264 }}>
-    <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: ext === 'PDF' ? colors.red : colors.ink2, fontSize: 9, fontWeight: '700' }}>{ext}</Text></View>
-    <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 14, fontWeight: '500', flexShrink: 1 }}>{name}</Text>
-  </View>;
 }
 /** An image the agent generated, under its step, at most 240 wide; tap or expand for full screen. */
 function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource }) {

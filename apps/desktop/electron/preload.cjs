@@ -26,6 +26,7 @@ const bridge = {
     return () => ipcRenderer.removeListener("runtime:snapshot", listener);
   },
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  readAttachment: file => ipcRenderer.invoke("attachment:preview", file),
   searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),

@@ -88,12 +88,12 @@ async function browserChecks() {
     await delay(250);
     if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-scrolled-up.png"), image.toPNG()));
     await evaluate('window.setMessageCount(55)');
-    await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 55');
+    await waitFor('!!document.querySelector(\'[aria-label="Go to assistant message 55 of 55"]\')');
     assert.ok(await evaluate(`${distanceFromBottom} > 56`), 'New messages preserve the position while reading earlier messages');
     await evaluate(`(${jumpButton}).click()`);
     await waitFor(`${distanceFromBottom} <= 1 && !(${jumpButton})`);
     await evaluate('window.setMessageCount(60)');
-    await waitFor(`document.querySelectorAll("[data-slot=preview-rail-item]").length === 60 && ${distanceFromBottom} <= 1 && !(${jumpButton})`);
+    await waitFor(`!!document.querySelector('[aria-label="Go to assistant message 60 of 60"]') && ${distanceFromBottom} <= 1 && !(${jumpButton})`);
     await evaluate(readEarlier);
     await waitFor(`!!(${jumpButton})`);
     await evaluate(`document.querySelector('[aria-label="Conversation"]').scrollTo({ top: 1e9, behavior: 'instant' })`);

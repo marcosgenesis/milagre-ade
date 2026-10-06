@@ -8,14 +8,16 @@ const { spawnSync } = require('node:child_process');
 const YAML = require('yaml');
 const script = path.join(__dirname, 'finalize-update-feeds.cjs');
 const names = ['Milagre-1.2.3-arm64.zip','Milagre-1.2.3-x64.zip','Milagre-1.2.3-arm64.dmg','Milagre-1.2.3-x64.dmg'];
-function fixture(t) {
+function fixture(t, { tag = 'v1.2.3', feeds = ['latest-mac.yml', 'beta-mac.yml'] } = {}) {
+  const v = tag.slice(1);
+  const files = [`Milagre-${v}-arm64.zip`,`Milagre-${v}-x64.zip`,`Milagre-${v}-arm64.dmg`,`Milagre-${v}-x64.dmg`];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-feeds-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const name of names) fs.writeFileSync(path.join(root, name), 'abc');
-  const feed = { version: '1.2.3', files: names.map(url=>({url,sha512:'stale',size:1})), path:names[0],sha512:'stale' };
-  const file = path.join(root,'latest-mac.yml');
-  fs.writeFileSync(file,YAML.stringify(feed));
-  return { root,feed,file,run:(...args)=>spawnSync(process.execPath,[script,'--tag','v1.2.3','--platform','macos','--artifacts',root,...args],{encoding:'utf8'}) };
+  for (const name of files) fs.writeFileSync(path.join(root, name), 'abc');
+  const feed = { version: v, files: files.map(url=>({url,sha512:'stale',size:1})), path:files[0],sha512:'stale' };
+  for (const name of feeds) fs.writeFileSync(path.join(root,name),YAML.stringify(feed));
+  const file = path.join(root,feeds[0]);
+  return { root,feed,file,run:(...args)=>spawnSync(process.execPath,[script,'--tag',tag,'--platform','macos','--artifacts',root,...args],{encoding:'utf8'}) };
 }
 test('refreshes feed hashes from final signed bytes including legacy top-level fields', t=>{
   const f=fixture(t);
@@ -43,4 +45,23 @@ test('rejects empty assets and symlinks',t=>{
   fs.writeFileSync(path.join(f.root,names[0]),'');assert.notEqual(f.run().status,0);
   fs.unlinkSync(path.join(f.root,names[0]));fs.symlinkSync(path.join(f.root,names[1]),path.join(f.root,names[0]));
   assert.notEqual(f.run().status,0);
+});
+test('a stable tag refreshes both the latest and the beta macOS feeds',t=>{
+  const f=fixture(t);
+  assert.equal(f.run().status,0);
+  const digest=createHash('sha512').update('abc').digest('base64');
+  for (const name of ['latest-mac.yml','beta-mac.yml']) assert.equal(YAML.parse(fs.readFileSync(path.join(f.root,name),'utf8')).sha512,digest);
+  assert.equal(f.run('--check').status,0);
+});
+test('a stable tag without the beta feed fails',t=>{
+  const f=fixture(t,{feeds:['latest-mac.yml']});
+  assert.notEqual(f.run().status,0);
+  assert.notEqual(f.run('--check').status,0);
+});
+test('a beta tag needs only the beta feed and refreshes it',t=>{
+  const f=fixture(t,{tag:'v1.2.3-beta.7',feeds:['beta-mac.yml']});
+  assert.equal(f.run().status,0);
+  const digest=createHash('sha512').update('abc').digest('base64');
+  assert.equal(YAML.parse(fs.readFileSync(f.file,'utf8')).sha512,digest);
+  assert.equal(f.run('--check').status,0);
 });

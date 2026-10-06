@@ -136,6 +136,25 @@ const checks = [
       phone.destroy();
     },
   },
+  {
+    name: "metadata: canonical, description, Open Graph image",
+    async run(open, evaluate) {
+      const window = await open({ width: 1440, height: 900 });
+      const meta = await evaluate(window, `({
+        canonical: document.querySelector('link[rel="canonical"]')?.href,
+        description: document.querySelector('meta[name="description"]')?.content,
+        image: document.querySelector('meta[property="og:image"]')?.content,
+        card: document.querySelector('meta[name="twitter:card"]')?.content,
+      })`);
+      assert.equal(meta.canonical, "https://milagre.cloud/");
+      assert.ok(meta.description.startsWith("Milagre runs Claude Code and Codex on your Mac"));
+      assert.equal(meta.image, "https://milagre.cloud/og.png");
+      assert.equal(meta.card, "summary_large_image");
+      assert.ok(fs.existsSync(path.join(dist, "og.png")), "og.png is built");
+      assert.ok(fs.existsSync(path.join(dist, "robots.txt")), "robots.txt is built");
+      window.destroy();
+    },
+  },
 ];
 
 async function browserChecks() {

@@ -64,8 +64,60 @@ async function capture(desktopUrl, canvasUrl) {
   app.exit();
 }
 
+// Renders the built site's hero at 1200x630 for link previews.
+async function captureOg() {
+  const http = require('node:http');
+  const dist = path.resolve(__dirname, '../apps/site/dist');
+  const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' };
+  const server = http.createServer((req, res) => {
+    let file = path.join(dist, decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
+    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
+    if (!file.startsWith(dist) || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' });
+    fs.createReadStream(file).pipe(res);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { app, BrowserWindow } = require('electron');
+  app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-og-electron-')));
+  await app.whenReady();
+  const window = new BrowserWindow({ width: 1200, height: 630, useContentSize: true, show: false });
+  const url = `http://127.0.0.1:${server.address().port}/`;
+  // Electron 44 crashes if emulation is sent before the first navigation, so load, attach, then reload.
+  await window.loadURL(url);
+  window.webContents.debugger.attach();
+  await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const reloaded = new Promise(resolve => window.webContents.once('did-finish-load', resolve));
+  window.webContents.reload();
+  await reloaded;
+  // The full hero is taller than 630px, so keep the title and the scene and shrink both to fit.
+  await window.webContents.executeJavaScript(`
+    document.querySelector('.nav')?.remove();
+    const hero = document.querySelector('.hero');
+    for (const el of hero.children) if (!el.matches('h1, .hero-visual')) el.style.display = 'none';
+    hero.style.cssText += 'padding: 30px 0 0; gap: 0;';
+    for (const part of [hero, hero.parentElement]) {
+      for (let next = part.nextElementSibling; next; next = next.nextElementSibling) next.style.display = 'none';
+    }
+    const title = hero.querySelector('h1');
+    title.style.cssText += 'max-width: 22ch; font-size: 54px;';
+    const visual = hero.querySelector('.hero-visual');
+    visual.style.cssText += 'margin-top: 20px; zoom: 0.74;';
+    document.fonts.ready.then(() => true)
+  `);
+  await delay(500);
+  fs.writeFileSync(path.resolve(__dirname, '../apps/site/public/og.png'), (await window.webContents.capturePage({ x: 0, y: 0, width: 1200, height: 630 })).resize({ width: 1200, height: 630 }).toPNG());
+  server.close();
+  app.exit();
+}
+
 async function main() {
-  if (process.versions.electron) return capture(process.argv.at(-2), process.argv.at(-1));
+  if (process.versions.electron) return process.argv.includes('--og') ? captureOg() : capture(process.argv.at(-2), process.argv.at(-1));
+  if (process.argv.includes('--og')) {
+    const child = spawn(require('electron'), [__filename, '--og'], { stdio: 'inherit', env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+    const code = await new Promise(resolve => child.on('exit', resolve));
+    if (code) throw new Error('OG capture failed');
+    return console.log('Saved apps/site/public/og.png');
+  }
   fs.mkdirSync(output, { recursive: true });
   const { createServer } = await import('vite');
   const fixtures = { '/__site_desktop.tsx': desktopFixture('dark'), '/__site_canvas.tsx': canvasFixture };

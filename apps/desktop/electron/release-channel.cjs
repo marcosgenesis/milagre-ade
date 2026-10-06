@@ -23,7 +23,7 @@ function createReleaseChannelStore({ file }) {
     },
   };
 }
-/** @param {{ channel?: string, allowPrerelease?: boolean, allowDowngrade?: boolean }} autoUpdater @param {string} channel */
+/** @param {{ channel?: string | null, allowPrerelease?: boolean, allowDowngrade?: boolean }} autoUpdater @param {string} channel */
 function configureUpdater(autoUpdater, channel) {
   autoUpdater.channel = channel === "beta" ? "beta" : "latest";
   autoUpdater.allowPrerelease = channel === "beta";

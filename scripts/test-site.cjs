@@ -70,6 +70,7 @@ const checks = [
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
+  app.on("window-all-closed", () => {}); // checks close their windows; keep the app alive until app.exit
   const server = await serve();
   const url = `http://127.0.0.1:${server.address().port}/`;
   const errors = [];

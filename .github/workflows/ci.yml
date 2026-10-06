@@ -13,6 +13,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      desktop: ${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}
+    steps:
+      - name: Detect which parts of the repository changed
+        id: filter
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+        with:
+          filters: |
+            desktop:
+              - 'apps/desktop/**'
+              - 'apps/daemon/**'
+              - 'packages/**'
+              - 'scripts/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
   javascript:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -40,6 +62,8 @@ jobs:
         run: npm test -- --unit
   native-tests:
     name: native-tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false

@@ -1144,7 +1144,7 @@ function App() {
           <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
         </>}
       </div>}
-      <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
+      <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
       {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">

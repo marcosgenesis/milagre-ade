@@ -16,6 +16,7 @@ import Tooltip from "./primitives/Tooltip";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
+import { useDismiss } from "../lib/use-dismiss";
 import { ProviderLogo } from "./ProviderLogo";
 import { HandoverBriefChip, HandoverRow } from "./Handover";
 import { handoverBlocker, otherProvider, providerLabel } from "../lib/handover";
@@ -211,23 +212,19 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     if (needsFullWidth !== expanded) setExpanded(needsFullWidth);
   }, [draft, expanded, selectedModel.name, effortLabel, fastMode, alwaysExpanded]);
 
-  useEffect(() => {
-    if (!modelOpen && !plusOpen && !permissionOpen && !effortOpen) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest("[data-promptbar]")) {
-        setModelOpen(false);
-        setPlusOpen(false);
-        setPermissionOpen(false);
-        setEffortOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [modelOpen, plusOpen, permissionOpen, effortOpen]);
+  // Any press outside the open picker closes it, including the prompt field and the rest of the composer.
+  useDismiss(modelOpen || plusOpen || permissionOpen || effortOpen, () => {
+    setModelOpen(false);
+    setPlusOpen(false);
+    setPermissionOpen(false);
+    setEffortOpen(false);
+  }, (target) => !!target.closest("[data-picker-panel], [data-promptbar] button[aria-expanded]"), () => { if (lastAnchor.current) anchorTo(...lastAnchor.current); });
+  const lastAnchor = useRef<[HTMLElement, number] | null>(null);
 
   // Right-align the popover with its trigger, or left-align when that would leave the composer. It opens above the
   // composer, or, in the tall layout, right above its button; below the button when there's more room there.
   function anchorTo(trigger: HTMLElement, width: number) {
+    lastAnchor.current = [trigger, width];
     const root = popoverRootRef.current?.getBoundingClientRect();
     if (!root) return;
     const button = trigger.getBoundingClientRect();
@@ -325,7 +322,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
     <div data-promptbar className="w-full" onKeyDown={handleEscape}>
       <div ref={popoverRootRef} className="relative">
         {menu && (
-          <div onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
+          <div data-picker-panel onMouseLeave={() => setEngaged(false)} className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-[10px] border border-line bg-surface p-1 shadow-raised" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}>
             <ScrollArea className="relative max-h-64" aria-label={menu === "slash" ? "Commands and skills" : plusOpen ? "Sources" : "Project files"}>
             <span aria-hidden className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover" style={{ top: rowBox?.top ?? 0, height: rowBox?.height ?? 0, opacity: rowBox && engaged ? 1 : 0, transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease" }} />
             {rows.map((row, index) => {

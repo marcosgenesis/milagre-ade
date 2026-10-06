@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { PickerPanel, PickerRow } from "./Picker";
+import { useDismiss } from "../../lib/use-dismiss";
 
 export type SelectOption<T extends string> = {
   value: T;
@@ -68,25 +69,7 @@ export function Select<T extends string>({
     rows?.[index]?.focus({ preventScroll: false });
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: Event) => {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      close(false);
-    };
-    const dismiss = () => close(false);
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("scroll", outside, true);
-    window.addEventListener("resize", dismiss);
-    window.addEventListener("blur", dismiss);
-    return () => {
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("scroll", outside, true);
-      window.removeEventListener("resize", dismiss);
-      window.removeEventListener("blur", dismiss);
-    };
-  }, [open]);
+  useDismiss(open, () => close(false), (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)), place);
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" || event.key === "Tab") {

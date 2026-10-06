@@ -7,13 +7,13 @@ const TARGETS = {
   "mac-x64": /^Milagre-.+-x64\.dmg$/,
 };
 
-export async function latestDownload(target, fetchImpl) {
+export async function latestDownload(target, fetchImpl, { token, timeoutMs = 3000 } = {}) {
   const pattern = TARGETS[target];
   if (!pattern) return null;
   try {
-    const response = await fetchImpl(RELEASES_API, {
-      headers: { accept: "application/vnd.github+json", "user-agent": "milagre-site" },
-    });
+    const headers = { accept: "application/vnd.github+json", "user-agent": "milagre-site" };
+    if (token) headers.authorization = `Bearer ${token}`;
+    const response = await fetchImpl(RELEASES_API, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return RELEASES_PAGE;
     const release = await response.json();
     const asset = (release.assets || []).find(item => pattern.test(item.name));
@@ -23,7 +23,7 @@ export async function latestDownload(target, fetchImpl) {
   }
 }
 
-export async function handleRequest(request, { assets, fetchImpl }) {
+export async function handleRequest(request, { assets, fetchImpl, token }) {
   const url = new URL(request.url);
   if (url.hostname === "www.milagre.cloud") {
     url.hostname = "milagre.cloud";
@@ -31,7 +31,7 @@ export async function handleRequest(request, { assets, fetchImpl }) {
   }
   const download = url.pathname.match(/^\/download\/([a-z0-9-]+)\/?$/);
   if (download) {
-    const location = await latestDownload(download[1], fetchImpl);
+    const location = await latestDownload(download[1], fetchImpl, { token });
     if (!location) return new Response("Unknown download", { status: 404 });
     return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
   }

@@ -11,3 +11,5 @@ directory = "./dist"
 binding = "ASSETS"
 run_worker_first = true
 not_found_handling = "404-page"
+
+# Optional secret: wrangler secret put GITHUB_TOKEN (public-read, raises the GitHub API rate limit)

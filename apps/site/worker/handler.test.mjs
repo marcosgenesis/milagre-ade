@@ -36,6 +36,35 @@ test("resolves the Intel DMG", async () => {
   assert.equal(await latestDownload("mac-x64", fetchImpl), "https://example.test/x64.dmg");
 });
 
+test("gives the GitHub request an abort signal so a stalled API cannot hang the redirect", async () => {
+  const { fetchImpl, calls } = github(release);
+  await latestDownload("mac-arm64", fetchImpl);
+  assert.ok(calls[0].init.signal instanceof AbortSignal);
+});
+
+test("falls back to the releases page when the GitHub request is aborted", async () => {
+  const aborted = async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); };
+  assert.equal(await latestDownload("mac-arm64", aborted, { timeoutMs: 1 }), RELEASES_PAGE);
+});
+
+test("sends a bearer token to GitHub when one is configured", async () => {
+  const { fetchImpl, calls } = github(release);
+  await latestDownload("mac-arm64", fetchImpl, { token: "ghp_test" });
+  assert.equal(calls[0].init.headers.authorization, "Bearer ghp_test");
+});
+
+test("sends no authorization header without a token", async () => {
+  const { fetchImpl, calls } = github(release);
+  await latestDownload("mac-arm64", fetchImpl);
+  assert.equal("authorization" in calls[0].init.headers, false);
+});
+
+test("handleRequest forwards the token to the GitHub lookup", async () => {
+  const { fetchImpl, calls } = github(release);
+  await handleRequest(new Request("https://milagre.cloud/download/mac-arm64"), { assets, fetchImpl, token: "ghp_test" });
+  assert.equal(calls[0].init.headers.authorization, "Bearer ghp_test");
+});
+
 test("returns null for an unknown target without calling GitHub", async () => {
   const { fetchImpl, calls } = github(release);
   assert.equal(await latestDownload("windows", fetchImpl), null);

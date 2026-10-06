@@ -1,4 +1,6 @@
 import { useReducedMotion } from "motion/react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   type ComponentPropsWithRef,
   type ReactNode,
@@ -125,6 +127,7 @@ export function MessageScroller({
   const [railItems, setRailItems] = useState<PreviewRailItem[]>([]);
   const [activeRailId, setActiveRailId] = useState("");
   const [railOverflowing, setRailOverflowing] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const {
     onScroll: onViewportScroll,
     onWheel: onViewportWheel,
@@ -289,15 +292,22 @@ export function MessageScroller({
     }, behavior === "smooth" ? 320 : 0);
   }, []);
 
+  const updateJumpToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setShowJumpToBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > followThreshold);
+  }, [followThreshold]);
+
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     // The active item follows every scroll, including the ones that chase streamed output.
     scheduleActiveRailItem();
+    updateJumpToBottom();
     if (programmaticScrollRef.current) return;
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setFollowing(distance <= followThreshold);
-  }, [followThreshold, scheduleActiveRailItem, setFollowing]);
+  }, [followThreshold, scheduleActiveRailItem, setFollowing, updateJumpToBottom]);
 
   const leaveLiveEdge = useCallback(() => {
     programmaticScrollRef.current = false;
@@ -305,10 +315,10 @@ export function MessageScroller({
 
   useLayoutEffect(() => {
     followingRef.current = followOutput;
-    if (!followOutput) return;
     // Position a newly opened conversation before the browser can paint its top.
-    scrollToEnd("instant");
-  }, [followOutput, scrollToEnd]);
+    if (followOutput) scrollToEnd("instant");
+    updateJumpToBottom();
+  }, [followOutput, scrollToEnd, updateJumpToBottom]);
 
   useEffect(() => {
     if (!followOutput || !followingRef.current) return;
@@ -320,14 +330,16 @@ export function MessageScroller({
 
   useEffect(() => {
     const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    const viewport = viewportRef.current;
+    if (!content || !viewport || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (!followOutput || !followingRef.current) return;
-      scrollToEnd(followBehavior);
+      if (followOutput && followingRef.current) scrollToEnd(followBehavior);
+      updateJumpToBottom();
     });
     observer.observe(content);
+    observer.observe(viewport);
     return () => observer.disconnect();
-  }, [followBehavior, followOutput, scrollToEnd]);
+  }, [followBehavior, followOutput, scrollToEnd, updateJumpToBottom]);
 
   useEffect(() => {
     if (navigation !== "rail") {
@@ -454,7 +466,7 @@ export function MessageScroller({
   );
 
   return (
-    <div data-slot="message-scroller" className={`min-h-0 ${className}`} {...props}>
+    <div data-slot="message-scroller" className={`relative min-h-0 ${className}`} {...props}>
       {navigation === "rail" ? (
         <PreviewRail
           items={railOverflowing ? railItems : []}
@@ -473,6 +485,21 @@ export function MessageScroller({
         </PreviewRail>
       ) : (
         viewport
+      )}
+      {showJumpToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-12 z-20 flex justify-center">
+          <button
+            type="button"
+            aria-label="Go to bottom"
+            onClick={() => {
+              setFollowing(true);
+              scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+            }}
+            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-line-strong/50 bg-surface/60 text-ink shadow-overlay backdrop-blur-chip transition-colors hover:bg-surface/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink"
+          >
+            <HugeiconsIcon icon={ArrowDown01Icon} size={20} aria-hidden="true" />
+          </button>
+        </div>
       )}
     </div>
   );

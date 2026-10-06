@@ -26,6 +26,15 @@ function serve() {
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
+async function copyLabel(evaluate, window) {
+  let label = "";
+  for (let i = 0; i < 40 && !/^(Copied|Press ⌘C)$/.test(label); i++) {
+    await delay(50);
+    label = await evaluate(window, `document.querySelector(".hero [data-copy]").textContent.trim()`);
+  }
+  return label;
+}
+
 const checks = [
   {
     name: "desktop hero has the title, both downloads, brew and the iPhone link",
@@ -41,17 +50,24 @@ const checks = [
     },
   },
   {
-    name: "copy button copies, or selects the command and asks for Command-C",
+    name: "copy button copies the brew command",
     async run(open, evaluate) {
       const window = await open({ width: 1440, height: 900 });
       await evaluate(window, `document.querySelector(".hero [data-copy]").click()`);
-      let label = "";
-      for (let i = 0; i < 40 && !/^(Copied|Press ⌘C)$/.test(label); i++) {
-        await delay(50);
-        label = await evaluate(window, `document.querySelector(".hero [data-copy]").textContent.trim()`);
-      }
+      const label = await copyLabel(evaluate, window);
+      // A hidden window may lack clipboard focus, so the selection fallback is also accepted here.
       assert.match(label, /^(Copied|Press ⌘C)$/);
-      if (label === "Press ⌘C") assert.equal(await evaluate(window, `getSelection().toString()`), BREW);
+      window.destroy();
+    },
+  },
+  {
+    name: "copy button falls back to selecting the command when the clipboard is unavailable",
+    async run(open, evaluate) {
+      const window = await open({ width: 1440, height: 900 });
+      await evaluate(window, `void (navigator.clipboard.writeText = () => Promise.reject(new Error("denied")))`);
+      await evaluate(window, `document.querySelector(".hero [data-copy]").click()`);
+      assert.equal(await copyLabel(evaluate, window), "Press ⌘C");
+      assert.equal(await evaluate(window, `getSelection().toString()`), BREW);
       window.destroy();
     },
   },
@@ -74,8 +90,10 @@ async function browserChecks() {
   const server = await serve();
   const url = `http://127.0.0.1:${server.address().port}/`;
   const errors = [];
+  const opened = [];
   async function open({ width, height, mobile = false, reducedMotion = false }) {
     const window = new BrowserWindow({ width, height, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
+    opened.push(window);
     window.webContents.on("console-message", event => { if (event.level === "error") errors.push(event.message); });
     await window.loadURL(url);
     if (mobile || reducedMotion) {
@@ -102,6 +120,7 @@ async function browserChecks() {
   for (const check of checks) {
     try { await check.run(open, evaluate, shot); console.log(`PASS: ${check.name}`); }
     catch (error) { failed = true; console.error(`FAIL: ${check.name}\n${error.stack}`); }
+    finally { for (const w of opened.splice(0)) if (!w.isDestroyed()) w.destroy(); }
   }
   if (errors.length) { failed = true; console.error(`FAIL: console errors\n${errors.join("\n")}`); }
   server.close();

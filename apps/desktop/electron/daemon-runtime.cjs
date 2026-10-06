@@ -75,7 +75,7 @@ async function connectDesktopRuntime(options) {
       const batch = hold.queue.splice(0);
       let state;
       let read = true;
-      try { state = /** @type {{ state: unknown }} */ (await hold.connection.call(isLinkScopeKey(project) ? 'link:snapshot' : 'project:snapshot', [isLinkScopeKey(project) ? scopeFromKey(project).linkId : project])).state; }
+      try { state = /** @type {{ state: unknown }} */ (await hold.connection.call(isLinkScopeKey(project) ? 'link:snapshot' : 'project:snapshot', [isLinkScopeKey(project) ? project.slice('milagre-link:'.length) : project])).state; }
       catch { read = false; }
       if (!live()) return;
       const last = batch.findLastIndex(item => ['project:state', 'link:state'].includes(item.channel));
@@ -130,7 +130,7 @@ async function connectDesktopRuntime(options) {
       recovering = true; capturingSnapshot = false; buffered = []; bufferedBytes = 0;
       attach(connection);
       for (const projectPath of projects) {
-        try { await connection.call(isLinkScopeKey(projectPath) ? 'link:open' : 'project:open', [isLinkScopeKey(projectPath) ? scopeFromKey(projectPath).linkId : projectPath]); }
+        try { await connection.call(isLinkScopeKey(projectPath) ? 'link:open' : 'project:open', [isLinkScopeKey(projectPath) ? projectPath.slice('milagre-link:'.length) : projectPath]); }
         catch (error) {
           // A Project removed while the host was offline must not prevent the
           // remaining Projects, or the folder picker, from becoming usable.
@@ -139,7 +139,7 @@ async function connectDesktopRuntime(options) {
           if (currentProject === projectPath) { currentProject = null; currentChat = null; }
         }
       }
-      if (currentProject) await connection.call(isLinkScopeKey(currentProject) ? 'link:open' : 'project:open', [isLinkScopeKey(currentProject) ? scopeFromKey(currentProject).linkId : currentProject]);
+      if (currentProject) await connection.call(isLinkScopeKey(currentProject) ? 'link:open' : 'project:open', [isLinkScopeKey(currentProject) ? currentProject.slice('milagre-link:'.length) : currentProject]);
       await connection.call('chat:set-open', [currentChat]);
       await connection.call('daemon:focus', [{ focused }]);
       capturingSnapshot = true;
@@ -184,7 +184,7 @@ async function connectDesktopRuntime(options) {
 
   async function invoke(method, args = []) {
     if (closed || !client || recovering) throw new Error('Milagre host is disconnected. Your command was not sent.');
-    const result = await client.call(method, args);
+    const result = /** @type {any} */ (await client.call(method, args));
     if (['project:open', 'project:current', 'project:switch'].includes(method) && result && typeof result === 'object' && 'path' in result && typeof result.path === 'string') {
       currentProject = result.path; projects.add(result.path);
     }

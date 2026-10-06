@@ -59,6 +59,7 @@ export type ChatDetails = {
 export type SidebarRecent = {
   id: string;
   label: string;
+  worktreeCount?: number;
   prompt?: string;
   /** The mark at the left of the row; idle when absent. */
   mark?: ChatMark;
@@ -262,6 +263,7 @@ export const ChatRow = memo(function ChatRow({
             }`}
           >
             <ChatTitle label={item.label} />
+            {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
           </span>
         </button>
       )}

@@ -549,9 +549,9 @@ function App() {
       getState: () => openState() ?? null,
       currentProjectPath: () => projectRef.current?.path,
       stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
-      hide: () => {
-        patchChat(sessionId, { archived: true, unread: false });
-        if (selectedSessionId === sessionId) startNewChat();
+      hide: async () => {
+        await window.milagre.patchChat(projectPath, sessionId, { archived: true, unread: false });
+        if (projectRef.current?.path === projectPath && selectedSessionRef.current === sessionId) startNewChat();
       },
       // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
       restore: () => {
@@ -568,7 +568,7 @@ function App() {
       },
       refreshBranches: () => void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {}),
       notify: setNotice,
-    }, sessionId, mode, plan);
+    }, sessionId, mode, plan).catch(error => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -1040,7 +1040,7 @@ function App() {
     onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
     onCommit: (id) => latest.current.openGitDialog(Number(id)),
     onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-    onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+    onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
   }), []);
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());

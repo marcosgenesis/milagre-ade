@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Text } from 'react-native';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSession } from '../session';
+import { ArchiveProgress } from '../archive-progress';
 import { Button, ErrorNotice, Field, PageScroll, styles } from '../ui';
 
 export default function ChatDetails() {
@@ -10,6 +11,7 @@ export default function ChatDetails() {
   const chat = session.snapshot?.project.state.sessions[Number(id)];
   const [title, setTitle] = useState(chat?.title || chat?.generatedTitle || '');
   const [busy, setBusy] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState('');
   const focused = useRef<object | null>(null);
   const projectPath = session.snapshot?.project.path;
@@ -20,7 +22,8 @@ export default function ChatDetails() {
   async function save(patch: { title?: string; archived?: boolean }) {
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
-    setBusy(true); setError('');
+    if (busy) return;
+    setBusy(true); setArchiving(patch.archived === true); setError('');
     try {
       await session.client!.call('chat:patch', [project.path, Number(id), patch]);
       if (!current()) return;
@@ -28,12 +31,13 @@ export default function ChatDetails() {
       if (current()) router.back();
     }
     catch (error) { if (current()) setError((error as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setArchiving(false); }
   }
   return <PageScroll><Text style={styles.title}>Manage Chat</Text><Field label="Chat name" value={title} onChangeText={setTitle} placeholder="Give this Chat a name" /><Button title="Save name" disabled={busy || !title.trim()} onPress={() => void save({ title: title.trim() })} />
     <Text style={styles.muted}>{chat.archived ? 'Restoring brings this Chat back to its Worktree list.' : 'Archiving hides this Chat from the active list. Its messages stay saved.'}</Text>
     {running && <Text style={styles.muted}>Stop the running turn before archiving this Chat.</Text>}
     <Button title={chat.archived ? 'Restore Chat' : 'Archive Chat'} secondary disabled={busy || running} onPress={() => void save({ archived: !chat.archived })} />
+    {archiving && <ArchiveProgress />}
     {error ? <ErrorNotice message={error} /> : null}
   </PageScroll>;
 }

@@ -38,10 +38,11 @@ function ProjectChanges({ member, name, list, mode, onSelectFile, activePath, co
   activePath?: string; commentCounts?: Record<string, number>; onCommit: () => void; onOpenEditor: () => void; onReveal: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const files = list.state === 'ready' && list.isRepo ? list.files : [];
   return <section data-link-changes-project={member.projectId} aria-label={name} className="pb-2">
-    <div className="group/project flex items-center gap-1 px-2 pt-1">
-      <button type="button" data-project-collapse aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name} changes`} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-chip px-1 py-1 text-left hover:bg-hover">
+    <div data-project-header className={`group/project relative mx-2 mt-1 rounded-chip hover:bg-hover ${actionsOpen ? 'bg-hover' : ''}`}>
+      <button type="button" data-project-collapse aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name} changes`} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)} className={`flex w-full min-w-0 items-center gap-1.5 rounded-chip py-1 pl-1 text-left transition-[padding] duration-150 group-hover/project:pr-8 group-focus-within/project:pr-8 ${actionsOpen ? 'pr-8' : 'pr-1'}`}>
         <HugeiconsIcon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} size={12} color="currentColor" />
         <ProjectAvatarStack projects={[{ path: member.projectPath, name }]} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -50,7 +51,7 @@ function ProjectChanges({ member, name, list, mode, onSelectFile, activePath, co
         </span>
         <Counts className="self-start pt-0.5" added={files.reduce((sum, file) => sum + file.added, 0)} removed={files.reduce((sum, file) => sum + file.removed, 0)} />
       </button>
-      <ProjectActions name={name} onCommit={onCommit} onOpenEditor={onOpenEditor} onReveal={onReveal} />
+      <ProjectActions name={name} onOpenChange={setActionsOpen} onCommit={onCommit} onOpenEditor={onOpenEditor} onReveal={onReveal} />
     </div>
     {!collapsed && <>
       {mode === 'committed' && list.state === 'ready' && list.isRepo && list.base && <p data-diff-base className="truncate px-8 pb-1 text-[10px] text-ink-3">since <span className="font-mono">{list.base}</span></p>}
@@ -59,10 +60,10 @@ function ProjectChanges({ member, name, list, mode, onSelectFile, activePath, co
   </section>;
 }
 
-function ProjectActions({ name, onCommit, onOpenEditor, onReveal }: { name: string; onCommit: () => void; onOpenEditor: () => void; onReveal: () => void }) {
+function ProjectActions({ name, onOpenChange, onCommit, onOpenEditor, onReveal }: { name: string; onOpenChange: (open: boolean) => void; onCommit: () => void; onOpenEditor: () => void; onReveal: () => void }) {
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
-  function close(refocus = true) { setPosition(null); if (refocus) trigger.current?.focus(); }
+  function close(refocus = true) { setPosition(null); onOpenChange(false); if (refocus) trigger.current?.focus(); }
   useLayoutEffect(() => { if (position) panel.current?.querySelector<HTMLButtonElement>('[data-picker-row]')?.focus(); }, [position]);
   useEffect(() => {
     if (!position) return;
@@ -75,11 +76,12 @@ function ProjectActions({ name, onCommit, onOpenEditor, onReveal }: { name: stri
   function open() {
     const rect = trigger.current!.getBoundingClientRect();
     setPosition({ left: Math.max(12, rect.right - 230), ...(window.innerHeight - rect.bottom > 150 ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }) });
+    onOpenChange(true);
   }
   const choose = (action: () => void) => () => { close(); action(); };
   return <>
-    <button ref={trigger} type="button" data-project-actions aria-label={`${name} actions`} aria-expanded={Boolean(position)} onClick={() => position ? close() : open()} className={`flex size-6 shrink-0 items-center justify-center rounded-chip text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/project:opacity-100 ${position ? 'bg-hover text-ink opacity-100' : 'opacity-0'}`}><HugeiconsIcon icon={MoreVerticalIcon} size={14} /></button>
-    {position && createPortal(<div ref={panel} aria-label={`${name} actions`} className="fixed z-[70] w-[230px]" style={position}>
+    <button ref={trigger} type="button" data-project-actions aria-label={`${name} actions`} aria-expanded={Boolean(position)} onClick={() => position ? close() : open()} className={`absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-chip text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/project:opacity-100 ${position ? 'bg-hover text-ink opacity-100' : 'opacity-0'}`}><HugeiconsIcon icon={MoreVerticalIcon} size={14} /></button>
+    {position && createPortal(<div ref={panel} data-link-project-menu aria-label={`${name} actions`} className="fixed z-[70] w-[230px]" style={position}>
       <PickerPanel onKeyDown={event => { if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); event.stopPropagation(); close(); } }}>
         <PickerRow label="Commit and open PR…" icon={<HugeiconsIcon icon={GitPullRequestIcon} size={15} />} selected={false} onClick={choose(onCommit)} />
         <PickerRow label="Open in editor" icon={<HugeiconsIcon icon={SourceCodeIcon} size={15} />} selected={false} onClick={choose(onOpenEditor)} />

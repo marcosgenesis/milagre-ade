@@ -153,6 +153,9 @@ async function main() {
     await fs.writeFile(path.join(webRoot, 'web-only.txt'), 'Web-only file\n');
     await evaluate(`document.querySelector('[data-diff-refresh]').click()`);
     await waitFor(() => evaluate(`!!document.querySelector(${JSON.stringify(group(webId) + ' [data-diff-tree-file="web-only.txt"]')})`), 'refresh restores a recovered member and finds an untracked file');
+    const projectHeader = await evaluate(`(() => { const rect = document.querySelector(${JSON.stringify(group(webId) + ' [data-project-header]')}).getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; })()`);
+    await connection.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...projectHeader });
+    await shot('link-project-row-hover');
     await evaluate(`document.querySelector(${JSON.stringify(group(webId) + ' [data-project-actions]')}).click()`);
     await shot('link-project-actions');
     await click('Commit and open PR…');

@@ -486,6 +486,11 @@ a {
   outline: none;
 }
 
+/* Project action rows keep the picker's neutral focus fill inside its scrolling panel. */
+[data-link-project-menu] [data-picker-row]:focus-visible {
+  outline: none;
+}
+
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,

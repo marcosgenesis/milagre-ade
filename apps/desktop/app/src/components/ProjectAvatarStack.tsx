@@ -3,6 +3,7 @@ import { WorkspaceIcon } from './WorkspaceIcon';
 const images = new Map<string, string | null>();
 export function ProjectAvatarStack({ projects }: { projects: Array<{ path: string; name: string }> }) {
   const [, redraw] = useState(0);
+  const stacked = projects.length > 1;
   const paths = projects.map(project => project.path).join('\n');
   useEffect(() => {
     let live = true;
@@ -12,7 +13,7 @@ export function ProjectAvatarStack({ projects }: { projects: Array<{ path: strin
     }
     return () => { live = false; };
   }, [paths]);
-  return <span aria-hidden className="flex shrink-0 items-center pr-1">
-    {projects.slice(0, 3).map((project, index) => <span key={project.path || index} className="relative flex size-5 items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface ring-2 ring-surface" style={{ marginLeft: index ? -8 : 0, zIndex: 3 - index }}><WorkspaceIcon src={images.get(project.path)} fallback={project.name.slice(0, 1).toUpperCase()} /></span>)}
+  return <span aria-hidden className={`flex shrink-0 items-center ${stacked ? 'pr-1' : ''}`}>
+    {projects.slice(0, 3).map((project, index) => <span key={project.path || index} className={`relative flex items-center justify-center overflow-hidden bg-ink text-[10px] font-semibold text-surface ${stacked ? 'size-5 rounded-[5px] ring-2 ring-surface' : 'size-6 rounded-[6px]'}`} style={{ marginLeft: index ? -8 : 0, zIndex: 3 - index }}><WorkspaceIcon src={images.get(project.path)} fallback={project.name.slice(0, 1).toUpperCase()} /></span>)}
   </span>;
 }

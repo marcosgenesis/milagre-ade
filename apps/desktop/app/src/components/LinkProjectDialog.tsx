@@ -36,7 +36,7 @@ export function LinkProjectDialog({ currentPath, onClose, onCreated }: { current
       <ScrollArea className="mt-2 max-h-[280px] min-h-0 rounded-control border border-line p-1">
         {filtered.map(project => <label key={project.id} className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-2 hover:bg-hover-2">
           <input type="checkbox" checked={selected.includes(project.id)} disabled={saving} onChange={event => setSelected(current => event.target.checked ? [...current, project.id] : current.filter(id => id !== project.id))} className="accent-ink" />
-          <span className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-xs text-surface"><ProjectAvatarStack projects={[project]} /></span>
+          <ProjectAvatarStack projects={[project]} />
           <span className="min-w-0"><span className="block text-[13px] font-medium">{project.name}</span><span className="block truncate text-[11px] text-ink-3" title={project.path}>{project.path}</span></span>
         </label>)}
         {!filtered.length && <p className="p-3 text-[13px] text-ink-3">No projects found.</p>}

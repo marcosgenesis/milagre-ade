@@ -22,7 +22,7 @@ function subscribe(listener: () => void) {
 }
 
 /** The editor "Open in" uses: the one chosen in Settings if it's still installed, else the first found. */
-export function pickEditor(editors: EditorInfo[], editorId: string): EditorInfo | undefined {
+function pickEditor(editors: EditorInfo[], editorId: string): EditorInfo | undefined {
   return editors.find((editor) => editor.id === editorId) ?? editors[0];
 }
 

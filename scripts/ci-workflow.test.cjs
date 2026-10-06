@@ -94,3 +94,11 @@ test('CI lints every workspace with oxlint and keeps the mobile ESLint rules', (
   assert.ok(runs.has('npm run lint'))
   assert.ok(runs.has('npm run lint --workspace @milagre/mobile'))
 })
+
+test('CI looks for dead code right after linting', () => {
+  const steps = ci.jobs.javascript.steps
+  const lint = steps.findIndex(step => step.run === 'npm run lint')
+  assert.equal(steps[lint + 1].name, 'Dead code')
+  assert.equal(steps[lint + 1].run, 'npm run knip')
+  assert.equal(require('../package.json').scripts.knip, 'knip')
+})

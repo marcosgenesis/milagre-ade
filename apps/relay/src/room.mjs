@@ -1,7 +1,7 @@
 import nacl from 'tweetnacl';
 import { hostIdOf, b64url, fromB64url } from '@milagre/shared/relay-crypto';
 
-export const MAX_FRAME = 1024 * 1024;
+const MAX_FRAME = 1024 * 1024;
 export const MAX_PHONES = 16;
 const OPEN = 1, DATA = 2, CLOSE = 3;
 

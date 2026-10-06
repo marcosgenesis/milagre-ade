@@ -1,0 +1,104 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.cjs",
+        "scripts/*.sh"
+      ],
+      "project": [
+        "scripts/**"
+      ],
+      "ignoreDependencies": [
+        "expo",
+        "expo-router",
+        "vite",
+        "app-builder-lib",
+        "builder-util",
+        "expo-device-hub"
+      ],
+      "ignore": [
+        "scripts/fixtures/mobile-prompt-skills.tsx"
+      ]
+    },
+    "apps/desktop": {
+      "entry": [
+        "electron/preload.cjs",
+        "app/index.html",
+        "electron/*.test.cjs",
+        "app/src/**/*.test.ts"
+      ],
+      "project": [
+        "app/src/**",
+        "electron/**"
+      ],
+      "ignoreDependencies": [
+        "@tailwindcss/postcss",
+        "postcss"
+      ]
+    },
+    "apps/daemon": {
+      "entry": [
+        "src/*.cjs"
+      ],
+      "project": [
+        "src/**"
+      ]
+    },
+    "apps/relay": {
+      "entry": [
+        "src/worker.ts",
+        "src/*.test.mjs"
+      ],
+      "project": [
+        "src/**"
+      ]
+    },
+    "apps/mobile": {
+      "entry": [
+        "src/app/**/*.tsx",
+        "src/*.test.ts",
+        "fingerprint.config.cjs"
+      ],
+      "project": [
+        "src/**"
+      ],
+      "ignoreDependencies": [
+        "expo-system-ui"
+      ]
+    },
+    "packages/core": {
+      "entry": [
+        "src/*.cjs",
+        "src/agents/*.cjs"
+      ],
+      "project": [
+        "src/**"
+      ],
+      "ignore": [
+        "src/simulators.d.cts"
+      ]
+    },
+    "packages/shared": {
+      "entry": [
+        "src/*.ts",
+        "src/*.mjs"
+      ],
+      "project": [
+        "src/**"
+      ]
+    }
+  },
+  "ignoreDependencies": [
+    "@semantic-release/*"
+  ],
+  "ignoreBinaries": [],
+  "ignoreIssues": {
+    "apps/mobile/src/update-sheet.tsx": [
+      "exports"
+    ],
+    "apps/mobile/src/accounts-section.tsx": [
+      "exports"
+    ]
+  }
+}

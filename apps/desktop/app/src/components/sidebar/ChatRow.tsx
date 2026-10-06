@@ -46,7 +46,7 @@ function HugeIcon({ icon, size = 16 }: { icon: HugeIconData; size?: number }) {
 }
 
 /** What the hover card tells about a chat. */
-export type ChatDetails = {
+type ChatDetails = {
   branch?: string;
   path?: string;
   diff?: DiffStat;

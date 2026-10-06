@@ -114,7 +114,7 @@ function subscribeSystemTheme(listener: () => void) {
   return () => darkQuery.removeEventListener("change", listener);
 }
 
-export function useResolvedTheme(): "light" | "dark" {
+function useResolvedTheme(): "light" | "dark" {
   const { theme } = useSettings();
   const systemDark = useSyncExternalStore(subscribeSystemTheme, () => darkQuery.matches);
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;

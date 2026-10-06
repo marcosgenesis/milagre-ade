@@ -9,7 +9,7 @@ type SecureStorage = {
 };
 const hostsKey = 'milagre.hosts.v1';
 const legacyKey = 'milagre.connection.v1';
-export const MAX_HOSTS = 12;
+const MAX_HOSTS = 12;
 
 function validate(value: unknown): SavedHost {
   const host = value as Partial<SavedHost>;
@@ -67,4 +67,3 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
     forget: (id: string) => ordered(async () => write((await read()).filter(item => item.id !== id))),
   };
 }
-export type HostsStore = ReturnType<typeof createHostsStore>;

@@ -5,7 +5,7 @@ import { Button as IOSButton, HStack as IOSHStack, Host as IOSHost, Image as IOS
 import { accessibilityLabel, buttonBorderShape, buttonStyle, contentShape, disabled as nativeDisabled, font, foregroundStyle, frame, labelStyle, lineLimit, menuOrder, padding, tint, pickerStyle, shapes, tag, controlSize, rotationEffect } from '@expo/ui/swift-ui/modifiers';
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 import * as Haptics from 'expo-haptics';
-import { ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon } from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
 import { colors as palette, fonts } from './theme';
 import { confirmSheet } from './confirm-store';
 import { Icon, type IconData, type Tone } from './icons';
@@ -50,25 +50,11 @@ export function PillButton({ title, onPress, icon, disabled = false, secondary =
 export function Toggle({ title, selected, onPress, disabled = false }: { title: string; selected: boolean; onPress: () => void; disabled?: boolean }) {
   return <Host ignoreSafeArea="all" matchContents={{ vertical: true }} style={{ minHeight: 44 }} seedColor={palette.green as string}><Switch label={title} value={selected} disabled={disabled} onValueChange={onPress} /></Host>;
 }
-export function Choice({ title, selected, onPress }: { title: string; selected: boolean; onPress: () => void }) {
-  return <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: selected }} onPress={onPress} style={({ pressed }) => ({ paddingVertical: 12, paddingHorizontal: 14, minHeight: 44, backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.6 : 1 })}><Text style={[styles.text, { flex: 1 }]}>{title}</Text><Icon icon={selected ? CheckmarkCircle02Icon : CircleIcon} tone={selected ? 'ink' : 'ink3'} size={22} /></Pressable>;
-}
 export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean }) {
   return <View style={{ gap: 8 }}>{!hideLabel && <Text style={styles.label}>{label}</Text>}<TextInput accessibilityLabel={label} autoCapitalize="none" autoCorrect={false} placeholderTextColor={colors.ink3} selectionColor={colors.accent} {...props} style={[styles.input, props.style]} /></View>;
 }
 export function ErrorNotice({ message, retry, retryTitle = 'Reconnect' }: { message: string; retry?: () => void; retryTitle?: string }) {
   return <View accessibilityRole="alert" style={styles.error}><Text selectable style={{ color: colors.red, fontSize: 15, lineHeight: 22 }}>{message}</Text>{retry && <PillButton title={retryTitle} secondary onPress={retry} style={{ alignSelf: 'flex-start' }} />}</View>;
-}
-export function Select({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; title: string; description?: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
-  const selected = options.find(option => option.value === value);
-  const items = selected ? options : [{ value, title: 'Choose' }, ...options];
-  return <View style={{ gap: 4 }}><View style={[styles.row, { justifyContent: 'space-between' }]}><Text style={styles.text}>{label}</Text><Host ignoreSafeArea="all" matchContents style={{ minHeight: 44, maxWidth: '100%', justifyContent: 'center' }} seedColor={palette.ink as string}>
-    {Platform.OS === 'ios' ? <IOSPicker label={label} selection={value} onSelectionChange={onChange} modifiers={[pickerStyle('menu'), nativeDisabled(disabled), accessibilityLabel(label)]} testID={`select-${label}`}>
-      {items.map(option => <IOSText key={option.value} modifiers={[tag(option.value)]}>{option.title}</IOSText>)}
-    </IOSPicker> : <Picker selectedValue={value} onValueChange={onChange} enabled={!disabled} testID={`select-${label}`}>
-      {items.map(option => <Picker.Item key={option.value} value={option.value} label={`${label}: ${option.title}`} />)}
-    </Picker>}
-  </Host></View>{selected?.description ? <Text style={styles.caption}>{selected.description}</Text> : null}</View>;
 }
 /** iOS segmented control (a native SwiftUI Picker); Android falls back to the dropdown Picker. */
 export function Segmented({ label, value, options, onChange }: { label: string; value: string; options: { value: string; title: string }[]; onChange: (value: string) => void }) {

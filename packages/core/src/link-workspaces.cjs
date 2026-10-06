@@ -39,7 +39,7 @@ function createLinkWorkspaces({ store, registry, ownProject, root = DEFAULT_WORK
         if (await git.read.refExists(project.path, `refs/heads/milagre/${name}`)) throw new Error(`Project ${project.name}: branch already exists`);
         try { await fs.lstat(worktreePath); throw new Error(`Project ${project.name}: Worktree folder already exists`); } catch (error) { if (error.code !== 'ENOENT') throw error; }
         const resolved = await resolveSetupCommand(project.path, settings.setupCommand);
-        members.push({ projectId: project.id, projectPath: project.path, projectName: project.name, worktreePath, branch: `milagre/${name}`, base, initialCommit: await git.read.commitOf(project.path, base), suffix, alias: `${slugify(project.name) || 'project'}-${i + 1}`, copyPatterns: settings.filesToCopy, setupCommand: resolved.command });
+        members.push({ projectId: project.id, projectPath: project.path, projectName: project.name, worktreePath, branch: `milagre/${name}`, base, initialCommit: await git.read.commitOf(project.path, base), suffix, alias: `${slugify(project.name) || 'project'}-${i + 1}`, ...(settings.filesToCopy !== undefined ? { copyPatterns: settings.filesToCopy } : {}), setupCommand: resolved.command });
       }
       prep = { operationId, chatId, prompt, status: 'reserved', workspacePath: path.join(store.directory(link.id), 'workspaces', String(chatId)), members };
       await save(link.id, prep);

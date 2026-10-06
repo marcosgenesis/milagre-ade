@@ -21,19 +21,19 @@ export function isListedChat(session, messageCount) {
 
 let nextPreviewId = -2;
 
-/** A local first-message preview. It is never written into the Project's persisted state. */
+/** A local message preview. It is never written into the Project's persisted state. */
 export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider }) {
   const id = nextPreviewId--;
   const session = state.sessions[sessionId] ?? { id, worktree_id: worktreeId, agent_name: state.worktrees[worktreeId]?.name || 'New Chat', status: 'Created', provider };
   const message = { id, session_id: session.id, body, role: 'user', context: null, images, files, model, clientMessageId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${-id}` };
-  return { session: { ...session, title: chatTitle(session, [message]) }, message, startedAt: Date.now(), sortId: state.next_id, targetSessionId: sessionId };
+  const messages = state.messages.filter(item => item.session_id === session.id);
+  return { session: { ...session, title: chatTitle(session, [...messages, message]) }, message, startedAt: Date.now(), sortId: state.next_id, targetSessionId: sessionId };
 }
 
 /** The saved Chat may arrive over the live connection before the send response does. */
 export function pendingChatSessionId(state, pending) {
   if (!pending) return null;
-  return state.messages.find(message => message.clientMessageId === pending.message.clientMessageId)?.session_id
-    ?? (pending.targetSessionId != null && state.messages.some(message => message.session_id === pending.targetSessionId) ? pending.targetSessionId : null);
+  return state.messages.find(message => message.clientMessageId === pending.message.clientMessageId)?.session_id ?? null;
 }
 
 /** A display projection shared by desktop's sidebar and the phone's drawer; canonical input replaces its preview. */

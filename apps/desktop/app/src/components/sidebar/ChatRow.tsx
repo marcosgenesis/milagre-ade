@@ -26,6 +26,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
+import { ShortcutKeys } from "@/components/primitives/ShortcutKeys";
 import { archiveChoices, type ArchiveMode, type ArchivePlan } from "@/lib/archive";
 import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
@@ -261,7 +262,7 @@ export const ChatRow = memo(function ChatRow({
           </span>
           <ChatMarkDot mark={mark} topAligned={hasPullRequests} />
           <span
-            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-10" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+            className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
@@ -282,10 +283,8 @@ export const ChatRow = memo(function ChatRow({
         </div>
       )}
 
-      {shortcutHint && !renaming && !menu && <kbd aria-hidden="true" data-shortcut-hint
-        className={`pointer-events-none absolute right-3 top-1.5 z-30 rounded border border-line bg-surface px-1 text-[11px] leading-5 text-ink ${collapsed ? "right-1" : ""}`}>
-        {shortcutHint}
-      </kbd>}
+      {shortcutHint && !renaming && !menu && <ShortcutKeys shortcut={shortcutHint} aria-hidden="true"
+        className={`pointer-events-none absolute top-1.5 z-30 ${collapsed ? "right-1" : "right-3"}`} />}
       {!item.pending && !collapsed && !renaming && !shortcutHint && (
         <button
           ref={triggerRef}

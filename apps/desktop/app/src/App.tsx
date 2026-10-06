@@ -321,7 +321,7 @@ function App() {
   }, [state, pendingSend, failedSends, project?.path]);
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
   const displayedMessages = useMemo(() => pendingHere && pendingSend
-    ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : messages.length ? messages : [pendingSend.message]
+    ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : [...messages, pendingSend.message]
     : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
@@ -772,15 +772,13 @@ function App() {
     const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
     const firstMessage = messages.length === 0;
     const submittedDraft = draftStore.get();
-    const preview = firstMessage ? createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: selectedWorktree.id, body, images, files, model: model.id, provider: model.provider }) : null;
-    if (preview) {
-      setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
-        message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
-      });
-      if (!preserveComposer) {
-        setDraft("");
-        imageDraft.clear();
-      }
+    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: selectedWorktree.id, body, images, files, model: model.id, provider: model.provider });
+    setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
+      message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
+    });
+    if (!preserveComposer) {
+      setDraft("");
+      imageDraft.clear();
     }
     // Capture the user's choices before setup runs in the background.
     const options = {
@@ -802,7 +800,7 @@ function App() {
       // The main process saves the message, then starts the Chat's turn, even if the user has navigated away.
       const { sessionId } = await agentRuns.send({
         projectPath: project.path,
-        clientMessageId: preview?.message.clientMessageId,
+        clientMessageId: preview.message.clientMessageId,
         sessionId: target.sessionId,
         worktreeId: target.worktreeId,
         body,
@@ -816,23 +814,19 @@ function App() {
       if (stillHere()) {
         setSelectedSessionId(sessionId);
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
-        if (!preserveComposer && !firstMessage) {
-          setDraft("");
-          imageDraft.clear();
-        }
       }
       return true;
     } catch (error) {
       const message = `${target ? "Could not send the message" : "Could not create the worktree"}: ${ipcErrorMessage(error)}`;
       if (stillHere()) {
         setNewChatError(message);
-        if (firstMessage && !preserveComposer) {
+        if (!preserveComposer) {
           const nextDraft = draftStore.get();
           setDraft([submittedDraft || body, nextDraft].filter(Boolean).join("\n\n"));
           imageDraft.restore(images, files);
         }
       } else {
-        if (preview && !preserveComposer) setFailedSends(current => [...current, { ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
+        if (!preserveComposer) setFailedSends(current => [...current, { ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
           draft: submittedDraft || body, error: message, target: target ? { ...target, view, projectPath: project.path } : null,
           message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
         }]);
@@ -1169,6 +1163,7 @@ function App() {
             key={project.path}
             store={draftStore}
             messages={displayedMessages}
+            pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
             imageDraft={imageDraft}
             projectPath={selectedWorktree?.path ?? project.path}
             onSend={() => void sendMessage()}
@@ -1185,7 +1180,7 @@ function App() {
               : undefined}
             isSending={isSending}
             sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
-            runStartedAt={pendingHere ? pendingSend?.startedAt : run?.startedAt}
+            runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={subagents}

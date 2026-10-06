@@ -12,6 +12,14 @@ This is a single-context repo. See `docs/agents/domain.md`.
 
 Scroll containers, scrollbars and choice menus go through shared primitives. See `docs/agents/ui.md`.
 
+### Desktop and mobile stay in sync
+
+Every change on desktop must also be applied on mobile, and every change on mobile must also be applied on desktop, in the same task. Skip syncing only when the user explicitly says to keep the change on one platform or not to sync it.
+
+- Inspect both implementations before editing. Keep features, behavior, copy, states and fixes in sync; use each platform's native controls and layout where appropriate.
+- Prefer shared logic when it applies to both platforms. A missing counterpart is work to implement, not an automatic exemption from syncing.
+- Verify the change on both platforms before declaring the task complete. If syncing is blocked, explain what remains and why. The mobile native-build approval rules below still apply; this sync rule does not authorize a new build.
+
 ### Mobile releases are OTA only
 
 Every change to `apps/mobile` reaches phones as an over-the-air update (EAS Update) to the build already in TestFlight. A new native build is the exception, and it needs the user's approval before you write the change that requires it, not after.

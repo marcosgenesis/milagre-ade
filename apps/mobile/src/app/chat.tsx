@@ -3,9 +3,10 @@ import type Reanimated from 'react-native-reanimated';
 import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { sessionForWorktree } from '@milagre/shared/model';
 import { createPendingChat, pendingChatSessionId } from '@milagre/shared/chats';
+import { messageNavigationIndices } from '@milagre/shared/message-navigation';
 import type { Client, OpenProject } from '../client';
 import { lastUserModel } from '@milagre/shared/agent-runs';
 import { blockerPrompt, pullRequestBlockers } from '@milagre/shared/pr-blockers';
@@ -25,12 +26,13 @@ import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
 import { useOpenProject } from '../use-open-project';
-import { ErrorNotice, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { PromptField } from '../prompt-field';
 import { archiveFromPhone } from '../archive';
 import { confirmSheet } from '../confirm-store';
 import { randomUUID } from 'expo-crypto';
 import { runChatAction } from '../chat-actions';
+import { MessageNavigation } from '../message-navigation';
 
 const PAGE = 40;
 
@@ -53,6 +55,20 @@ export default function ChatScreen() {
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
+  const scrollKey = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}|${params.id ?? `new:${params.worktreeId}`}`;
+  const [jumpState, setJumpState] = useState({ key: scrollKey, visible: false });
+  const showJumpToBottom = jumpState.key === scrollKey && jumpState.visible;
+  const onEndVisible = useCallback((visible: boolean) => {
+    setJumpState(current => current.key === scrollKey && current.visible === !visible ? current : { key: scrollKey, visible: !visible });
+  }, [scrollKey]);
+  const jumpToBottom = useCallback(() => {
+    following.current = true;
+    scroll.current?.scrollToEnd({ animated: false });
+    setJumpState({ key: scrollKey, visible: false });
+  }, [scrollKey]);
+  useEffect(() => {
+    following.current = true;
+  }, [scrollKey]);
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
@@ -92,6 +108,31 @@ export default function ChatScreen() {
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
+  const navigationItems = useMemo(() => messageNavigationIndices(messages.length).map(index => ({ index, label: `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}` })), [messages]);
+  const messagePositions = useRef(new Map<number, number>());
+  const navigationTarget = useRef<number | null>(null);
+  useEffect(() => { messagePositions.current.clear(); navigationTarget.current = null; }, [params.id]);
+  const navigateToMessage = (index: number) => {
+    if (index === messages.length - 1) {
+      navigationTarget.current = null;
+      following.current = true;
+      scroll.current?.scrollToEnd({ animated: true });
+      return;
+    }
+    following.current = false;
+    const id = messages[index].id;
+    navigationTarget.current = id;
+    if (index < messages.length - visible) {
+      messagePositions.current.clear();
+      setShown({ id: params.id, count: messages.length - index });
+    } else {
+      const y = messagePositions.current.get(id);
+      if (y !== undefined) {
+        navigationTarget.current = null;
+        scroll.current?.scrollTo({ y: Math.max(0, y - insets.top - 72), animated: true });
+      }
+    }
+  };
   const openActivity = useCallback((message: string) => router.push({ pathname: '/activity', params: { id: String(params.id), message } }), [params.id]);
   const { rememberChat } = session;
   const canRemember = !!params.id && !!session.snapshot?.project.state.sessions[Number(params.id)] && targetMatches;
@@ -301,14 +342,20 @@ export default function ChatScreen() {
     {sidebar}
     {more}
     <PanelSwipe panels={panels}>
-    <KeyboardChatScrollView ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: 12, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
+    <KeyboardChatScrollView key={scrollKey} ref={scroll} offset={lift} keyboardLiftBehavior="whenAtEnd" onEndVisible={onEndVisible} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]} scrollEventThrottle={32} onScroll={({ nativeEvent: e }) => { following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120; }} onLayout={({ nativeEvent }) => { viewport.current = nativeEvent.layout.height; }} onContentSizeChange={(_, height) => { if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true }); }}>
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
       {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{project.link ? 'One Chat, with a new Worktree in each linked Project on your computer.' : newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
       {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
-      {messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />)}
+      {messages.slice(-visible).map(message => <View key={message.id} nativeID={`chat-message-${message.id}`} onLayout={({ nativeEvent: { layout } }) => {
+        messagePositions.current.set(message.id, layout.y);
+        if (navigationTarget.current === message.id) {
+          navigationTarget.current = null;
+          scroll.current?.scrollTo({ y: Math.max(0, layout.y - insets.top - 72), animated: true });
+        }
+      }}><ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /></View>)}
       {run && <ChatReply run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />}
       {(run || pending) && <ThinkingIndicator startedAt={pending?.preview.startedAt ?? run?.startedAt} label={run?.waitingForSubagents ? 'Waiting on subagents' : `Working with ${model.name}`} />}
       {chat?.resumeTurn && !run && <PillButton title="Continue interrupted turn" secondary disabled={busy} onPress={() => void action(() => client.call('chat:resume', [project.path, chat.id]))} style={{ alignSelf: 'flex-start' }} />}
@@ -317,7 +364,11 @@ export default function ChatScreen() {
     {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
         find this scroll view (it only follows each view's first child), so the blur is drawn here. */}
     <EdgeFade edge="top" height={insets.top + 72} />
-    <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
+    <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    {showJumpToBottom && <View pointerEvents="box-none" style={{ height: 56, alignItems: 'center', zIndex: 1 }}>
+      <GlassIconButton label="Go to bottom" systemImage="chevron.down" icon={ArrowDown01Icon} onPress={jumpToBottom} />
+    </View>}
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />
     <View onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))} style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}>
@@ -347,7 +398,7 @@ export default function ChatScreen() {
           <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
-          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
+          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp01Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
         </View>
       </View>}
     </View>

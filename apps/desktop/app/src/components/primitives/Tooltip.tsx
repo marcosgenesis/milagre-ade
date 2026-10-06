@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { openModal } from "../../lib/modal";
 import { shortcutModifier, useShortcutHints } from "../../lib/shortcut-hints";
+import { ShortcutKeys } from "./ShortcutKeys";
 
 export const TOOLTIP_SHOW_DELAY = 400;
 
@@ -26,7 +27,7 @@ export function TooltipBubble({ label, rect, align = "start", side = "top", wrap
       }}
     >
       {label}
-      {hint && <span data-shortcut-hint className="opacity-60">{hint}</span>}
+      {hint && <ShortcutKeys shortcut={hint} plain className="opacity-70" />}
     </span>,
     document.body,
   );
@@ -57,6 +58,7 @@ export default function Tooltip({
   const [rect, setRect] = useState<DOMRect | null>(null);
   const showHints = useShortcutHints();
   const [hintRect, setHintRect] = useState<DOMRect | null>(null);
+  const hintRef = useRef<HTMLElement>(null);
   const hint = shortcut?.replace("⌘", shortcutModifier);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -64,6 +66,13 @@ export default function Tooltip({
     const bounds = trigger?.getBoundingClientRect();
     setHintRect(showHints && shortcut && bounds?.width && bounds.height && (!modal || modal.contains(trigger)) ? bounds : null);
   }, [showHints, shortcut]);
+  useLayoutEffect(() => {
+    const badge = hintRef.current;
+    if (!badge || !hintRect) return;
+    const half = badge.getBoundingClientRect().width / 2;
+    const anchor = hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2;
+    badge.style.left = `${Math.max(8 + half, Math.min(window.innerWidth - 8 - half, anchor))}px`;
+  }, [hintRect, hint, rect]);
 
   const clear = () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -93,10 +102,8 @@ export default function Tooltip({
       {children}
       {rect && <TooltipBubble label={label} rect={rect} align={align} side={side} wrap={wrap} hint={hint} />}
       {hintRect && !rect && createPortal(
-        <kbd aria-hidden="true" data-shortcut-hint className="pointer-events-none fixed z-[70] rounded border border-line bg-surface px-1.5 py-0.5 text-[11px] text-ink shadow-raised"
-          style={{ top: hintRect.top + hintRect.height / 2, left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2, transform: "translate(-50%, -50%)" }}>
-          {hint}
-        </kbd>, document.body,
+        <ShortcutKeys ref={hintRef} shortcut={hint!} aria-hidden="true" className="pointer-events-none fixed z-[70]"
+          style={{ top: hintRect.top + hintRect.height / 2, left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2, transform: "translate(-50%, -50%)" }} />, document.body,
       )}
     </span>
   );

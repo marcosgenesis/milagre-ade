@@ -49,3 +49,19 @@ test('canonical input replaces a pending Chat before the send response without m
   assert.equal(pendingChatSessionId(persisted, pending), 5);
   assert.equal(withPendingChat(persisted, pending), persisted);
 });
+
+test('follow-up input stays pending until its own message arrives and keeps the Chat title', async () => {
+  const { createPendingChat, withPendingChat, pendingChatSessionId } = await import('./chats.mjs');
+  const state: CoordinatorState = { next_id: 4, projects: {}, worktrees: {}, sessions: { 1: session }, messages: [{ id: 3, session_id: 1, body: 'Original title', role: 'user', context: null }], tasks: {} };
+  const pending = createPendingChat({ state, worktreeId: 1, sessionId: 1, body: 'Follow up', model: 'm', provider: 'codex' });
+  assert.equal(pendingChatSessionId(state, pending), null, 'previous messages are not acknowledgement of this send');
+  const shown = withPendingChat(state, pending);
+  assert.equal(shown.messages.length, 2);
+  assert.equal(chatTitle(shown.sessions[1], shown.messages), 'Original title');
+  assert.equal(state.messages.length, 1);
+  const concurrent = { ...state, messages: [...state.messages, { id: 4, session_id: 1, body: 'Follow up', role: 'user' as const, context: null }] };
+  assert.equal(pendingChatSessionId(concurrent, pending), null, 'another client sending the same text is not acknowledgement');
+  const saved = { ...concurrent, messages: [...concurrent.messages, { ...pending.message, id: 5 }] };
+  assert.equal(pendingChatSessionId(saved, pending), 1);
+  assert.equal(withPendingChat(saved, pending), saved);
+});

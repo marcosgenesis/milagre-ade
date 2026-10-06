@@ -178,6 +178,8 @@ interface ChatComposerProps {
   imageDraft: ImageDraft;
   projectPath: string;
   messages: AppChatMessage[];
+  /** Unsaved input appears below the reply still streaming while the backend prepares the send. */
+  pendingMessageId?: number;
   draft: string;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
@@ -356,6 +358,7 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messages,
+  pendingMessageId,
   draft,
   onDraftChange,
   onSend,
@@ -449,6 +452,15 @@ export function ChatComposer({
     event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
   }
 
+  const streamingMessage: AppChatMessage | undefined = isSending && (streamingText || streamingSteps?.length)
+    ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
+    : undefined;
+  const transcript = [...messages];
+  if (streamingMessage) {
+    const pendingIndex = transcript.findIndex(message => message.id === pendingMessageId);
+    transcript.splice(pendingIndex < 0 ? transcript.length : pendingIndex, 0, streamingMessage);
+  }
+
   return (
     <div
       ref={root}
@@ -479,31 +491,23 @@ export function ChatComposer({
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
           {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
-          {messages.map((message) => (
+          {transcript.map((message) => (
             <MessageSection
-              key={message.id}
+              key={message.clientMessageId ?? message.id}
               message={message}
               isUser={message.role === "user"}
               onRecommendationSelect={onRecommendationSelect}
               onUpdateCli={onUpdateCli}
               updatingCli={updatingCli}
               cliStatus={cliStatus}
-              animate={!openingMessages.current.ids.has(message.id)}
+              streaming={message === streamingMessage}
+              asking={message === streamingMessage && asking}
+              waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
+              animate={!message.clientMessageId && !openingMessages.current.ids.has(message.id)}
               onOpenChat={onOpenLinkedChat}
             />
           ))}
 
-          {isSending && (streamingText || streamingSteps?.length) ? (
-            <MessageSection
-              message={{ id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }}
-              isUser={false}
-              onRecommendationSelect={onRecommendationSelect}
-              streaming
-              asking={asking}
-              waitingStepIds={waitingStepIds}
-              animate
-            />
-          ) : null}
           {isSending && (
             <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
               <ThinkingIndicator startedAt={runStartedAt} label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />

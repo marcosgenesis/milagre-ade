@@ -379,13 +379,15 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, rememberChat() {}, isSelected: () => true,
   };
   const react = hookHost({ effects });
-  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
+  const ui = { ...Object.fromEntries(['Button', 'GlassIconButton', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     'expo-crypto': { randomUUID: require('node:crypto').randomUUID },
     '../chat-actions': load('chat-actions.ts', { 'react-native': { Alert: { alert } }, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': { confirmSheet: (...args) => alert(...args), confirm: async () => true } }),
+    '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
+    '../message-navigation': { MessageNavigation: 'MessageNavigation' },
     '../prompt-field': { PromptField: 'PromptField' },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
@@ -906,6 +908,75 @@ test('the transcript follows new content, also after the agent settings sheet op
   find(tree, node => node.type === 'AgentControls').props.onToggle();
   page.props.onContentSizeChange(0, 1000);
   assert.equal(scrolls, 2);
+});
+
+test('mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling', () => {
+  const screen = chatHost();
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  screen.session.snapshot.project.state.messages = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, session_id: 42, role: 'assistant', body: `Message ${index + 1}` }));
+  const tree = screen.render();
+  const rail = find(tree, node => node.type === 'MessageNavigation');
+  assert.ok(rail, 'Chats have a navigation rail');
+  assert.equal(rail.props.items.length, 15);
+  assert.equal(rail.props.items[0].index, 0);
+  assert.equal(rail.props.items.at(-1).index, 99);
+  const page = find(tree, node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  page.props.ref.current = { scrollTo: options => scrolls.push(options), scrollToEnd: options => scrolls.push({ end: true, ...options }) };
+  rail.props.onSelect(0);
+  const earlier = screen.render();
+  const target = find(earlier, node => node.props?.nativeID === 'chat-message-1');
+  assert.ok(target, 'selecting an unloaded message mounts it');
+  target.props.onLayout({ nativeEvent: { layout: { y: 84 } } });
+  assert.equal(scrolls.at(-1).y, 12, 'the first message stays below the transparent header');
+  find(earlier, node => node.type === 'MessageNavigation').props.onSelect(99);
+  assert.equal(scrolls.at(-1).end, true, 'the latest tick returns to live output');
+});
+
+test('the mobile rail stays above the composer when the keyboard lifts it', () => {
+  const keyboard = { height: { value: -300 }, progress: { value: 1 } };
+  const { MessageNavigation } = load('message-navigation.tsx', {
+    'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Pressable: 'Pressable', View: 'View' },
+    'react-native-reanimated': { default: { View: 'AnimatedView' }, useAnimatedStyle: fn => fn() },
+    'react-native-keyboard-controller': { useReanimatedKeyboardAnimation: () => keyboard },
+    './theme': { colors: {} },
+  });
+  const props = { items: [{ index: 0, label: 'First' }, { index: 99, label: 'Latest' }], onSelect() {}, top: 134, bottom: 152, keyboardOffset: 24 };
+  const bottom = tree => Object.assign({}, ...[tree.props.style].flat()).bottom;
+  assert.equal(bottom(MessageNavigation(props)), 428, 'the rail follows the composer by the keyboard height minus its lift offset');
+  keyboard.height.value = 0; keyboard.progress.value = 0;
+  assert.equal(bottom(MessageNavigation(props)), 152, 'closing the keyboard restores the rail bounds');
+});
+
+test('Go to bottom returns the mobile transcript to the end and resumes following', () => {
+  const screen = chatHost({ effects: true });
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const jump = () => find(screen.render(), node => node.type === 'GlassIconButton' && node.props.label === 'Go to bottom');
+  const scrolls = [];
+  page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'No button when the end is visible, including short chats');
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });
+  page().props.onEndVisible(false);
+  assert.ok(jump(), 'The keyboard-aware end callback reveals the button');
+  page().props.onContentSizeChange(0, 1900);
+  assert.equal(scrolls.length, 0, 'New output leaves earlier messages in place');
+  jump().props.onPress();
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), 'The jump reaches the end without intermediate scroll events disabling follow');
+  assert.equal(jump(), undefined);
+  page().props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 2, 'Following resumes after the jump');
+  page().props.onEndVisible(false);
+  assert.ok(jump());
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'Scrolling back to the end manually hides the button');
+  page().props.onEndVisible(false);
+  screen.params.id = '42';
+  screen.render();
+  assert.equal(jump(), undefined, 'Switching Chats clears the previous button state');
 });
 
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {

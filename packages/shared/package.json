@@ -70,7 +70,8 @@
     "./diff-parse": "./src/diff-parse.ts",
     "./diff-tree": "./src/diff-tree.ts",
     "./diff-layout": "./src/diff-layout.ts",
-    "./usage": "./src/usage.ts"
+    "./usage": "./src/usage.ts",
+    "./message-navigation": "./src/message-navigation.ts"
   },
   "files": [
     "src/*.mjs",
@@ -85,7 +86,8 @@
     "src/diff-parse.ts",
     "src/diff-tree.ts",
     "src/diff-layout.ts",
-    "src/usage.ts"
+    "src/usage.ts",
+    "src/message-navigation.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

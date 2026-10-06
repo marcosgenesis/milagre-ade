@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Detect which parts of the repository changed
         id: filter
+        # Pushes to main always run every job; the filter needs a PR base to compare against.
+        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
         with:
           filters: |

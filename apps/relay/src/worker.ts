@@ -45,6 +45,7 @@ export class Room implements DurableObject {
     if (this.room && this.roomId !== id) this.room = undefined;
     const room = this.live(); // before accepting, so a rebuild cannot mistake the new socket for one that lost its state
     const [client, server] = Object.values(new WebSocketPair());
+    if (!client || !server) throw new Error('WebSocketPair did not yield two sockets');
     // A phone turned away at the door never becomes hibernatable: the runtime takes about 10 s to finish
     // closing a hibernatable socket that has not sent anything yet, and the phone would wait that long for its 4404.
     const refusal = role === 'phone' ? room.phoneRefusal() : null;

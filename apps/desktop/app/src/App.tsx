@@ -97,7 +97,9 @@ function latestSessionId(state: CoordinatorState) {
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
-type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number };
+// `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
+type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
+const NO_WORKTREE = -1;
 type PreparedSendTarget = { view: number; projectPath: string; sessionId: number | null; worktreeId: number };
 type FailedSend = PendingSend & { draft: string; error: string; target: PreparedSendTarget | null };
 
@@ -300,6 +302,12 @@ function App() {
   const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
   const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
   const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
+  // A large Project's state can reach the window after the send's reply; dropping the preview then would hide the new chat until it does.
+  useEffect(() => {
+    if (!pendingSend?.sent) return;
+    const latest = states[pendingSend.projectPath];
+    if (!latest || pendingChatSessionId(latest, pendingSend) !== null) setPendingSend(null);
+  }, [pendingSend, states]);
   const sidebarState = useMemo(() => {
     if (!state) return state;
     const recovered = failedSends.filter(send => send.projectPath === project?.path).reduce((current, send) => withPendingChat(current, send), state);
@@ -730,7 +738,10 @@ function App() {
     const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
     const firstMessage = messages.length === 0;
     const submittedDraft = draftStore.get();
-    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: selectedWorktree.id, body, images, files, model: model.id, provider: model.provider });
+    // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
+    const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
+    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || isolation === "local" ? selectedWorktree.id : NO_WORKTREE);
+    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: previewWorktreeId, body, images, files, model: model.id, provider: model.provider });
     setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
       message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
     });
@@ -750,11 +761,12 @@ function App() {
       tldrEnabled: getSettings().tldrEnabled,
     };
     let target: Awaited<ReturnType<typeof resolveSendTarget>> = null;
+    let sent = false;
     try {
       target = await resolveSendTarget(body);
       if (!target) return false;
       if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
-      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId } : pending);
+      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId, session: { ...pending.session, worktree_id: target!.worktreeId } } : pending);
       // The main process saves the message, then starts the Chat's turn, even if the user has navigated away.
       const { sessionId } = await agentRuns.send({
         projectPath: project.path,
@@ -769,6 +781,9 @@ function App() {
         ...options,
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
+      sent = true;
+      setPendingSend(pending => pending && pending.message.clientMessageId === preview.message.clientMessageId
+        ? { ...pending, sent: true, originSessionId: sessionId, originWorktreeId: target!.worktreeId } : pending);
       if (stillHere()) {
         setSelectedSessionId(sessionId);
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
@@ -792,7 +807,7 @@ function App() {
       }
       return false;
     } finally {
-      setPendingSend(null);
+      if (!sent) setPendingSend(null);
       sendInFlight.current = false;
       setPreparingView(null);
     }

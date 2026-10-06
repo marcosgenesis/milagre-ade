@@ -105,6 +105,24 @@ test('a phone opens a named Link and sends one shared Chat with two owned Worktr
   assert.equal((await (await request(snapshotRoute)).json()).result.link.state.sessions[id].title, 'From phone');
 });
 
+test('mobile archives finished subagents through the shared owner and restores their output', async t => {
+  const { project, dataDir, rpc, request } = await fixture(t);
+  const subagents = ['completed', 'failed', 'cancelled', 'unknown'].map(status => ({ id: status, title: status, status, startedAt: 1, updatedAt: 2, transcript: [{ id: 'message', kind: 'message', text: 'Preserved output' }] }));
+  await fs.mkdir(path.join(project, '.milagre'));
+  await fs.writeFile(path.join(project, '.milagre/coordination.json'), JSON.stringify({ next_id: 3, projects: { 1: { id: 1, name: 'project' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'main', status: 'Created', subagents } }, messages: [], tasks: {} }));
+  await rpc('project:open', [project]);
+  assert.equal((await rpc('chat:archive-finished-subagents', [project, 2])).status, 200);
+  const desktop = await connect({ dataDir });
+  t.after(() => desktop.close());
+  const state = (await desktop.call('project:open', [project])).state;
+  assert.deepEqual(state.sessions[2].subagents.filter(agent => agent.archived).map(agent => agent.id), ['completed', 'failed', 'cancelled']);
+  assert.equal((await rpc('chat:archive-subagent', [project, 2, 'completed', false])).status, 200);
+  const phone = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  const restored = phone.project.state.sessions[2].subagents.find(agent => agent.id === 'completed');
+  assert.equal(Boolean(restored.archived), false);
+  assert.equal(restored.transcript[0].text, 'Preserved output');
+});
+
 test('the phone can load the real skill catalog for its project', async t => {
   const { project, rpc } = await fixture(t);
   await rpc('project:open', [project]);

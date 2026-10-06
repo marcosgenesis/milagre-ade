@@ -51,7 +51,16 @@ function checkForUpdates() {
 ipcMain.handle("update:state", () => updateState);
 ipcMain.handle("update:check", () => checkForUpdates());
 ipcMain.handle("update:channel", () => releaseChannel.get());
-ipcMain.handle("update:set-channel", (_event, channel) => { const next = releaseChannel.set(channel); updateState = { status: "idle", version: null, progress: 0 }; void checkForUpdates(); return next; });
+// The new channel is saved first. A running or finished download keeps its state; the channel applies on the next check.
+ipcMain.handle("update:set-channel", async (_event, channel) => {
+  const next = releaseChannel.set(channel);
+  if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
+  if (updateCheck) await updateCheck.catch(() => {});
+  if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
+  publishUpdateState({ status: "idle", version: null, progress: 0 });
+  void checkForUpdates();
+  return next;
+});
 // Installing replaces the host bundle too. Save and stop it before the updater runs.
 ipcMain.handle("update:install", async () => {
   await runtime.close({ stopHost: true });

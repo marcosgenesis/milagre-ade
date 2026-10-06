@@ -17,8 +17,8 @@ function createReleaseChannelStore({ file }) {
     get: () => channel,
     set(next) {
       if (next !== "stable" && next !== "beta") throw new Error(`Unknown release channel: ${next}`);
+      fs.writeFileSync(file, JSON.stringify({ channel: next }));
       channel = next;
-      fs.writeFileSync(file, JSON.stringify({ channel }));
       return channel;
     },
   };

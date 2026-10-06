@@ -83,6 +83,21 @@ async function checkEditorRoot(root) {
 }
 const openEditor = createEditorOpener({ editors, open: openInEditor, checkRoot: checkEditorRoot });
 ipcMain.handle("editor:open", (_event, request) => openEditor(request));
+// Settings > Skills opens or reveals a SKILL.md wherever it lives (~/.claude/skills is no checkout), but only a file the
+// Project's skill catalog lists, so the renderer can't name any other file.
+async function checkSkillFile(projectPath, file) {
+  const { skills, shadowed = [] } = /** @type {import("@milagre/shared/model").SkillCatalog} */ (await runtime.invoke("skills:list", [projectPath]));
+  if (typeof file !== "string" || ![...skills, ...shadowed].some(skill => skill.path === file)) throw new Error("That skill is no longer there. Reload the list.");
+}
+const openSkillFile = createEditorOpener({ editors, open: openInEditor, checkRoot: async () => {} });
+ipcMain.handle("skills:open", async (_event, { projectPath, file, editor } = {}) => {
+  await checkSkillFile(projectPath, file);
+  return openSkillFile({ root: path.dirname(file), path: path.basename(file), editor });
+});
+ipcMain.handle("skills:reveal", async (_event, projectPath, file) => {
+  await checkSkillFile(projectPath, file);
+  shell.showItemInFolder(file);
+});
 
 // Brings the window back from a notification click and tells it what to open.
 function openFromNotification(channel, ...args) {

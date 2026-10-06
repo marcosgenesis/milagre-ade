@@ -1,10 +1,11 @@
 import { AccountsSettings } from "./AccountsSettings";
+import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, MagicWand01Icon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
@@ -28,12 +29,13 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "accounts" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "accounts" | "appearance" | "skills" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
+  { key: "skills", label: "Skills", icon: MagicWand01Icon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
@@ -622,6 +624,7 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
         {section === "general" && <GeneralSettings models={models} />}
         {section === "accounts" && <AccountsSettings />}
         {section === "appearance" && <AppearanceSettings />}
+        {section === "skills" && (projectPath ? <SkillsSettings key={projectPath} projectPath={projectPath} /> : <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>)}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && <ProjectSettings projectPath={projectPath} />}

@@ -111,8 +111,19 @@ function createRuntime(options) {
     if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
     handlers.set(name, handler);
   } };
-  const simulators = options.simulators ?? require("./simulators.cjs").createSimulators();
-  commands.handle("simulator:list", () => simulators.list());
+  const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const simulators = createChatSimulators({
+    simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
+    file: path.join(dataDir, "simulator-attachments.json"),
+    validateChat: async chatId => {
+      const scope = projectOfKey(chatId), id = sessionIdFromKey(chatId);
+      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id]) throw new Error("Open an existing Chat before attaching a simulator.");
+    },
+  });
+  for (const method of ["list", "attach", "detach"]) commands.handle(`simulator:${method}`, (context, request) => {
+    if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
+    return simulators[method](request);
+  });
   for (const method of ["open", "offer", "status", "control", "input", "close"]) {
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -711,7 +722,7 @@ function createRuntime(options) {
     }
     return (await readProject(projectPath)).state;
   }
-  const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit });
+  const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit, extraTools: chatId => simulatorToolDefinitions(chatId, simulators) });
   const linkWorkspaces = createLinkWorkspaces({ store: linkStore, registry: projectRegistry(), ownProject, root: options.worktreeRoot ?? DEFAULT_WORKTREE_ROOT, getSettings: projectPath => projectSettings().get(projectPath) });
   const linkRuntime = registerLinkRuntime({ commands, registry: projectRegistry, store: linkStore, workspaces: linkWorkspaces, chats, broadcast: broadcastProjectState, titles: chatTitles });
   commands.handle("linked:snapshot", () => linked.snapshot());

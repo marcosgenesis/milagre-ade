@@ -6,6 +6,7 @@ const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { startDaemon } = require('./server.cjs');
 const { connect } = require('./client.cjs');
+const { execFileSync } = require('node:child_process');
 const { startMobileBridge } = require('./mobile-bridge.cjs');
 
 async function fixture(t) {
@@ -26,7 +27,12 @@ async function fixture(t) {
     await daemon.close();
     await fs.rm(dataDir, { recursive: true, force: true });
   });
-  return { dataDir, opens, disconnected,
+  const project = path.join(dataDir, 'project');await fs.mkdir(project);
+  execFileSync('git',['init','-q',project]);
+  const setup = await connect({dataDir});clients.push(setup);
+  const openedProject = await setup.call('project:open',[project]);
+  const chatId = `${openedProject.path}#${Object.values(openedProject.state.sessions)[0].id}`;
+  return { dataDir, opens, disconnected, chatId,
     async client() { const client = await connect({ dataDir }); clients.push(client); return client; },
     async bridge(confined = false) {
       const bridge = await startMobileBridge({ dataDir, port: 0, token: 'a'.repeat(64), ...(confined ? { allowedRoot: dataDir } : {}) });
@@ -42,9 +48,10 @@ async function fixture(t) {
 test('simulator commands receive distinct server identities and disconnect releases their viewers', async t => {
   const f = await fixture(t);
   const a = await f.client(), b = await f.client();
-  assert.equal((await a.call('simulator:list')).devices.length, 1);
-  await a.call('simulator:open', [{ deviceId: 'test-device', owner: 'forged' }]);
-  await b.call('simulator:open', [{ deviceId: 'test-device' }]);
+  assert.equal((await a.call('simulator:list',[{chatId:f.chatId}])).devices.length, 0);
+  await a.call('simulator:attach',[{chatId:f.chatId,deviceId:'test-device'}]);
+  await a.call('simulator:open', [{ chatId:f.chatId, deviceId: 'test-device', owner: 'forged' }]);
+  await b.call('simulator:open', [{ chatId:f.chatId, deviceId: 'test-device' }]);
   assert.equal(typeof f.opens[0].owner, 'string');
   assert.ok(f.opens[0].owner.length >= 16);
   assert.notEqual(f.opens[0].owner, 'forged');
@@ -57,14 +64,15 @@ test('simulator commands receive distinct server identities and disconnect relea
 test('paired mobile reaches the same simulator service; unauthenticated and confined clients are refused', async t => {
   const f = await fixture(t);
   const paired = await f.bridge();
-  const listed = await paired('simulator:list');
+  const listed = await paired('simulator:list',[{chatId:f.chatId}]);
   assert.equal(listed.status, 200);
-  assert.equal((await listed.json()).result.devices[0].name, 'Test iPhone');
-  assert.equal((await paired('simulator:open', [{ deviceId: 'test-device' }])).status, 200);
+  assert.equal((await listed.json()).result.available[0].name, 'Test iPhone');
+  assert.equal((await paired('simulator:attach', [{chatId:f.chatId,deviceId:'test-device'}])).status,200);
+  assert.equal((await paired('simulator:open', [{ chatId:f.chatId, deviceId: 'test-device' }])).status, 200);
   assert.equal(typeof f.opens[0].owner, 'string');
   assert.equal((await paired('simulator:list', [], false)).status, 401);
   const confined = await f.bridge(true);
-  for (const method of ['list', 'open', 'offer', 'status', 'control', 'input', 'close']) {
+  for (const method of ['list', 'attach', 'detach', 'open', 'offer', 'status', 'control', 'input', 'close']) {
     assert.equal((await confined(`simulator:${method}`, [{ viewerId: 'private-viewer' }])).status, 403, method);
   }
 });

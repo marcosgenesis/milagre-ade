@@ -395,7 +395,7 @@ export default function ChatScreen() {
       {!question && <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 8 }}>
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />
-        <SimulatorChip />
+        {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
         {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction('agents')} />}
       </View>}
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={actionBusy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); }, true)} />)}

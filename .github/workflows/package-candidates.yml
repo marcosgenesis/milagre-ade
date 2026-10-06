@@ -124,6 +124,7 @@ jobs:
         run: |-
           app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
           node scripts/test-desktop.cjs --packaged "$app"
+          node scripts/verify-packaged-simulator-helper.cjs "$app"
       - name: Sign and verify Linux candidates with temporary test key
         if: matrix.platform == 'linux'
         run: |-

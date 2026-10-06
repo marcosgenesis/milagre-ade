@@ -9,6 +9,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const zlib = require('node:zlib');
 const { WebSocketServer, WebSocket } = require('ws');
 const { chatInProject } = require('@milagre/shared/agent-runs');
+const { isLinkScopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
 const { connect } = require('./client.cjs');
 const { createConfinement } = require('./confine.cjs');
 
@@ -16,8 +17,11 @@ const { createConfinement } = require('./confine.cjs');
 const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
   'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
+  'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
+  'accounts:list', 'accounts:add', 'accounts:select', 'accounts:login', 'accounts:cancel', 'accounts:remove',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'chat:archive-subagent', 'chat:archive-finished-subagents',
   'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',
   // Archive's confirm step: whether the Chat's worktree is Milagre's and what removing it would lose, then the removal,
   // which the daemon checks again against what the phone saw after closing the Chat's agent.
@@ -49,6 +53,32 @@ function forPhone(project) {
     : session]));
   return { ...project, state: { ...state, messages, sessions } };
 }
+/** A drawer-only projection. Empty message bodies are metadata, never a readable transcript. */
+function forChatList(project, runs) {
+  const byChat = new Map();
+  for (const message of project.state.messages) {
+    let row = byChat.get(message.session_id);
+    if (!row) { row = { first: message }; byChat.set(message.session_id, row); }
+    row.last = message;
+    if (message.role !== 'assistant') {
+      row.lastInput = message;
+    }
+  }
+  const sessions = Object.fromEntries(Object.entries(project.state.sessions).map(([id, session]) => {
+    const { subagents, handoverDraft, ...metadata } = session;
+    return [id, { ...metadata, ...(handoverDraft === undefined ? {} : { handoverDraft: '' }) }];
+  }));
+  // Keep listing/order and failure metadata, plus every input identity: an acknowledgement may still
+  // be outstanding when another user or linked Chat sends a later message. Preserve source order.
+  const boundaries = new Set([...byChat.values()].flatMap(row => [row.first, row.lastInput, row.last]));
+  const messages = project.state.messages.filter(message => message.clientMessageId || boundaries.has(message))
+    .map(({ id, session_id, role, outcome, clientMessageId }) => ({ id, session_id, role, outcome, clientMessageId, body: '', context: null }));
+  const marks = Object.fromEntries(Object.entries(runs.runs || {}).map(([key, run]) => [key, {
+    model: run.model, startedAt: run.startedAt, approvals: run.approvals, questions: run.questions, answered: {}, text: '', steps: [],
+  }]));
+  return { previewOnly: true, project: { ...project, state: { ...project.state, sessions, messages, tasks: {} } }, runs: { ...runs, runs: marks } };
+}
+
 // Steps at the end of a streaming turn, and any still running, keep this much of the end of their output.
 const LIVE_STEPS = 3;
 const LIVE_DETAIL = 4096;
@@ -125,6 +155,20 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
+  const validScope = owner => typeof owner === 'string' && (isLinkScopeKey(owner) || path.isAbsolute(owner));
+  async function readScope(owner) {
+    await confine?.check(owner);
+    if (!validScope(owner)) throw failure(400, 'Choose a valid Project or Link');
+    if (!isLinkScopeKey(owner)) return { project: await client.call('project:snapshot', [owner]) };
+    const id = scopeFromKey(owner).linkId;
+    const [link, projects] = await Promise.all([client.call('link:snapshot', [id]), client.call('project:registry')]);
+    return { link: { ...link, projects: link.link.projectIds.map(id => projects.find(project => project.id === id) ?? { id, path: '', name: 'Unavailable Project' }) } };
+  }
+  async function scopeRoots(owner) {
+    if (!isLinkScopeKey(owner)) return client.call('project:worktree-paths', [owner]);
+    const { link } = await readScope(owner);
+    return [path.join(dataDir, 'links', link.link.id, '.milagre', 'images'), ...Object.values(link.state.sessions).flatMap(chat => [chat.workspacePath, ...chat.worktrees.map(member => member.worktreePath)])];
+  }
   let active = 0;
   let closed;
   let url;
@@ -180,7 +224,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   }
   client.on('event', ({ channel, payload } = {}) => {
     for (const entry of live) {
-      if (channel === 'project:state' && payload?.path === entry.projectPath) signal(entry, 'project');
+      if ((channel === 'project:state' && payload?.path === entry.projectPath) || (channel === 'link:state' && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)) signal(entry, 'project');
       else if (channel === 'agent:event' && typeof payload?.chatId === 'string' && chatInProject(entry.projectPath, payload.chatId)) {
         // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs
         // fetch first would hide the reply until the Project caught up. Subagents live only in the Project state.
@@ -196,12 +240,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   async function serveMedia(target, res) {
     const projectPath = target.searchParams.get('projectPath');
     const requested = target.searchParams.get('path');
-    if (!projectPath || !requested || !path.isAbsolute(projectPath) || !path.isAbsolute(requested)) throw failure(400, 'projectPath and path must be absolute');
+    if (!validScope(projectPath) || !requested || !path.isAbsolute(requested)) throw failure(400, 'Choose a valid Project or Link and absolute image path');
     if (confine) { await confine.check(projectPath); await confine.check(requested, { uploads: true }); }
     const type = MEDIA_TYPES[path.extname(requested).toLowerCase()];
     if (!type) throw failure(415, 'Only png, jpeg, gif, webp and heic images are served');
     // Only the worktree folders: a big Project's whole state would be read in pages for every image.
-    const worktreePaths = await client.call('project:worktree-paths', [projectPath]);
+    const worktreePaths = await scopeRoots(projectPath);
     const candidates = [
       ...(Array.isArray(worktreePaths) ? worktreePaths : []),
       path.join(projectPath, '.milagre', 'images'),
@@ -273,23 +317,25 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
         }
         if (req.method === 'GET' && target.pathname === '/snapshot') {
           const projectPath = target.searchParams.get('projectPath');
-          await confine?.check(projectPath);
-          const [project, runs] = await Promise.all([client.call('project:snapshot', [projectPath]), client.call('chat:runs')]);
-          reply(200, { result: { project: forPhone(project), runs: runsForPhone(projectRuns(runs, projectPath)) } }, { etag: true });
+          const [scope, runs] = await Promise.all([readScope(projectPath), client.call('chat:runs')]);
+          const slim = scope.link ? { link: forPhone(scope.link) } : { project: forPhone(scope.project) };
+          const result = !scope.link && target.searchParams.get('view') === 'chats'
+            ? forChatList(scope.project, projectRuns(runs, projectPath))
+            : { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) };
+          reply(200, { result }, { etag: true });
           return;
         }
         // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.
         if (req.method === 'GET' && target.pathname === '/runs') {
           const projectPath = target.searchParams.get('projectPath');
-          if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
+          if (!validScope(projectPath)) throw failure(400, 'Choose a valid Project or Link');
           await confine?.check(projectPath);
           reply(200, { result: runsForPhone(projectRuns(await client.call('chat:runs'), projectPath)) }, { etag: true });
           return;
         }
         if (req.method === 'GET' && target.pathname === '/message') {
-          await confine?.check(target.searchParams.get('projectPath'));
-          const project = await client.call('project:snapshot', [target.searchParams.get('projectPath')]);
-          const message = project.state.messages.find(item => item.id === Number(target.searchParams.get('id')));
+          const scope = await readScope(target.searchParams.get('projectPath'));
+          const message = (scope.link ?? scope.project).state.messages.find(item => item.id === Number(target.searchParams.get('id')));
           if (!message) throw failure(404, 'That message is no longer in this Project.');
           reply(200, { result: message });
           return;
@@ -319,7 +365,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             if (bytes.length > 5 * MAX_BODY) throw failure(413, 'Each file must be 5 MiB or smaller');
             if (!bytes.length || bytes.toString('base64') !== base64) throw failure(400, 'Invalid attachment data');
             await confine?.check(projectPath);
-            await client.call('project:worktree-paths', [projectPath]);
+            await scopeRoots(projectPath);
             const folder = path.join(uploads, randomUUID());
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
@@ -349,6 +395,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           } else result = await client.call(request.method, request.args);
           // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
           if (request.method === 'project:open' && result && typeof result === 'object') result = { path: result.path, name: result.name };
+          if (request.method === 'link:open' && result?.link) result = { id: result.link.id, name: result.link.name };
           // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
           if (request.method === 'project:image' && typeof result === 'string' && result.length > MAX_PROJECT_IMAGE) result = null;
           }
@@ -370,7 +417,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
       const target = new URL(req.url, url);
       if (target.pathname !== '/live') throw failure(404, 'Unknown endpoint');
       projectPath = target.searchParams.get('projectPath');
-      if (!projectPath || !path.isAbsolute(projectPath)) throw failure(400, 'projectPath must be absolute');
+      if (!validScope(projectPath)) throw failure(400, 'Choose a valid Project or Link');
     } catch (error) {
       refuse(error);
       return;
@@ -403,4 +450,4 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   } catch (error) { await close(); throw error; }
   return { url, close, lost };
 }
-module.exports = { startMobileBridge, forPhone, runsForPhone, METHODS };
+module.exports = { startMobileBridge, forPhone, forChatList, runsForPhone, METHODS };

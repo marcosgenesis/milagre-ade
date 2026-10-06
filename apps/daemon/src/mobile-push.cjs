@@ -4,6 +4,8 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { attentionNotice } = require('@milagre/shared/attention');
 const { isTurnEnd, projectOfKey, sessionIdFromKey } = require('@milagre/shared/agent-runs');
+const { isLinkScopeKey } = require('@milagre/shared/chat-scopes');
+const validOwner = owner => path.isAbsolute(owner) || isLinkScopeKey(owner);
 
 const FOCUS_MS = 15000;
 const MAX_DEVICES = 32;
@@ -117,12 +119,12 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
     focus({ deviceId, chatId } = {}) {
       validDevice(deviceId);
       if (!devices.has(deviceId)) throw new Error('Push device is not registered');
-      if (chatId !== null && (typeof chatId !== 'string' || chatId.length > 4096 || !Number.isSafeInteger(sessionIdFromKey(chatId)) || sessionIdFromKey(chatId) < 1 || !path.isAbsolute(projectOfKey(chatId)))) throw new Error('Invalid focused Chat');
+      if (chatId !== null && (typeof chatId !== 'string' || chatId.length > 4096 || !Number.isSafeInteger(sessionIdFromKey(chatId)) || sessionIdFromKey(chatId) < 1 || !validOwner(projectOfKey(chatId)))) throw new Error('Invalid focused Chat');
       if (chatId === null) focus.delete(deviceId); else focus.set(deviceId, { chatId, until: now() + FOCUS_MS });
       return null;
     },
     observe(chatId, event) {
-      if (closed || !Number.isSafeInteger(sessionIdFromKey(chatId)) || !path.isAbsolute(projectOfKey(chatId))) return;
+      if (closed || !Number.isSafeInteger(sessionIdFromKey(chatId)) || !validOwner(projectOfKey(chatId))) return;
       let run = chats.get(chatId);
       if (event.type === 'turn-started' || (event.type === 'message-sent' && run?.ended)) {
         if (event.turnId && run?.turnId === event.turnId && !run.ended) return;

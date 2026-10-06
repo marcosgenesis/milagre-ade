@@ -1,4 +1,6 @@
 import { useReducedMotion } from "motion/react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   type ComponentPropsWithRef,
   type ReactNode,
@@ -10,6 +12,7 @@ import {
   useState,
 } from "react";
 import { PreviewRail, type PreviewRailItem } from "../motion/PreviewRail";
+import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
@@ -125,6 +128,10 @@ export function MessageScroller({
   const [railItems, setRailItems] = useState<PreviewRailItem[]>([]);
   const [activeRailId, setActiveRailId] = useState("");
   const [railOverflowing, setRailOverflowing] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // A newly opened conversation lays out every message at its real size once, so the skipped ones keep that size
+  // instead of a guess that would shift the scroll position after it opens at the bottom.
+  const [measuring, setMeasuring] = useState(true);
   const {
     onScroll: onViewportScroll,
     onWheel: onViewportWheel,
@@ -210,7 +217,9 @@ export function MessageScroller({
     }
     const cache = previewCacheRef.current;
     const targets = new Map<string, HTMLElement>();
-    const nextItems = messages.map((message, index) => {
+    // Sample the whole Chat, including both ends, rather than growing a tick per message.
+    const nextItems = messageNavigationIndices(messages.length).map((index) => {
+      const message = messages[index];
       let id = railIdRef.current.get(message);
       if (!id) {
         railIdCounterRef.current += 1;
@@ -289,26 +298,44 @@ export function MessageScroller({
     }, behavior === "smooth" ? 320 : 0);
   }, []);
 
+  const updateJumpToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setShowJumpToBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > followThreshold);
+  }, [followThreshold]);
+
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     // The active item follows every scroll, including the ones that chase streamed output.
     scheduleActiveRailItem();
+    updateJumpToBottom();
     if (programmaticScrollRef.current) return;
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setFollowing(distance <= followThreshold);
-  }, [followThreshold, scheduleActiveRailItem, setFollowing]);
+  }, [followThreshold, scheduleActiveRailItem, setFollowing, updateJumpToBottom]);
 
   const leaveLiveEdge = useCallback(() => {
     programmaticScrollRef.current = false;
   }, []);
 
+  useEffect(() => {
+    let settle = 0;
+    const first = requestAnimationFrame(() => {
+      settle = requestAnimationFrame(() => setMeasuring(false));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(settle);
+    };
+  }, []);
+
   useLayoutEffect(() => {
     followingRef.current = followOutput;
-    if (!followOutput) return;
     // Position a newly opened conversation before the browser can paint its top.
-    scrollToEnd("instant");
-  }, [followOutput, scrollToEnd]);
+    if (followOutput) scrollToEnd("instant");
+    updateJumpToBottom();
+  }, [followOutput, scrollToEnd, updateJumpToBottom]);
 
   useEffect(() => {
     if (!followOutput || !followingRef.current) return;
@@ -320,14 +347,16 @@ export function MessageScroller({
 
   useEffect(() => {
     const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    const viewport = viewportRef.current;
+    if (!content || !viewport || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (!followOutput || !followingRef.current) return;
-      scrollToEnd(followBehavior);
+      if (followOutput && followingRef.current) scrollToEnd(followBehavior);
+      updateJumpToBottom();
     });
     observer.observe(content);
+    observer.observe(viewport);
     return () => observer.disconnect();
-  }, [followBehavior, followOutput, scrollToEnd]);
+  }, [followBehavior, followOutput, scrollToEnd, updateJumpToBottom]);
 
   useEffect(() => {
     if (navigation !== "rail") {
@@ -445,6 +474,7 @@ export function MessageScroller({
         aria-live="polite"
         aria-relevant="additions text"
         aria-busy={busy}
+        data-measuring={measuring || undefined}
         className={contentClassName}
         {...contentProps}
       >
@@ -454,7 +484,7 @@ export function MessageScroller({
   );
 
   return (
-    <div data-slot="message-scroller" className={`min-h-0 ${className}`} {...props}>
+    <div data-slot="message-scroller" className={`relative min-h-0 ${className}`} {...props}>
       {navigation === "rail" ? (
         <PreviewRail
           items={railOverflowing ? railItems : []}
@@ -473,6 +503,21 @@ export function MessageScroller({
         </PreviewRail>
       ) : (
         viewport
+      )}
+      {showJumpToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-12 z-20 flex justify-center">
+          <button
+            type="button"
+            aria-label="Go to bottom"
+            onClick={() => {
+              setFollowing(true);
+              scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+            }}
+            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-line-strong/50 bg-surface/60 text-ink shadow-overlay backdrop-blur-chip transition-colors hover:bg-surface/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink"
+          >
+            <HugeiconsIcon icon={ArrowDown01Icon} size={20} aria-hidden="true" />
+          </button>
+        </div>
       )}
     </div>
   );

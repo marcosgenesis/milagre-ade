@@ -1,13 +1,18 @@
-import type { ChatMessage, CoordinatorState } from '@milagre/shared/model';
+import type { ChatMessage, CoordinatorState, NamedProjectLink, OpenLink } from '@milagre/shared/model';
+import { isLinkScopeKey, scopeKey } from '@milagre/shared/chat-scopes';
+import { phoneSnapshot } from './chat-scope.ts';
 import type { AgentRuns } from '@milagre/shared/agent-runs';
 import { openLive, type Live, type LiveOptions } from './live.ts';
 import type { RelayTransport } from './relay-transport.ts';
 
-export type OpenProject = { path: string; name: string; state: CoordinatorState };
+export type OpenProject = { path: string; name: string; state: CoordinatorState; link?: OpenLink };
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
-export type Snapshot = { project: OpenProject; runs: Runs };
-export type RecentProject = { path: string; name?: string };
+export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };
+/** Drawer metadata only. Never use it as the Chat screen's snapshot. Older hosts return a full Snapshot. */
+export type ProjectPreview = Omit<Snapshot, 'previewOnly'> & { previewOnly: true };
+export type RegisteredProject = { id: string; path: string; name: string };
+export type RecentProject = { path: string; name?: string; link?: NamedProjectLink; projects?: RegisteredProject[] };
 
 /** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
 export type Access = { id: string; secret: string };
@@ -68,7 +73,7 @@ const LOST = 'Connection lost. Reconnect to your computer. Check the Chat before
 const decoder = new TextDecoder();
 const MEDIA_AT_ONCE = 4;
 // Creating a worktree can fetch and copy files; removing one with big ignored folders can take minutes.
-const LONG_CALLS = new Set(['worktree:create', 'worktree:remove']);
+const LONG_CALLS = new Set(['worktree:create', 'worktree:remove', 'link:send', 'link:open']);
 
 export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, timeoutMs = 30000, runtime?: RelayRuntime) {
   const relay = host.relay ? validRelay(host.relay) : undefined;
@@ -192,6 +197,22 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
 
   return {
     url,
+    async recentScopes(): Promise<RecentProject[]> {
+      const [projects, groups] = await Promise.all([
+        request<RecentProject[]>('/rpc', { v: 1, method: 'project:recent', args: [] }),
+        Promise.all([request<NamedProjectLink[]>('/rpc', { v: 1, method: 'link:list', args: [] }), request<RegisteredProject[]>('/rpc', { v: 1, method: 'project:registry', args: [] })]).catch(error => {
+          if (/not available from mobile|demo computer only/i.test(error.message)) return [[], []] as [NamedProjectLink[], RegisteredProject[]];
+          throw error;
+        }),
+      ]);
+      const [links, registry] = groups;
+      return [...projects, ...links.map(link => ({ path: scopeKey({ kind: 'link', linkId: link.id }), name: link.name, link, projects: link.projectIds.map(id => registry.find(project => project.id === id) ?? { id, name: 'Unavailable Project', path: '' }) }))];
+    },
+    async open(owner: string) {
+      const link = isLinkScopeKey(owner);
+      const opened = await request<{ path?: string }>('/rpc', { v: 1, method: link ? 'link:open' : 'project:open', args: [link ? owner.slice('milagre-link:'.length) : owner] }, link ? Math.max(timeoutMs, 330000) : timeoutMs);
+      return phoneSnapshot(await request<Snapshot | { link: OpenLink; runs: Runs }>('/snapshot?projectPath=' + encodeURIComponent(link ? owner : opened.path ?? owner)));
+    },
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>('/attachments', { projectPath, name, base64 }),
     // Git fetches, worktree setup and removing a worktree get the same deadline as the desktop daemon client.
     call: <T,>(method: string, args: unknown[] = []) => request<T>('/rpc', { v: 1, method, args }, LONG_CALLS.has(method) ? Math.max(timeoutMs, 330000) : timeoutMs),
@@ -202,7 +223,8 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     image: (projectPath: string, path: string): { uri: string; headers?: Record<string, string> } | Promise<{ uri: string }> => relay ? relayImage(projectPath, path) : media(projectPath, path),
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
-    snapshot: (projectPath: string) => request<Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath)),
+    snapshot: async (projectPath: string) => phoneSnapshot(await request<Snapshot | { link: OpenLink; runs: Runs }>('/snapshot?projectPath=' + encodeURIComponent(projectPath))),
+    preview: (projectPath: string) => request<ProjectPreview | Snapshot>('/snapshot?projectPath=' + encodeURIComponent(projectPath) + '&view=chats'),
     /** Just the Project's streaming turns: what a live "runs" signal fetches instead of the whole snapshot. */
     runs: (projectPath: string) => request<Runs>('/runs?projectPath=' + encodeURIComponent(projectPath)),
     /** The Project's live socket, through the same tunnel and Access headers as every request, or through the relay. */

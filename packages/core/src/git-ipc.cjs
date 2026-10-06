@@ -29,7 +29,7 @@ function chatContext(chat = {}) {
 function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVersion, env = process.env, actions = createGitActions({ env }), diff = createGitDiff({ env }), models, knownFolders } = {}) {
   const command = (name) => async () => {
     const status = await cli(name);
-    return status?.problem ? null : status?.command ?? null;
+    return status?.problem ? null : status ?? null;
   };
   const textModels = models ?? {
     claude: claudeModel({ getCommand: command("claude") }),

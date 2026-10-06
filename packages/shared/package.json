@@ -9,6 +9,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./chat-scopes": {
+      "types": "./src/chat-scopes.d.mts",
+      "default": "./src/chat-scopes.mjs"
+    },
     "./git-diff": "./src/git-diff.ts",
     "./agent-runs": {
       "types": "./src/agent-runs.d.mts",
@@ -71,7 +75,8 @@
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
-    }
+    },
+    "./message-navigation": "./src/message-navigation.ts"
   },
   "files": [
     "src/*.mjs",
@@ -87,7 +92,8 @@
     "src/diff-tree.ts",
     "src/diff-layout.ts",
     "src/usage.ts",
-    "src/simulator.ts"
+    "src/simulator.ts",
+    "src/message-navigation.ts"
   ],
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

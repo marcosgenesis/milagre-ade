@@ -19,6 +19,7 @@ const chatProject = chatId => (typeof chatId === 'string' ? projectOfKey(chatId)
 const attached = file => ({ file });
 const none = () => [];
 const denySimulator = () => { throw refused(); };
+const denied = () => { throw refused(); };
 
 /**
  * The paths in each command the phone may call, by argument shape (see core's runtime). A command missing here is
@@ -38,6 +39,12 @@ const PATHS = Object.freeze({
   'push:focus': ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),
   'daemon:status': none,
   'project:recent': none,
+  // Named Links span Projects. The single-folder demo must never expose them.
+  'project:registry': denied,
+  'link:list': denied,
+  'link:create': denied,
+  'link:open': denied,
+  'link:send': denied,
   'project:open': ([projectPath]) => [projectPath],
   // Takes a Project off the recent list; its folder is never touched.
   'project:forget': ([projectPath]) => [projectPath],
@@ -49,6 +56,12 @@ const PATHS = Object.freeze({
   'chat:resume': ([projectPath]) => [projectPath],
   'agent:interrupt': ([chatId]) => [chatProject(chatId)],
   'agent:respond-permission': ([value]) => [chatProject(value?.chatId)],
+  'accounts:list': none,
+  'accounts:add': none,
+  'accounts:select': none,
+  'accounts:login': none,
+  'accounts:cancel': none,
+  'accounts:remove': none,
   'usage:read': none,
   'usage:cached': none,
   'agent:answer-question': ([value]) => [chatProject(value?.chatId)],
@@ -56,6 +69,8 @@ const PATHS = Object.freeze({
   'agent:models': none,
   'agent:cli-status': none,
   'chat:patch': ([projectPath]) => [projectPath],
+  'chat:archive-subagent': ([projectPath]) => [projectPath],
+  'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
   'worktree:pull-request': ([worktreePath]) => [worktreePath],
   'project:branches': ([projectPath]) => [projectPath],
   'skills:list': ([projectPath]) => [projectPath],
@@ -105,6 +120,8 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     const paths = PATHS[method];
     if (!paths || !Array.isArray(args)) throw refused();
     // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
+    if (method === 'accounts:list') return { result: { providers: [] } };
+    if (method.startsWith('accounts:')) throw failure(403, 'Accounts cannot be changed on this demo computer.');
     if (method === 'push:register') throw failure(403, NOTIFICATIONS_OFF);
     if (method === 'push:unregister') return { result: { registered: false } };
     if (method === 'push:focus') return { result: null };

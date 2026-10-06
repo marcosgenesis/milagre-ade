@@ -1,7 +1,7 @@
 import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot, type ProjectPreview } from './client';
 import { relayRuntime } from './relay-native';
 import { syncProject } from './live';
 import { readPermission, savedHosts, savedNavigation, savePermission } from './hosts-native';
@@ -11,6 +11,7 @@ import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/share
 import type { Attachment } from './attachments';
 import { defaultPreferences, type TurnPreferences } from './turn-options';
 import { pendingChatSessionId, type PendingChat } from '@milagre/shared/chats';
+import { createLinkOperations } from './link-operations';
 
 const hostOf = (url: string) => /^relay:/.test(url) ? 'Mac' : String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 /** A computer to connect to: a saved one, a scanned pairing, or an address and token typed in. */
@@ -33,6 +34,17 @@ function useSessionState() {
   const selection = useRef<{ client: Client; path: string } | null>(null);
   // The last snapshot of each Project this session saw, so reopening one shows its Chats at once while it refreshes.
   const seen = useRef(new Map<string, Snapshot>());
+  const listed = useRef(new Map<string, Snapshot | ProjectPreview>());
+  const previews = useRef(new Map<Client, Map<string, Promise<Snapshot | ProjectPreview>>>());
+  // Keep streamed status and local refreshes in the copy a remounted drawer will read.
+  useEffect(() => {
+    if (client && snapshot) {
+      const key = `${client.url}|${snapshot.project.path}`;
+      seen.current.set(key, snapshot);
+      listed.current.set(key, snapshot);
+    }
+  }, [client, snapshot]);
+  const cachedProject = useCallback((path: string) => client ? listed.current.get(`${client.url}|${path}`) ?? seen.current.get(`${client.url}|${path}`) : undefined, [client]);
   /** The Project being opened, and whether its last copy is already on screen. */
   const [opening, setOpening] = useState<{ path: string; cached: boolean } | null>(null);
   // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
@@ -45,6 +57,15 @@ function useSessionState() {
       if (!cancelled) { setModels(models); setCliStatus(status); }
     }).catch(() => { if (!cancelled) setProviderError('Could not check the installed agents. Reconnect to check again.'); });
     return () => { cancelled = true; };
+  }, [client]);
+  const refreshProviders = useCallback(async () => {
+    if (!client) return;
+    const version = generation.current;
+    try {
+      const [models, status] = await Promise.all([client.call<AgentModels>('agent:models'), client.call<AgentCliStatus>('agent:cli-status')]);
+      if (version !== generation.current) return;
+      setModels(models); setCliStatus(status); setProviderError('');
+    } catch { setProviderError('Could not check the installed agents. Reconnect to check again.'); }
   }, [client]);
   const loadHosts = useCallback(async () => {
     const list = await savedHosts.list();
@@ -66,7 +87,7 @@ function useSessionState() {
     const previous = selection.current;
     try {
       await next.call('daemon:status');
-      const projects = await next.call<RecentProject[]>('project:recent');
+      const projects = await next.recentScopes();
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== '1') {
         if (remember) {
@@ -94,9 +115,9 @@ function useSessionState() {
     try {
       await next.call('daemon:status');
       if (current !== generation.current) return false;
-      const projects = await next.call<RecentProject[]>('project:recent');
-      const project = await next.call<OpenProject>('project:open', [projectPath]);
-      const state = await next.snapshot(project.path);
+      const projects = await next.recentScopes();
+      const state = await next.open(projectPath);
+      const project = state.project;
       if (current !== generation.current) return false;
       if (!state.project.state.sessions[sessionId]) throw new Error('This Chat is no longer available on your computer.');
       selection.current = { client: next, path: project.path };
@@ -120,14 +141,14 @@ function useSessionState() {
       if (cached) setSnapshot(cached);
     }
     try {
-      const project = await client.call<OpenProject>('project:open', [projectPath]);
-      const state = await client.snapshot(project.path);
+      const state = await client.open(projectPath);
+      const project = state.project;
       if (current === generation.current) {
         if (options.chatId !== undefined && !state.project.state.sessions[options.chatId]) throw new Error('This Chat is no longer available. Choose another Chat.');
         selection.current = { client, path: project.path };
         seen.current.set(`${client.url}|${projectPath}`, state).set(`${client.url}|${project.path}`, state);
         setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
-        setRecent(previous => previous.some(item => item.path === project.path) ? previous : [...previous, { path: project.path, name: project.name }]);
+        setRecent(previous => previous.some(item => item.path === project.path) ? previous : [...previous, { path: project.path, name: project.name, ...(project.link ? { link: project.link.link, projects: project.link.projects } : {}) }]);
         return state;
       }
     } catch (error) {
@@ -138,15 +159,39 @@ function useSessionState() {
     }
   };
   // Reading a drawer group does not select it or disturb the Chat behind the drawer.
-  const previewProject = useCallback(async (path: string) => {
-    if (!client) throw new Error('Connect to your computer first.');
-    const project = await client.call<OpenProject>('project:open', [path]);
-    return client.snapshot(project.path);
+  const previewProject = useCallback((path: string): Promise<Snapshot | ProjectPreview> => {
+    if (!client) return Promise.reject(new Error('Connect to your computer first.'));
+    let pending = previews.current.get(client);
+    if (!pending) { pending = new Map(); previews.current.set(client, pending); }
+    const existing = pending.get(path);
+    if (existing) return existing;
+    const key = `${client.url}|${path}`;
+    const previous = listed.current.get(key) ?? seen.current.get(key);
+    const work = (async () => {
+      const linked = path.startsWith('milagre-link:');
+      const project = linked ? { path } : await client.call<OpenProject>('project:open', [path]);
+      const canonicalKey = `${client.url}|${project.path}`;
+      const canonicalPrevious = listed.current.get(canonicalKey) ?? seen.current.get(canonicalKey);
+      const copy = linked ? await client.open(path) : await client.preview(project.path);
+      // A live update or foreground open that landed meanwhile is newer than this preview.
+      const latest = listed.current.get(canonicalKey) ?? seen.current.get(canonicalKey);
+      const requested = listed.current.get(key) ?? seen.current.get(key);
+      const next = latest && latest !== canonicalPrevious ? latest : requested && requested !== previous ? requested : copy;
+      listed.current.set(key, next).set(canonicalKey, next);
+      // Only full snapshots can warm navigation. A summary must never erase already-read messages.
+      if (!next.previewOnly) seen.current.set(key, next).set(canonicalKey, next);
+      return next;
+    })().finally(() => {
+      pending.delete(path);
+      if (!pending.size) previews.current.delete(client);
+    });
+    pending.set(path, work);
+    return work;
   }, [client]);
   const reloadProjects = useCallback(async () => {
     if (!client) return;
     const current = generation.current;
-    const projects = await client.call<RecentProject[]>('project:recent');
+    const projects = await client.recentScopes();
     if (current === generation.current) setRecent(projects);
   }, [client]);
   const projectPath = snapshot?.project.path;
@@ -193,13 +238,14 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, lastLocation, rememberChat, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
+  return { booted, lastLocation, rememberChat, cachedProject, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders
  * only the composer's screens, not every screen that reads the connection and snapshot.
  */
 function ComposerProvider({ children }: { children: React.ReactNode }) {
+  const [linkOperations] = useState(createLinkOperations);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
@@ -208,10 +254,10 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void readPermission().then(saved => { if (saved) setPermission(saved); }); }, []);
   const defaults = useMemo(() => ({ ...defaultPreferences, permissionMode: permission }), [permission]);
   const setDefaultPermission = useCallback((mode: PermissionMode) => { setPermission(mode); void savePermission(mode); }, []);
-  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission }), [drafts, attachments, preferences, defaults, setDefaultPermission]);
+  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission, linkOperations }), [drafts, attachments, preferences, defaults, setDefaultPermission, linkOperations]);
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
-type Composer = { defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
+type Composer = { linkOperations: ReturnType<typeof createLinkOperations>; defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
 const ComposerContext = createContext<Composer | null>(null);
 export type MobilePendingChat = { preview: PendingChat; hostId: string; projectPath: string; originChatId: string; originSessionId: number | null; worktreeId: number; newWorktree: boolean; accepted: boolean; promoted?: boolean };
 type PendingChats = { pendingChats: Record<string, MobilePendingChat>; setPendingChats: React.Dispatch<React.SetStateAction<Record<string, MobilePendingChat>>> };

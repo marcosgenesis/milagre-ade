@@ -1,3 +1,4 @@
+import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from '@milagre/shared/model';
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
 
@@ -47,12 +48,13 @@ export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@
 /** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects.
  * `notice`: shown once, e.g. the host went away and was started again. `failed`: it couldn't be started again (`message` says why). */
 export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean; notice?: string; failed?: boolean };
-export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+export type RuntimeSnapshot = { projects: OpenProject[]; links?: Array<{ linkId: string; state: LinkState }>; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
 export type CanvasSnapshot = {
   projects: { id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[];
   links: ProjectLink[];
+  projectGroups?: NamedProjectLink[];
   worktreePositions: Record<string, Record<string, { x: number; y: number }>>;
   states: { path: string; state: CoordinatorState }[];
 };
@@ -130,6 +132,11 @@ declare global {
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
       /** Every opened Project, seeded once from existing coordination files. */
+      listNamedLinks: () => Promise<NamedProjectLink[]>;
+      createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
+      openNamedLink: (id: string) => Promise<OpenLink>;
+      sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
+      onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       getCanvas: () => Promise<CanvasSnapshot>;
@@ -180,7 +187,7 @@ declare global {
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
-      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
+      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */
@@ -199,6 +206,9 @@ declare global {
       /** Lets phones that have not paired yet do so for another ten minutes. */
       openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
+      listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      accountAction: (action: "add" | "select" | "login" | "cancel" | "remove", provider: ModelProvider, value: string) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      onAccountsChanged: (callback: () => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;

@@ -2,28 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
-import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, Link04Icon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
-import type { Snapshot } from './client';
+import type { RegisteredProject } from './client';
+import { isLinkScopeKey } from '@milagre/shared/chat-scopes';
 import { usePendingChats, useSession, type MobilePendingChat } from './session';
 import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
 import { Icon } from './icons';
 import { LoadingLogo } from './loading-logo';
-import { ErrorNotice, Field, IconButton, PageScroll, PullDown, colors, styles } from './ui';
-import { SettingsView, type SettingsPage } from './app/settings';
-import { NotificationsView } from './app/notifications';
-import { UsageSection } from './usage-section';
-import { ProjectIcon } from './project-icon';
+import { ErrorNotice, Field, IconButton, PullDown, colors, styles } from './ui';
+import { ProjectIcon, ProjectIcons } from './project-icon';
 import { ProjectSearch } from './project-search';
 import { chatMenu, runChatAction } from './chat-actions';
 import { confirm } from './confirm-store';
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
-  | { kind: 'project'; name: string; expanded: boolean }
+  | { kind: 'project'; name: string; expanded: boolean; members?: RegisteredProject[] }
+  | { kind: 'section'; name: string }
   | { kind: 'chat'; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
   | { kind: 'notice'; message: string; failed?: boolean }
 );
@@ -33,19 +32,26 @@ const NEEDS: ChatMark[] = ['question', 'waiting', 'interrupted', 'failed', 'unre
 const labels: Record<ChatMark, string> = { idle: '', running: 'Running', question: 'Needs reply', waiting: 'Needs approval', interrupted: 'Interrupted', failed: 'Failed', unread: 'Unread' };
 
 /** The same project tree is the first-run destination and the drawer over a Chat: every Project's Chats, their ⋯ actions and filters. */
-export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNavigate: Destination; onClose?: () => void; activeChatId?: number }) {
+type NavigationProps = { onNavigate: Destination; onClose?: () => void; activeChatId?: number };
+export function ProjectNavigation(props: NavigationProps) {
+  const { client } = useSession();
+  // A computer's paths, errors and in-flight UI work never belong to another computer.
+  return <ProjectNavigationContent key={client?.url || ''} {...props} />;
+}
+
+function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: NavigationProps) {
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
-  const { reloadProjects, previewProject } = session;
+  const { reloadProjects, previewProject, cachedProject } = session;
   const currentPath = session.snapshot?.project.path;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([currentPath || session.recent[0]?.path].filter(Boolean) as string[]));
-  const [copies, setCopies] = useState<Record<string, Snapshot>>({});
+  // Snapshots live in the session, so closing the drawer or switching Projects keeps them.
+  const [revision, setRevision] = useState(0);
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [show, setShow] = useState<Show>('all');
-  // Settings open inside the navigation, so reaching them never passes through the screen behind it.
-  const [page, setPage] = useState<'settings' | SettingsPage | 'add' | null>(null);
+  const [page, setPage] = useState<'add' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -56,9 +62,9 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const load = useCallback((projectPath: string) => {
     const existing = pending.current.get(projectPath);
     if (existing) return existing;
-    const work = previewProject(projectPath).then(copy => {
+    const work = previewProject(projectPath).then(() => {
       if (!alive.current) return;
-      setCopies(previous => ({ ...previous, [projectPath]: copy }));
+      setRevision(value => value + 1);
       setFailures(previous => { const next = { ...previous }; delete next[projectPath]; return next; });
     }).catch(e => { if (alive.current) setFailures(previous => ({ ...previous, [projectPath]: e.message })); })
       .finally(() => { pending.current.delete(projectPath); });
@@ -68,17 +74,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== 'all';
   useEffect(() => {
-    let cancelled = false;
-    // Search reads every Project; ordinary browsing only reads expanded groups.
     const paths = session.recent.filter(item => searching || expanded.has(item.path)).map(item => item.path);
-    void (async () => { for (const projectPath of paths) { if (cancelled) break; await load(projectPath); } })();
-    return () => { cancelled = true; };
+    // One slow Project must not hold up the other expanded groups.
+    void Promise.all(paths.map(load));
   }, [expanded, searching, session.recent, load]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
     for (const project of session.recent) {
-      const saved = project.path === currentPath && session.snapshot ? session.snapshot : copies[project.path];
+      const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
       const previews = Object.values(pendingChats).filter(item => item.hostId === session.client?.url && item.projectPath === project.path);
       const projected = saved && previews.reduce((state, item) => withPendingChat(state, item.preview), saved.project.state);
       const copy = saved && projected ? { ...saved, project: { ...saved.project, state: projected } } : saved;
@@ -94,7 +98,8 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       const marked = Object.values(copy?.project.state.sessions || {}).map(chat => {
         const run = copy?.runs.runs[`${copy.project.path}#${chat.id}`];
         const pending = pendingById.get(chat.id);
-        return { chat, run, pending, mark: pending && !pending.accepted ? 'running' as const : chatMark(chat, run, byChat.get(chat.id) || []) };
+        const sortId = pending && !byChat.get(chat.id)?.some(message => message.clientMessageId !== pending.preview.message.clientMessageId) ? pending.preview.sortId : chat.id;
+        return { chat, run, pending, sortId, mark: pending && !pending.accepted ? 'running' as const : chatMark(chat, run, byChat.get(chat.id) || []) };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const chats = marked.filter(({ chat, run }) => (show === 'archived') === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
@@ -102,16 +107,19 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         .filter(({ mark }) => show !== 'running' || mark === 'running')
         .filter(({ chat }) => !needle || [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some(text => text?.toLowerCase().includes(needle)))
         // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => (b.pending?.preview.sortId ?? b.chat.id) - (a.pending?.preview.sortId ?? a.chat.id));
+        .sort((a, b) => b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
-      result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open });
+      const section = project.link ? 'Links' : 'Projects';
+      if (session.recent.some(item => item.link) && !result.some(row => row.kind === 'section' && row.name === section)) result.push({ key: `section:${section}`, path: '', kind: 'section', name: section });
+      result.push({ key: project.path, path: project.path, kind: 'project', name, expanded: open, members: project.projects });
       if (!open) continue;
       for (const { chat, mark, pending } of chats) result.push({ key: `${project.path}#${chat.id}`, path: project.path, kind: 'chat', chat, pending, worktree: pending?.newWorktree ? 'New worktree' : copy?.project.state.worktrees[chat.worktree_id]?.name || 'Worktree', mark });
-      if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: 'Could not load chats. Tap to retry.', failed: true });
+      if (failures[project.path]) result.push({ key: `${project.path}:error`, path: project.path, kind: 'notice', message: copy ? 'Could not refresh chats. Tap to retry.' : 'Could not load chats. Tap to retry.', failed: true });
       else if (!copy || !chats.length) result.push({ key: `${project.path}:notice`, path: project.path, kind: 'notice', message: !copy ? 'Loading chats...' : searching ? 'No matching chats' : 'No chats yet. Start one with +.' });
     }
     return result;
-  }, [copies, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
+  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.
@@ -127,11 +135,11 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
   // behind the navigation leaves it for the project list.
   async function act(projectPath: string, chat: AgentSession, action: string) {
-    const copy = projectPath === currentPath && session.snapshot ? session.snapshot : copies[projectPath];
+    const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
     if (!copy || !session.client) return;
     setError('');
     try {
-      const result = await runChatAction({ action, chat, running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`], client: session.client, projectPath: copy.project.path, state: copy.project.state,
+      const result = await runChatAction({ action, chat, running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`], client: session.client, projectPath: copy.project.path, state: copy.project.state, link: copy.project.link,
         refresh: () => projectPath === currentPath ? session.refresh() : load(projectPath), expectActivity: session.expectActivity, notify: message => { if (alive.current) setError(message); } });
       if ((result === 'hidden' || result === 'removed') && projectPath === currentPath && chat.id === activeChatId) onNavigate('/projects');
     } catch (e) { if (alive.current) setError((e as Error).message); }
@@ -139,6 +147,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
   async function projectAction(projectPath: string, name: string, action: string) {
     if (action === 'new') { select(projectPath); return; }
+    if (isLinkScopeKey(projectPath)) { if (action === 'copy') await Clipboard.setStringAsync(name); return; }
     if (action === 'copy') { await Clipboard.setStringAsync(projectPath); return; }
     if (action !== 'remove' || !session.client) return;
     const client = session.client;
@@ -170,15 +179,18 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   }
   const footer = <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
     <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setPage('add')} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
-    <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => setPage('settings')} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <IconButton label="Link projects" icon={Link04Icon} size={44} disabled={busy} onPress={() => onNavigate('/link-projects', true)} />
+      <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate('/settings', true)} />
+    </View>
   </View>;
   if (page) return <View style={styles.screen}>
     <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <IconButton label={page === 'settings' || page === 'add' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' || page === 'add' ? null : 'settings')} />
-      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'add' ? 'Add project' : page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
+      <IconButton label="Back to Projects" icon={ArrowLeft01Icon} size={44} onPress={() => setPage(null)} />
+      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>Add project</Text>
       {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
     </View>
-    {page === 'add' ? <ProjectSearch onOpen={addProject} /> : page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
+    <ProjectSearch onOpen={addProject} />
   </View>;
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 16, paddingBottom: 12 }}>
@@ -208,13 +220,15 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void reloadProjects().then(() => Promise.all([...expanded].map(load))).catch(e => setError(e.message)).finally(() => setRefreshing(false)); }} />}
       ListEmptyComponent={<Text style={[styles.muted, { padding: 20 }]}>{query.trim() ? 'No chats match your search.' : show !== 'all' ? 'No chats match this filter.' : 'Add a project from your computer to start a Chat.'}</Text>}
       renderItem={({ item }) => {
+        if (item.kind === 'section') return <Text style={[s.detail, { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 6, fontWeight: '500' }]}>{item.name}</Text>;
         if (item.kind === 'project') {
-          const menu = [{ items: [{ id: 'new', title: 'New Chat', systemImage: 'square.and.pencil' }, { id: 'copy', title: 'Copy path', systemImage: 'doc.on.doc' }] }, { items: [{ id: 'remove', title: 'Remove from list', systemImage: 'minus.circle', destructive: true }] }];
+          const linked = isLinkScopeKey(item.path);
+          const menu = [{ items: [{ id: 'new', title: 'New Chat', systemImage: 'square.and.pencil' }, { id: 'copy', title: linked ? 'Copy Link name' : 'Copy path', systemImage: 'doc.on.doc' }] }, ...(!linked ? [{ items: [{ id: 'remove', title: 'Remove from list', systemImage: 'minus.circle', destructive: true }] }] : [])];
           const choose = (action: string) => void projectAction(item.path, item.name, action);
           // A tap folds the group; a long press opens the Project's menu.
           return <View style={s.project}>
             <PullDown label={`${item.expanded ? 'Collapse' : 'Expand'} ${item.name}`} title={item.name} sections={menu} onSelect={choose} onPress={() => setExpanded(previous => { const next = new Set(previous); if (next.has(item.path)) next.delete(item.path); else next.add(item.path); return next; })} style={{ flex: 1 }}>
-              <View style={s.projectTitle}><ProjectIcon client={session.client} path={item.path} /><Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
+              <View style={s.projectTitle}>{item.members ? <ProjectIcons client={session.client} projects={item.members} /> : <ProjectIcon client={session.client} path={item.path} />}<Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: '500', color: colors.ink }]}>{item.name}</Text><Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} /></View>
             </PullDown>
             <IconButton label={`New Chat in ${item.name}`} icon={Add01Icon} size={44} disabled={busy} onPress={() => select(item.path)} />
             <PullDown label={`Actions for ${item.name}`} title={item.name} sections={menu} onSelect={choose}>
@@ -225,14 +239,14 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
         if (item.kind === 'notice') return <Pressable accessibilityRole={item.failed ? 'button' : 'text'} disabled={!item.failed} onPress={() => void load(item.path)} style={s.notice}><Text style={[s.detail, item.failed && { color: colors.red }]}>{item.message}</Text></Pressable>;
         const title = item.chat.title || item.chat.generatedTitle || 'New Chat';
         const selected = currentPath === item.path && activeChatId === item.chat.id;
-        const copy = item.path === currentPath && session.snapshot ? session.snapshot : copies[item.path];
-        const menu = chatMenu(item.chat, copy?.project.state.worktrees[item.chat.worktree_id]);
+        const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
+        const menu = chatMenu(item.chat, copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id]);
         // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
         return <View style={[s.chat, { backgroundColor: selected ? colors.hover : 'transparent' }]}>
           <PullDown label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={item.pending ? [] : menu} onSelect={action => { if (!item.pending) void act(item.path, item.chat, action); }} onPress={() => select(item.path, item.chat.id, item.pending)} style={{ flex: 1 }}>
             <View style={s.chatBody}>
               <ChatMarkIcon mark={item.mark} />
-              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}><Icon icon={GitBranchIcon} tone="ink3" size={12} /><Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
+              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>{!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}<Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
             </View>
           </PullDown>
           {!item.pending && <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)}>

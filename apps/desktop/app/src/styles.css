@@ -22,6 +22,19 @@
   opacity: 0;
   transition-duration: 90ms;
 }
+
+.link-project-dialog[open] {
+  animation: pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.link-project-dialog[open]::backdrop {
+  animation: fade-in 140ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .link-project-dialog[open],
+  .link-project-dialog[open]::backdrop {
+    animation: fade-in 60ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+}
 @starting-style {
   .command-palette[open]::backdrop { opacity: 0; }
 }
@@ -473,6 +486,11 @@ a {
   outline: none;
 }
 
+/* Project action rows keep the picker's neutral focus fill inside its scrolling panel. */
+[data-link-project-menu] [data-picker-row]:focus-visible {
+  outline: none;
+}
+
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
@@ -608,6 +626,10 @@ a:focus-visible .animated-underline::after {
 [data-slot="message"]:not([data-streaming]) {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
+}
+/* An opening conversation measures every message once; contain-intrinsic-size remembers it from then on. */
+[data-measuring] [data-slot="message"] {
+  content-visibility: visible;
 }
 
 /* The diff's sticky file headers sit at its top edge, so only the bottom fades. */

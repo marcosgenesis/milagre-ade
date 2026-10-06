@@ -5,7 +5,7 @@ import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -170,7 +170,81 @@ const MessageSection = memo(function MessageSection({
   );
 });
 
+// Background turns and draft edits must not rebuild a long, unchanged transcript.
+const MessageTranscript = memo(function MessageTranscript({
+  messages, pendingMessageId, isSending, streamingText, streamingSteps, asking, waitingStepIds,
+  onRecommendationSelect, onUpdateCli, updatingCli, cliStatus, onOpenLinkedChat, findOpen,
+}: Pick<ChatComposerProps, "messages" | "pendingMessageId" | "isSending" | "streamingText" | "streamingSteps" | "asking" | "waitingStepIds" | "onRecommendationSelect" | "onUpdateCli" | "updatingCli" | "cliStatus" | "onOpenLinkedChat" | "findOpen">) {
+  const chatId = messages[0]?.session_id ?? "new";
+  // The messages a chat opens with don't animate in; later ones do. A new chat's first message counts as later.
+  const openingMessages = useRef<{ chat: number | string; ids: Set<number> } | null>(null);
+  if (!openingMessages.current) openingMessages.current = { chat: chatId, ids: new Set(messages.map(message => message.id)) };
+  if (openingMessages.current.chat !== chatId) {
+    openingMessages.current = { chat: chatId, ids: openingMessages.current.chat === "new" ? new Set() : new Set(messages.map((message) => message.id)) };
+  }
+  // Keep the same recent-history page size as mobile. New messages extend the page without dropping its first row.
+  const [page, setPage] = useState(() => ({ chat: chatId, firstId: messages[Math.max(0, messages.length - 40)]?.id }));
+  let firstId = page.chat === chatId ? page.firstId : messages[Math.max(0, messages.length - 40)]?.id;
+  if (findOpen) firstId = messages[0]?.id;
+  if (page.chat !== chatId || page.firstId !== firstId) setPage({ chat: chatId, firstId });
+  const start = Math.max(0, messages.findIndex(message => message.id === firstId));
+  const earlierButton = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<{ element: HTMLElement; top: number; viewport: HTMLElement } | null>(null);
+  useLayoutEffect(() => {
+    const saved = anchor.current;
+    if (!saved) return;
+    anchor.current = null;
+    let frame = 0;
+    let remaining = 3;
+    const restore = () => {
+      if (!saved.element.isConnected) return;
+      saved.viewport.scrollTop += saved.element.getBoundingClientRect().top - saved.top;
+      // content-visibility replaces estimated heights as the newly exposed rows enter the viewport.
+      if (remaining-- > 0) frame = requestAnimationFrame(restore);
+    };
+    restore();
+    return () => cancelAnimationFrame(frame);
+  }, [page]);
+  function showEarlier() {
+    const column = earlierButton.current?.parentElement;
+    const element = column?.querySelector<HTMLElement>('[data-slot="message"]');
+    const viewport = column?.closest<HTMLElement>('[aria-label="Conversation"]');
+    if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
+    setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+  }
+  const streamingMessage: AppChatMessage | undefined = isSending && (streamingText || streamingSteps?.length)
+    ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
+    : undefined;
+  const transcript = messages.slice(start);
+  if (streamingMessage) {
+    const pendingIndex = transcript.findIndex(message => message.id === pendingMessageId);
+    transcript.splice(pendingIndex < 0 ? transcript.length : pendingIndex, 0, streamingMessage);
+  }
+
+  const openingIds = openingMessages.current.ids;
+  return <>
+    {start > 0 && <button ref={earlierButton} type="button" onClick={showEarlier} className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover">Show earlier messages ({start})</button>}
+    {transcript.map((message) => (
+      <MessageSection
+        key={message.clientMessageId ?? message.id}
+        message={message}
+        isUser={message.role === "user"}
+        onRecommendationSelect={onRecommendationSelect}
+        onUpdateCli={onUpdateCli}
+        updatingCli={updatingCli}
+        cliStatus={cliStatus}
+        streaming={message === streamingMessage}
+        asking={message === streamingMessage && asking}
+        waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
+        animate={!message.clientMessageId && !openingIds.has(message.id)}
+        onOpenChat={onOpenLinkedChat}
+      />
+          ))}
+  </>;
+});
+
 interface ChatComposerProps {
+  scopeKind?: 'project' | 'link';
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
   findSignal?: number;
@@ -354,6 +428,7 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
 const EMPTY_SUBAGENTS: Subagent[] = [];
 
 export function ChatComposer({
+  scopeKind,
   imageDraft,
   projectPath,
   messages,
@@ -433,11 +508,6 @@ export function ChatComposer({
   const noteKey = handoverBrief?.chatId;
   const showHandoverNote = noteKey !== undefined && lockedProvider !== undefined && !dismissedNotes.includes(noteKey);
   const workingModelName = runModelName ?? selectedModel.name;
-  // The messages a chat opens with don't animate in; later ones do. A new chat's first message counts as later.
-  const openingMessages = useRef<{ chat: number | string; ids: Set<number> }>({ chat: chatId, ids: new Set(messages.map((message) => message.id)) });
-  if (openingMessages.current.chat !== chatId) {
-    openingMessages.current = { chat: chatId, ids: openingMessages.current.chat === "new" ? new Set() : new Set(messages.map((message) => message.id)) };
-  }
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     if (isNewChat) setScrolled(false);
@@ -449,15 +519,6 @@ export function ChatComposer({
     event.preventDefault();
     void imageDraft.attachFiles(files);
     event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.focus();
-  }
-
-  const streamingMessage: AppChatMessage | undefined = isSending && (streamingText || streamingSteps?.length)
-    ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
-    : undefined;
-  const transcript = [...messages];
-  if (streamingMessage) {
-    const pendingIndex = transcript.findIndex(message => message.id === pendingMessageId);
-    transcript.splice(pendingIndex < 0 ? transcript.length : pendingIndex, 0, streamingMessage);
   }
 
   return (
@@ -490,22 +551,12 @@ export function ChatComposer({
       >
         <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
           {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
-          {transcript.map((message) => (
-            <MessageSection
-              key={message.clientMessageId ?? message.id}
-              message={message}
-              isUser={message.role === "user"}
-              onRecommendationSelect={onRecommendationSelect}
-              onUpdateCli={onUpdateCli}
-              updatingCli={updatingCli}
-              cliStatus={cliStatus}
-              streaming={message === streamingMessage}
-              asking={message === streamingMessage && asking}
-              waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
-              animate={!message.clientMessageId && !openingMessages.current.ids.has(message.id)}
-              onOpenChat={onOpenLinkedChat}
-            />
-          ))}
+          <MessageTranscript
+            findOpen={findOpen} messages={messages} pendingMessageId={pendingMessageId} isSending={isSending}
+            streamingText={streamingText} streamingSteps={streamingSteps} asking={asking} waitingStepIds={waitingStepIds}
+            onRecommendationSelect={onRecommendationSelect} onUpdateCli={onUpdateCli} updatingCli={updatingCli}
+            cliStatus={cliStatus} onOpenLinkedChat={onOpenLinkedChat}
+          />
 
           {isSending && (
             <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
@@ -554,7 +605,7 @@ export function ChatComposer({
       </div>
 
       <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
-        {isNewChat && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
+        {isNewChat && scopeKind !== 'link' && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
         {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
         {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
         {approval && <div className="mb-2 w-full">{approval}</div>}

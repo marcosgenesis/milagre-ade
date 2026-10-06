@@ -1,3 +1,4 @@
+const { isLinkScopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
 const { preparePrivateDirectory } = require('@milagre/core/private-files');
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require('./local-auth.cjs');
 const net = require('node:net');
@@ -138,8 +139,9 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
   let listening = false;
   const sender = createExpoPush({ ...pushOptions, onError, onInvalid: token => push.invalidate(token) });
   const push = createMobilePush({ dataDir, send: sender.send, onError, context: async chatId => {
-    const project = await runtime.invoke('project:snapshot', [projectOfKey(chatId)]);
-    return attentionContext(project.state, project.name || require('node:path').basename(project.path), sessionIdFromKey(chatId));
+    const owner = projectOfKey(chatId);
+    const project = await runtime.invoke(isLinkScopeKey(owner) ? 'link:snapshot' : 'project:snapshot', [isLinkScopeKey(owner) ? scopeFromKey(owner).linkId : owner]);
+    return attentionContext(project.state, project.link?.name || project.name || require('node:path').basename(project.path), sessionIdFromKey(chatId));
   } });
   const runtime = createRuntime({ ...runtimeOptions, dataDir, version,
     isChatFocused: chatId => [...views.values()].some(view => view.focused && view.chatId === chatId),
@@ -293,6 +295,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         else result = await runtime.invoke(request.method, request.args, context);
         // An open may finish after its caller disconnects. Dispose that late session as well.
         if (socket.destroyed && request.method.startsWith('simulator:')) await runtime.disconnect?.(context.clientId);
+        if (request.method === 'link:open' && result?.link) view.linkId = result.link.id;
         if (['project:open', 'project:current', 'project:switch'].includes(request.method) && result?.path) view.projectPath = result.path;
         await reply(result ?? null);
         if (request.method === 'daemon:stop') void close().catch(onError);

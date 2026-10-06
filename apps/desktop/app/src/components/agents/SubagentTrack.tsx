@@ -56,13 +56,13 @@ export function SubagentTrack({ agents, provider = "codex", onOpenCanvas, onArch
 
   const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: child ? 480 : 420, height: child ? 520 : 360 });
 
-  if (!agents.length) return null;
+  if (!agents.length || (!visible.length && !opened)) return null;
   const actionClass = "flex size-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline-2 disabled:opacity-40";
   return <div className="flex" data-slot="subagent-track">
-    <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface h-6 px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2">
+    {visible.length > 0 && <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={opened} aria-controls={opened ? panelId : undefined} onClick={() => { setSelected(null); setArchived(false); setOpened(!opened); }} className="flex items-center gap-2 rounded-full border border-line bg-surface h-6 px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2">
       {visible.some(subagentActive) && <SpinnerRing size={12} />}
       Subagents <span className="tabular-nums">{visible.length}</span>
-    </button>
+    </button>}
     {opened && createPortal(<div ref={panel} id={panelId} role="dialog" aria-label="Subagents" aria-modal="false" data-slot="subagent-popover" style={bounds} className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface p-1 shadow-raised text-ink" onKeyDown={event => {
       if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
       const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-subagent-open]")];

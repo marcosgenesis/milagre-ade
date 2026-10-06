@@ -70,6 +70,8 @@ window.interrupts = [];
 window.agentListeners = new Set();
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
+  getRuns: async () => ({ seq: 0, runs: {} }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),

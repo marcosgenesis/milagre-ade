@@ -1,3 +1,4 @@
+const { isLinkScopeKey, scopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
 const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
 const { projectOfKey } = require('@milagre/shared/agent-runs');
 
@@ -17,6 +18,7 @@ const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it wa
 // The Project an event belongs to, when it names one.
 function projectOfEvent({ channel, payload }) {
   if (!payload || typeof payload !== 'object') return null;
+  if (channel === 'link:state') return typeof payload.linkId === 'string' ? scopeKey({ kind: 'link', linkId: payload.linkId }) : null;
   if (channel === 'project:state') return typeof payload.path === 'string' ? payload.path : null;
   if (typeof payload.chatId === 'string') return projectOfKey(payload.chatId);
   return typeof payload.projectPath === 'string' ? payload.projectPath : null;
@@ -82,16 +84,16 @@ async function connectDesktopRuntime(options) {
       const batch = hold.queue.splice(0);
       let state;
       let read = true;
-      try { state = /** @type {{ state: unknown }} */ (await hold.connection.call('project:snapshot', [project])).state; }
+      try { state = /** @type {{ state: unknown }} */ (await hold.connection.call(isLinkScopeKey(project) ? 'link:snapshot' : 'project:snapshot', [isLinkScopeKey(project) ? project.slice('milagre-link:'.length) : project])).state; }
       catch { read = false; }
       if (!live()) return;
-      const last = batch.findLastIndex(item => item.channel === 'project:state');
+      const last = batch.findLastIndex(item => ['project:state', 'link:state'].includes(item.channel));
       batch.forEach((item, index) => {
         if (!carriesState(item.payload)) { forward(item); return; }
         const { stateTooLarge, state: _own, ...rest } = item.payload;
         // A failed read keeps the window's state; the event still moves the turn on screen.
-        if (!read) { if (!stateTooLarge) forward(item); else if (item.channel !== 'project:state') forward({ ...item, payload: rest }); return; }
-        if (item.channel === 'project:state' && index !== last) return;
+        if (!read) { if (!stateTooLarge) forward(item); else if (!['project:state', 'link:state'].includes(item.channel)) forward({ ...item, payload: rest }); return; }
+        if (['project:state', 'link:state'].includes(item.channel) && index !== last) return;
         forward({ ...item, payload: { ...rest, state } });
       });
     }
@@ -153,7 +155,7 @@ async function connectDesktopRuntime(options) {
       recovering = true; capturingSnapshot = false; buffered = []; bufferedBytes = 0;
       attach(connection);
       for (const projectPath of projects) {
-        try { await connection.call('project:open', [projectPath]); }
+        try { await connection.call(isLinkScopeKey(projectPath) ? 'link:open' : 'project:open', [isLinkScopeKey(projectPath) ? projectPath.slice('milagre-link:'.length) : projectPath]); }
         catch (error) {
           // A Project removed while the host was offline must not prevent the
           // remaining Projects, or the folder picker, from becoming usable.
@@ -162,7 +164,7 @@ async function connectDesktopRuntime(options) {
           if (currentProject === projectPath) { currentProject = null; currentChat = null; }
         }
       }
-      if (currentProject) await connection.call('project:open', [currentProject]);
+      if (currentProject) await connection.call(isLinkScopeKey(currentProject) ? 'link:open' : 'project:open', [isLinkScopeKey(currentProject) ? currentProject.slice('milagre-link:'.length) : currentProject]);
       await connection.call('chat:set-open', [currentChat]);
       await connection.call('daemon:focus', [{ focused }]);
       capturingSnapshot = true;
@@ -213,10 +215,11 @@ async function connectDesktopRuntime(options) {
 
   async function invoke(method, args = []) {
     if (closed || !client || recovering) throw new Error('Milagre host is disconnected. Your command was not sent.');
-    const result = await client.call(method, args);
+    const result = /** @type {any} */ (await client.call(method, args));
     if (['project:open', 'project:current', 'project:switch'].includes(method) && result && typeof result === 'object' && 'path' in result && typeof result.path === 'string') {
       currentProject = result.path; projects.add(result.path);
     }
+    if (method === 'link:open' && result?.link?.id) { currentProject = scopeKey({ kind: 'link', linkId: result.link.id }); projects.add(currentProject); }
     if (method === 'chat:set-open') currentChat = args[0] ?? null;
     return result;
   }

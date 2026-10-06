@@ -66,6 +66,11 @@ const bridge = {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   listRecentProjects: () => ipcRenderer.invoke("project:recent"),
+  listNamedLinks: () => ipcRenderer.invoke('link:list'),
+  createNamedLink: request => ipcRenderer.invoke('link:create', request),
+  openNamedLink: id => ipcRenderer.invoke('link:open', id),
+  sendLinkMessage: request => ipcRenderer.invoke('link:send', request),
+  onLinkState: callback => { const listener = (_event, update) => callback(update); ipcRenderer.on('link:state', listener); return () => ipcRenderer.removeListener('link:state', listener); },
   listProjects: () => ipcRenderer.invoke("project:registry"),
   setProjectPosition: (id, position) => ipcRenderer.invoke("project:position", id, position),
   getCanvas: () => ipcRenderer.invoke("canvas:snapshot"),
@@ -139,6 +144,9 @@ const bridge = {
     ipcRenderer.on("phone:status", listener);
     return () => ipcRenderer.removeListener("phone:status", listener);
   },
+  listAccounts: (refresh = false) => ipcRenderer.invoke("accounts:list", refresh),
+  accountAction: (action, provider, value) => ipcRenderer.invoke(`accounts:${action}`, provider, value),
+  onAccountsChanged: (callback) => { const listener = () => callback(); ipcRenderer.on("accounts:changed", listener); return () => ipcRenderer.removeListener("accounts:changed", listener); },
   readUsage: () => ipcRenderer.invoke("usage:read"),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
   getCachedUsage: () => ipcRenderer.invoke("usage:cached"),

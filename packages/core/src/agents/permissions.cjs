@@ -143,6 +143,27 @@ function insideRoot(root, files) {
   });
 }
 
+// Resolve existing ancestors as well as new files, so an alias cannot escape an owned root.
+function insideWorkspace(roots, files, cwd = roots[0]) {
+  const { realpathSync } = require('node:fs');
+  const resolve = value => {
+    try { return realpathSync(value); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(value);
+      if (parent === value) throw error;
+      return path.join(resolve(parent), path.basename(value));
+    }
+  };
+  try {
+    const canonical = roots.map(root => realpathSync(root));
+    return files.length > 0 && files.every(file => {
+      const resolved = resolve(path.resolve(cwd, file));
+      return canonical.some(root => { const relative = path.relative(root, resolved); return relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); });
+    });
+  } catch { return false; }
+}
+
 // The approval requests a session is waiting on. Each is answered exactly once: by the user, or as
 // cancelled when its turn stops. `forget` drops one the agent withdrew without replying to it.
 // The mode follows the user's switch mid-turn. Full answers every request without a card. Switching
@@ -207,6 +228,7 @@ module.exports = {
   capText,
   claudeEditDiff,
   insideRoot,
+  insideWorkspace,
   claudeRequest,
   claudeResult,
   codexChangesDiff,

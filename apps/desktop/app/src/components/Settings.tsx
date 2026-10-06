@@ -1,9 +1,10 @@
+import { AccountsSettings } from "./AccountsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
@@ -27,10 +28,11 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "accounts" | "appearance" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
+  { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
@@ -71,7 +73,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 
 function Row({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-6 px-4 py-3">
+    <div className="flex min-h-12 items-center justify-between gap-6 px-4 py-2">
       <div className="grid min-w-0 gap-0.5">
         <span className="text-[13.5px] font-medium text-ink">{label}</span>
         {description && <span className="text-[12px] text-ink-3">{description}</span>}
@@ -618,6 +620,7 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
+        {section === "accounts" && <AccountsSettings />}
         {section === "appearance" && <AppearanceSettings />}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}

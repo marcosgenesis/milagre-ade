@@ -3,6 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { resolveProject } = require("./project-identity.cjs");
 const { createLink, pruneLinks } = require("./project-links.cjs");
+const { createProjectGroup, validProjectGroup } = require('./project-groups.cjs');
 
 const DEFAULT_ROOTS = [path.join(os.homedir(), "Developer"), path.join(os.homedir(), ".milagre", "worktrees")];
 const SKIP = new Set([".git", "node_modules", ".next", ".cache"]);
@@ -58,7 +59,7 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
       seen.add(entry.id);
       return true;
     });
-    return { scanned: data.scanned === true, projects, links: Array.isArray(data.links) ? data.links : [], worktreePositions: data.worktreePositions && typeof data.worktreePositions === "object" ? data.worktreePositions : {} };
+    return { scanned: data.scanned === true, projects, links: Array.isArray(data.links) ? data.links : [], projectGroups: Array.isArray(data.projectGroups) ? data.projectGroups.filter(validProjectGroup) : [], worktreePositions: data.worktreePositions && typeof data.worktreePositions === "object" ? data.worktreePositions : {} };
   }
 
   async function write(data) {
@@ -88,6 +89,17 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
   }
 
   return {
+    listProjectGroups: async () => { await queue.catch(() => {}); return (await read()).projectGroups ?? []; },
+    createProjectGroup: async (request) => {
+      let created;
+      await update(async data => {
+        data.projectGroups ??= [];
+        created = createProjectGroup(data.projectGroups, data.projects, request, now);
+        data.projectGroups = [...data.projectGroups, created];
+        return data;
+      });
+      return created;
+    },
     // Called when the canvas first needs the registry. The marker is persisted even if the scan finds nothing.
     list: () => update(async (data) => {
       if (data.scanned) return data;
@@ -119,7 +131,7 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
     snapshot: async () => {
       await queue;
       const data = await read();
-      return { projects: data.projects, links: data.links, worktreePositions: data.worktreePositions };
+      return { projects: data.projects, links: data.links, projectGroups: data.projectGroups ?? [], worktreePositions: data.worktreePositions };
     },
     setWorktreePosition: (id, worktreePath, position) => update(async (data) => {
       if (!data.projects.some(project => project.id === id) || typeof worktreePath !== "string" || !path.isAbsolute(worktreePath)

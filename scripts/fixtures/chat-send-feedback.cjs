@@ -1,0 +1,71 @@
+// Shared IPC fixture for send regressions and renderer benchmarks.
+module.exports = `
+import React from "react";
+import { createRoot } from "react-dom/client";
+import "/src/styles.css";
+const state = { next_id: 4, projects: { 1: { id: 1, name: "shop" } },
+  worktrees: { 1: { id: 1, name: "main", path: "/fixture", project_id: 1 } },
+  sessions: { 2: { id: 2, worktree_id: 1, agent_name: "Previous chat", provider: "claude", status: "Idle" } },
+  messages: [{ id: 3, session_id: 2, role: "user", body: "Previous chat", context: null }], tasks: {} };
+if (new URLSearchParams(location.search).has("long")) {
+  state.messages = Array.from({ length: 300 }, (_, index) => ({
+    id: index + 3, session_id: 2, role: index % 2 ? "assistant" : "user", context: null,
+    body: index % 2 ? "Completed the requested change.\\n\\n" + "The component keeps existing messages visible while the request is pending.\\n\\n".repeat(8) : "Previous chat " + index,
+    ...(index % 2 ? { steps: Array.from({ length: 8 }, (_, step) => ({
+      id: index + "-" + step, kind: "read", title: "Read source and check implementation", status: "done", detail: "Read source file.\\n".repeat(20),
+    })) } : {}),
+  }));
+  state.next_id = 303;
+}
+window.renderedMessageIds = [];
+window.transcriptRenders = 0;
+window.railItemsRendered = 0;
+const listeners = new Set();
+window.emitAgent = (sessionId, event) => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event }));
+window.calls = { created: 0, sent: [] };
+window.milagre = new Proxy({
+  getRuntimeConnection: async () => ({ connected: true }),
+  getAgentPorts: async () => ({}),
+  getRuns: async () => ({ seq: 0, runs: {} }),
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
+  getCurrentProject: async () => ({ path: "/fixture", name: "shop", state: structuredClone(state) }),
+  listBranches: async () => ["main"],
+  getPathForFile: file => "/fixture/" + file.name,
+  createWorktree: () => {
+    window.calls.created++;
+    return new Promise((resolve, reject) => {
+      window.failCreate = () => reject(new Error("Setup failed"));
+      window.finishCreate = () => {
+        const id = state.next_id;
+        state.worktrees[id] = { id, name: "milagre/chat-" + id, path: "/worktrees/shop/chat-" + id, project_id: 1, base: "main" };
+        state.sessions[id + 1] = { id: id + 1, worktree_id: id, agent_name: "milagre/chat-" + id, status: "Created" };
+        state.next_id = id + 2;
+        resolve({ project: { path: "/fixture", name: "shop", state: structuredClone(state) }, worktreeId: id });
+      };
+    });
+  },
+  sendMessage: request => {
+    window.calls.sent.push(request);
+    return new Promise((resolve, reject) => {
+      window.failSend = () => reject(new Error("Disk full"));
+      window.saveSend = () => {
+        const sessionId = request.sessionId ?? state.next_id++;
+        state.sessions[sessionId] ??= { id: sessionId, worktree_id: request.worktreeId, agent_name: "Local chat", status: "Created" };
+        state.sessions[sessionId].provider = request.provider;
+        state.messages.push({ id: state.next_id++, session_id: sessionId, body: request.body, images: request.images, files: request.files, clientMessageId: request.clientMessageId, context: null, role: "user", model: request.model });
+        const publish = () => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: structuredClone(state) }));
+        if (window.holdState) { window.holdState = false; window.releaseState = publish; } else publish();
+        window.ackSend = () => resolve({ sessionId });
+      };
+    });
+  },
+  onAgentEvent: callback => { listeners.add(callback); return () => listeners.delete(callback); },
+  listEditors: async () => [],
+  getCachedUsage: async () => ({ providers: [] }),
+  readUsage: async () => ({ providers: [] }),
+  getUpdateState: async () => ({ status: "idle" }),
+}, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
+localStorage.setItem("milagre-settings", JSON.stringify({ defaultModelId: "claude-opus-5-5" }));
+const { default: App } = await import("/src/App");
+createRoot(document.getElementById("root")).render(<App />);
+`;

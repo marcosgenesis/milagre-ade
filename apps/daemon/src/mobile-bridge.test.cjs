@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const http = require('node:http');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -44,6 +44,83 @@ test('mobile bridge forwards commands to the existing owner and reads cached sna
   assert.deepEqual(snapshot.runs.runs, {});
   await bridge.close();
   assert.equal((await client.call('daemon:status')).version, 'test');
+});
+
+test('a phone opens a named Link and sends one shared Chat with two owned Worktrees', async t => {
+  const { dataDir, project, rpc, request, bridge, token } = await fixture(t, { runtimeOptions: demoRuntimeOptions() });
+  const second = path.join(path.dirname(project), 'second');
+  await fs.mkdir(second);
+  execFileSync('git', ['init', '-b', 'main', second], { stdio: 'ignore' });
+  for (const folder of [project, second]) {
+    await fs.writeFile(path.join(folder, 'status.txt'), 'Original\n');
+    execFileSync('git', ['-C', folder, 'add', '.']);
+    execFileSync('git', ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Fixture']);
+    assert.equal((await rpc('project:open', [folder])).status, 200);
+  }
+  const registryResponse = await rpc('project:registry'); assert.equal(registryResponse.status, 200);
+  const registered = (await registryResponse.json()).result;
+  const made = await rpc('link:create', [{ name: 'Together', projectIds: registered.map(item => item.id) }]);
+  assert.equal(made.status, 200);
+  const link = (await made.json()).result;
+  const owner = `milagre-link:${link.id}`;
+  assert.equal((await rpc('link:open', [link.id])).status, 200);
+  const snapshotRoute = '/snapshot?projectPath=' + encodeURIComponent(owner);
+  const initial = (await (await request(snapshotRoute)).json()).result;
+  assert.equal(initial.link.link.id, link.id);
+  assert.equal(initial.link.projects.length, 2);
+  assert.deepEqual(initial.link.state.sessions, {});
+  const uploaded = await request('/attachments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectPath: owner, name: 'notes.txt', base64: Buffer.from('Shared draft attachment').toString('base64') }) });
+  assert.equal(uploaded.status, 200, 'A Link draft can attach files before allocating Worktrees');
+  const socket = new WebSocket(bridge.url.replace('http:', 'ws:') + '/live?projectPath=' + encodeURIComponent(owner), { headers: { authorization: `Bearer ${token}` } });
+  t.after(() => socket.terminate());
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  const signals = []; socket.on('message', raw => signals.push(JSON.parse(String(raw)).type));
+  const sent = { linkId: link.id, sessionId: null, operationId: randomUUID(), body: 'hello', provider: 'codex', model: 'test', permissionMode: 'auto' };
+  const answer = await rpc('link:send', [sent]); assert.equal(answer.status, 200);
+  const id = (await answer.json()).result.sessionId;
+  assert.equal((await (await rpc('link:send', [sent])).json()).result.sessionId, id, 'retry reuses the shared Chat');
+  const client = await connect({ dataDir }); t.after(() => client.close());
+  let saved;
+  for (let i = 0; i < 80; i++) { saved = (await (await request(snapshotRoute)).json()).result; if (saved.link.state.messages.some(message => message.role === 'assistant')) break; await delay(50); }
+  assert.equal(Object.keys(saved.link.state.sessions).length, 1);
+  assert.equal(saved.link.state.sessions[id].worktrees.length, 2);
+  const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+  const media = file => request(`/media?projectPath=${encodeURIComponent(owner)}&path=${encodeURIComponent(file)}`);
+  for (const member of saved.link.state.sessions[id].worktrees) {
+    const image = path.join(member.worktreePath, 'screenshot.png'); await fs.writeFile(image, png);
+    assert.equal((await media(image)).status, 200, 'Images in either owned Worktree are available to the shared Chat');
+  }
+  const outside = path.join(path.dirname(project), 'unrelated.png'); await fs.writeFile(outside, png);
+  const alias = path.join(saved.link.state.sessions[id].worktrees[0].worktreePath, 'outside.png'); await fs.symlink(outside, alias);
+  assert.equal((await media(outside)).status, 403);
+  assert.equal((await media(alias)).status, 403, 'An owned Worktree symlink cannot share an unrelated file');
+  assert.equal(saved.link.state.messages.filter(message => message.role === 'user').length, 1);
+  assert.ok(saved.link.state.messages.some(message => message.role === 'assistant'));
+  for (let i = 0; i < 40 && !signals.includes('project'); i++) await delay(50);
+  assert.ok(signals.includes('project'), 'Link state wakes the phone live socket');
+  const message = saved.link.state.messages.at(-1);
+  assert.equal((await (await request('/message?projectPath=' + encodeURIComponent(owner) + '&id=' + message.id)).json()).result.id, message.id);
+  assert.equal((await request('/runs?projectPath=' + encodeURIComponent(owner))).status, 200);
+  assert.equal((await rpc('chat:patch', [owner, id, { title: 'From phone' }])).status, 200);
+  assert.equal((await (await request(snapshotRoute)).json()).result.link.state.sessions[id].title, 'From phone');
+});
+
+test('mobile archives finished subagents through the shared owner and restores their output', async t => {
+  const { project, dataDir, rpc, request } = await fixture(t);
+  const subagents = ['completed', 'failed', 'cancelled', 'unknown'].map(status => ({ id: status, title: status, status, startedAt: 1, updatedAt: 2, transcript: [{ id: 'message', kind: 'message', text: 'Preserved output' }] }));
+  await fs.mkdir(path.join(project, '.milagre'));
+  await fs.writeFile(path.join(project, '.milagre/coordination.json'), JSON.stringify({ next_id: 3, projects: { 1: { id: 1, name: 'project' } }, worktrees: { 1: { id: 1, project_id: 1, path: project, name: 'main' } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'main', status: 'Created', subagents } }, messages: [], tasks: {} }));
+  await rpc('project:open', [project]);
+  assert.equal((await rpc('chat:archive-finished-subagents', [project, 2])).status, 200);
+  const desktop = await connect({ dataDir });
+  t.after(() => desktop.close());
+  const state = (await desktop.call('project:open', [project])).state;
+  assert.deepEqual(state.sessions[2].subagents.filter(agent => agent.archived).map(agent => agent.id), ['completed', 'failed', 'cancelled']);
+  assert.equal((await rpc('chat:archive-subagent', [project, 2, 'completed', false])).status, 200);
+  const phone = (await (await request('/snapshot?projectPath=' + encodeURIComponent(project))).json()).result;
+  const restored = phone.project.state.sessions[2].subagents.find(agent => agent.id === 'completed');
+  assert.equal(Boolean(restored.archived), false);
+  assert.equal(restored.transcript[0].text, 'Preserved output');
 });
 
 test('the phone can load the real skill catalog for its project', async t => {
@@ -236,8 +313,9 @@ test('two removals of one worktree take turns, and the second reports it already
   const made = await f.create('Twice');
   const [one, two] = await Promise.all([1, 2].map(() => f.remove(made.worktree.path, { chatId: made.chatId, seen: made.seen })));
   assert.deepEqual([one.status, two.status], [200, 200], JSON.stringify([one.body, two.body]));
-  assert.equal(one.body.result.removed, true);
-  assert.equal(two.body.result.alreadyRemoved, true);
+  // Concurrent HTTP requests can reach the daemon in either order. Exactly one performs the removal.
+  assert.equal([one, two].filter(reply => reply.body.result.removed === true).length, 1);
+  assert.equal([one, two].filter(reply => reply.body.result.alreadyRemoved === true).length, 1);
   await assert.rejects(fs.stat(made.worktree.path), { code: 'ENOENT' });
 });
 
@@ -647,4 +725,54 @@ test('push registration is authenticated, validated and removable through mobile
   assert.equal((await rpc('push:unregister', [{ deviceId: device.deviceId }])).status, 200);
   assert.equal((await rpc('push:focus', [{ deviceId: device.deviceId, chatId: null }])).status, 409);
   assert.equal((await fetch(bridge.url + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, method: 'push:register', args: [device] }) })).status, 401);
+});
+
+test('drawer projection preserves listing metadata and pending-send identity without transcript bodies', () => {
+  const { forChatList } = require('./mobile-bridge.cjs');
+  const messages = Array.from({ length: 1000 }, (_, id) => ({ id, session_id: 2, role: id % 2 ? 'assistant' : 'user', context: null, body: `Message ${id}\n` + 'Long transcript '.repeat(500), ...(id === 998 ? { clientMessageId: 'pending-input' } : id === 500 ? { clientMessageId: 'earlier-pending-input' } : {}), ...(id === 999 ? { outcome: 'failed' } : {}), steps: [{ id: 'step', detail: 'Output'.repeat(100) }] }));
+  const project = { path: '/p', name: 'p', state: { next_id: 1000, projects: {}, worktrees: { 1: { id: 1, name: 'main', path: '/p' } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: 'Fallback', status: 'Idle', unread: true, subagents: [{ transcript: ['large'] }], handoverDraft: 'A long brief' } }, messages, tasks: {} } };
+  const runs = { seq: 3, runs: { '/p#2': { text: 'Streaming'.repeat(1000), steps: [{ detail: 'large' }], approvals: [{ requestId: 'approve' }], questions: [], model: 'model', startedAt: 1, answered: {} } } };
+  const copy = forChatList(project, runs);
+  assert.equal(copy.previewOnly, true);
+  assert.equal(copy.project.state.sessions[2].generatedTitle, undefined, 'compact snapshots preserve the full snapshot title fields');
+  assert.equal(copy.project.state.sessions[2].unread, true);
+  assert.equal(copy.project.state.sessions[2].handoverDraft, '');
+  assert.equal(copy.project.state.sessions[2].subagents, undefined);
+  assert.deepEqual(copy.project.state.messages.map(message => message.id), [0, 500, 998, 999]);
+  assert.equal(copy.project.state.messages[1].clientMessageId, 'earlier-pending-input', 'another input arriving later must not hide an outstanding acknowledgement');
+  assert.equal(copy.project.state.messages[2].clientMessageId, 'pending-input');
+  assert.equal(copy.project.state.messages.at(-1).outcome, 'failed');
+  assert.ok(copy.project.state.messages.every(message => !message.body && !message.steps));
+  assert.equal(copy.runs.runs['/p#2'].approvals.length, 1);
+  assert.equal(copy.runs.runs['/p#2'].text, '');
+  assert.deepEqual(copy.runs.runs['/p#2'].steps, []);
+  assert.equal(copy.runs.seq, 3);
+  assert.ok(JSON.stringify(copy).length < 2000);
+  assert.equal(project.state.messages.length, 1000, 'the projection does not mutate the transcript');
+  assert.equal(project.state.sessions[2].handoverDraft, 'A long brief');
+});
+
+test('drawer projection does not turn an empty input or handover into an agent-name title', () => {
+  const { forChatList } = require('./mobile-bridge.cjs');
+  for (const extra of [{}, { handoverDraft: 'Brief' }, { generatedTitle: '   ' }]) {
+    const session = { id: 2, worktree_id: 1, agent_name: 'main', ...extra };
+    const project = { state: { sessions: { 2: session }, messages: [{ id: 3, session_id: 2, role: 'user', body: '' }], tasks: {} } };
+    const copy = forChatList(project, { runs: {} });
+    assert.equal(copy.project.state.sessions[2].generatedTitle?.trim() || '', '');
+  }
+});
+
+test('drawer snapshots are marked and cached separately from full snapshots', async t => {
+  const { project, request, rpc } = await fixture(t);
+  await rpc('project:open', [project]);
+  const route = '/snapshot?projectPath=' + encodeURIComponent(project);
+  const original = (await (await request(route)).json()).result;
+  const chat = Object.values(original.project.state.sessions)[0];
+  await rpc('chat:patch', [project, chat.id, { title: 'Drawer chat' }]);
+  const response = await request(route + '&view=chats');
+  const preview = (await response.json()).result;
+  assert.equal(preview.previewOnly, true);
+  assert.equal(preview.project.state.sessions[chat.id].title, 'Drawer chat');
+  assert.equal((await (await request(route)).json()).result.previewOnly, undefined);
+  assert.equal((await request(route + '&view=chats', { headers: { 'if-none-match': response.headers.get('etag') } })).status, 304);
 });

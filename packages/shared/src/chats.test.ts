@@ -65,3 +65,18 @@ test('follow-up input stays pending until its own message arrives and keeps the 
   assert.equal(pendingChatSessionId(saved, pending), 1);
   assert.equal(withPendingChat(saved, pending), saved);
 });
+
+test('legacy acknowledgement requires an accepted target and a new untagged matching input', async () => {
+  const { createPendingChat, pendingChatSessionId } = await import('./chats.mjs');
+  const state: CoordinatorState = { next_id: 4, projects: {}, worktrees: {}, sessions: { 1: session }, messages: [], tasks: {} };
+  const pending = createPendingChat({ state, worktreeId: 1, sessionId: 1, body: 'Follow up', model: 'm', provider: 'codex' });
+  const saved = { id: 4, session_id: 1, body: 'Follow up', role: 'user' as const, context: null };
+  const acknowledged = { ...pending, acceptedSessionId: 1 };
+  const resolve = (message: typeof saved & { clientMessageId?: string }) => pendingChatSessionId({ ...state, messages: [message] }, acknowledged);
+  assert.equal(pendingChatSessionId({ ...state, messages: [saved] }, pending), null);
+  assert.equal(resolve(saved), 1);
+  assert.equal(resolve({ ...saved, id: 3 }), null);
+  assert.equal(resolve({ ...saved, session_id: 2 }), null);
+  assert.equal(resolve({ ...saved, body: 'Other input' }), null);
+  assert.equal(resolve({ ...saved, clientMessageId: 'another-client' }), null);
+});

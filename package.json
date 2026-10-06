@@ -32,7 +32,7 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "package:repositories": "node scripts/generate-linux-repository.cjs",
     "lint": "oxlint",
-    "prepare": "lefthook install"
+    "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\""
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",

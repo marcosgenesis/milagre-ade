@@ -44,3 +44,13 @@ test('unknown flags are rejected', () => {
 test('--changed is rejected until it is implemented', () => {
   assert.throws(() => parseArgs(['--changed']), /--changed is not implemented yet; use --only or --workspace/)
 })
+
+test('a platform skip prints the manifest reason when it has one', () => {
+  const electron = ['scripts/test-sidebar-resize.cjs', 'scripts/test-windows-cli.cjs']
+  const { skipped } = selectTests({ unit: [], electron, filters: { ...parseArgs(['--electron']), platform: 'linux', commandExists: () => true } })
+  assert.deepEqual(skipped, [
+    { file: 'scripts/test-sidebar-resize.cjs', reason: `needs darwin: ${MANIFEST['test-sidebar-resize.cjs'].reason}` },
+    { file: 'scripts/test-windows-cli.cjs', reason: 'needs win32' },
+  ])
+  assert.match(MANIFEST['test-sidebar-resize.cjs'].reason, /#\d+/)
+})

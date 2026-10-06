@@ -81,7 +81,7 @@ test('Electron checks run on Ubuntu under xvfb with screenshots kept as an artif
   const job = ci.jobs['desktop-checks']
   assert.equal(job['runs-on'], 'ubuntu-latest')
   const runs = job.steps.map(step => step.run).filter(Boolean)
-  assert.ok(runs.includes('xvfb-run -a npm test -- --electron'))
+  assert.ok(runs.includes('xvfb-run -a -s "-screen 0 1600x1200x24" npm test -- --electron'))
   const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact'))
   assert.equal(upload.if, 'always()')
   assert.equal(upload.with.path, '${{ runner.temp }}/electron-screenshots')

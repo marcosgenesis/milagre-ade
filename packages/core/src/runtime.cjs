@@ -26,7 +26,7 @@ const { SessionManager } = require("./agents/session-manager.cjs");
 const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
-const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
+const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
 const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
@@ -273,7 +273,9 @@ function createRuntime(options) {
     if ((await recentProjects().list()).some(item => item.path === folder)) return;
     throw new Error("Open this project in Milagre first.");
   }
-  commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
+  // A null Project lists the user's skills only.
+  commands.handle("skills:list", async (_event, projectPath) => { if (projectPath !== null) await knownFolder(projectPath); return discoverSkills(projectPath); });
+  commands.handle("skills:read", async (_event, projectPath, file) => { if (projectPath !== null) await knownFolder(projectPath); return readDiscoveredSkill(projectPath, file); });
   commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
   commands.handle("project:image", async (_event, projectPath) => {

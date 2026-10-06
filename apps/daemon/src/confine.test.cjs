@@ -63,6 +63,7 @@ const callsAt = (target, demo) => [
   ['project:open', [target]],
   ['project:branches', [target]],
   ['skills:list', [target]],
+  ['skills:read', [target, path.join(target, 'SKILL.md')]],
   ['chat:send', [{ projectPath: target, sessionId: 1, body: 'hi', provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
   ['chat:send', [{ projectPath: demo, cwd: target, sessionId: 1, body: 'hi', provider: 'codex', model: 'demo', permissionMode: 'ask' }]],
   ['chat:send', [{ projectPath: demo, sessionId: 1, body: 'hi', files: [path.join(target, 'secret.png')], provider: 'codex', model: 'demo', permissionMode: 'ask' }]],

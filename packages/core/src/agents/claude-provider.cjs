@@ -70,8 +70,8 @@ function linkedOptions(tools, sdk) {
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class ClaudeSession {
-  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
-    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
+  constructor({ cwd, resumeId, command, env, emit, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
+    Object.assign(this, { cwd, resumeId, command, env, emit, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
     this.state = { sessionId: resumeId ?? null, turnId: null, hasText: false };
     this.query = null;
     this.inbox = null;
@@ -229,6 +229,7 @@ class ClaudeSession {
     this.query = sdk.query({
       prompt: this.inbox,
       options: {
+        ...(this.env ? { env: this.env } : {}),
         cwd: this.cwd,
         model,
         permissionMode: mode,

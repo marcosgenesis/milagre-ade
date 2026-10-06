@@ -63,6 +63,25 @@ function harness({ idleMs = 60_000 } = {}) {
 }
 const request = (chatId, extra = {}) => ({ chatId, provider: "codex", model: "gpt-6-sol", cwd: "/repo", permissionMode: "auto", prompt: "hi", images: [], command: "/bin/codex", ...extra });
 
+test("account switches keep active replies, then resume their history with the new account", async t => {
+  const { manager, created } = harness();
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1", { accountId: "personal", env: { CODEX_HOME: "/personal" } }));
+  created[0].nativeId = "thread-saved";
+  created[0].turnActive = true;
+  const next = request("1", { accountId: "work", env: { CODEX_HOME: "/work" } });
+  await manager.startTurn(next);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].closed, false);
+  assert.equal(created[0].options.env.CODEX_HOME, "/personal");
+  created[0].turnActive = false;
+  await manager.startTurn(next);
+  assert.equal(created.length, 2);
+  assert.equal(created[0].closed, true);
+  assert.equal(created[1].options.resumeId, "thread-saved");
+  assert.equal(created[1].options.env.CODEX_HOME, "/work");
+});
+
 test("creates one session per chat and reuses it", async (t) => {
   const { manager, created } = harness();
   t.after(() => manager.closeAll());

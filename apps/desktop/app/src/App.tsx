@@ -141,7 +141,7 @@ function App() {
     void window.milagre.getCliStatus().then((next) => setCliStatus((previous) => keepIfSame(previous, next))).catch(() => undefined);
     void window.milagre.getModels().then((next) => setReported((previous) => keepIfSame(previous, next))).catch(() => undefined);
   };
-  useEffect(refreshCliStatus, []);
+  useEffect(() => { refreshCliStatus(); return window.milagre.onAccountsChanged?.(refreshCliStatus); }, []);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
   // and the open chat isn't on the other agent. After that a model the agents don't offer only gives way to

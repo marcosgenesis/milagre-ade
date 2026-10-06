@@ -24,7 +24,7 @@ export function createUsageState(client: UsageClient, now = Date.now) {
     inFlight = client.call<UsageSnapshot>('usage:read').then(next => {
       publish({ snapshot: mergeSnapshot(state.snapshot, next, now()), loading: false, error: '' });
     }).catch(error => {
-      const next: UsageSnapshot | null = state.snapshot && { providers: state.snapshot.providers.map(provider => ({ ...provider, status: provider.status === 'unavailable' ? 'unavailable' : 'error', windows: [] })) };
+      const next: UsageSnapshot | null = state.snapshot && { ...(state.snapshot.accountKey ? { accountKey: state.snapshot.accountKey } : {}), providers: state.snapshot.providers.map(provider => ({ ...provider, status: provider.status === 'unavailable' ? 'unavailable' : 'error', windows: [] })) };
       publish({ snapshot: next ? mergeSnapshot(state.snapshot, next, now()) : null, loading: false, error: error instanceof Error ? error.message : 'Could not read usage. Try refreshing.' });
     }).finally(() => { inFlight = null; });
     return inFlight;

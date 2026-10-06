@@ -49,10 +49,10 @@ function codexModels(entries) {
   }));
 }
 
-async function listClaudeModels({ command, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
+async function listClaudeModels({ command, env, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   const { query } = await loadSdk();
   const idle = { async *[Symbol.asyncIterator]() { await new Promise(() => {}); } };
-  const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command } });
+  const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command, ...(env ? { env } : {}) } });
   try {
     return claudeModels(await session.supportedModels());
   } finally {
@@ -60,8 +60,8 @@ async function listClaudeModels({ command, loadSdk = () => import("@anthropic-ai
   }
 }
 
-async function listCodexModels({ command, cwd, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
-  const rpc = createRpc({ command, cwd });
+async function listCodexModels({ command, cwd, env, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
+  const rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
   rpc.start();
   try {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
@@ -88,7 +88,7 @@ function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaude
   function lookup(provider) {
     if (!cache.has(provider)) {
       const pending = cli(provider)
-        .then((status) => (status.problem || !status.command ? null : list[provider]({ command: status.command, cwd, clientVersion })))
+        .then((status) => (status.problem || !status.command ? null : list[provider]({ command: status.command, cwd, clientVersion, ...(status.env ? { env: status.env } : {}) })))
         .catch(() => null)
         .then((models) => {
           if (models?.length) return models;
@@ -99,10 +99,12 @@ function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaude
     }
     return cache.get(provider);
   }
-  return async () => {
+  const read = async () => {
     const [claude, codex] = await Promise.all([lookup("claude"), lookup("codex")]);
     return { claude, codex };
   };
+  read.invalidate = provider => cache.delete(provider);
+  return read;
 }
 
 module.exports = { CODEX_FAST_TIER, claudeCapability, claudeModels, codexModels, createModelCache, listClaudeModels, listCodexModels };

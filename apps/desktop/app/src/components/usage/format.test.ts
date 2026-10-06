@@ -9,6 +9,12 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 
+test("failed usage after an account switch never inherits another account's windows", () => {
+  const previous = { accountKey: "personal", providers: [claude()] };
+  const next = { accountKey: "work", providers: [claude({ status: "error", windows: [] })] };
+  assert.deepEqual(mergeSnapshot(previous, next, NOW), next);
+});
+
 function claude(overrides: Partial<ProviderUsage> = {}): ProviderUsage {
   return {
     provider: "claude",

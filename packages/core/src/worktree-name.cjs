@@ -18,7 +18,7 @@ function branchName(reply) {
 // A new chat's worktree is named for what it will do, by a one-shot Haiku call that sees only the
 // message. Without the Claude CLI, or when the call fails or runs past timeoutMs, the name is the
 // message's first words.
-async function suggestWorktreeName(prompt, { command, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), timeoutMs = 6000 } = {}) {
+async function suggestWorktreeName(prompt, { command, env, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), timeoutMs = 6000 } = {}) {
   const fallback = slugify(prompt);
   if (!command || !fallback) return fallback;
   const abortController = new AbortController();
@@ -37,6 +37,7 @@ async function suggestWorktreeName(prompt, { command, loadSdk = () => import("@a
         persistSession: false,
         cwd: os.tmpdir(),
         pathToClaudeCodeExecutable: command,
+        ...(env ? { env } : {}),
         abortController,
       },
     });

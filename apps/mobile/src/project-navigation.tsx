@@ -1,3 +1,4 @@
+import { AccountsSection } from './accounts-section';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -175,10 +176,10 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   if (page) return <View style={styles.screen}>
     <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
       <IconButton label={page === 'settings' || page === 'add' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' || page === 'add' ? null : 'settings')} />
-      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'add' ? 'Add project' : page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
+      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'add' ? 'Add project' : page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : page === 'accounts' ? 'Accounts' : 'Plan usage'}</Text>
       {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
     </View>
-    {page === 'add' ? <ProjectSearch onOpen={addProject} /> : page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
+    {page === 'add' ? <ProjectSearch onOpen={addProject} /> : page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll>{page === 'accounts' ? <AccountsSection /> : <UsageSection />}</PageScroll>}
   </View>;
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 16, paddingBottom: 12 }}>

@@ -46,6 +46,15 @@ function useSessionState() {
     }).catch(() => { if (!cancelled) setProviderError('Could not check the installed agents. Reconnect to check again.'); });
     return () => { cancelled = true; };
   }, [client]);
+  const refreshProviders = useCallback(async () => {
+    if (!client) return;
+    const version = generation.current;
+    try {
+      const [models, status] = await Promise.all([client.call<AgentModels>('agent:models'), client.call<AgentCliStatus>('agent:cli-status')]);
+      if (version !== generation.current) return;
+      setModels(models); setCliStatus(status); setProviderError('');
+    } catch { setProviderError('Could not check the installed agents. Reconnect to check again.'); }
+  }, [client]);
   const loadHosts = useCallback(async () => {
     const list = await savedHosts.list();
     setHosts(list);
@@ -193,7 +202,7 @@ function useSessionState() {
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, lastLocation, rememberChat, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
+  return { booted, lastLocation, rememberChat, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

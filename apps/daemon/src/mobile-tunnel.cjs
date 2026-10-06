@@ -1,4 +1,5 @@
 const { spawn: spawnProcess } = require('node:child_process');
+const { ensureCloudflared } = require('./cloudflared.cjs');
 
 const QUICK_URL = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
 // cloudflared logs this once the edge accepts the first connection; before that the URL answers 502/530.
@@ -8,7 +9,8 @@ const READY = /Registered tunnel connection/;
  * Runs cloudflared until it registers with Cloudflare's edge. Logging stays at info: debug logs request headers, and
  * those carry the connection token.
  */
-function runCloudflared({ args, quick, binary = 'cloudflared', spawn = spawnProcess, timeoutMs = 30000 }) {
+function runCloudflared({ args, quick, binary, spawn = spawnProcess, timeoutMs = 30000 }) {
+  if (!binary) return ensureCloudflared().then(managed => runCloudflared({ args, quick, binary: managed, spawn, timeoutMs }));
   const child = spawn(binary, ['tunnel', '--no-autoupdate', '--loglevel', 'info', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
   const close = () => new Promise(resolve => {
     if (child.exitCode !== null || child.signalCode !== null) return resolve();
@@ -20,7 +22,7 @@ function runCloudflared({ args, quick, binary = 'cloudflared', spawn = spawnProc
     let log = '';
     const fail = error => { clearTimeout(timer); void close(); reject(error); };
     const timer = setTimeout(() => fail(new Error(`cloudflared did not open a tunnel within ${Math.round(timeoutMs / 1000)} seconds.${log ? ` Last output: ${log.trim().split('\n').at(-1)}` : ''}`)), timeoutMs);
-    child.once('error', error => fail(error.code === 'ENOENT' ? new Error('cloudflared is not installed. Install it with `brew install cloudflared`.') : error));
+    child.once('error', error => fail(error.code === 'ENOENT' ? new Error("Milagre couldn't start phone access. Restart Milagre and try again.") : error));
     child.once('exit', code => { if ((quick && !url) || !READY.test(log)) fail(new Error(`cloudflared stopped (exit ${code}) before the tunnel was ready.`)); });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', chunk => {

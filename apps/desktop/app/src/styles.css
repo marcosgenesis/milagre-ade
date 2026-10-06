@@ -399,6 +399,9 @@ a {
     0 3px 9px oklch(0 0 0 / 0.2);
 }
 
+.prompt-input-highlighted { color: transparent; }
+.prompt-input-highlighted::selection { color: var(--ink); }
+
 @media (min-width: 64rem) {
   .component-nav-scroll {
     -webkit-mask-image: linear-gradient(

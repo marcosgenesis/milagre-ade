@@ -108,6 +108,16 @@ test("does not treat paths, URLs, inline code or fenced code as invocations", as
   assert.equal(await expandSkillPrompt(project, "/unknown", { home, bundledDirectory: null }), "/unknown");
 });
 
+test("expands highlighted skills followed by sentence punctuation, but not query URLs", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  await skill(project, ".agents", "review", "Review instructions");
+  for (const prompt of ["Use /review, then finish", "Use /review.", "Use /review?"]) {
+    assert.ok((await expandSkillPrompt(project, prompt, { home, bundledDirectory: null })).includes("Review instructions"));
+  }
+  const url = "Open /review?mode=compact";
+  assert.equal(await expandSkillPrompt(project, url, { home, bundledDirectory: null }), url);
+});
+
 test("rejects relative workspace paths and limits combined skill context", async (t) => {
   const { project, home, skill } = await fixture(t);
   await assert.rejects(discoverSkills("relative", { home, bundledDirectory: null }), /absolute workspace/);

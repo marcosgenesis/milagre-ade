@@ -25,6 +25,7 @@
     "test:ports": "node scripts/test-ports.cjs",
     "test:chat-attachments": "node scripts/test-chat-attachments.cjs",
     "test:chat-layout": "node scripts/test-chat-layout.cjs",
+    "test:prompt-skills": "node scripts/test-prompt-skills.cjs",
     "test:diff-view": "node scripts/test-diff-view.cjs",
     "test:diff-comments": "node scripts/test-diff-comments.cjs",
     "test:sidebar-pr": "node scripts/test-sidebar-pr.cjs",

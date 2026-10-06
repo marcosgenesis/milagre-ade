@@ -71,6 +71,47 @@ function load(file, modules, extra = '') {
 }
 const jsx = (type, props) => ({ type, props });
 
+test('mobile skill input preserves edits and clears its description when the caret or catalog changes', () => {
+  const react = hookHost();
+  let catalog = { skills: [{ name: 'tldr', description: 'Rewrite for a skimming reader.' }] };
+  let draft = 'run /tldr';
+  const { PromptField } = load('prompt-field.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Text: 'Text', View: 'View' },
+    '@milagre/shared/prompt-skills': require('../packages/shared/src/prompt-skills.mjs'),
+    './use-rpc': { useRpc: () => ({ data: catalog }) },
+    './ui': { Field: 'Field', colors: { ink: 'ink', accentInk: 'accent' } },
+  });
+  function render() { react.begin(); const tree = PromptField({ client: {}, projectPath: '/project', draft, onChangeText: value => { draft = value; } }); react.flush(); return tree; }
+  const field = () => find(render(), node => node.type === 'Field');
+  const description = () => find(render(), node => node.type === 'Text' && node.props.children === 'Rewrite for a skimming reader.');
+  assert.equal('value' in field().props, false, 'native attributed children must not be combined with value');
+  assert.ok(find(field(), node => node.type === 'Text' && node.props.children === '/tldr' && node.props.style.color === 'accent'));
+  field().props.onFocus();
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 7, end: 7 } } });
+  assert.ok(description());
+  field().props.onChangeText('run /tldr please');
+  assert.equal(draft, 'run /tldr please');
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 16, end: 16 } } });
+  assert.equal(description(), undefined);
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 7, end: 7 } } });
+  assert.ok(description());
+  catalog = { skills: [] };
+  assert.equal(description(), undefined);
+  assert.equal(find(field(), node => node.type === 'Text' && node.props.style.color === 'accent'), undefined);
+  catalog = { skills: [{ name: 'tldr', description: 'Rewrite for a skimming reader.' }] };
+  field().props.onBlur();
+  assert.equal(description(), undefined);
+  draft = '';
+  assert.equal(field().props.children.props.children.length, 0, 'clearing a sent draft clears native attributed text');
+  draft = 'run /tldr';
+  field().props.onSelectionChange({ nativeEvent: { selection: { start: 4, end: 9 } } });
+  catalog = { skills: [] };
+  assert.deepEqual({ ...field().props.selection }, { start: 4, end: 9 }, 'catalog recoloring preserves the native text selection');
+  field().props.onChangeText('run /tldr please');
+  assert.equal(field().props.selection, undefined, 'ordinary typing keeps native caret control');
+});
+
 function markdownHost({ media, basePath } = {}) {
   const react = { ...hookHost({ effects: true }), memo: fn => fn };
   const viewer = require('../apps/mobile/src/viewer-store.ts');
@@ -286,6 +327,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
+    '../prompt-field': { PromptField: 'PromptField' },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../loading-logo': { LoadingLogo: 'LoadingLogo' },
@@ -295,11 +337,18 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': require('@milagre/shared/chats'), '../session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'), '../confirm-store': { confirmSheet: (...args) => alert(...args) },
   });
   const render = () => { react.begin(); const tree = ChatScreen(); react.flush(); return tree; };
-  const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
+  const field = () => { const props = find(render(), node => node.type === 'PromptField').props; return { ...props, value: props.draft }; };
   const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
   return { session, sending, params, field, send, render, router, calls };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('the mobile composer loads skills from the selected Chat Worktree', () => {
+  const chat = chatHost();
+  chat.session.snapshot.project.state.worktrees[2] = { id: 2, name: 'feature', path: '/worktrees/feature', project_id: 1 };
+  chat.params.worktreeId = '2';
+  assert.equal(chat.field().projectPath, '/worktrees/feature');
+});
 
 test('browsing another Project in the drawer leaves the current Chat selected', async () => {
   const render = sessionHost({ url: 'mac', call: async (method, args) => method === 'project:recent' ? [] : { path: args?.[0] }, snapshot: async path => snapshot(path) });

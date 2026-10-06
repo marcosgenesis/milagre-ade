@@ -53,6 +53,7 @@ export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; create
 export type CanvasSnapshot = {
   projects: { id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[];
   links: ProjectLink[];
+  projectGroups?: NamedProjectLink[];
   worktreePositions: Record<string, Record<string, { x: number; y: number }>>;
   states: { path: string; state: CoordinatorState }[];
 };

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let desktop users select a named Link and run one shared Chat in one new Worktree per member Project.
+**Goal:** Let desktop and mobile users select a named Link and run one shared Chat in one new Worktree per member Project.
 
 **Architecture:** Persist named Links separately from existing canvas edges. Give shared Chats a Link scope, canonical state in the runtime profile, a durable Worktree preparation record and one provider session with access to all owned member Worktrees. Reuse transcript and lifecycle behavior through a scope adapter; ordinary Project state and existing canvas Delegation retain their contracts.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Import is a separate PR. No mobile Link UI or native changes.
+- Import is a separate PR. Mobile Links reuse the installed native runtime and ship through OTA.
 - The daemon remains the sole writer.
 - Each later new Chat creates a fresh set. Sending again, restarting, or handing over providers reuses that Chat's set.
 - No extra Link heading in the Chat pane. Hide the four Project-specific selector actions while viewing a Link.

@@ -4,7 +4,7 @@ import { ReactFlow, Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, P
 import "@xyflow/react/dist/style.css";
 import type { AgentRuns } from "@/lib/agent-runs";
 import type { CanvasSnapshot, LinkEndpoint } from "@/electron";
-import type { CoordinatorState, LinkedWork } from "@/model";
+import type { CoordinatorState, LinkedWork, NamedProjectLink } from "@/model";
 import { chatMark, chatTitle, type ChatMark } from "@/lib/chat-list";
 import { chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser } from "@/lib/agent-runs";
 import { delegatedChats } from "@/lib/linked-work";
@@ -15,7 +15,15 @@ type CanvasChat = { id: number; title: string; mark: ChatMark; receiveOnly: bool
 type CanvasData = { kind: "project" | "worktree"; endpoint: LinkEndpoint; name: string; branch?: string; diff?: string; chats?: CanvasChat[]; onOpenChat?: (projectPath: string, id: number) => void; projectPath: string; [key: string]: unknown };
 type CanvasNode = Node<CanvasData>;
 const nodeTypes = { project: ProjectNode, worktree: WorktreeNode };
-const edgeTypes = { link: LinkEdge };
+const edgeTypes = { link: LinkEdge, membership: MembershipEdge };
+
+function MembershipEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, data }: EdgeProps<Edge<{ name: string; linkId: string }>>) {
+  const [path, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  return <>
+    <BaseEdge id={id} path={path} style={style} />
+    <EdgeLabelRenderer><span data-named-link={data?.linkId} className="pointer-events-none absolute rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{data?.name}</span></EdgeLabelRenderer>
+  </>;
+}
 
 /** What travels along a Link now: running Delegations, or a Negotiation the user can stop. */
 type LinkActivity = { label: string; negotiationId?: string };
@@ -54,7 +62,7 @@ function LinkHandles() {
 }
 
 function ProjectNode({ data }: NodeProps<CanvasNode>) {
-  return <div className="h-full w-[330px] rounded-2xl border border-line-strong bg-surface/90 shadow-card">
+  return <div data-canvas-project={data.projectPath} className="h-full w-[330px] rounded-2xl border border-line-strong bg-surface/90 shadow-card">
     <LinkHandles />
     <div className="canvas-drag-handle flex h-14 cursor-grab items-center gap-2 border-b border-line px-5 active:cursor-grabbing">
       <span className="flex size-8 items-center justify-center rounded-lg bg-hover-2 text-sm font-semibold text-ink">{data.name.slice(0, 1).toUpperCase()}</span>
@@ -124,7 +132,7 @@ function makeNodes(snapshot: CanvasSnapshot, states: Record<string, CoordinatorS
   return nodes;
 }
 
-export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack }: { states: Record<string, CoordinatorState>; runs: AgentRuns; linkedWork: LinkedWork; onOpenChat: (projectPath: string, id: number) => void; onBack: () => void }) {
+export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack, focusLink }: { states: Record<string, CoordinatorState>; runs: AgentRuns; linkedWork: LinkedWork; onOpenChat: (projectPath: string, id: number) => void; onBack: () => void; focusLink?: NamedProjectLink }) {
   const [snapshot, setSnapshot] = useState<CanvasSnapshot | null>(null);
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
@@ -139,12 +147,13 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack }: { s
   const openChat = useCallback((path: string, id: number) => openChatRef.current(path, id), []);
   useEffect(() => {
     if (!snapshot) return;
-    const next = makeNodes(snapshot, states, runs, linkedWork, openChat);
+    const visible = focusLink ? { ...snapshot, projects: snapshot.projects.filter(project => focusLink.projectIds.includes(project.id)) } : snapshot;
+    const next = makeNodes(visible, states, runs, linkedWork, openChat);
     setNodes(previous => next.map(node => {
       const old = previous.find(item => item.id === node.id);
       return old ? { ...node, position: old.position } : node;
     }));
-  }, [snapshot, states, runs, linkedWork, openChat]);
+  }, [snapshot, states, runs, linkedWork, openChat, focusLink]);
   const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => setNodes(current => applyNodeChanges(changes, current)), []);
   const stopNegotiation = useCallback((id: string) => {
     window.milagre.stopNegotiation(id).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
@@ -158,13 +167,23 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack }: { s
       const width = Number(node?.style?.width ?? 0);
       return (node?.position.x ?? 0) + (parent?.position.x ?? 0) + width / 2;
     };
-    return (snapshot?.links ?? []).map((link) => {
+    const canvasEdges = (snapshot?.links ?? []).flatMap((link) => {
       const source = link.a.worktree_path ? worktreeNodeId(link.a.project_id, link.a.worktree_path) : projectNodeId(link.a.project_id);
       const target = link.b.worktree_path ? worktreeNodeId(link.b.project_id, link.b.worktree_path) : projectNodeId(link.b.project_id);
+      if (!nodeById.has(source) || !nodeById.has(target)) return [];
       const rightward = centerX(source) <= centerX(target);
-      return { id: link.id, source, target, sourceHandle: rightward ? "right-source" : "left-source", targetHandle: rightward ? "left-target" : "right-target", type: "link" as const, selected: link.id === selectedLink, data: { activity: linkActivity(linkedWork, link.id), onStop: stopNegotiation }, style: { stroke: link.id === selectedLink ? "var(--color-accent)" : "var(--color-ink-3)", strokeWidth: 2 } };
+      return [{ id: link.id, source, target, sourceHandle: rightward ? "right-source" : "left-source", targetHandle: rightward ? "left-target" : "right-target", type: "link" as const, selected: link.id === selectedLink, data: { activity: linkActivity(linkedWork, link.id), onStop: stopNegotiation }, style: { stroke: link.id === selectedLink ? "var(--color-accent)" : "var(--color-ink-3)", strokeWidth: 2 } }];
     });
-  }, [snapshot?.links, selectedLink, linkedWork, stopNegotiation, nodeById]);
+    const groups = focusLink ? [focusLink] : snapshot?.projectGroups ?? [];
+    const memberships = groups.flatMap(group => {
+      const members = group.projectIds.map(projectNodeId).filter(id => nodeById.has(id));
+      return members.slice(1).map(target => {
+        const source = members[0], rightward = centerX(source) <= centerX(target);
+        return { id: `membership:${group.id}:${target}`, source, target, type: 'membership', sourceHandle: rightward ? 'right-source' : 'left-source', targetHandle: rightward ? 'left-target' : 'right-target', selectable: false, deletable: false, data: { name: group.name, linkId: group.id }, style: { stroke: 'var(--color-accent)', strokeWidth: 2, strokeDasharray: '5 4' } };
+      });
+    });
+    return [...canvasEdges, ...memberships];
+  }, [snapshot?.links, snapshot?.projectGroups, focusLink, selectedLink, linkedWork, stopNegotiation, nodeById]);
   const connect = useCallback(async (connection: Connection) => {
     const a = nodeById.get(connection.source)?.data.endpoint;
     const b = nodeById.get(connection.target)?.data.endpoint;
@@ -192,7 +211,7 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack }: { s
     </div>
     {error && <div role="alert" className="border-b border-line px-5 py-2 text-xs text-red-500">{error}</div>}
     <div className="min-h-0 flex-1">
-      {snapshot ? <ReactFlow className="milagre-canvas-flow" nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onConnect={connection => void connect(connection)} onNodeDragStop={(event, node) => void savePosition(event, node)} onEdgeClick={(_event, edge) => setSelectedLink(edge.id)} onPaneClick={() => setSelectedLink(null)} fitView fitViewOptions={{ padding: 0.15 }} nodesConnectable edgesReconnectable={false} deleteKeyCode={null}>
+      {snapshot ? <ReactFlow className="milagre-canvas-flow" nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onConnect={connection => void connect(connection)} onNodeDragStop={(event, node) => void savePosition(event, node)} onEdgeClick={(_event, edge) => { if (edge.type === 'link') setSelectedLink(edge.id); }} onPaneClick={() => setSelectedLink(null)} fitView fitViewOptions={{ padding: 0.15 }} nodesConnectable edgesReconnectable={false} deleteKeyCode={null}>
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow> : <div className="flex h-full items-center justify-center text-sm text-ink-3">Loading Projects…</div>}

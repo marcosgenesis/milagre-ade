@@ -29,6 +29,8 @@ import { ErrorNotice, IconButton, PageScroll, PillButton, PullDown, colors, styl
 import { PromptField } from '../prompt-field';
 import { archiveFromPhone } from '../archive';
 import { confirmSheet } from '../confirm-store';
+import { randomUUID } from 'expo-crypto';
+import { runChatAction } from '../chat-actions';
 
 const PAGE = 40;
 
@@ -54,7 +56,7 @@ export default function ChatScreen() {
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
   const worktreeOf = session.snapshot?.project.state.worktrees[(params.id ? session.snapshot.project.state.sessions[Number(params.id)]?.worktree_id : Number(params.worktreeId)) ?? -1];
-  const pr = usePullRequest(worktreeOf);
+  const pr = usePullRequest(session.snapshot?.project.link ? undefined : worktreeOf);
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
   const connected = session.client;
   const projectPath = session.snapshot?.project.path;
@@ -67,13 +69,13 @@ export default function ChatScreen() {
   useFocusEffect(useCallback(() => { focused.current = { client: connected, projectPath, id: params.id, worktreeId: params.worktreeId }; return () => { focused.current = null; }; }, [connected, projectPath, params.id, params.worktreeId]));
   useEffect(() => {
     let cancelled = false;
-    if (connected && projectPath && !params.id) void connected.call<string[]>('project:branches', [projectPath]).then(items => {
+    if (connected && projectPath && !session.snapshot?.project.link && !params.id) void connected.call<string[]>('project:branches', [projectPath]).then(items => {
       if (!cancelled) setBranchList({ client: connected, path: projectPath, items });
     }).catch(error => {
       if (!cancelled) setBranchList({ client: connected, path: projectPath, items: [], error: (error as Error).message });
     });
     return () => { cancelled = true; };
-  }, [connected, projectPath, params.id]);
+  }, [connected, projectPath, params.id, session.snapshot?.project.link]);
   // A screen reopened from the drawer adopts its own acknowledged Chat; the original async handler may be unfocused.
   const acceptedSessionId = pending?.accepted ? pending.preview.targetSessionId : null;
   const pendingKey = pending ? `${pending.hostId}|${pending.originChatId}` : null;
@@ -135,7 +137,7 @@ export default function ChatScreen() {
   const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
   const base = baseBranch && branches?.items.includes(baseBranch) ? baseBranch
     : worktree?.name && branches?.items.includes(worktree.name) ? worktree.name : branches?.items[0] || '';
-  const newWorktree = !params.id && isolation === 'worktree';
+  const newWorktree = !project.link && !params.id && isolation === 'worktree';
   const targetDisabled = busy || picking;
   const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
   const branchName = newWorktree ? base || 'Choose branch' : worktree?.name || 'Choose branch';
@@ -170,6 +172,7 @@ export default function ChatScreen() {
     const firstMessage = savedMessages.length === 0;
     const clearsDraft = sent === draft;
     const key = `${client.url}|${chatId}`;
+    const operationId = project.link ? composer.linkOperations.forSend(key, JSON.stringify([sent, sending.map(item => item.id)]), randomUUID) : null;
     const preview = firstMessage ? createPendingChat({ state: project.state, worktreeId, sessionId: params.id ? Number(params.id) : null, body: sent, images: sending.flatMap(item => item.image ? [item.image] : []), files: sending.filter(item => !item.image).map(item => item.path || item.name), model: model.id, provider: actualProvider }) : null;
     if (preview) {
       pendingStore.setPendingChats(current => ({ ...current, [key]: { preview, hostId: client.url, projectPath: sendingProjectPath, originChatId: chatId, originSessionId: params.id ? Number(params.id) : null, worktreeId, newWorktree, accepted: false } }));
@@ -197,8 +200,11 @@ export default function ChatScreen() {
         target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
       }
       if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], preview: { ...current[key].preview, targetSessionId: target.sessionId } } } : current);
-      const result = await client.call<{ sessionId: number }>('chat:send', [{ projectPath: sendingProjectPath, ...target, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }]);
+      const result = project.link
+        ? await client.call<{ sessionId: number }>('link:send', [{ linkId: project.link.link.id, sessionId: params.id ? Number(params.id) : null, operationId, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }])
+        : await client.call<{ sessionId: number }>('chat:send', [{ projectPath: sendingProjectPath, ...target, clientMessageId: preview?.message.clientMessageId, body: sent, ...media, prompt: attachmentPrompt(sent, media.files), ...options }]);
       accepted = true;
+      if (operationId) composer.linkOperations.accepted(key, operationId);
       const promote = current();
       if (preview) pendingStore.setPendingChats(current => current[key] ? { ...current, [key]: { ...current[key], accepted: true, promoted: promote, preview: { ...current[key].preview, targetSessionId: result.sessionId } } } : current);
       const destination = `${sendingProjectPath}#${result.sessionId}`;
@@ -255,6 +261,11 @@ export default function ChatScreen() {
     if (busy) return;
     setError('');
     try {
+      if (project.link) {
+        const result = await runChatAction({ action: 'archive', client, projectPath: project.path, state: project.state, link: project.link, chat: target, running: !!run, expectActivity: session.expectActivity, refresh: session.refresh, notify: setError });
+        if (result === 'hidden') router.replace('/projects');
+        return;
+      }
       const result = await archiveFromPhone({ client, alert: confirmSheet, projectPath: project.path, state: project.state, chat: target, running: !!run,
         onConfirm: () => { setBusy(true); session.expectActivity(); }, notify: setError, refresh: session.refresh });
       if (result === 'hidden' || result === 'removed') router.replace('/projects');
@@ -267,7 +278,7 @@ export default function ChatScreen() {
   const header = <>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text></View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: worktree ? 1 : 0 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree?.name ?? ''}</Text><Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>{diff && (diff.added > 0 || diff.removed > 0) ? `+${diff.added}` : ''}</Text>{diff && (diff.added > 0 || diff.removed > 0) ? ' ' : ''}<Text style={{ color: colors.red }}>{diff && (diff.added > 0 || diff.removed > 0) ? `−${diff.removed}` : ''}</Text></Text></View>
+      {!project.link && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: worktree ? 1 : 0 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree?.name ?? ''}</Text><Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>{diff && (diff.added > 0 || diff.removed > 0) ? `+${diff.added}` : ''}</Text>{diff && (diff.added > 0 || diff.removed > 0) ? ' ' : ''}<Text style={{ color: colors.red }}>{diff && (diff.added > 0 || diff.removed > 0) ? `−${diff.removed}` : ''}</Text></Text></View>}
     </View>
   </>;
   const more = <Stack.Toolbar placement="right">
@@ -294,7 +305,7 @@ export default function ChatScreen() {
       {process.env.EXPO_PUBLIC_DEMO === '1' && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
       {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
       {chat?.archived && <View style={styles.card}><Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text><PillButton title="Restore Chat" disabled={busy} onPress={() => void action(() => client.call('chat:patch', [project.path, chat.id, { archived: false }]))} style={{ alignSelf: 'flex-start' }} /></View>}
-      {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
+      {!messages.length && !run && <View style={{ paddingVertical: 48, alignItems: 'center', gap: 8 }}><Text style={styles.subtitle}>What are we working on?</Text><Text style={[styles.muted, { textAlign: 'center' }]}>{project.link ? 'One Chat, with a new Worktree in each linked Project on your computer.' : newWorktree ? `Your agent starts in a new worktree from ${base || 'the selected branch'} on your computer.` : `Your agent runs in ${worktree?.name || 'this Worktree'} on your computer.`}</Text></View>}
       {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
       {messages.length > visible && <PillButton title={`Show earlier messages (${messages.length - visible})`} secondary onPress={() => { following.current = false; setShown({ id: params.id, count: visible + PAGE }); }} style={{ alignSelf: 'center' }} />}
       {messages.slice(-visible).map(message => <ChatReply key={message.id} message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />)}
@@ -318,7 +329,7 @@ export default function ChatScreen() {
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={busy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); })} />)}
       {question ? <Questions key={question.requestId} request={question} busy={busy} submit={(answers, summary) => void action(async () => { const accepted = await client.call('agent:answer-question', [{ chatId, requestId: question.requestId, answers, summary }]); if (!accepted) throw new Error('This question is no longer pending. Refresh the Chat.'); })} />
       : <View style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 24, borderCurve: 'continuous', paddingTop: 8, paddingHorizontal: 8, paddingBottom: 6, gap: 4, boxShadow: '0 4px 20px #0000000f' }}>
-        {!params.id && <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+        {!params.id && !project.link && <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
           <PullDown label="Choose isolation" nativeTrigger={{ title: isolation === 'local' ? 'Local' : 'New worktree', systemImage: isolation === 'local' ? 'laptopcomputer' : 'arrow.triangle.branch', disabled: targetDisabled }} sections={[{ title: 'Isolation', items: [{ id: 'local', title: 'Local', systemImage: 'laptopcomputer', checked: isolation === 'local', disabled: targetDisabled }, { id: 'worktree', title: 'New worktree', systemImage: 'arrow.triangle.branch', checked: isolation === 'worktree', disabled: targetDisabled }] }]} onSelect={id => { if (!targetDisabled) setIsolation(id === 'worktree' ? 'worktree' : 'local'); }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, opacity: targetDisabled ? 0.35 : 1 }}><Icon icon={isolation === 'local' ? LaptopIcon : GitForkIcon} tone="ink2" size={14} /><Text style={styles.label}>{isolation === 'local' ? 'Local' : 'New worktree'}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
           </PullDown>
@@ -327,7 +338,7 @@ export default function ChatScreen() {
           </PullDown>
         </View>}
         {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
-        <PromptField key={chatId} client={client} projectPath={worktree?.path ?? project.path} draft={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} />
+        <PromptField key={chatId} client={client} projectPath={worktree?.path || (project.link ? '' : project.path)} draft={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
           <PullDown label="Add photos or files" nativeTrigger={{ systemImage: 'plus', disabled: attachmentDisabled }} sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle', disabled: attachmentDisabled }, { id: 'camera', title: 'Take Photo', systemImage: 'camera', disabled: attachmentDisabled }, { id: 'files', title: 'Choose Files', systemImage: 'folder', disabled: attachmentDisabled }] }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>
             <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', opacity: attachmentDisabled ? 0.35 : 1 }}><Icon icon={Add01Icon} tone="ink2" size={21} /></View>

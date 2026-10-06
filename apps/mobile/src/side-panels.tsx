@@ -103,6 +103,8 @@ function usePanels() {
   return panels;
 }
 
+export function usePanelNavigation() { return usePanels().navigate; }
+
 /** Offers the panels while this screen is focused. A rightward drag opens the left one, a leftward drag Changes. */
 export function useSidePanels({ chatId, worktreeId }: { chatId?: number; worktreeId?: number }) {
   const panels = usePanels();
@@ -161,7 +163,7 @@ export function SidePanelsHost() {
         <ProjectNavigation key={session.client.url} activeChatId={screen.chatId} onClose={() => show(null)} onNavigate={navigate} />
       </Animated.View>}
       {mounted.right && screen.worktreeId !== undefined && <Animated.View {...hidden('right')} style={[StyleSheet.absoluteFill, { backgroundColor: colors.page }, right]}>
-        <ChangesPanel key={screen.worktreeId} worktreeId={screen.worktreeId} onClose={() => show(null)} />
+        <ChangesPanel key={`${session.snapshot?.project.path}#${screen.worktreeId}`} worktreeId={screen.worktreeId} onClose={() => show(null)} />
       </Animated.View>}
     </View></GestureDetector>
   </View>;

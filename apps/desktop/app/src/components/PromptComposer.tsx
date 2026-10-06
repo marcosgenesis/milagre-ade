@@ -454,7 +454,7 @@ export function PromptComposer({ imageDraft, projectPath, draft, onDraftChange, 
 
         <div className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line bg-surface transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}>
           <input ref={fileInputRef} type="file" multiple hidden aria-label="Choose attachments" onChange={event => { void imageDraft.attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-          <Attachments images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} leading={handoverBrief && <HandoverBriefChip brief={handoverBrief.brief} onSave={handoverBrief.onSave} />} />
+          <Attachments localFiles={imageDraft.localFiles} images={imageDraft.images} files={imageDraft.files} removeImage={imageDraft.remove} removeFile={imageDraft.removeFile} leading={handoverBrief && <HandoverBriefChip brief={handoverBrief.brief} onSave={handoverBrief.onSave} />} />
           {imageDraft.loading && <div role="status" className="px-2 text-xs text-ink-3">Loading images…</div>}
           {imageDraft.error && <div role="alert" className="px-2 text-xs text-red">{imageDraft.error}</div>}
 

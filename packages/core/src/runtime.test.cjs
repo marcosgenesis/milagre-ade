@@ -337,3 +337,24 @@ test('an open project\'s worktree folders are read without its whole state', asy
   assert.deepEqual(await runtime.invoke('project:worktree-paths', [project]), [project]);
   await assert.rejects(runtime.invoke('project:worktree-paths', [path.join(project, 'elsewhere')]), /Open the project/);
 });
+
+test('attachment preview command serves Worktree files and saved external attachments only', async t => {
+  const { project, make } = await fixture(t);
+  const first = make();
+  const opened = await first.invoke('project:current');
+  const local = path.join(project, 'ui.tsx');
+  const external = path.join(path.dirname(project), 'attached.txt');
+  await fs.writeFile(local, 'export const ui = true;');
+  await fs.writeFile(external, 'outside the Worktree');
+  assert.equal((await first.invoke('attachment:preview', [local])).text, 'export const ui = true;');
+  await assert.rejects(first.invoke('attachment:preview', [external]), /attached file|open Worktree/);
+  await first.invoke('chat:patch', [project, Number(Object.keys(opened.state.sessions)[0]), { title: 'Attachments' }]);
+  await first.close();
+  const stored = path.join(project, '.milagre/coordination.json');
+  const state = JSON.parse(await fs.readFile(stored, 'utf8'));
+  state.messages.push({ id: state.next_id++, session_id: Number(Object.keys(opened.state.sessions)[0]), role: 'user', body: 'Read this', files: [external], context: null });
+  await fs.writeFile(stored, JSON.stringify(state));
+  const second = make();
+  await second.invoke('project:current');
+  assert.equal((await second.invoke('attachment:preview', [external])).text, 'outside the Worktree');
+});

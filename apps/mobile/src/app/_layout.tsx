@@ -42,6 +42,7 @@ export default function Layout() {
     <Stack.Screen name="viewer" options={{ presentation: 'transparentModal', headerShown: false, animation: 'none', contentStyle: { backgroundColor: 'transparent' } }} />
     <Stack.Screen name="chat-details" options={{ title: 'Rename Chat' }} />
     <Stack.Screen name="changes" options={{ title: 'Changes' }} />
+    <Stack.Screen name="file-preview" options={{ title: 'File preview' }} />
     <Stack.Screen name="diff" options={{ title: 'Diff' }} />
   </Stack><SidePanelsHost /></UpdateShell><Splash /></ThemeProvider></SidePanelsProvider></PushProvider></SessionProvider></KeyboardProvider></GestureHandlerRootView>;
 }

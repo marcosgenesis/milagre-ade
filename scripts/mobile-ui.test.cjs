@@ -66,7 +66,7 @@ function load(file, modules, extra = '') {
   vm.runInNewContext(compiled, { exports, require: id => {
     assert.ok(id in modules, `Unexpected import: ${id}`);
     return modules[id];
-  }, process: { env: {} }, URL, setTimeout, clearTimeout, setInterval, clearInterval });
+  }, process: { env: {} }, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval });
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
@@ -380,7 +380,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   };
   const react = hookHost({ effects });
   const ui = { ...Object.fromEntries(['Button', 'GlassIconButton', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
-  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
+  const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image', 'Pressable'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
@@ -1919,4 +1919,98 @@ test('pending snapshot acknowledgement does not disable mobile Stop', async () =
   assert.equal(stop.props.disabled, false);
   stop.props.onPress(); await settle();
   assert.ok(screen.calls.some(call => call.method === 'agent:interrupt'));
+});
+
+test('mobile file attachment chips open their contents', () => {
+  const pushed = [];
+  const react = hookHost();
+  const { FileChip } = load('file-chip.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Pressable: 'Pressable', View: 'View', Text: 'Text' },
+    'expo-router': { router: { push: target => pushed.push(target) } },
+    './ui': { colors: {} },
+  });
+  react.begin();
+  const chip = FileChip({ path: '/project/ui.tsx' });
+  const button = find(chip, node => node.type === 'Pressable');
+  assert.equal(button.props.accessibilityRole, 'button');
+  button.props.onPress();
+  assert.equal(pushed[0].pathname, '/file-preview');
+  assert.equal(pushed[0].params.path, '/project/ui.tsx');
+});
+
+test('mobile file preview renders text and reports unreadable, empty, and truncated files', () => {
+  const react = hookHost();
+  let result = { data: null, error: '', refresh() {} };
+  const { default: FilePreview } = load('app/file-preview.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'expo-file-system': { File: class {}, FileMode: { ReadOnly: 'readOnly' } },
+    'react-native': { Platform: { OS: 'ios' }, Text: 'Text', View: 'View' },
+    'expo-router': { Stack: { Screen: 'Screen' }, useLocalSearchParams: () => ({ path: '/project/ui.tsx' }) },
+    '../session': { useSession: () => ({ client: {} }) },
+    '../use-rpc': { useRpc: (client, method, args) => { assert.equal(method, 'attachment:preview'); assert.equal(args[0], '/project/ui.tsx'); return result; } },
+    '../file-code': { FileCode: 'FileCode' },
+    '../ui': { colors: {}, styles: {}, ErrorNotice: 'ErrorNotice', PageScroll: 'PageScroll' },
+  });
+  const render = () => { react.begin(); return FilePreview(); };
+  const text = value => find(render(), node => node.type === 'Text' && node.props.children === value);
+  assert.ok(text('Reading file…'));
+  result = { ...result, data: { text: 'export const ui = "hello";', binary: false, truncated: true } };
+  assert.equal(find(render(), node => node.type === 'FileCode').props.text, result.data.text);
+  assert.equal(find(render(), node => node.type === 'FileCode').props.name, 'ui.tsx');
+  assert.ok(text('Showing the first 256 KB.'));
+  result = { ...result, data: { text: '', binary: false, truncated: false } };
+  assert.ok(text('This file is empty.'));
+  result = { ...result, data: { text: '', binary: true, truncated: false } };
+  assert.ok(text('This file does not have a text preview.'));
+  result = { ...result, data: null, error: 'File no longer exists.' };
+  assert.equal(find(render(), node => node.type === 'ErrorNotice').props.message, result.error);
+});
+
+test('mobile picked files preview locally before sending', async () => {
+  const react = hookHost({ effects: true });
+  let closed = false;
+  const bytes = new TextEncoder().encode('export const draft = true;');
+  const { default: FilePreview } = load('app/file-preview.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'expo-file-system': { FileMode: { ReadOnly: 'readOnly' }, File: class {
+      constructor(uri) { assert.equal(uri, 'file:///phone/ui.tsx'); this.size = bytes.length; }
+      open(mode) { assert.equal(mode, 'readOnly'); return { readBytes(length) { assert.equal(length, bytes.length); return bytes; }, close() { closed = true; } }; }
+    } },
+    'react-native': { Platform: { OS: 'ios' }, Text: 'Text', View: 'View' },
+    'expo-router': { Stack: { Screen: 'Screen' }, useLocalSearchParams: () => ({ uri: 'file:///phone/ui.tsx', name: 'ui.tsx' }) },
+    '../session': { useSession: () => ({ client: null }) },
+    '../use-rpc': { useRpc: client => { assert.equal(client, null, 'local files do not read from the computer'); return {}; } },
+    '../file-code': { FileCode: 'FileCode' },
+    '../ui': { colors: {}, styles: {}, ErrorNotice: 'ErrorNotice', PageScroll: 'PageScroll' },
+  });
+  react.begin(); FilePreview();
+  await settle();
+  react.begin();
+  assert.ok(find(FilePreview(), node => node.type === 'FileCode' && node.props.text === 'export const draft = true;' && node.props.name === 'ui.tsx'));
+  assert.equal(closed, true);
+});
+
+test('mobile TSX preview colors native text in both themes and preserves selection', () => {
+  const react = hookHost();
+  let scheme = 'light';
+  const { FileCode } = load('file-code.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Text: 'Text', useColorScheme: () => scheme },
+    '@milagre/shared/file-syntax': require('@milagre/shared/file-syntax'),
+    './theme': { fonts: { mono: 'Menlo' } },
+    './ui': { colors: {}, styles: {} },
+  });
+  const text = 'export const Card = () => (\r\n  <section title="hello">Welcome</section>\r\n);\r\n';
+  const render = () => { react.begin(); return FileCode({ text, name: 'Card.tsx' }); };
+  const light = render();
+  const selectable = find(light, node => node.type === 'Text' && node.props.selectable);
+  assert.equal(selectable.props.children.map(node => node.props.children).join(''), text);
+  const keyword = tree => find(tree, node => node.type === 'Text' && node.props.children === 'export').props.style.color;
+  const tag = tree => find(tree, node => node.type === 'Text' && node.props.children === 'section').props.style.color;
+  assert.notEqual(keyword(light), tag(light));
+  scheme = 'dark';
+  const dark = render();
+  assert.notEqual(keyword(dark), keyword(light));
+  assert.notEqual(keyword(dark), tag(dark));
 });

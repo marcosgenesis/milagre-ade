@@ -67,6 +67,7 @@ declare global {
       onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
       onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;
+      readAttachment: (file: string) => Promise<{ text: string; binary: boolean; truncated: boolean }>;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
       listBranches: (projectPath: string) => Promise<string[]>;

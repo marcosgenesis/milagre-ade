@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import { PreviewRail, type PreviewRailItem } from "../motion/PreviewRail";
+import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
@@ -213,7 +214,9 @@ export function MessageScroller({
     }
     const cache = previewCacheRef.current;
     const targets = new Map<string, HTMLElement>();
-    const nextItems = messages.map((message, index) => {
+    // Sample the whole Chat, including both ends, rather than growing a tick per message.
+    const nextItems = messageNavigationIndices(messages.length).map((index) => {
+      const message = messages[index];
       let id = railIdRef.current.get(message);
       if (!id) {
         railIdCounterRef.current += 1;

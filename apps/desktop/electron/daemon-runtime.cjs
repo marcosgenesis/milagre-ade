@@ -1,4 +1,4 @@
-const { isLinkScopeKey, scopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
+const { isLinkScopeKey, scopeKey } = require('@milagre/shared/chat-scopes');
 const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
 const { projectOfKey } = require('@milagre/shared/agent-runs');
 

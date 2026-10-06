@@ -11,6 +11,7 @@
     "checkJs": true,
     "noEmit": true,
     "strict": true,
+    "noUnusedLocals": true,
     "noImplicitAny": false,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,

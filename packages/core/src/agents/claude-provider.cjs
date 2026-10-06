@@ -3,7 +3,7 @@ const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
+const { PendingPermissions, claudeRequest, claudeResult, insideRoot, insideWorkspace } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 const { runTool } = require("../linked-tools.cjs");
 
@@ -69,8 +69,8 @@ function linkedOptions(tools, sdk) {
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class ClaudeSession {
-  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
-    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
+  constructor({ cwd, resumeId, command, emit, workspaceRoots, workspaceInstructions, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
+    Object.assign(this, { cwd, resumeId, command, emit, workspaceRoots, workspaceInstructions, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
     this.state = { sessionId: resumeId ?? null, turnId: null, hasText: false };
     this.query = null;
     this.inbox = null;
@@ -228,6 +228,7 @@ class ClaudeSession {
       prompt: this.inbox,
       options: {
         cwd: this.cwd,
+        ...(this.workspaceRoots ? { additionalDirectories: this.workspaceRoots.filter(root => root !== this.cwd) } : {}),
         model,
         permissionMode: mode,
         ...(effort ? { effort } : {}),
@@ -237,7 +238,7 @@ class ClaudeSession {
         forwardSubagentText: true,
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
-        systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled) },
+        systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled, this.workspaceInstructions) },
         ...(this.linked?.tools.length ? linkedOptions(this.linked.tools, sdk) : {}),
         canUseTool: (toolName, input, options) => (toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options)),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
@@ -264,7 +265,7 @@ class ClaudeSession {
     const request = claudeRequest(toolName, input, options);
     return new Promise((resolve) => {
       const abort = () => this.permissions.resolve(request.requestId, "cancelled");
-      const inWorkspace = !options.blockedPath && Boolean(request.files?.length) && insideRoot(this.cwd, request.files);
+      const inWorkspace = !options.blockedPath && Boolean(request.files?.length) && (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files));
       this.permissions.add(request, (decision) => {
         options.signal?.removeEventListener("abort", abort);
         resolve(claudeResult(decision, input, options.suggestions));

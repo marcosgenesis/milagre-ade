@@ -56,6 +56,18 @@ async function main() {
     await selector(); await waitFor(() => evaluate(`document.body.textContent.includes('Link projects')`), 'Project selector actions');
     assert.ok(await evaluate(`document.body.textContent.includes('Copy project path')`)); assert.equal(await evaluate(`document.body.textContent.includes('Import project')`), false); await shot('project-selector');
     await click('Link projects…'); await waitFor(() => evaluate(`!!document.querySelector('#link-name') && document.querySelectorAll('dialog input[type=checkbox]').length === 2`), 'Link creation dialog');
+    const openingMotion = () => evaluate(`document.querySelector('dialog').getAnimations().map(animation => ({ frames: animation.effect.getKeyframes(), duration: animation.effect.getTiming().duration }))`);
+    const normalMotion = await openingMotion();
+    assert.ok(normalMotion.some(animation => animation.frames.some(frame => frame.transform && frame.transform !== 'none') && Number(animation.frames[0].opacity) < Number(animation.frames.at(-1).opacity)), 'Opening Link projects fades and scales the dialog into view');
+    await click('Cancel'); await waitFor(() => evaluate(`!document.querySelector('#link-name')`), 'Link dialog closed');
+    await connection.call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await selector(); await click('Link projects…'); await waitFor(() => evaluate(`!!document.querySelector('#link-name') && document.querySelectorAll('dialog input[type=checkbox]').length === 2`), 'reduced-motion Link dialog');
+    const reducedMotion = await openingMotion();
+    assert.ok(reducedMotion.some(animation => Number(animation.frames[0].opacity) < Number(animation.frames.at(-1).opacity)), 'Reduced motion keeps the opening fade');
+    assert.ok(reducedMotion.every(animation => animation.frames.every(frame => !frame.transform || frame.transform === 'none')), 'Reduced motion removes scale movement');
+    await click('Cancel'); await waitFor(() => evaluate(`!document.querySelector('#link-name')`), 'reduced-motion Link dialog closed');
+    await connection.call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await selector(); await click('Link projects…'); await waitFor(() => evaluate(`!!document.querySelector('#link-name') && document.querySelectorAll('dialog input[type=checkbox]').length === 2`), 'Link dialog reopened');
     assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]:checked').length`), 0, 'Opening Link projects leaves membership choices to the user');
     assert.equal(await evaluate(`document.querySelector('dialog button[type=submit]').disabled`), true);
     await shot('create-link-empty');

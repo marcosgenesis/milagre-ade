@@ -3,6 +3,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { parse } = require("yaml");
 const { BUNDLED_SKILLS_DIRECTORY } = require("./bundled-skills.cjs");
+const { promptSkillTokens, promptSkillParts } = require("@milagre/shared/prompt-skills");
 
 const SKILL_DIRECTORIES = [".agents", ".claude", ".gemini", ".codex"];
 const MAX_SKILL_BYTES = 256 * 1024;
@@ -93,16 +94,15 @@ async function discoverSkills(projectPath, { home = os.homedir(), bundledDirecto
 }
 
 function skillCommands(prompt) {
-  // Only standalone slash tokens; ignore code blocks, inline code, URLs and paths.
-  const prose = prompt.replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`/g, "");
-  return new Set([...prose.matchAll(/(?:^|\s)\/([a-zA-Z0-9][\w.:-]*)(?=\s|$)/g)].map((match) => match[1].toLowerCase()));
+  return new Set(promptSkillTokens(prompt).map(token => token.name.toLowerCase()));
 }
 
 async function expandSkillPrompt(projectPath, prompt, options) {
   const commands = skillCommands(prompt);
   if (!commands.size) return prompt;
   const { skills } = await discoverSkills(projectPath, options);
-  const selected = skills.filter((skill) => commands.has(skill.name.toLowerCase()));
+  const invoked = new Set(promptSkillParts(prompt, skills.map(skill => skill.name)).filter(part => part.skill).map(part => part.text.slice(1).toLowerCase()));
+  const selected = skills.filter((skill) => invoked.has(skill.name.toLowerCase()));
   if (!selected.length) return prompt;
   const sections = [];
   let totalBytes = 0;

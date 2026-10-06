@@ -56,7 +56,7 @@ test('Windows and Linux native tests run on PRs without building an installer', 
   assert.ok(!runs.includes('package:'), 'native tests never package')
 })
 
-test('native tests run only when a PR touches desktop code; the JavaScript job always runs', () => {
+test('native tests and Electron checks run only when a PR touches desktop code; the JavaScript job always runs', () => {
   const changes = ci.jobs.changes
   assert.ok(changes, 'a changes job decides what a PR touched')
   const filter = changes.steps.find(step => step.id === 'filter')
@@ -65,8 +65,10 @@ test('native tests run only when a PR touches desktop code; the JavaScript job a
   assert.ok(desktop.includes('apps/desktop/**') && desktop.includes('packages/**'))
   assert.ok(!desktop.includes('apps/mobile/**'), 'mobile-only PRs skip the desktop jobs')
   assert.equal(changes.outputs.desktop, "${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}")
-  assert.equal(ci.jobs['native-tests'].needs, 'changes')
-  assert.equal(ci.jobs['native-tests'].if, "needs.changes.outputs.desktop == 'true'")
+  for (const name of ['native-tests', 'desktop-checks']) {
+    assert.equal(ci.jobs[name].needs, 'changes', `${name} waits for the change detection`)
+    assert.equal(ci.jobs[name].if, "needs.changes.outputs.desktop == 'true'", `${name} is skipped on PRs without desktop changes`)
+  }
   assert.equal(ci.jobs.javascript.if, undefined)
 })
 
@@ -75,4 +77,14 @@ test('installers build on main, on dispatch, and on PRs only with the preview:in
   assert.equal(candidates.on.pull_request.paths, undefined)
   assert.deepEqual(candidates.on.push, { branches: ['main'], paths: candidates.on.push.paths })
   assert.equal(candidates.jobs.package.if, "${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview:installers') }}")
+})
+
+test('Electron checks run on Ubuntu under xvfb with screenshots kept as an artifact', () => {
+  const job = ci.jobs['desktop-checks']
+  assert.equal(job['runs-on'], 'ubuntu-latest')
+  const runs = job.steps.map(step => step.run).filter(Boolean)
+  assert.ok(runs.includes('xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron'))
+  const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact'))
+  assert.equal(upload.if, 'always()')
+  assert.equal(upload.with.path, '${{ runner.temp }}/electron-screenshots')
 })

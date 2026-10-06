@@ -34,6 +34,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // So is the linked-work snapshot (linked:snapshot); null would crash useLinkedWork.
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getCurrentProject: async () => ({ path: "/fixture", name: "shop", state }),
   listBranches: async () => ["main"],
   createWorktree: async () => {

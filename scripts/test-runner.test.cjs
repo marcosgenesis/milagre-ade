@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { test } = require('node:test')
-const { discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST } = require('./test-runner.cjs')
+const { shouldRetry, discoverUnitTests, discoverElectronChecks, selectTests, parseArgs, MANIFEST } = require('./test-runner.cjs')
 const root = path.join(__dirname, '..')
 
 test('discovers every node:test file and every Electron check', () => {
@@ -43,4 +43,21 @@ test('unknown flags are rejected', () => {
 
 test('--changed is rejected until it is implemented', () => {
   assert.throws(() => parseArgs(['--changed']), /--changed is not implemented yet; use --only or --workspace/)
+})
+
+test('a platform skip prints the manifest reason when it has one', () => {
+  const electron = ['scripts/test-sidebar-resize.cjs', 'scripts/test-windows-cli.cjs']
+  const { skipped } = selectTests({ unit: [], electron, filters: { ...parseArgs(['--electron']), platform: 'linux', commandExists: () => true } })
+  assert.deepEqual(skipped, [
+    { file: 'scripts/test-sidebar-resize.cjs', reason: `needs darwin: ${MANIFEST['test-sidebar-resize.cjs'].reason}` },
+    { file: 'scripts/test-windows-cli.cjs', reason: 'needs win32' },
+  ])
+  assert.match(MANIFEST['test-sidebar-resize.cjs'].reason, /#\d+/)
+})
+
+test('an Electron check is retried once, only on Linux CI', () => {
+  assert.equal(shouldRetry({ platform: 'linux', ci: 'true', attempt: 1 }), true)
+  assert.equal(shouldRetry({ platform: 'linux', ci: 'true', attempt: 2 }), false)
+  assert.equal(shouldRetry({ platform: 'linux', ci: undefined, attempt: 1 }), false)
+  assert.equal(shouldRetry({ platform: 'darwin', ci: 'true', attempt: 1 }), false)
 })

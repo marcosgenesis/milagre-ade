@@ -118,7 +118,7 @@ export function syncProject({ connect, snapshot, runs, onError, active, watchAct
     if (fetching) return;
     fetching = true;
     try {
-      // oxlint-disable-next-line no-unmodified-loop-condition -- the flag is set by a callback or another async task while the loop awaits; the linter cannot see that
+      // oxlint-disable-next-line no-unmodified-loop-condition -- the returned stop function sets stopped, and watcher events set pending, while the loop awaits
       while (pending && !stopped) {
         const next = pending;
         pending = null;

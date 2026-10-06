@@ -181,7 +181,7 @@ test('a failed Worktree discovery preserves existing Chats and disk state',async
 test('quit stops agents after a disk failure and can retry before releasing ownership',async t=>{
  const {project,make}=await fixture(t);let closed=0,created=false;const runtime=make({titleModels:{},agentCli:async()=>({command:'/fake'}),createSession(_provider,options){created=true;return {turnActive:true,closed:false,startTurn:async()=>{options.emit({type:'turn-started',turnId:'t'});return {turnId:'t'};},close:async()=>{closed++;options.emit({type:'turn-cancelled'});}};}});
  const opened=await runtime.openProject(project);const session=Object.values(opened.state.sessions)[0];await runtime.invoke('chat:send',[{projectPath:project,sessionId:session.id,body:'Keep me',provider:'codex',model:'test'}]);
- // oxlint-disable-next-line no-unmodified-loop-condition -- the flag is set by a callback or another async task while the loop awaits; the linter cannot see that
+ // oxlint-disable-next-line no-unmodified-loop-condition -- createSession assigns created when the runtime starts the turn while the loop waits
  for(let i=0;i<100 && !created;i++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(created,true);
  const rename=fs.rename;let fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
  await assert.rejects(runtime.close(),/disk full/);assert.ok(closed>0,'providers must stop even when persistence fails');assert.throws(()=>make(),/already owned/);

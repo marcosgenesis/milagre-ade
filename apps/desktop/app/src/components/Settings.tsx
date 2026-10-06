@@ -260,7 +260,7 @@ function usePhoneStatus() {
     let pushed = false;
     // An update that arrives while the first read is in flight is newer than that read.
     const off = window.milagre.onPhoneStatus((next) => { pushed = true; setStatus(next); });
-    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     window.milagre.getPhoneStatus().then((next) => { if (live && !pushed) setStatus(next); }, (error) => {
       if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
     });
@@ -300,7 +300,7 @@ function PhoneSettings() {
   useEffect(() => {
     if (!showingQr) return;
     let live = true;
-    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     window.milagre.openPhonePairing().then((next) => { if (live) setStatus(next); }, () => {});
     return () => { live = false; };
   }, [showingQr, setStatus]);
@@ -444,7 +444,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
     void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then((next) => {
-      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
       if (seq === previewSeq.current) setFound(next);
     }, () => {});
   };

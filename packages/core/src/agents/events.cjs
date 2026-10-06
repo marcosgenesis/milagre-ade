@@ -41,7 +41,7 @@ const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|E
 // The last non-empty line a CLI printed, without terminal colours and without a log line's timestamp, level
 // and module, and whether it was a log line.
 function readLastLine(text) {
-  // oxlint-disable-next-line no-control-regex -- the pattern matches terminal or control characters on purpose
+  // oxlint-disable-next-line no-control-regex -- strips ANSI colour escapes from provider output
   const raw = String(text ?? "").replace(/\x1b\[[0-9;]*m/g, "").split("\n").map((item) => item.trim()).filter(Boolean).at(-1) ?? "";
   const logged = LOG_PREFIX.test(raw);
   const line = logged ? raw.replace(LOG_PREFIX, "") : raw;

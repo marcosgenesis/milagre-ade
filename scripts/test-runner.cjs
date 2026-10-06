@@ -34,8 +34,7 @@ function discoverUnitTests(root) {
 }
 
 function discoverElectronChecks(root) {
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
-  return fs.readdirSync(path.join(root, 'scripts')).filter(name => /^test-.*\.cjs$/.test(name) && !/\.test\.cjs$/.test(name) && name !== 'test-runner.cjs').sort().map(name => `scripts/${name}`)
+  return fs.readdirSync(path.join(root, 'scripts')).filter(name => /^test-.*\.cjs$/.test(name) && !name.endsWith('.test.cjs') && name !== 'test-runner.cjs').sort().map(name => `scripts/${name}`)
 }
 
 const WORKSPACES = { shared: 'packages/shared/', core: 'packages/core/', desktop: 'apps/desktop/', daemon: 'apps/daemon/', relay: 'apps/relay/', mobile: 'apps/mobile/', scripts: 'scripts/' }

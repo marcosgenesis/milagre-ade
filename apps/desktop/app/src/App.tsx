@@ -310,7 +310,7 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
-  // oxlint-disable-next-line react/preserve-manual-memoization -- the dependency list is deliberately narrower than the compiler infers; the omitted values derive from the listed ones
+  // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads selectedSession.subagents and selectedSession.native_session_id, both listed; the compiler infers the whole selectedSession object from the property access
   const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
@@ -337,7 +337,7 @@ function App() {
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
   const displayedMessages = useMemo(() => pendingHere && pendingSend
     ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : [...messages, pendingSend.message]
-    // oxlint-disable-next-line react/preserve-manual-memoization -- the dependency list is deliberately narrower than the compiler infers; the omitted values derive from the listed ones
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
@@ -798,7 +798,7 @@ function App() {
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(next => {
-      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
       if (projectRef.current?.path === project.path) setBranches(next);
     }).catch(() => {});
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };

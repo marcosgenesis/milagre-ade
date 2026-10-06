@@ -39,7 +39,7 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
   const fits = chars => slots === 0 || (slots < MAX_PENDING && held + chars <= budgetChars);
   const reserve = chars => { slots++; held += chars; };
   function admit() {
-    // oxlint-disable-next-line no-unmodified-loop-condition -- the flag is set by a callback or another async task while the loop awaits; the linter cannot see that
+    // oxlint-disable-next-line no-unmodified-loop-condition -- clear() sets closed from outside while this loop drains the queue
     while (waiting.length && (closed || fits(waiting[0].chars))) {
       const next = waiting.shift();
       if (!closed) reserve(next.chars);

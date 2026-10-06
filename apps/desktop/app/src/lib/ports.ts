@@ -18,7 +18,7 @@ export function useAgentPorts() {
       setPorts(next);
     });
     const recover = window.milagre.onRuntimeSnapshot?.(snapshot => { updated = true; setPorts(snapshot.ports); });
-    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node callback (or deliberately bridges the promise to a callback API)
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     void window.milagre.getAgentPorts().then((next) => { if (live && !updated) setPorts(next); }).catch(() => {});
     return () => {
       live = false;

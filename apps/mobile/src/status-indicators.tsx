@@ -45,7 +45,7 @@ export function PullRequestLabel({ pr, compact = false }: { pr: PullRequest; com
   const ready = pr.state === 'OPEN' && !blocker && !checking && pr.conflictStatusKnown !== false;
   const tone = pr.state === 'MERGED' ? '#a855f7' : blocker ? (BLOCKERS[blocker].tone === 'red' ? colors.red : colors.orange) : checking ? colors.orange : colors.green;
   const status = pr.state === 'MERGED' ? 'Merged' : blocker ? BLOCKERS[blocker].short : checking ? 'CI running' : ready ? 'Ready' : '';
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the regex test also tolerates a non-string value, where startsWith would throw
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pr comes unvalidated from the host's JSON response, so pr.url may be missing and startsWith would throw
   return <Pressable accessibilityRole="link" accessibilityLabel={`Pull request ${pr.number}${status ? `, ${status}` : ''}`} onPress={() => { if (/^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {}); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
     <Icon icon={GitPullRequestIcon} tone="ink3" size={12} />
     <Text style={{ color: colors.ink3, fontSize: 13 }}>#{pr.number}</Text>

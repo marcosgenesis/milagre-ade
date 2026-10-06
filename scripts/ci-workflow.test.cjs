@@ -18,3 +18,16 @@ test('CI and candidate runs on one ref cancel the previous PR run but never a ma
 test('every CI job has a timeout', () => {
   for (const [name, job] of Object.entries(ci.jobs)) assert.ok(Number.isInteger(job['timeout-minutes']), `${name} needs timeout-minutes`)
 })
+
+test('CI typechecks once and builds the renderer without a second typecheck', () => {
+  const runs = ci.jobs.javascript.steps.map(step => step.run).filter(Boolean)
+  assert.ok(runs.includes('npm run typecheck'))
+  assert.ok(runs.includes('npm run build:renderer --workspace milagre'))
+  assert.ok(!runs.includes('npm run build'))
+})
+
+test('desktop agent tests do not repeat the renderer logic tests', () => {
+  const desktop = require('../apps/desktop/package.json').scripts
+  assert.equal(desktop['test:agent'], 'node --test electron/*.test.cjs')
+  assert.equal(desktop['test:ui'], 'node --test "app/src/**/*.test.ts"')
+})

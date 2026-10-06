@@ -39,7 +39,7 @@ jobs:
       - name: Test mobile transport
         run: npm run test:mobile
       - name: Build renderer
-        run: npm run build
+        run: npm run build:renderer --workspace milagre
       - name: Test agent runner
         run: npm run test:agent
       - name: Test UI logic

@@ -10,6 +10,12 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
   }
   async function open(id) {
     const link = await definition(id), key = scopeKey({ kind: 'link', linkId: id });
+    try { await workspaces.recoverLinkPreparations(id); } catch { /* The saved failure remains readable below. */ }
+    await store.update(id, latest => {
+      const sessions = { ...latest.sessions }; let changed = false;
+      for (const prep of Object.values(latest.preparations)) if (prep.status === 'ready' && !sessions[prep.chatId]) { sessions[prep.chatId] = { id: prep.chatId, agent_name: link.name, status: 'Created', workspacePath: prep.workspacePath, worktrees: prep.members }; changed = true; }
+      return changed ? { ...latest, sessions } : latest;
+    });
     let state = await store.get(id);
     await chats.resumeInterrupted(key, state).catch(() => {});
     state = await store.get(id); titles.resume(key, state);
@@ -17,6 +23,14 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
     const projects = await registry().list();
     return { link, state, projects: link.projectIds.map(projectId => projects.find(project => project.id === projectId) ?? { id: projectId, name: require('node:path').basename(require('node:path').dirname(projectId)), path: '' }) };
   }
+  commands.handle('link:workspace-roots', async (_event, requested) => {
+    const fs = require('node:fs/promises');
+    const real = await fs.realpath(requested).catch(() => null);
+    for (const id of store.ids()) for (const session of Object.values((await store.get(id)).sessions)) {
+      if (session.workspacePath === real) return session.worktrees.map(member => member.worktreePath);
+    }
+    throw new Error('Choose an open shared Chat workspace');
+  });
   commands.handle('link:list', () => registry().listProjectGroups());
   commands.handle('link:create', (_event, request) => registry().createProjectGroup(request));
   commands.handle('link:open', (_event, id) => open(id));
@@ -46,6 +60,6 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
     queues.set(request.linkId, run); run.finally(() => { if (queues.get(request.linkId) === run) queues.delete(request.linkId); }).catch(() => {});
     return run;
   });
-  return { definition, open };
+  return { definition, open, async workspace(root) { for (const id of store.ids()) for (const session of Object.values((await store.get(id)).sessions)) if (session.workspacePath === root) return session.worktrees; throw new Error('Workspace unavailable'); } };
 }
 module.exports = { registerLinkRuntime };

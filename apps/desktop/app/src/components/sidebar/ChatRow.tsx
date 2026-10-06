@@ -242,7 +242,7 @@ export const ChatRow = memo(function ChatRow({
           type="button"
           onClick={() => onPick(item)}
           aria-current={active ? "page" : undefined}
-          className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+          className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
           }`}
         >

@@ -23,7 +23,10 @@ function createLinkWorkspaces({ store, registry, ownProject, root = DEFAULT_WORK
     let prep = state.preparations[operationId] ?? Object.values(state.preparations).find(item => item.chatId === chatId);
     if (prep?.chatId !== undefined && prep.chatId !== chatId) throw new Error('Preparation belongs to another Chat');
     if (prep?.status === 'ready') return { workspacePath: prep.workspacePath, worktrees: prep.members };
-    if (prep?.status === 'failed') throw new Error(prep.error);
+    if (prep?.status === 'failed') {
+      if (prep.retainedPaths?.length) throw new Error(prep.error);
+      prep = undefined;
+    }
     const projects = await membersAvailable(link);
     // Acquire every repository before reserving or mutating any member.
     for (const project of projects) await ownProject(project.path);

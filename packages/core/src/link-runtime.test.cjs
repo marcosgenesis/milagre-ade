@@ -65,3 +65,16 @@ test('missing Project leaves shared history readable but blocks sends', async t 
     await assert.rejects(runtime.invoke('link:send', [{ linkId: link.id, operationId: randomUUID(), body: 'Edit' }]), /unavailable/);
   } finally { await fs.rename(projects[0].path + '-moved', projects[0].path); }
 });
+
+
+test('Git accepts a selected member and refuses the aggregate workspace; editor roots are explicitly validated', async t => {
+  const { runtime, projects } = await fixture(t);
+  const link = await runtime.invoke('link:create', [{ name: 'Food', projectIds: projects.map(p => p.id) }]);
+  await runtime.invoke('link:open', [link.id]);
+  const sent = await runtime.invoke('link:send', [{ linkId: link.id, operationId: randomUUID(), sessionId: null, body: 'Edit', provider: 'codex', model: 'test', permissionMode: 'auto' }]);
+  const session = (await runtime.invoke('link:snapshot', [link.id])).state.sessions[sent.sessionId];
+  await assert.rejects(runtime.invoke('git:changes', [{ cwd: session.workspacePath }]), /folder/);
+  assert.ok((await runtime.invoke('git:changes', [{ cwd: session.worktrees[1].worktreePath }])).isRepo);
+  assert.deepEqual(await runtime.invoke('link:workspace-roots', [session.workspacePath]), session.worktrees.map(member => member.worktreePath));
+  await assert.rejects(runtime.invoke('link:workspace-roots', ['/']), /workspace/);
+});

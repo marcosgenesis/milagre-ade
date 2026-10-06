@@ -1,3 +1,4 @@
+import { scopeKey } from '@milagre/shared/chat-scopes';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, applyNodeChanges, getSmoothStepPath, type Connection, type Edge, type EdgeProps, type Node, type NodeChange, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -10,7 +11,7 @@ import { delegatedChats } from "@/lib/linked-work";
 import { NEGOTIATION_ROUNDS } from "@milagre/shared/limits";
 import { ScrollArea } from "./primitives/ScrollArea";
 
-type CanvasChat = { id: number; title: string; mark: ChatMark; receiveOnly: boolean };
+type CanvasChat = { id: number; title: string; mark: ChatMark; receiveOnly: boolean; scopeOwner?: string };
 type CanvasData = { kind: "project" | "worktree"; endpoint: LinkEndpoint; name: string; branch?: string; diff?: string; chats?: CanvasChat[]; onOpenChat?: (projectPath: string, id: number) => void; projectPath: string; [key: string]: unknown };
 type CanvasNode = Node<CanvasData>;
 const nodeTypes = { project: ProjectNode, worktree: WorktreeNode };
@@ -76,7 +77,7 @@ function WorktreeNode({ data }: NodeProps<CanvasNode>) {
     </div>
     <ScrollArea as="ul" className="nodrag nopan nowheel mt-2 flex-1 border-t border-line px-2 py-1">
       {data.chats?.map(chat => <li key={chat.id}>
-        <button type="button" className="nodrag flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={() => data.onOpenChat?.(data.projectPath, chat.id)}>
+        <button type="button" className="nodrag flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-hover-2 hover:text-ink" onClick={() => data.onOpenChat?.(chat.scopeOwner ?? data.projectPath, chat.id)}>
           <span className={`size-1.5 shrink-0 rounded-full ${markClass[chat.mark]}`} title={chat.mark} />
           <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           {chat.receiveOnly && <span className="shrink-0 rounded border border-line px-1 text-[10px] text-ink-3" title="This Codex Chat can't use the linked tools: it gets the summary and receives Delegations only.">receive-only</span>}
@@ -110,12 +111,13 @@ function makeNodes(snapshot: CanvasSnapshot, states: Record<string, CoordinatorS
       if (message.role !== "assistant" && message.body.trim() && !firstMessages.has(message.session_id)) firstMessages.set(message.session_id, message);
     }
     for (const [index, worktree] of worktrees.entries()) {
-      const chats = Object.values(state?.sessions ?? {}).filter(session => session.worktree_id === worktree.id && !session.archived).map(session => ({
+      const chats: CanvasChat[] = Object.values(state?.sessions ?? {}).filter(session => session.worktree_id === worktree.id && !session.archived).map(session => ({
         id: session.id,
         title: chatTitle(session, firstMessages.has(session.id) ? [firstMessages.get(session.id)!] : []),
         mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), delegated: delegated.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
         receiveOnly: work.receiveOnly.includes(chatKey(project.path, session.id)),
       }));
+      if (worktree.sharedChat) chats.push({ id: worktree.sharedChat.sessionId, title: 'Open shared Link Chat', mark: 'idle', receiveOnly: false, scopeOwner: scopeKey({ kind: 'link', linkId: worktree.sharedChat.linkId }) } as typeof chats[number]);
       nodes.push({ id: worktreeNodeId(project.id, worktree.path), type: "worktree", parentId: projectNodeId(project.id), extent: "parent", position: snapshot.worktreePositions[project.id]?.[worktree.path] ?? { x: 20, y: 64 + index * 194 }, data: { kind: "worktree", endpoint: { project_id: project.id, worktree_path: worktree.path }, name: worktree.name, branch: worktree.name, diff: worktree.diff ? `+${worktree.diff.added} −${worktree.diff.removed}` : undefined, chats, projectPath: project.path, onOpenChat }, style: { width: 290, height: 178 }, dragHandle: ".canvas-drag-handle" });
     }
   }

@@ -60,7 +60,7 @@ const notFound = () => new Error("File not found");
 
 // `requested` (relative to root, or absolute) as a real path inside root, or an error. A symlink that
 // leaves root is refused after realpath; with no `requested` the root folder itself is the target.
-async function resolveInside(root, requested) {
+async function resolveInside(root, requested, additionalRoots = []) {
   let realRoot;
   try {
     realRoot = await fsp.realpath(root);
@@ -79,7 +79,10 @@ async function resolveInside(root, requested) {
     throw notFound();
   }
   const relative = path.relative(realRoot, real);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw outside();
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    const permitted = await Promise.all(additionalRoots.map(async owned => { const resolved = await fsp.realpath(owned); const within = path.relative(resolved, real); return within !== '..' && !within.startsWith(`..${path.sep}`) && !path.isAbsolute(within); }));
+    if (!permitted.some(Boolean)) throw outside();
+  }
   return { target: real, isDirectory: (await fsp.stat(real)).isDirectory() };
 }
 
@@ -111,8 +114,8 @@ async function openInEditor({ root, path: requested, line, editor: editorId }, {
   if (!editor) return "No editor found";
   let resolved;
   try {
-    await checkRoot(root);
-    resolved = await resolveInside(root, requested);
+    const ownedRoots = await checkRoot(root);
+    resolved = await resolveInside(root, requested, Array.isArray(ownedRoots) ? ownedRoots : []);
   } catch (error) {
     return error.message;
   }

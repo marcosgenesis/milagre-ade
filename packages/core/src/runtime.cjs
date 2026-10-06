@@ -229,14 +229,18 @@ function createRuntime(options) {
   }
 
   commands.handle("project:files", async (_event, root, query) => {
-    if (!scopeStates.worktreePaths().includes(root)) throw new Error("Choose an open project's worktree.");
+    if (!scopeStates.worktreePaths().includes(root) && !scopeStates.workspacePaths().includes(root)) throw new Error("Choose an open project's worktree.");
+    if (scopeStates.workspacePaths().includes(root)) {
+      const roots = await linkRuntime.workspace(root);
+      return (await Promise.all(roots.map(async member => (await searchFiles(member.worktreePath, query)).map(file => `${member.alias}/${file}`)))).flat();
+    }
     return searchFiles(root, query);
   });
   // Path-taking commands only serve folders the user opened: an open project, one of its worktrees, or a recent
   // project (the switcher shows their avatars). Any renderer or paired phone script otherwise reaches any folder.
   async function knownFolder(folder) {
     if (typeof folder !== "string" || !path.isAbsolute(folder)) throw new Error("An absolute Project path is required");
-    if (states.has(folder) || scopeStates.worktreePaths().includes(folder)) return;
+    if (states.has(folder) || scopeStates.worktreePaths().includes(folder) || scopeStates.workspacePaths().includes(folder)) return;
     if ((await recentProjects().list()).some(item => item.path === folder)) return;
     throw new Error("Open this project in Milagre first.");
   }
@@ -277,6 +281,7 @@ function createRuntime(options) {
   // chat uses it. Two removals of one worktree take turns: the second finds it gone and says so instead of failing.
   const removals = new Map();
   commands.handle("worktree:remove", async (_event, worktreePath, options) => {
+    if ((await linkStore.ownedWorktrees()).has(worktreePath)) throw new Error("This Worktree belongs to a shared Link Chat. Archive the Chat to hide it.");
     const { force, projectPath, chatId, seen } = options && typeof options === "object" ? options : {};
     if (typeof projectPath !== "string" || !states.has(projectPath)) throw new Error("Open this project in Milagre first.");
     if (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath)) throw new Error("An absolute worktree path is required.");

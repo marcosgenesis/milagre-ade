@@ -4,7 +4,8 @@ function createChatScopes({ projects, links, validateLink }) {
   return {
     has(key) { const [store, id] = target(key); return store.has(id); },
     projects: () => [...projects.projects(), ...links.ids().map(linkId => scopeKey({ kind: 'link', linkId }))],
-    worktreePaths: () => [...projects.worktreePaths(), ...links.ids().flatMap(id => Object.values(links.cached(id)?.sessions ?? {}).flatMap(session => [session.workspacePath, ...session.worktrees.map(member => member.worktreePath)]))],
+    worktreePaths: () => [...projects.worktreePaths(), ...links.ids().flatMap(id => Object.values(links.cached(id)?.sessions ?? {}).flatMap(session => session.worktrees.map(member => member.worktreePath)))],
+    workspacePaths: () => links.ids().flatMap(id => Object.values(links.cached(id)?.sessions ?? {}).map(session => session.workspacePath)),
     get(key) { const [store, id] = target(key); return store.get(id); },
     update(key, change, options) { const [store, id] = target(key); return store.update(id, change, options); },
     flush(key) { if (key === undefined) return Promise.all([projects.flush(), links.flush()]); const [store, id] = target(key); return store.flush(id); },

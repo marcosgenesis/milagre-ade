@@ -1,11 +1,12 @@
 import type { SavedHost } from './hosts-store.ts';
 import type { PushPreferences, PushStore } from './push-store.ts';
+import { isChatScope } from './chat-scope.ts';
 
 export type PushView = { hostId: string; chatId: string } | null;
 export type NotificationTarget = { host: SavedHost; projectPath: string; sessionId: number; eventId: string };
 export function notificationTarget(value: unknown, hosts: SavedHost[]): NotificationTarget | null {
   const data = value as Record<string, unknown> | null;
-  if (!data || data.kind !== 'milagre-chat' || typeof data.hostId !== 'string' || typeof data.projectPath !== 'string' || !data.projectPath.startsWith('/') ||
+  if (!data || data.kind !== 'milagre-chat' || typeof data.hostId !== 'string' || !isChatScope(data.projectPath) ||
     data.projectPath.length > 4096 || data.projectPath.includes('\0') || !Number.isSafeInteger(data.sessionId) || Number(data.sessionId) < 1 || typeof data.eventId !== 'string' || data.eventId.length > 128) return null;
   const host = hosts.find(host => host.id === data.hostId);
   return host ? { host, projectPath: data.projectPath, sessionId: Number(data.sessionId), eventId: data.eventId } : null;

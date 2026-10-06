@@ -42,7 +42,7 @@ class ChatImages {
     this.copies = new Map();
   }
   cwd(state, message, projectPath) {
-    return state.worktrees?.[state.sessions?.[message.session_id]?.worktree_id]?.path || projectPath;
+    return state.sessions?.[message.session_id]?.workspacePath || state.worktrees?.[state.sessions?.[message.session_id]?.worktree_id]?.path || projectPath;
   }
   async copy(projectPath, file) {
     const key = JSON.stringify([projectPath, file]);
@@ -65,7 +65,7 @@ class ChatImages {
       } finally { await handle.close(); }
       const mime = mimeTypes[path.extname(file).toLowerCase()];
       const id = createHash('sha256').update(bytes).digest('hex');
-      return (await storeImages(projectPath, [{ id, name: path.basename(file), path: file, dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }]))[0];
+      return (await storeImages(this.states.storageDirectory?.(projectPath) ?? projectPath, [{ id, name: path.basename(file), path: file, dataUrl: `data:${mime};base64,${bytes.toString('base64')}` }]))[0];
     })();
     this.copies.set(key, { stamp, promise: copying });
     copying.catch(() => { if (this.copies.get(key)?.promise === copying) this.copies.delete(key); });

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const http = require('node:http');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -44,6 +44,65 @@ test('mobile bridge forwards commands to the existing owner and reads cached sna
   assert.deepEqual(snapshot.runs.runs, {});
   await bridge.close();
   assert.equal((await client.call('daemon:status')).version, 'test');
+});
+
+test('a phone opens a named Link and sends one shared Chat with two owned Worktrees', async t => {
+  const { dataDir, project, rpc, request, bridge, token } = await fixture(t, { runtimeOptions: demoRuntimeOptions() });
+  const second = path.join(path.dirname(project), 'second');
+  await fs.mkdir(second);
+  execFileSync('git', ['init', '-b', 'main', second], { stdio: 'ignore' });
+  for (const folder of [project, second]) {
+    await fs.writeFile(path.join(folder, 'status.txt'), 'Original\n');
+    execFileSync('git', ['-C', folder, 'add', '.']);
+    execFileSync('git', ['-C', folder, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Fixture']);
+    assert.equal((await rpc('project:open', [folder])).status, 200);
+  }
+  const registryResponse = await rpc('project:registry'); assert.equal(registryResponse.status, 200);
+  const registered = (await registryResponse.json()).result;
+  const made = await rpc('link:create', [{ name: 'Together', projectIds: registered.map(item => item.id) }]);
+  assert.equal(made.status, 200);
+  const link = (await made.json()).result;
+  const owner = `milagre-link:${link.id}`;
+  assert.equal((await rpc('link:open', [link.id])).status, 200);
+  const snapshotRoute = '/snapshot?projectPath=' + encodeURIComponent(owner);
+  const initial = (await (await request(snapshotRoute)).json()).result;
+  assert.equal(initial.link.link.id, link.id);
+  assert.equal(initial.link.projects.length, 2);
+  assert.deepEqual(initial.link.state.sessions, {});
+  const uploaded = await request('/attachments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectPath: owner, name: 'notes.txt', base64: Buffer.from('Shared draft attachment').toString('base64') }) });
+  assert.equal(uploaded.status, 200, 'A Link draft can attach files before allocating Worktrees');
+  const socket = new WebSocket(bridge.url.replace('http:', 'ws:') + '/live?projectPath=' + encodeURIComponent(owner), { headers: { authorization: `Bearer ${token}` } });
+  t.after(() => socket.terminate());
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  const signals = []; socket.on('message', raw => signals.push(JSON.parse(String(raw)).type));
+  const sent = { linkId: link.id, sessionId: null, operationId: randomUUID(), body: 'hello', provider: 'codex', model: 'test', permissionMode: 'auto' };
+  const answer = await rpc('link:send', [sent]); assert.equal(answer.status, 200);
+  const id = (await answer.json()).result.sessionId;
+  assert.equal((await (await rpc('link:send', [sent])).json()).result.sessionId, id, 'retry reuses the shared Chat');
+  const client = await connect({ dataDir }); t.after(() => client.close());
+  let saved;
+  for (let i = 0; i < 80; i++) { saved = (await (await request(snapshotRoute)).json()).result; if (saved.link.state.messages.some(message => message.role === 'assistant')) break; await delay(50); }
+  assert.equal(Object.keys(saved.link.state.sessions).length, 1);
+  assert.equal(saved.link.state.sessions[id].worktrees.length, 2);
+  const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+  const media = file => request(`/media?projectPath=${encodeURIComponent(owner)}&path=${encodeURIComponent(file)}`);
+  for (const member of saved.link.state.sessions[id].worktrees) {
+    const image = path.join(member.worktreePath, 'screenshot.png'); await fs.writeFile(image, png);
+    assert.equal((await media(image)).status, 200, 'Images in either owned Worktree are available to the shared Chat');
+  }
+  const outside = path.join(path.dirname(project), 'unrelated.png'); await fs.writeFile(outside, png);
+  const alias = path.join(saved.link.state.sessions[id].worktrees[0].worktreePath, 'outside.png'); await fs.symlink(outside, alias);
+  assert.equal((await media(outside)).status, 403);
+  assert.equal((await media(alias)).status, 403, 'An owned Worktree symlink cannot share an unrelated file');
+  assert.equal(saved.link.state.messages.filter(message => message.role === 'user').length, 1);
+  assert.ok(saved.link.state.messages.some(message => message.role === 'assistant'));
+  for (let i = 0; i < 40 && !signals.includes('project'); i++) await delay(50);
+  assert.ok(signals.includes('project'), 'Link state wakes the phone live socket');
+  const message = saved.link.state.messages.at(-1);
+  assert.equal((await (await request('/message?projectPath=' + encodeURIComponent(owner) + '&id=' + message.id)).json()).result.id, message.id);
+  assert.equal((await request('/runs?projectPath=' + encodeURIComponent(owner))).status, 200);
+  assert.equal((await rpc('chat:patch', [owner, id, { title: 'From phone' }])).status, 200);
+  assert.equal((await (await request(snapshotRoute)).json()).result.link.state.sessions[id].title, 'From phone');
 });
 
 test('the phone can load the real skill catalog for its project', async t => {

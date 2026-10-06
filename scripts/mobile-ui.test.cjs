@@ -247,11 +247,14 @@ const snapshot = projectPath => ({ project: { path: projectPath, state: { sessio
 
 const relayRuntime = { name: 'relay runtime' };
 function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
+  client.recentScopes ??= () => client.call('project:recent');
+  client.open ??= async owner => { await client.call('project:open', [owner]); return client.snapshot(owner); };
   const react = hookHost({ effects });
   const { useSessionState, PendingChatsProvider } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
     './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, savedNavigation: { read: async () => null, save: async () => {} }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'), '@milagre/shared/model': {},
+    './link-operations': require('../apps/mobile/src/link-operations.ts'),
   }, '\nexport { useSessionState, PendingChatsProvider };');
   return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount, pending: props => { react.begin(); return PendingChatsProvider(props).props.value; } });
 }
@@ -370,6 +373,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     drafts: { '/p#new:1': 'first message' },
     attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
     preferences: {}, defaults: require('../apps/mobile/src/turn-options.ts').defaultPreferences, setDefaultPermission() {}, models: null, cliStatus: null,
+    linkOperations: require('../apps/mobile/src/link-operations.ts').createLinkOperations(),
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, rememberChat() {}, isSelected: () => true,
@@ -380,6 +384,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
+    'expo-crypto': { randomUUID: require('node:crypto').randomUUID },
+    '../chat-actions': load('chat-actions.ts', { 'react-native': { Alert: { alert } }, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': { confirmSheet: (...args) => alert(...args), confirm: async () => true } }),
     '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
     '../message-navigation': { MessageNavigation: 'MessageNavigation' },
     '../prompt-field': { PromptField: 'PromptField' },
@@ -403,6 +409,33 @@ test('the mobile composer loads skills from the selected Chat Worktree', () => {
   chat.session.snapshot.project.state.worktrees[2] = { id: 2, name: 'feature', path: '/worktrees/feature', project_id: 1 };
   chat.params.worktreeId = '2';
   assert.equal(chat.field().projectPath, '/worktrees/feature');
+});
+
+test('a mobile Link draft sends through its canonical owner and retries the same operation', async () => {
+  let attempts = 0;
+  const chat = chatHost({ effects: true, call: async method => {
+    if (method === 'link:send' && ++attempts === 1) throw new Error('Connection lost');
+    return { sessionId: 42 };
+  } });
+  const id = '40996067-6cc2-4427-bc1e-9007c5f51875', owner = `milagre-link:${id}`;
+  const link = { link: { id, name: 'Food', projectIds: ['api', 'web'] }, projects: [{ id: 'api', path: '/api', name: 'API' }, { id: 'web', path: '/web', name: 'Web' }], state: { next_id: 1, sessions: {}, messages: [], preparations: {} } };
+  chat.session.snapshot = require('../apps/mobile/src/chat-scope.ts').phoneSnapshot({ link, runs: { runs: {} } });
+  chat.params.worktreeId = '0';
+  chat.session.drafts = { [`${owner}#new:0`]: 'Update both Projects' };
+  assert.equal(chat.field().projectPath, '', 'A new shared draft never selects a primary Project for skills');
+  await chat.send();
+  await settle();
+  assert.equal(chat.field().value, 'Update both Projects', 'Failure restores the draft');
+  await chat.send();
+  await settle();
+  const sends = chat.calls.filter(call => call.method === 'link:send');
+  assert.equal(sends.length, 2);
+  assert.equal(sends[0].args[0].linkId, id);
+  assert.equal(sends[0].args[0].sessionId, null);
+  assert.equal(sends[0].args[0].operationId, sends[1].args[0].operationId);
+  assert.equal('worktreeId' in sends[0].args[0], false);
+  assert.equal(chat.calls.some(call => ['worktree:create', 'chat:send'].includes(call.method)), false);
+  assert.equal(chat.params.id, '42');
 });
 
 test('browsing another Project in the drawer leaves the current Chat selected', async () => {
@@ -493,7 +526,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
-    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon' }, './project-search': { ProjectSearch: 'ProjectSearch' },
+    '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
+    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
   const rows = () => find(render(), node => node.type === 'FlatList');

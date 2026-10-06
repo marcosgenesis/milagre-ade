@@ -84,6 +84,7 @@ export interface Worktree {
   base?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
+  sharedChat?: { linkId: string; sessionId: number };
 }
 
 export interface AgentSession {
@@ -118,6 +119,46 @@ export interface AgentSession {
   resumeTurn?: { stoppedAt?: number };
 }
 
+/** A named Link owns one conversation across an isolated Worktree in each member Project. */
+export type ChatScope = { kind: 'project'; projectPath: string } | { kind: 'link'; linkId: string };
+export interface NamedProjectLink {
+  id: string;
+  name: string;
+  projectIds: string[];
+  createdAt: string;
+}
+export interface WorktreeBinding {
+  projectId: string;
+  projectPath: string;
+  worktreePath: string;
+  branch: string;
+  base: string;
+}
+export interface LinkChatSession extends Omit<AgentSession, 'worktree_id'> {
+  workspacePath: string;
+  worktrees: WorktreeBinding[];
+}
+export interface LinkPreparation {
+  operationId: string;
+  chatId: number;
+  status: 'reserved' | 'creating' | 'setup' | 'ready' | 'failed';
+  members: Array<WorktreeBinding & { created?: boolean; setupDone?: boolean }>;
+  workspacePath: string;
+  error?: string;
+  retainedPaths?: string[];
+}
+export interface LinkState {
+  next_id: number;
+  sessions: Record<string, LinkChatSession>;
+  messages: ChatMessage[];
+  preparations: Record<string, LinkPreparation>;
+}
+export interface OpenLink {
+  link: NamedProjectLink;
+  state: LinkState;
+  projects: Array<{ id: string; path: string; name: string }>;
+}
+
 
 
 export interface ChatMessage {
@@ -137,6 +178,7 @@ export interface ChatMessage {
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
+  operationId?: string;
 }
 
 /**
@@ -457,3 +499,6 @@ export interface ProviderUsage {
 export interface UsageSnapshot {
   providers: ProviderUsage[];
 }
+
+export interface TranscriptState { next_id: number; sessions: Record<string, AgentSession | LinkChatSession>; messages: ChatMessage[]; }
+export type LinkSendRequest = Omit<ChatSendRequest, 'projectPath' | 'worktreeId'> & { linkId: string; operationId: string };

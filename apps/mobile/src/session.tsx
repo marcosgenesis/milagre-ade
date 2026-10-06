@@ -1,7 +1,7 @@
 import { reconcileState } from "@milagre/shared/reconcile";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot } from './client';
+import { createClient, type ClientHost, type Client, type RecentProject, type Snapshot } from './client';
 import { relayRuntime } from './relay-native';
 import { syncProject } from './live';
 import { readPermission, savedHosts, savedNavigation, savePermission } from './hosts-native';
@@ -11,6 +11,7 @@ import type { AgentCliStatus, AgentModels, PermissionMode } from '@milagre/share
 import type { Attachment } from './attachments';
 import { defaultPreferences, type TurnPreferences } from './turn-options';
 import { pendingChatSessionId, type PendingChat } from '@milagre/shared/chats';
+import { createLinkOperations } from './link-operations';
 
 const hostOf = (url: string) => /^relay:/.test(url) ? 'Mac' : String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 /** A computer to connect to: a saved one, a scanned pairing, or an address and token typed in. */
@@ -66,7 +67,7 @@ function useSessionState() {
     const previous = selection.current;
     try {
       await next.call('daemon:status');
-      const projects = await next.call<RecentProject[]>('project:recent');
+      const projects = await next.recentScopes();
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== '1') {
         if (remember) {
@@ -94,9 +95,9 @@ function useSessionState() {
     try {
       await next.call('daemon:status');
       if (current !== generation.current) return false;
-      const projects = await next.call<RecentProject[]>('project:recent');
-      const project = await next.call<OpenProject>('project:open', [projectPath]);
-      const state = await next.snapshot(project.path);
+      const projects = await next.recentScopes();
+      const state = await next.open(projectPath);
+      const project = state.project;
       if (current !== generation.current) return false;
       if (!state.project.state.sessions[sessionId]) throw new Error('This Chat is no longer available on your computer.');
       selection.current = { client: next, path: project.path };
@@ -120,14 +121,14 @@ function useSessionState() {
       if (cached) setSnapshot(cached);
     }
     try {
-      const project = await client.call<OpenProject>('project:open', [projectPath]);
-      const state = await client.snapshot(project.path);
+      const state = await client.open(projectPath);
+      const project = state.project;
       if (current === generation.current) {
         if (options.chatId !== undefined && !state.project.state.sessions[options.chatId]) throw new Error('This Chat is no longer available. Choose another Chat.');
         selection.current = { client, path: project.path };
         seen.current.set(`${client.url}|${projectPath}`, state).set(`${client.url}|${project.path}`, state);
         setSnapshot(previous => reconcileState(previous ?? undefined, state)); setError('');
-        setRecent(previous => previous.some(item => item.path === project.path) ? previous : [...previous, { path: project.path, name: project.name }]);
+        setRecent(previous => previous.some(item => item.path === project.path) ? previous : [...previous, { path: project.path, name: project.name, ...(project.link ? { link: project.link.link, projects: project.link.projects } : {}) }]);
         return state;
       }
     } catch (error) {
@@ -140,13 +141,12 @@ function useSessionState() {
   // Reading a drawer group does not select it or disturb the Chat behind the drawer.
   const previewProject = useCallback(async (path: string) => {
     if (!client) throw new Error('Connect to your computer first.');
-    const project = await client.call<OpenProject>('project:open', [path]);
-    return client.snapshot(project.path);
+    return client.open(path);
   }, [client]);
   const reloadProjects = useCallback(async () => {
     if (!client) return;
     const current = generation.current;
-    const projects = await client.call<RecentProject[]>('project:recent');
+    const projects = await client.recentScopes();
     if (current === generation.current) setRecent(projects);
   }, [client]);
   const projectPath = snapshot?.project.path;
@@ -200,6 +200,7 @@ function useSessionState() {
  * only the composer's screens, not every screen that reads the connection and snapshot.
  */
 function ComposerProvider({ children }: { children: React.ReactNode }) {
+  const [linkOperations] = useState(createLinkOperations);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
@@ -208,10 +209,10 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void readPermission().then(saved => { if (saved) setPermission(saved); }); }, []);
   const defaults = useMemo(() => ({ ...defaultPreferences, permissionMode: permission }), [permission]);
   const setDefaultPermission = useCallback((mode: PermissionMode) => { setPermission(mode); void savePermission(mode); }, []);
-  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission }), [drafts, attachments, preferences, defaults, setDefaultPermission]);
+  const value = useMemo(() => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission, linkOperations }), [drafts, attachments, preferences, defaults, setDefaultPermission, linkOperations]);
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
-type Composer = { defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
+type Composer = { linkOperations: ReturnType<typeof createLinkOperations>; defaults: TurnPreferences; setDefaultPermission: (mode: PermissionMode) => void; drafts: Record<string, string>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>; attachments: Record<string, Attachment[]>; setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>; preferences: Record<string, TurnPreferences>; setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>> };
 const ComposerContext = createContext<Composer | null>(null);
 export type MobilePendingChat = { preview: PendingChat; hostId: string; projectPath: string; originChatId: string; originSessionId: number | null; worktreeId: number; newWorktree: boolean; accepted: boolean; promoted?: boolean };
 type PendingChats = { pendingChats: Record<string, MobilePendingChat>; setPendingChats: React.Dispatch<React.SetStateAction<Record<string, MobilePendingChat>>> };

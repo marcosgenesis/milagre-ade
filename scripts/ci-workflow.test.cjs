@@ -46,3 +46,12 @@ test('CI runs the unit suite through the single test command', () => {
   assert.ok(runs.includes('npm test -- --unit'))
   assert.ok(!runs.some(run => /npm run test:/.test(run)), 'no per-suite scripts left in CI')
 })
+
+test('Windows and Linux native tests run on PRs without building an installer', () => {
+  const job = ci.jobs['native-tests']
+  assert.deepEqual(job.strategy.matrix.include.map(item => item.os), ['windows-latest', 'ubuntu-latest'])
+  const runs = JSON.stringify(job.steps)
+  assert.ok(runs.includes('windows-runtime.test.cjs') && runs.includes('windows-transport.test.cjs') && runs.includes('process-tree.test.cjs') && runs.includes('ownership.test.cjs'))
+  assert.ok(runs.includes('MILAGRE_LINUX_REPOSITORY_INTEGRATION=1'))
+  assert.ok(!runs.includes('package:'), 'native tests never package')
+})

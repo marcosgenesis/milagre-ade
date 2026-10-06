@@ -210,6 +210,7 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
       } finally { shared.close(); }
       await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
     } catch (cleanupError) {
+      // oxlint-disable-next-line no-unsafe-finally -- pre-existing, see PR body
       if (!failure) throw cleanupError;
       console.error('Fixture cleanup failed:', cleanupError);
     }

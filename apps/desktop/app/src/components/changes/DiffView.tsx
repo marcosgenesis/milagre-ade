@@ -4,6 +4,7 @@ import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 import { ScrollArea } from "../primitives/ScrollArea";
 import type { DiffFileEntry } from "../../electron";
 import { CommentCard, CommentSlot } from "./DiffComments";
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 import { DiffFile, type DiffLayout } from "./DiffFile";
 import { useCommentDraft, type CommentActions, type CommentStore, type CommentView } from "./useDiffComments";
 import type { Changes } from "./useChanges";
@@ -61,6 +62,7 @@ export function DiffView({ changes, prefs, comments }: { changes: Changes; prefs
     }
     grouped.current = next;
     return next;
+  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }, [comments.comments]);
   // Comments on files that left the diff have no file to sit in; they gather at the top so they can still be deleted.
   const paths = new Set(files.map((file) => file.path));

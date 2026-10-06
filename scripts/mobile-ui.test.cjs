@@ -1603,6 +1603,7 @@ test('relay transports: one per Mac, replaced by a new code, closed in the backg
   const phoneRandom = n => new Uint8Array(n);
   const { relayRuntime } = load('relay-native.ts', {
     'react-native': { AppState: { addEventListener: (_event, listener) => { listeners.push(listener); return { remove() {} }; } } },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- pre-existing, see PR body
     'expo-file-system': { Directory: class {}, File: class {}, Paths: {} },
     './relay-transport': { createRelayTransport: options => { const transport = { options, closed: 0, close() { transport.closed++; } }; made.push(transport); return transport; } },
     './phone-identity': { phoneIdentity: async () => identity, phoneRandom },

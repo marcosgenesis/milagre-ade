@@ -15,6 +15,7 @@ export function usePullRequest(worktree?: Worktree) {
   const session = useSession();
   const [pr, setPr] = useState<PullRequest | null>(null);
   useFocusEffect(useCallback(() => {
+    // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
     if (!worktree || !session.client) return;
     const client = session.client;
     let focused = true;
@@ -45,6 +46,7 @@ export function PullRequestLabel({ pr, compact = false }: { pr: PullRequest; com
   const ready = pr.state === 'OPEN' && !blocker && !checking && pr.conflictStatusKnown !== false;
   const tone = pr.state === 'MERGED' ? '#a855f7' : blocker ? (BLOCKERS[blocker].tone === 'red' ? colors.red : colors.orange) : checking ? colors.orange : colors.green;
   const status = pr.state === 'MERGED' ? 'Merged' : blocker ? BLOCKERS[blocker].short : checking ? 'CI running' : ready ? 'Ready' : '';
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
   return <Pressable accessibilityRole="link" accessibilityLabel={`Pull request ${pr.number}${status ? `, ${status}` : ''}`} onPress={() => { if (/^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {}); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
     <Icon icon={GitPullRequestIcon} tone="ink3" size={12} />
     <Text style={{ color: colors.ink3, fontSize: 13 }}>#{pr.number}</Text>

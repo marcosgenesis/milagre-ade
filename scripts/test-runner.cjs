@@ -34,6 +34,7 @@ function discoverUnitTests(root) {
 }
 
 function discoverElectronChecks(root) {
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
   return fs.readdirSync(path.join(root, 'scripts')).filter(name => /^test-.*\.cjs$/.test(name) && !/\.test\.cjs$/.test(name) && name !== 'test-runner.cjs').sort().map(name => `scripts/${name}`)
 }
 

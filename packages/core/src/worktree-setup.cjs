@@ -1,4 +1,5 @@
 const { spawnCommand } = require("./agents/command.cjs");
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
@@ -110,6 +111,7 @@ function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(e
   });
 }
 
+// oxlint-disable-next-line no-control-regex -- pre-existing, see PR body
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** The last `lines` lines of command output, without colour codes or trailing blank lines. */

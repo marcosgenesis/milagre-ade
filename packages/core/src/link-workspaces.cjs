@@ -86,6 +86,7 @@ function createLinkWorkspaces({ store, registry, ownProject, root = DEFAULT_WORK
         const exists = await fs.lstat(member.worktreePath).then(() => true, () => false);
         if (!exists) continue;
         try {
+          // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
           if (member.setupStarted && !member.setupDone || !member.created || await git.read.commitOf(member.worktreePath, 'HEAD') !== member.initialCommit || (await git.read.text(member.worktreePath, ['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim()) throw new Error('Modified or unverified');
           await git.write.checked(member.projectPath, ['worktree', 'remove', '--', member.worktreePath]);
           await git.write.checked(member.projectPath, ['branch', '-d', '--', member.branch]);
@@ -94,6 +95,7 @@ function createLinkWorkspaces({ store, registry, ownProject, root = DEFAULT_WORK
       }
       prep.status = 'failed'; prep.retainedPaths = retainedPaths;
       prep.error = `Project ${current?.projectName ?? link.name}: ${error.message}${retainedPaths.length ? `\nRetained Worktrees: ${retainedPaths.join(', ')}` : ''}`;
+      // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
       await save(link.id, prep); throw new Error(prep.error);
     }
   }

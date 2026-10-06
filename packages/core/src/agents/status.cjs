@@ -32,6 +32,7 @@ function claudeLoggedOut(command, { execFileImpl = execFile, env } = {}) {
           const status = JSON.parse(text.slice(text.indexOf("{")));
           resolve(status.loggedIn === false && status.apiProvider === "firstParty");
         } catch {
+          // oxlint-disable-next-line promise/no-multiple-resolved -- pre-existing, see PR body
           resolve(false);
         }
       });

@@ -237,6 +237,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
       clearInterval(current.timer);
       clearTimeout(current.readyTimer);
       clearTimeout(current.stableTimer);
+      // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
       for (const conn of [...current.conns.keys()]) dropConn(current, conn, false);
       if (session === current) session = null;
       if (closed) { setStatus('offline'); return; }
@@ -298,6 +299,7 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
       const current = session;
       if (!current) { setStatus('offline'); return; }
       const ended = new Promise(resolve => current.socket.once('close', resolve));
+      // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
       for (const conn of [...current.conns.keys()]) dropConn(current, conn, false);
       if (current.socket.readyState === WebSocket.CONNECTING) current.socket.terminate();
       else current.socket.close(1000);

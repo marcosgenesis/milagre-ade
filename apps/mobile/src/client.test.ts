@@ -14,6 +14,7 @@ test('one send carries token/version and is never retried after a network failur
   let calls = 0;
   const client = createClient({ address: 'http://127.0.0.1:8787', token: 'token' }, async (_url, init) => {
     calls++;
+    // oxlint-disable-next-line no-unsafe-optional-chaining -- pre-existing, see PR body
     assert.equal((init?.headers as Record<string, string>).Authorization, 'Bearer token');
     assert.deepEqual(JSON.parse(init?.body as string), { v: 1, method: 'chat:send', args: [{ body: 'hello' }] });
     throw new Error('offline');
@@ -51,6 +52,7 @@ test('creating or removing a worktree gets the desktop deadline instead of the n
 test('HTTPS sends authenticate once, refuse redirects and reject a changed response origin', async () => {
   const client = createClient({ address: 'https://computer.example.com', token: 'private-token' }, async (_url, init) => {
     assert.equal(init?.redirect, 'error');
+    // oxlint-disable-next-line no-unsafe-optional-chaining -- pre-existing, see PR body
     assert.equal((init?.headers as Record<string, string>).Authorization, 'Bearer private-token');
     const response = new Response(JSON.stringify({ v: 1, result: {} }));
     Object.defineProperty(response, 'url', { value: 'https://other.example.com/rpc' });
@@ -83,6 +85,7 @@ test('an unchanged snapshot comes back as a 304 and reuses the last one', async 
   const sent: (string | undefined)[] = [];
   let calls = 0;
   const client = createClient({ address: 'http://127.0.0.1:8787', token: 'token' }, async (_url, init) => {
+    // oxlint-disable-next-line no-unsafe-optional-chaining -- pre-existing, see PR body
     sent.push((init?.headers as Record<string, string>)['If-None-Match']);
     return ++calls === 1 ? new Response(JSON.stringify({ v: 1, result: { project: 'p' } }), { headers: { etag: '"abc"' } }) : new Response(null, { status: 304, headers: { etag: '"abc"' } });
   });

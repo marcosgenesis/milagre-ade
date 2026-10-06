@@ -149,6 +149,7 @@ test('only one host can be pending: a newer one closes the older', () => {
 
 test('a pending host cannot carry phone frames before it proves', () => {
   const room = createRoom({ id, nonce: randomNonce });
+  // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
   const host = connectHost(room);
   const phone = fakeSocket();
   const conn = room.phoneOpened(phone);

@@ -44,6 +44,7 @@ const scripts = {
     yield init;
     throw new Error("Claude Code process exited with code 1");
   },
+  // oxlint-disable-next-line require-yield -- pre-existing, see PR body
   async *missing() {
     throw new Error("No conversation found with session ID: gone");
   },
@@ -347,6 +348,7 @@ test("explains a missing CLI without starting anything", async (t) => {
 });
 
 test("keeps the saved session when a resumed start fails for another reason", async (t) => {
+  // oxlint-disable-next-line require-yield -- pre-existing, see PR body
   const script = async function* () { throw new Error("spawn EACCES"); };
   const { session, events } = claude(t, { script, resumeId: "session-1" });
   await session.startTurn(TURN);

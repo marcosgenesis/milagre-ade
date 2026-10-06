@@ -35,6 +35,7 @@ export function ActivityBlock({ entries, streaming = false, waitingStepIds = [] 
   if (entries.length === 1 && entries[0].type === "step") return <StepRow step={entries[0].step} waiting={waitingStepIds.includes(entries[0].step.id)} />;
 
   const steps = entries.flatMap((entry): ChatStep[] => (entry.type === "step" ? [entry.step] : []));
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   const current = streaming ? [...steps].reverse().find((step) => step.status === "running") : undefined;
   const waiting = current ? waitingStepIds.includes(current.id) : false;
   const summary = activitySummary(steps);

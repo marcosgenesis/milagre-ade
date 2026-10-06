@@ -3,6 +3,7 @@ const { createLinkStore } = require('./link-store.cjs');
 const { createLinkWorkspaces } = require('./link-workspaces.cjs');
 const { createChatScopes } = require('./chat-scopes.cjs');
 const { registerLinkRuntime } = require('./link-runtime.cjs');
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require('@milagre/shared/chat-scopes');
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
@@ -16,7 +17,9 @@ const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession, recoverCodexSubagents } = require("./agents/codex-provider.cjs");
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
@@ -797,6 +800,7 @@ function createRuntime(options) {
     closing = true;
     closed ??= (async () => {
       await simulators.close();
+      // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -808,10 +812,12 @@ function createRuntime(options) {
         // final flush retries after their cancellation events have been recorded.
         await scopeStates.flush().catch(() => {});
         await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
+        // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
         await Promise.allSettled([...starting]);
         await agents.closeAll();
         await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
       }
+      // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
       while (background.size) await Promise.allSettled([...background]);
       await states.close();
       await linkStore.close();
@@ -846,6 +852,7 @@ function createRuntime(options) {
     // mutate state, so its event watermark and run sequence describe one instant.
     snapshot: () => ({ links: linkStore.ids().map(linkId => ({ linkId, state: linkStore.has(linkId) ? linkStore.cached(linkId) : undefined })), projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
     focused: (view) => accept(() => { diffs.focused(view ? view.projectPath : shownProjectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     flush: async () => { await Promise.allSettled([...active]); await scopeStates.flush(); await usageStore.idle(); },
     close,
   };

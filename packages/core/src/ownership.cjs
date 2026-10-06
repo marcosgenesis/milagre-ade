@@ -71,6 +71,7 @@ function acquireOwnership(lockPath) {
     fs.mkdirSync(lockPath, { mode: 0o700 });
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
+    // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
     if (!clearStale(lockPath)) throw new Error(`Milagre state is already owned. Close its other runtime. If it crashed, verify the process in ${path.join(lockPath, 'owner.json')} has exited before removing ${lockPath}.`);
     return acquireOwnership(lockPath);
   }

@@ -13,6 +13,7 @@ import { defaultPreferences, type TurnPreferences } from './turn-options';
 import { pendingChatSessionId, type PendingChat } from '@milagre/shared/chats';
 import { createLinkOperations } from './link-operations';
 
+// oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pre-existing, see PR body
 const hostOf = (url: string) => /^relay:/.test(url) ? 'Mac' : String(url || '').replace(/^https?:\/\//, '').replace(/[:/].*$/, '') || 'Computer';
 /** A computer to connect to: a saved one, a scanned pairing, or an address and token typed in. */
 export type HostLink = ClientHost & { name?: string };
@@ -75,6 +76,7 @@ function useSessionState() {
   // Saved computers are read once at launch; the startup splash waits for them.
   useEffect(() => { void Promise.all([savedHosts.list().then(setHosts).catch(() => {}), savedNavigation.read().then(setLastLocation)]).finally(() => setBooted(true)); }, []);
   const rememberChat = useCallback((chatId: number) => {
+    // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
     if (!client || !snapshot || !Number.isSafeInteger(chatId) || chatId <= 0) return;
     const location = { hostId: client.url, projectPath: snapshot.project.path, chatId };
     setLastLocation(location);

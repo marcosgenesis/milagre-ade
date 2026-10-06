@@ -131,10 +131,12 @@ class PendingQuestions {
   }
 
   dismissAll() {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const requestId of [...this.open.keys()]) this.settle(requestId, "dismissed");
   }
 
   cancelAll() {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const requestId of [...this.open.keys()]) this.settle(requestId, "cancelled");
   }
 }

@@ -23,6 +23,7 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   const diffOpen = shown && chatId !== null && diffChatId === chatId;
 
   // Hiding the panel closes the diff; reopening it starts on the chat.
+  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { if (!shown) setDiffChatId(null); }, [shown]);
 
   useEffect(() => {

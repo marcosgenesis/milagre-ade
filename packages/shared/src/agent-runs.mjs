@@ -36,6 +36,7 @@ export function chatInProject(projectPath, key) {
 
 /** The model of the chat's last message, which a turn the agent started by itself runs on. */
 export function lastUserModel(state, sessionId) {
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   return [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "user")?.model ?? "";
 }
 

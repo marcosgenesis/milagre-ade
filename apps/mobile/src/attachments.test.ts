@@ -4,6 +4,7 @@ import { appendAttachments, attachmentPrompt, prepareAttachments, type Attachmen
 import type { Client } from './client.ts';
 test('attachment drafts are bounded without dropping an existing selection', () => {
   const file = { id: 'a', name: 'a.txt', uri: 'file:///a' };
+  // oxlint-disable-next-line unicorn/no-array-fill-with-reference-type -- pre-existing, see PR body
   assert.throws(() => appendAttachments([file], Array(4).fill(file)), /up to 4/);
   assert.equal(appendAttachments([file], []).length, 1);
 });

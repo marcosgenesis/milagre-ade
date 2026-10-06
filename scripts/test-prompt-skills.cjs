@@ -168,6 +168,7 @@ async function main() {
     name: 'prompt-skills-fixture',
     resolveId(id) { if (id === '/__prompt-skills.tsx') return id; },
     load(id) { if (id === '/__prompt-skills.tsx') return fixture; },
+    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     configureServer(server) { server.middlewares.use(async (request, response, next) => {
       if (request.url !== '/__prompt-skills') return next();
       response.setHeader('Content-Type', 'text/html');

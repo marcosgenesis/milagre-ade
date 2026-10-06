@@ -39,6 +39,7 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
   const fits = chars => slots === 0 || (slots < MAX_PENDING && held + chars <= budgetChars);
   const reserve = chars => { slots++; held += chars; };
   function admit() {
+    // oxlint-disable-next-line no-unmodified-loop-condition -- pre-existing, see PR body
     while (waiting.length && (closed || fits(waiting[0].chars))) {
       const next = waiting.shift();
       if (!closed) reserve(next.chars);
@@ -87,6 +88,7 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
     },
     /** Admitted captures, for tests: slots in use and characters reserved. */
     usage: () => ({ slots, chars: held }),
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     clear() { closed = true; for (const id of [...captures.keys()]) release(id); admit(); },
   };
 }

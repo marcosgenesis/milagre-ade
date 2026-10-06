@@ -18,6 +18,7 @@ function elapsed(agent: Subagent, now: number) {
 }
 
 export const SubagentTranscript = memo(function SubagentTranscript({ agent }: { agent: Subagent }) {
+  // oxlint-disable-next-line react/purity -- pre-existing, see PR body
   const [now, setNow] = useState(Date.now());
   const running = subagentActive(agent);
   useEffect(() => {

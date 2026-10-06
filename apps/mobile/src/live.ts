@@ -58,7 +58,9 @@ export function openLive(url: string, headers: Record<string, string>, { onSigna
     let next: LiveSocket;
     try { next = create(url, { ...headers, Origin: LIVE_ORIGIN }); } catch { failures++; retry = timers.setTimeout(connect, UNSUPPORTED); return; }
     socket = next;
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     next.onopen = () => { if (next !== socket) return; failures = 0; up = true; quiet(); onStatus(true); };
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     next.onmessage = event => {
       if (next !== socket) return;
       quiet();
@@ -67,7 +69,9 @@ export function openLive(url: string, headers: Record<string, string>, { onSigna
       if (type === 'runs' || type === 'project') onSignal(type);
     };
     // Both platforms put the refused upgrade's status in the message ("…101… but was '404 Not Found'").
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     next.onerror = event => { if (/\b404\b/.test(event?.message ?? '')) unsupported = true; lost(next); };
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     next.onclose = () => lost(next);
   }
   connect();
@@ -114,6 +118,7 @@ export function syncProject({ connect, snapshot, runs, onError, active, watchAct
     if (fetching) return;
     fetching = true;
     try {
+      // oxlint-disable-next-line no-unmodified-loop-condition -- pre-existing, see PR body
       while (pending && !stopped) {
         const next = pending;
         pending = null;

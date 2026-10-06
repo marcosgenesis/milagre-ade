@@ -17,6 +17,7 @@ async function inspectAccount(provider, { command, env }) {
       try {
         const raw = String(stdout); const info = JSON.parse(raw.slice(raw.indexOf('{')));
         resolve({ state: info.loggedIn ? 'ready' : 'signed-out', email: text(info.email), plan: text(info.subscriptionType || info.authMethod) });
+      // oxlint-disable-next-line promise/no-multiple-resolved -- pre-existing, see PR body
       } catch { resolve({ state: 'error', message: 'Could not check this account. Try Refresh.' }); }
     })?.stdin?.end();
   });
@@ -42,6 +43,7 @@ function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, hom
       if (parsed.selected[provider] !== 'default' && !parsed.accounts.some(a => a.provider === provider && a.id === parsed.selected[provider])) throw new Error();
     }
     saved = { accounts: parsed.accounts.map(({ id, provider, label }) => ({ id, provider, label })), selected: { claude: parsed.selected.claude, codex: parsed.selected.codex } };
+  // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
   } catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not read saved accounts. Restore accounts/accounts.json before switching accounts.'); }
   const identities = new Map();
   const logins = new Map();
@@ -193,6 +195,7 @@ function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, hom
     if (wasSelected) changed(provider);
     return snapshot();
   }
+  // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
   return { list, select, add, login, cancel, remove, environment, directory, selected: provider => saved.selected[provider], close() { closed = true; for (const k of [...logins.keys()]) cancel(...k.split(':')); } };
 }
 

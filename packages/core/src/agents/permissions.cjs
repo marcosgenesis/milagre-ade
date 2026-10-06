@@ -192,6 +192,7 @@ class PendingPermissions {
 
   setMode(mode) {
     this.mode = mode;
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const [requestId, pending] of [...this.answers]) {
       if (mode === "full" || (mode === "auto" && pending.inWorkspace)) this.resolve(requestId, "allow");
     }
@@ -215,6 +216,7 @@ class PendingPermissions {
   }
 
   cancelAll() {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     for (const requestId of [...this.answers.keys()]) this.resolve(requestId, "cancelled");
   }
 }

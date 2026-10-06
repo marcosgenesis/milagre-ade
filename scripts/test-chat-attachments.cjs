@@ -304,6 +304,7 @@ async function main() {
     name: 'issues-fixture',
     resolveId(id) { if (id === '/__issues.tsx') return id; },
     load(id) { if (id === '/__issues.tsx') return fixture; },
+    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     configureServer(server) { server.middlewares.use(async (request, response, next) => {
       if (request.url !== '/__issues') return next();
       response.setHeader('Content-Type', 'text/html');

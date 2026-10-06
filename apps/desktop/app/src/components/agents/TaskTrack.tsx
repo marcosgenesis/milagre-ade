@@ -25,6 +25,7 @@ export function TaskTrack({ tasks }: { tasks?: AgentTask[] }) {
   const bounds = useAnchoredPopover({ opened, setOpened, trigger, panel, width: 380 });
   const empty = !tasks?.length;
   // The list goes with its turn; a later one starts closed.
+  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { if (empty) setOpened(false); }, [empty]);
   if (!tasks?.length) return null;
   const done = tasks.filter(task => task.status === "completed").length;

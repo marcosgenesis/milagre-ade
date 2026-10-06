@@ -91,6 +91,7 @@ class ChatImages {
       const message = { ...run, session_id: sessionIdFromKey(key) };
       if (imagePaths(message, this.cwd(state, message, projectPath)).has(requested)) return (await this.copy(projectPath, requested)).path;
     }
+    // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
     for (const message of [...state.messages].reverse()) {
       if (message.role !== 'assistant') continue;
       const stored = message.images?.find(image => image.sourcePath === requested);

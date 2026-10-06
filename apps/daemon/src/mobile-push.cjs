@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { preparePrivateDirectory, assertPrivate } = require('@milagre/core/private-files');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -149,6 +150,7 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
       epoch++; focus.clear();
       return ordered(async () => { await save(new Map()); });
     },
+    // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
     async settled() { while (work.size) await Promise.all([...work]); await writes; },
     async close() { closed = true; epoch++; focus.clear(); await writes; },
   };

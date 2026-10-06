@@ -42,6 +42,7 @@ function createProjectSettings(file) {
     const save = queue.catch(() => {}).then(async () => {
       const data = await read({ strict: true });
       const key = path.resolve(projectPath);
+      // oxlint-disable-next-line unicorn/no-useless-fallback-in-spread -- pre-existing, see PR body
       const entry = { ...(data.projects[key] ?? {}) };
       change(entry);
       if (Object.keys(entry).length > 0) data.projects[key] = entry;

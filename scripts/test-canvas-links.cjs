@@ -81,6 +81,7 @@ async function main() {
     name: "canvas-links-fixture",
     resolveId(id) { if (id === "/__canvas_links_fixture.tsx") return id; },
     load(id) { if (id === "/__canvas_links_fixture.tsx") return fixture; },
+    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     configureServer(server) { server.middlewares.use(async (request, response, next) => {
       if (request.url !== "/__canvas_links__") return next();
       const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__canvas_links_fixture.tsx"></script></body></html>');

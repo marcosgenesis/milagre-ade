@@ -1,5 +1,6 @@
 import type { NamedProjectLink } from '@milagre/shared/model';
 import { ProjectAvatarStack } from './ProjectAvatarStack';
+// oxlint-disable-next-line no-unused-expressions -- pre-existing, see PR body
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";

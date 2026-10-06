@@ -110,6 +110,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       if (refs.length) byPath[worktree.path] = [...new Set([...(byPath[worktree.path] ?? []), ...refs])];
     }
     return byPath;
+  // oxlint-disable-next-line react/preserve-manual-memoization -- pre-existing, see PR body
   }, [state?.messages, state?.sessions, state?.worktrees]);
   const chatRefsKey = JSON.stringify(Object.entries(chatRefs).sort(([a], [b]) => a.localeCompare(b)));
   const [chatSnapshot, setChatSnapshot] = useState<{ projectPath: string; prs: Record<string, Record<PullRequestRef, PullRequest | null>> }>({ projectPath: "", prs: {} });

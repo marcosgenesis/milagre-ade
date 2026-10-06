@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { isLinkScopeKey, scopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
 const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
 const { projectOfKey } = require('@milagre/shared/agent-runs');

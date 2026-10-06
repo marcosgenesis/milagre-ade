@@ -104,6 +104,7 @@ async function main() {
     html = `<html><style>*{box-sizing:border-box}body{margin:0;width:1800px;height:980px;background:#f0f2f5;display:flex;align-items:center;justify-content:center;gap:42px}.desktop{width:1260px;height:834px;border-radius:18px;overflow:hidden;border:1px solid #d9dce1;box-shadow:0 20px 60px #17203320}.desktop img{width:100%;height:100%}.phone{width:370px;border:7px solid #232427;border-radius:44px;overflow:hidden;box-shadow:0 20px 50px #17203330;background:#fafafb}.phone img{display:block;width:100%}</style><body><div class="desktop"><img src="${uri(path.join(output,'desktop.png'))}"></div><div class="phone"><img src="${uri(mobile)}"></div></body></html>`;
   }
   if (!process.argv.includes('--host-only')) {
+    // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
     const server = await createServer({ configFile: path.resolve('apps/desktop/vite.config.ts'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'readme-fixture', resolveId: id => id === '/__readme.tsx' ? id : null, load: id => id === '/__readme.tsx' ? fixture : null, configureServer(server) { server.middlewares.use(async (req,res,next) => {
       if (req.url !== '/__readme') return next();
       res.setHeader('Content-Type','text/html');

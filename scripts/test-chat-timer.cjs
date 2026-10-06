@@ -104,6 +104,7 @@ async function main() {
       resolveId(id) { if (id === "/__chat_timer_fixture.tsx") return id; },
       load(id) { if (id === "/__chat_timer_fixture.tsx") return fixture; },
       configureServer(server) {
+        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           if (request.url !== "/__chat_timer__") return next();
           const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_timer_fixture.tsx"></script></body></html>');

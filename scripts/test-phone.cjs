@@ -63,6 +63,7 @@ async function browserChecks() {
   window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
   const evaluate = async (source) => {
     try { return await window.webContents.executeJavaScript(source); }
+    // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
     catch (error) { throw new Error(`${source}: ${error.message}`); }
   };
   async function waitFor(source) {
@@ -185,6 +186,7 @@ async function main() {
       resolveId(id) { if (id === "/__phone_fixture.tsx") return id; },
       load(id) { if (id === "/__phone_fixture.tsx") return fixture; },
       configureServer(server) {
+        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           if (request.url !== "/__phone__") return next();
           const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__phone_fixture.tsx"></script></body></html>');

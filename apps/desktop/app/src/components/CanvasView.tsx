@@ -141,6 +141,7 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack, focus
     try { setSnapshot(await window.milagre.getCanvas()); setError(null); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
+  // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 15000); return () => window.clearInterval(timer); }, [refresh]);
   const openChatRef = useRef(onOpenChat);
   openChatRef.current = onOpenChat;
@@ -149,6 +150,7 @@ export function CanvasView({ states, runs, linkedWork, onOpenChat, onBack, focus
     if (!snapshot) return;
     const visible = focusLink ? { ...snapshot, projects: snapshot.projects.filter(project => focusLink.projectIds.includes(project.id)) } : snapshot;
     const next = makeNodes(visible, states, runs, linkedWork, openChat);
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setNodes(previous => next.map(node => {
       const old = previous.find(item => item.id === node.id);
       return old ? { ...node, position: old.position } : node;

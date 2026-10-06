@@ -77,6 +77,7 @@ const SPARKLE = 'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z';
 /** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */
 function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; live: boolean; waiting: boolean; onPress: () => void }) {
   const palette = hex(useColorScheme());
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   const current = live ? [...steps].reverse().find(step => step.status === 'running') : undefined;
   const summary = activitySummary(steps);
   const label = current ? current.title : summary.text || 'Activity';

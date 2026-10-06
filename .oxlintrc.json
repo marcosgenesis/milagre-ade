@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "react",
+    "import",
+    "promise",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-shadow": "warn",
+    "react/react-in-jsx-scope": "off",
+    "typescript/no-explicit-any": "warn",
+    "react-hooks/exhaustive-deps": "warn",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": [
+          "**/*.css",
+          "react-native-get-random-values",
+          "expo-router/entry"
+        ]
+      }
+    ],
+    "no-console": "off",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/consistent-function-scoping": "warn",
+    "promise/always-return": "warn",
+    "unicorn/no-array-sort": "warn",
+    "react/exhaustive-effect-dependencies": "warn",
+    "react/refs": "warn"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/release/**",
+    "**/.expo/**",
+    "apps/mobile/ios/**",
+    "apps/mobile/android/**",
+    "squashfs-root/**",
+    "docs/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "**/*.test.*",
+        "scripts/test-*.cjs"
+      ],
+      "rules": {
+        "no-shadow": "off"
+      }
+    }
+  ]
+}

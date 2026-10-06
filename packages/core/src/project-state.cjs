@@ -22,6 +22,7 @@ function reconcileState(rawState, projectName, discoveredWorktrees, options = {}
   const state = rawState ?? emptyState(projectName);
   const existingWorktrees = Object.values(state.worktrees ?? {});
   const existingSessions = Object.values(state.sessions ?? {});
+  // oxlint-disable-next-line unicorn/no-useless-spread -- pre-existing, see PR body
   let nextId = Math.max(state.next_id ?? 1, ...[
     ...existingWorktrees.map((item) => item.id),
     ...existingSessions.map((item) => item.id),

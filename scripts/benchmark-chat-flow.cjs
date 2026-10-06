@@ -75,6 +75,7 @@ async function main() {
         }
       },
       configureServer(server) {
+        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           if (request.url.split('?')[0] !== '/__chat_flow__') return next();
           response.setHeader('Content-Type', 'text/html');

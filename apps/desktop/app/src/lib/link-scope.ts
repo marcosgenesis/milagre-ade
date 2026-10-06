@@ -37,6 +37,7 @@ export function createScopeDrafts() {
   };
 }
 export function linkChatRows(state: LinkState) {
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   return Object.values(state.sessions).filter(session => !session.archived).map(session => ({ id: String(session.id), label: chatTitle(session, state.messages.filter(message => message.session_id === session.id)), unread: session.unread, worktreeCount: session.worktrees.length })).reverse();
 }
 export function memberWorktreeForAction(state: LinkState, sessionId: number, projectId: string) {

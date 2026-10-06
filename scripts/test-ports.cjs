@@ -113,6 +113,7 @@ async function browserChecks() {
   window.webContents.on("console-message", (details) => { if (details.level === "error") console.error(details.message); });
   const evaluate = async (source) => {
     try { return await window.webContents.executeJavaScript(source); }
+    // oxlint-disable-next-line preserve-caught-error -- pre-existing, see PR body
     catch (error) { throw new Error(`${source}: ${error.message}`); }
   };
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
@@ -217,6 +218,7 @@ async function main() {
       resolveId(id) { if (id === "/__ports_fixture.tsx") return id; },
       load(id) { if (id === "/__ports_fixture.tsx") return fixture; },
       configureServer(server) {
+        // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
         server.middlewares.use(async (request, response, next) => {
           if (request.url !== "/__ports__") return next();
           const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__ports_fixture.tsx"></script></body></html>');

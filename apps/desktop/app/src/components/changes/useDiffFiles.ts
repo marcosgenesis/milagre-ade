@@ -79,6 +79,7 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
   useEffect(() => {
     dropPatches();
     forced.current.clear();
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setSnapshot({ scope: JSON.stringify([cwd, base, mode]), list: { state: "idle" } });
     if (active && cwd) void refresh();
     // Invalidates a read still running for the old folder or mode.
@@ -110,6 +111,7 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
         });
     });
     pump();
+  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }, [pump]);
 
   const patchFor = (file: DiffFileEntry) => cache.current.get(patchKey(cwd, mode, file));

@@ -58,6 +58,7 @@ class ChatTitles {
     await this.update(projectPath, latest => {
       const current = latest.sessions[sessionId];
       if (!current?.titlePending) return latest;
+      // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
       const { titlePending, ...rest } = current;
       return { ...latest, sessions: { ...latest.sessions, [sessionId]: {
         ...rest, ...(title && !current.title && !current.generatedTitle ? { generatedTitle: title } : {}),

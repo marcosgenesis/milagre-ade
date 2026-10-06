@@ -21,6 +21,7 @@ function MarkdownImage({ src, alt, media, basePath }: { src: string; alt: string
     if (!target) return null;
     if ('url' in target) return { uri: target.url };
     try { return media?.(target.path) ?? null; } catch { return null; }
+  // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
   }, [target, media, attempt]);
   const pending = source && typeof (source as Promise<ImageSourcePropType>).then === 'function' ? source as Promise<ImageSourcePropType> : null;
   const [loaded, setLoaded] = useState<{ source: MediaValue; value: ImageSourcePropType | null } | null>(null);

@@ -65,6 +65,7 @@ async function browserChecks() {
 }
 async function main(){
  const {createServer}=await import('vite');const {spawn}=require('node:child_process');
+ // oxlint-disable-next-line oxc/no-async-endpoint-handlers -- pre-existing, see PR body
  const server=await createServer({server:{host:'127.0.0.1',port:0},plugins:[{name:'accounts-fixture',resolveId:id=>id==='/__accounts.tsx'?id:null,load:id=>id==='/__accounts.tsx'?fixture:null,configureServer(server){server.middlewares.use(async(req,res,next)=>{if(req.url!=='/__accounts__')return next();res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/__accounts.tsx"></script></body></html>'));});}}]});
  try{await server.listen();const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn(require('electron'),[__filename,server.resolvedUrls.local[0]+'__accounts__','-ApplePersistenceIgnoreState','YES'],{env,stdio:'inherit'});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>resolve(code??1));});}finally{await server.close();}
 }

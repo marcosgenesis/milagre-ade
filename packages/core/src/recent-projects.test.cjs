@@ -70,6 +70,7 @@ test("the list keeps the 10 most recent projects", async (t) => {
   const list = await recent.list();
 
   assert.equal(MAX_RECENT, 10);
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   assert.deepEqual(list.map((entry) => entry.name), names.slice(2).reverse());
 });
 
@@ -128,6 +129,7 @@ test("writes are atomic: saves run one at a time and leave no temporary files", 
   await Promise.all(paths.map((folder) => recent.add(folder)));
 
   assert.deepEqual(await fs.readdir(data), ["recent-projects.json"]);
+  // oxlint-disable-next-line unicorn/no-array-reverse -- pre-existing, see PR body
   assert.deepEqual((await recent.list()).map((entry) => entry.name), [...names].reverse());
 });
 

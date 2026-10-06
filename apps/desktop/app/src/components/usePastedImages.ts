@@ -13,7 +13,9 @@ export function isAttachableImage(file: File): boolean {
 function readImage(file: File): Promise<ImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     reader.onload = () => resolve({ id: crypto.randomUUID(), name: file.name || "Pasted image", dataUrl: String(reader.result) });
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- pre-existing, see PR body
     reader.onerror = () => reject(new Error("Could not read the pasted image. Try again."));
     reader.readAsDataURL(file);
   });
@@ -38,6 +40,7 @@ export function usePastedImages(scope: string) {
   }
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     clear();
     localFiles.current.clear();
     return () => { generation.current++; };

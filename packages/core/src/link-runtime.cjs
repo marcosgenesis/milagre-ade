@@ -1,3 +1,4 @@
+// oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
 const { randomUUID } = require('node:crypto');
 const { scopeKey, validLinkId } = require('@milagre/shared/chat-scopes');
 function registerLinkRuntime({ commands, registry, store, workspaces, chats, broadcast, titles }) {

@@ -78,6 +78,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({ opened, agents, wor
   }
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     if (!opened || working) { clearSleepTimer(); setGodGaze(null); }
     return clearSleepTimer;
   }, [opened, working]);
@@ -99,6 +100,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({ opened, agents, wor
   // Keep existing positions on updates; new arrivals push only bots in their space.
   useEffect(() => {
     if (!opened) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setPositions(previous => {
       const arrivals = visible.filter(agent => !previous[agent.id]);
       if (!arrivals.length) return previous;

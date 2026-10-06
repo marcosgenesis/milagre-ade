@@ -65,6 +65,7 @@ function forChatList(project, runs) {
     }
   }
   const sessions = Object.fromEntries(Object.entries(project.state.sessions).map(([id, session]) => {
+    // oxlint-disable-next-line no-unused-vars -- pre-existing, see PR body
     const { subagents, handoverDraft, ...metadata } = session;
     return [id, { ...metadata, ...(handoverDraft === undefined ? {} : { handoverDraft: '' }) }];
   }));
@@ -367,6 +368,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             await confine?.check(projectPath);
             await scopeRoots(projectPath);
             const folder = path.join(uploads, randomUUID());
+            // oxlint-disable-next-line no-control-regex -- pre-existing, see PR body
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
             const save = async () => {

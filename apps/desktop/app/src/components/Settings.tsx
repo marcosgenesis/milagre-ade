@@ -260,6 +260,7 @@ function usePhoneStatus() {
     let pushed = false;
     // An update that arrives while the first read is in flight is newer than that read.
     const off = window.milagre.onPhoneStatus((next) => { pushed = true; setStatus(next); });
+    // oxlint-disable-next-line promise/no-callback-in-promise -- pre-existing, see PR body
     window.milagre.getPhoneStatus().then((next) => { if (live && !pushed) setStatus(next); }, (error) => {
       if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
     });
@@ -299,12 +300,14 @@ function PhoneSettings() {
   useEffect(() => {
     if (!showingQr) return;
     let live = true;
+    // oxlint-disable-next-line promise/no-callback-in-promise -- pre-existing, see PR body
     window.milagre.openPhonePairing().then((next) => { if (live) setStatus(next); }, () => {});
     return () => { live = false; };
   }, [showingQr, setStatus]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!showingQr) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 15_000);
     return () => window.clearInterval(timer);
@@ -442,6 +445,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
     void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then((next) => {
+      // oxlint-disable-next-line promise/no-callback-in-promise -- pre-existing, see PR body
       if (seq === previewSeq.current) setFound(next);
     }, () => {});
   };
@@ -455,6 +459,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setText(null);
     setFound(null);
     setLoadError(null);
@@ -552,6 +557,7 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // oxlint-disable-next-line react/set-state-in-effect -- pre-existing, see PR body
     setText(null);
     setResolved(null);
     setError(null);

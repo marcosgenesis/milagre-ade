@@ -34,6 +34,7 @@ export default function ComputersScreen() {
     }));
   }, []);
   const load = useCallback(async () => {
+    // oxlint-disable-next-line react/memo-dependencies -- pre-existing, see PR body
     try { const hosts = await session.loadHosts(); setError(''); void check(hosts); return hosts; }
     catch (e) { setError((e as Error).message); return []; }
   }, [session.loadHosts, check]); // eslint-disable-line react-hooks/exhaustive-deps

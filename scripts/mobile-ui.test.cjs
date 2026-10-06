@@ -1781,13 +1781,14 @@ test('mobile simulator receiver is an OTA JS string cached locally; backgroundin
   const gate = deferred(), calls = [], injected = [];
   const client = { call: async (method, args) => { calls.push([method, args]); return method === 'simulator:open' ? gate.promise : null; } };
   const h = simulatorHost(client);
-  h.render('TestSimulatorWebView', { client, deviceId: 'sim' }); await settle();
-  const tree = h.render('TestSimulatorWebView', { client, deviceId: 'sim' });
+  h.render('TestSimulatorWebView', { client, deviceId: 'sim', chatId: '/p#7' }); await settle();
+  const tree = h.render('TestSimulatorWebView', { client, deviceId: 'sim', chatId: '/p#7' });
   assert.equal(tree.type, 'DomWebView'); assert.match(tree.props.source.uri, /^file:\/\/\/cache\//);
   assert.match(h.files.get(tree.props.source.uri), /RTCPeerConnection/);
   assert.equal(tree.props.useExpoModulesBridge, false);
   tree.props.ref.current = { injectJavaScript: value => injected.push(value) };
   tree.props.onMessage({ nativeEvent: { data: JSON.stringify({ channel: 'milagre-simulator', id: 1, method: 'open', args: { deviceId: 'sim' } }) } });
+  assert.equal(calls.find(([method]) => method === 'simulator:open')[1][0].chatId, '/p#7');
   h.background(); gate.resolve({ viewerId: 'late-viewer' }); await settle();
   assert.ok(injected.some(script => script.includes('simulatorDispose')));
   assert.deepEqual(JSON.parse(JSON.stringify(calls.find(([method]) => method === 'simulator:close'))), ['simulator:close', [{ viewerId: 'late-viewer' }]]);
@@ -1798,9 +1799,9 @@ test('mobile simulator chooses the sole running device, but a list never starts 
   const device = { id: 'one', name: 'iPhone', platform: 'ios', version: '26.2' };
   for (const devices of [[device], [device, { ...device, id: 'two' }]]) {
     const calls = [];
-    const h = simulatorHost({ url: 'mac', call: async method => { calls.push(method); return { supported: true, devices }; } });
-    h.render('SimulatorSheet', { hostId: 'mac' }); await settle();
-    const tree = h.render('SimulatorSheet', { hostId: 'mac' });
+    const h = simulatorHost({ url: 'mac', call: async method => { calls.push(method); return { chatId: '/p#7', supported: true, devices, attached: devices, available: [] }; } });
+    h.render('SimulatorSheet', { hostId: 'mac', chatId: '/p#7' }); await settle();
+    const tree = h.render('SimulatorSheet', { hostId: 'mac', chatId: '/p#7' });
     assert.equal(tree.props.style.paddingBottom, 34, 'controls clear the phone home indicator');
     assert.equal(!!find(tree, node => node.props?.deviceId === 'one'), devices.length === 1);
     assert.deepEqual(calls, ['simulator:list']);
@@ -1812,10 +1813,10 @@ test('mobile simulator chooses the sole running device, but a list never starts 
 test('simulator sheet preserves its native header and bounds chooser/viewer content below it', async t => {
   const device = { id: 'one', name: 'iPhone', platform: 'ios', version: '27' };
   for (const devices of [[device], [device, { ...device, id: 'two' }]]) {
-    const h = simulatorHost({ url: 'mac', call: async () => ({ supported: true, devices }) });
+    const h = simulatorHost({ url: 'mac', call: async () => ({ chatId: '/p#7', supported: true, devices, attached: devices, available: [] }) });
     t.after(() => h.cleanup());
-    h.render('SimulatorSheet', { hostId: 'mac' }); await settle();
-    const tree = h.render('SimulatorSheet', { hostId: 'mac' });
+    h.render('SimulatorSheet', { hostId: 'mac', chatId: '/p#7' }); await settle();
+    const tree = h.render('SimulatorSheet', { hostId: 'mac', chatId: '/p#7' });
     const [header, body] = tree.props.children;
     assert.equal(header.props.collapsable, false, 'Fabric must preserve one header view for native sheet sizing');
     assert.equal(header.props.style.flexShrink, 0);
@@ -2089,4 +2090,37 @@ test('mobile TSX preview colors native text in both themes and preserves selecti
   const dark = render();
   assert.notEqual(keyword(dark), keyword(light));
   assert.notEqual(keyword(dark), tag(dark));
+});
+
+
+test('new mobile Chat has no simulator pill; an existing Chat carries its identity', () => {
+  const fresh = chatHost();
+  assert.equal(find(fresh.render(), n => n.type === 'SimulatorChip'), undefined);
+  const existing = ongoingChatHost();
+  assert.equal(find(existing.render(), n => n.type === 'SimulatorChip').props.chatId, '/p#7');
+});
+
+
+test('mobile picker exposes other devices only in Attach and detach updates this Chat', async () => {
+  const a = { id: 'a', name: 'My iPhone', platform: 'ios', version: '27' };
+  const b = { id: 'b', name: 'Other device', platform: 'android', version: '16' };
+  let attached = [a]; const calls = [];
+  const h = simulatorHost({ url: 'mac', call: async (method, args) => {
+    calls.push([method,args]);
+    if (method === 'simulator:attach') attached.push(b);
+    if (method === 'simulator:detach') attached = attached.filter(d => d.id !== args[0].deviceId);
+    return { chatId:'/p#7', supported:true, devices:attached, attached, available:[a,b].filter(d => !attached.some(x => x.id===d.id)) };
+  } });
+  const render = () => h.render('SimulatorSheet',{hostId:'mac',chatId:'/p#7'});
+  render();await settle();
+  find(render(),n => n.props.label==='Back to devices').props.onPress();
+  assert.equal(find(render(),n => n.props.accessibilityLabel==='Attach Other device'),undefined);
+  find(render(),n => n.props.title==='Attach simulator').props.onPress();
+  find(render(),n => n.props.accessibilityLabel==='Attach Other device').props.onPress();await settle();
+  assert.ok(find(render(),n => n.props.deviceId==='b'));
+  find(render(),n => n.props.label==='Back to devices').props.onPress();
+  find(render(),n => n.props.label==='Detach Other device from Chat').props.onPress();await settle();
+  assert.equal(find(render(),n => n.props.label==='Detach Other device from Chat'),undefined);
+  for (const [,args] of calls) assert.equal(args[0].chatId,'/p#7');
+  h.cleanup();
 });

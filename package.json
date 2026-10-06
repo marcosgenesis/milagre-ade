@@ -86,7 +86,10 @@
     "asarUnpack": [
       "node_modules/@milagre/core/src/bundled-skills/**/*",
       "node_modules/expo-device-hub/**/*",
-      "node_modules/node-datachannel/**/*"
+      "node_modules/node-datachannel/**/*",
+      "node_modules/ws/**/*",
+      "node_modules/mediabunny/**/*",
+      "node_modules/@fastify/busboy/**/*"
     ],
     "files": [
       "dist/**/*",

@@ -16,7 +16,7 @@ const ACTIVE_TTL_MS = 3000;
  *   registry() -> the Project registry; project(path) -> the Project's state, loading the Project if needed
  *   chats -> the ChatHost; agents -> the SessionManager; emit(channel, payload) -> the windows
  */
-function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit, store = jsonFileStore(path.join(dataDir, "delegations.json")) }) {
+function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit, extraTools = () => [], store = jsonFileStore(path.join(dataDir, "delegations.json")) }) {
   // Codex Chats whose provider refused the linked tools: they get the summary and receive Delegations only.
   const receiveOnly = new Set();
   const tools = new Map();
@@ -141,7 +141,7 @@ function createLinkedWorktrees({ dataDir, registry, project, chats, agents, emit
 
   function toolsFor(chatId) {
     if (!tools.has(chatId)) tools.set(chatId, linkedToolDefinitions(chatId, { reads, delegations: isLinkScopeKey(projectOfKey(chatId)) ? { delegate: async () => { throw new Error('Delegation from a shared Link Chat is not supported. Use its canvas read tools.'); }, conclude: async () => { throw new Error('Shared Link Chats do not host Negotiations.'); } } : delegations }));
-    return tools.get(chatId);
+    return [...tools.get(chatId), ...extraTools(chatId)];
   }
 
   return {

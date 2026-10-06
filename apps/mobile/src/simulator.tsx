@@ -14,73 +14,91 @@ import { hex } from './theme';
 import { CircleButton, PageScroll, PillButton, colors, styles } from './ui';
 
 /** Poll discovery only while this screen is visible. Discovery never starts a video session. */
-function useSimulators(client: Client | null) {
+function useSimulators(client: Client | null, chatId?: string) {
   const [list, setList] = useState<SimulatorList | null>(null);
+  const revision = useRef(0);
+  const updateList: typeof setList = useCallback(value => { revision.current++; setList(value); }, []);
   useFocusEffect(useCallback(() => {
-    if (!client) return;
+    if (!client || !chatId) return;
     let disposed = false, busy = false;
     setList(null);
     const refresh = async () => {
       if (AppState.currentState !== 'active' || disposed || busy) return;
       busy = true;
-      try { const value = await client.call<SimulatorList>('simulator:list', []); if (!disposed) setList(value); }
-      catch (error) { if (!disposed) setList({ devices: [], supported: true, error: error instanceof Error ? error.message : 'Could not list simulators.' }); }
+      const started = revision.current;
+      try { const value = await client.call<SimulatorList>('simulator:list', [{ chatId }]); if (value.chatId !== chatId) throw new Error('Update Milagre on this Mac to attach simulators to Chats.'); if (!disposed && started === revision.current) setList(value); }
+      catch (error) { if (!disposed && started === revision.current) setList({ devices: [], supported: true, error: error instanceof Error ? error.message : 'Could not list simulators.' }); }
       finally { busy = false; }
     };
-    void refresh(); const timer = setInterval(refresh, 15000);
+    void refresh(); const timer = setInterval(refresh, 5000);
     const subscription = AppState.addEventListener('change', () => { void refresh(); });
     return () => { disposed = true; clearInterval(timer); subscription.remove(); };
-  }, [client]));
-  return list;
+  }, [client, chatId]));
+  return { list, setList: updateList };
 }
 
 /** Same border, height, spacing and icon size as the desktop Ports pill. */
-export function SimulatorChip() {
+export function SimulatorChip({ chatId }: { chatId: string }) {
   const { client } = useSession();
-  const list = useSimulators(client);
-  if (!client || list?.supported === false) return null;
-  return <Pressable accessibilityRole="button" accessibilityLabel={`Simulators, ${list?.devices.length ?? 0} running on this Mac`} onPress={() => router.push({ pathname: '/simulator-sheet', params: { hostId: client.url } })} hitSlop={8} style={({ pressed }) => ({ height: 24, paddingHorizontal: 8, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 })}>
+  const { list } = useSimulators(client, chatId);
+  if (!client || !chatId || list?.supported === false) return null;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Simulators, ${list?.devices.length ?? 0} running in this Chat`} onPress={() => router.push({ pathname: '/simulator-sheet', params: { hostId: client.url, chatId } })} hitSlop={8} style={({ pressed }) => ({ height: 24, paddingHorizontal: 8, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 })}>
     <Icon icon={SmartphoneIcon} tone="ink2" size={12} /><Text style={{ color: colors.ink2, fontSize: 11 }}>Simulators {list?.devices.length ?? 0}</Text>
   </Pressable>;
 }
 
-export function SimulatorSheet({ hostId }: { hostId?: string }) {
+export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: string }) {
   const { client } = useSession();
   const insets = useSafeAreaInsets();
-  const source = client && (!hostId || hostId === client.url) ? client : null;
-  const list = useSimulators(source);
+  const source = client && chatId && (!hostId || hostId === client.url) ? client : null;
+  const { list, setList } = useSimulators(source, chatId);
+  const [attaching, setAttaching] = useState(false), [busy, setBusy] = useState(false);
   const [chosen, setSelected] = useState<SimulatorDevice | null>(null);
   const [choosing, setChoosing] = useState(false);
-  const selected = chosen ?? (!choosing && list?.devices.length === 1 ? list.devices[0] : null);
+  const selected = attaching ? null : (chosen && list?.devices.find(d => d.id === chosen.id)) ?? (!choosing && list?.devices.length === 1 ? list.devices[0] : null);
   const [paused, setPaused] = useState(AppState.currentState !== 'active');
   const [revision, setRevision] = useState(0);
   useFocusEffect(useCallback(() => {
     const subscription = AppState.addEventListener('change', state => { if (state !== 'active') setPaused(true); });
     return () => { subscription.remove(); setPaused(true); };
   }, []));
+  const mutate = async (method: 'attach' | 'detach', device: SimulatorDevice) => {
+    if (!source || !chatId || busy) return;
+    setBusy(true); setList(current => current);
+    try { const result = await source.call<SimulatorList>(`simulator:${method}`, [{ chatId, deviceId: device.id }]); setList(result); setAttaching(false); setChoosing(method === 'detach'); setSelected(method === 'attach' ? device : null); }
+    catch (error) { setList(current => ({ ...current, devices: current?.devices ?? [], supported: true, error: error instanceof Error ? error.message : 'Could not update attachment.' })); }
+    finally { setBusy(false); }
+  };
   return <View style={{ flex: 1, backgroundColor: colors.page, paddingBottom: insets.bottom }}>
     {/* Keep the header as one native view: form-sheet scroll sizing cannot account for a flattened header. */}
     <View collapsable={false} style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 8 }}>
-      {selected && (list?.devices.length ?? 0) > 1 ? <CircleButton label="Back to devices" icon={ArrowLeft01Icon} onPress={() => { setChoosing(true); setSelected(null); }} /> : <View style={{ width: 40 }} />}
-      <View style={{ flex: 1, alignItems: 'center' }}><Text accessibilityRole="header" numberOfLines={1} style={{ color: colors.ink, fontSize: 17, fontWeight: '600' }}>{selected?.name ?? 'Simulator'}</Text><Text style={{ color: colors.ink3, fontSize: 11 }}>On this Mac</Text></View>
+      {(selected || attaching) ? <CircleButton label="Back to devices" icon={ArrowLeft01Icon} onPress={() => { setChoosing(true); setSelected(null); setAttaching(false); }} /> : <View style={{ width: 40 }} />}
+      <View style={{ flex: 1, alignItems: 'center' }}><Text accessibilityRole="header" numberOfLines={1} style={{ color: colors.ink, fontSize: 17, fontWeight: '600' }}>{selected?.name ?? (attaching ? 'Attach simulator' : 'Simulators')}</Text><Text style={{ color: colors.ink3, fontSize: 11 }}>{attaching ? 'Other devices on this Mac' : 'This Chat'}</Text></View>
       <CircleButton label="Close simulator" icon={Cancel01Icon} onPress={() => router.back()} />
     </View>
     <View collapsable={false} style={{ flex: 1, minHeight: 0 }}>
     {!source ? <Text style={[styles.muted, { padding: 20 }]}>Reconnect to this Mac to open its simulators.</Text>
       : paused ? <View style={{ padding: 20, gap: 16 }}><Text style={styles.muted}>Viewer paused while the app was hidden.</Text><PillButton title="Retry" onPress={() => { setRevision(value => value + 1); setPaused(false); }} /></View>
-      : selected ? <SimulatorWebView key={`${selected.id}:${revision}`} client={source} deviceId={selected.id} />
+      : selected ? <SimulatorWebView key={`${selected.id}:${revision}`} client={source} deviceId={selected.id} chatId={chatId!} />
       : <PageScroll style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} contentContainerStyle={{ padding: 20, gap: 12 }}>
         {!list && <Text style={styles.muted}>Finding running simulators...</Text>}
         {!!list?.error && <Text accessibilityRole="alert" style={{ color: colors.red }}>{list.error}</Text>}
         {list?.supported === false && <Text style={styles.muted}>Simulators are unavailable on this computer.</Text>}
-        {list?.supported && !list.error && !list.devices.length && <Text style={styles.muted}>No devices are running. Start an iOS simulator or Android emulator on this Mac.</Text>}
-        {list?.devices.map(device => <Pressable key={device.id} accessibilityRole="button" onPress={() => setSelected(device)} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, borderRadius: 12, backgroundColor: pressed ? colors.hover : colors.surface })}><Icon icon={SmartphoneIcon} size={18} tone="ink2" /><Text style={{ flex: 1, color: colors.ink, fontSize: 15 }}>{device.name}</Text><Text style={styles.muted}>{device.platform === 'android' ? 'Android' : 'iOS'} {device.version}</Text></Pressable>)}
+        {list?.supported && !list.error && !(attaching ? list.available : list.attached)?.length && <Text style={styles.muted}>{attaching ? 'No other devices are running on this Mac.' : 'No simulators attached to this Chat.'}</Text>}
+        {(attaching ? list?.available ?? [] : list?.attached ?? []).map(device => {
+          const running = attaching || list?.devices.some(d => d.id === device.id);
+          return <View key={device.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable accessibilityRole="button" accessibilityLabel={`${attaching ? 'Attach ' : ''}${device.name}`} disabled={busy || !running} onPress={() => attaching ? void mutate('attach', device) : setSelected(device)} style={({ pressed }) => ({ flex: 1, flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, borderRadius: 12, opacity: running ? 1 : 0.5, backgroundColor: pressed ? colors.hover : colors.surface })}><Icon icon={SmartphoneIcon} size={18} tone="ink2" /><Text style={{ flex: 1, color: colors.ink, fontSize: 15 }}>{device.name}</Text><Text style={styles.muted}>{running ? `${device.platform === 'android' ? 'Android' : 'iOS'} ${device.version}` : 'Stopped'}</Text></Pressable>
+            {!attaching && <CircleButton label={`Detach ${device.name} from Chat`} icon={Cancel01Icon} onPress={busy ? undefined : () => void mutate('detach', device)} />}
+          </View>;
+        })}
+        {!attaching && <PillButton title="Attach simulator" onPress={() => setAttaching(true)} />}
       </PageScroll>}
     </View>
   </View>;
 }
 
-function SimulatorWebView({ client, deviceId }: { client: Client; deviceId: string }) {
+function SimulatorWebView({ client, deviceId, chatId }: { client: Client; deviceId: string; chatId: string }) {
   const scheme = useColorScheme();
   const theme = useMemo(() => {
     const palette = hex(scheme);
@@ -94,7 +112,7 @@ function SimulatorWebView({ client, deviceId }: { client: Client; deviceId: stri
   const [uri, setUri] = useState<string | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
   const bridge = useRef<ReturnType<typeof createSimulatorBridge> | null>(null);
   useEffect(() => {
-    const currentBridge = createSimulatorBridge((method, args) => client.call(`simulator:${method}`, [args]), reply => {
+    const currentBridge = createSimulatorBridge((method, args) => client.call(`simulator:${method}`, [method === 'open' ? { ...args as object, chatId } : args]), reply => {
       // Data stays JSON, never an executable string supplied by the remote peer.
       view.current?.injectJavaScript(`window.simulatorReply?.(${JSON.stringify(reply).replace(/</g, '\\u003c')});true;`);
     });
@@ -107,7 +125,7 @@ function SimulatorWebView({ client, deviceId }: { client: Client; deviceId: stri
     }).catch(failure => { if (!cancelled) setError(failure instanceof Error ? failure.message : 'Could not prepare the simulator viewer.'); });
     const subscription = AppState.addEventListener('change', state => { if (state !== 'active') { view.current?.injectJavaScript('window.simulatorDispose?.();true;'); currentBridge.dispose(); } });
     return () => { cancelled = true; currentBridge.dispose(); subscription.remove(); try { if (file.exists) file.delete(); } catch { /* The OS may purge cache files while backgrounding. */ } };
-  }, [client, deviceId, revision]);
+  }, [client, deviceId, chatId, revision]);
   const failed = () => { bridge.current?.dispose(); setError('The simulator viewer stopped. Retry to reconnect.'); };
   if (error) return <View style={{ padding: 20, gap: 16 }}><Text accessibilityRole="alert" style={{ color: colors.red }}>{error}</Text><PillButton title="Retry" onPress={() => { setError(''); setUri(null); setRevision(value => value + 1); }} /></View>;
   if (!uri) return <Text style={[styles.muted, { padding: 20 }]}>Preparing viewer...</Text>;

@@ -10,13 +10,16 @@ import { ChatComposer } from "/src/components/ChatComposer";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
-window.deviceCount = 2;
+window.deviceCount = 3;
+window.attachedIds = [0,1];
 window.simulatorCalls = [];
 window.simulatorClosed = [];
-const device = i => i === 0 ? {id:'device-0',name:'iPhone 17',platform:'ios',version:'27'} : {id:'device-'+i,name:'Pixel 9',platform:'android',version:'16'};
+const device = i => i === 0 ? {id:'device-0',name:'iPhone 17',platform:'ios',version:'27'} : {id:'device-'+i,name:i===1?'Pixel 9':'Other Chat device',platform:'android',version:'16'};
 window.milagre = { simulators: {
- list: async () => ({devices:Array.from({length:window.deviceCount},(_,i)=>device(i)),supported:true}),
- open: async args => { window.simulatorCalls.push(args); return {viewerId:'view-'+window.simulatorCalls.length,device:device(0),iceServers:[]}; },
+ list: async ({chatId}) => ({chatId,devices:window.attachedIds.map(device),attached:window.attachedIds.map(device),available:Array.from({length:window.deviceCount},(_,i)=>i).filter(i=>!window.attachedIds.includes(i)).map(device),supported:true}),
+ attach: async ({chatId,deviceId}) => {window.attachedIds.push(Number(deviceId.split('-')[1]));return window.milagre.simulators.list({chatId});},
+ detach: async ({chatId,deviceId}) => {window.attachedIds=window.attachedIds.filter(i=>device(i).id!==deviceId);return window.milagre.simulators.list({chatId});},
+ open: async args => { window.simulatorCalls.push(args); return {viewerId:'view-'+window.simulatorCalls.length,device:device(Number(args.deviceId.split('-')[1])),iceServers:[]}; },
  offer: async () => {throw Error('Test connection failed. Retry to reconnect.');},
  status: async () => ({width:588,height:1280,orientation:'portrait',generation:1,controlling:false,ready:true}),
  control: async () => ({width:588,height:1280,orientation:'portrait',generation:2,controlling:true,ready:true}),
@@ -91,6 +94,11 @@ async function browserChecks() {
   assert.equal(await evaluate('window.simulatorCalls.length'),0,'closed pill must not start capture');
   assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-track] svg")'),'phone icon');
   assert.ok(await evaluate('document.querySelector("[data-slot=simulator-track]").parentElement === document.querySelector("[data-slot=subagent-track]").parentElement'),'same composer pill row');
+  await evaluate('window.setMessageCount(0)');
+  await waitFor('!document.querySelector("[data-slot=simulator-track]")');
+  await screenshot('new-chat');
+  await evaluate('window.setMessageCount(2)');
+  await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
   await screenshot('composer-dark');
   await click('[data-slot=simulator-track] button');
   await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
@@ -119,7 +127,18 @@ async function browserChecks() {
   await screenshot('composer-light');
   await click('[data-slot=simulator-track] button');
   await waitFor('!!document.querySelector("[data-slot=simulator-popover]")');
+  assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-2]")'),false,'other Chat device is excluded');
   await screenshot('chooser-light');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Attach simulator").click()');
+  await waitFor('!!document.querySelector("[data-simulator-device=device-2]")');
+  assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-0]")'),false);
+  await screenshot('attach-light');
+  await click('[data-simulator-device=device-2]');
+  await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
+  assert.equal(await evaluate('window.simulatorCalls.at(-1).chatId'),'/fixture#1');
+  await click('[aria-label="Back to devices"]');
+  await click('[aria-label="Detach Other Chat device from Chat"]');
+  await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
   window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
   await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
   console.log('PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots');

@@ -129,6 +129,7 @@ jobs:
         run: |-
           app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
           npm run test:desktop -- --packaged "$app"
+          node scripts/test-packaged-simulator-helper.cjs "$app"
       - name: Refresh feeds after DMG notarization
         env:
           RELEASE_TAG: ${{ inputs.tag }}

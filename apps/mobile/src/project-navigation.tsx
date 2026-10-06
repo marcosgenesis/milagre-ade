@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
-import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, Link04Icon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, Link04Icon, MoreHorizontalIcon, PinIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
+import { comparePins, isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
 import type { RegisteredProject } from './client';
 import { isLinkScopeKey } from '@milagre/shared/chat-scopes';
@@ -109,8 +109,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         .filter(({ mark }) => show !== 'needs' || NEEDS.includes(mark))
         .filter(({ mark }) => show !== 'running' || mark === 'running')
         .filter(({ chat }) => !needle || [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some(text => text?.toLowerCase().includes(needle)))
-        // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => b.sortId - a.sortId);
+        // Pinned Chats first in their order, then the newest Chat first, by when it was created, so rows don't jump around as agents reply.
+        .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       const section = project.link ? 'Links' : 'Projects';
       if (session.recent.some(item => item.link) && !result.some(row => row.kind === 'section' && row.name === section)) result.push({ key: `section:${section}`, path: '', kind: 'section', name: section });
@@ -255,10 +255,10 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         const menu = chatMenu(item.chat, copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id]);
         // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
         return <View style={[s.chat, { backgroundColor: selected ? colors.hover : 'transparent' }]}>
-          <PullDown label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={item.pending ? [] : menu} onSelect={action => { if (!item.pending) void act(item.path, item.chat, action); }} onPress={() => select(item.path, item.chat.id, item.pending)} style={{ flex: 1 }}>
+          <PullDown label={`${title}${item.chat.pinned ? ', pinned' : ''}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ''}`} title={title} sections={item.pending ? [] : menu} onSelect={action => { if (!item.pending) void act(item.path, item.chat, action); }} onPress={() => select(item.path, item.chat.id, item.pending)} style={{ flex: 1 }}>
             <View style={s.chatBody}>
               <ChatMarkIcon mark={item.mark} />
-              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>{!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}<Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
+              <View style={{ flex: 1, gap: 5 }}><Text numberOfLines={2} style={[s.chatTitle, item.mark === 'unread' && { fontWeight: '600' }]}>{title}</Text><View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>{item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}{!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}<Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>{copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}</Text>{!!labels[item.mark] && <Text style={[s.detail, { color: item.mark === 'failed' ? colors.red : item.mark === 'question' || item.mark === 'waiting' ? colors.orange : colors.ink2 }]}>{labels[item.mark]}</Text>}</View></View>
             </View>
           </PullDown>
           {!item.pending && <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={action => void act(item.path, item.chat, action)}>

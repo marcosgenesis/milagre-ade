@@ -549,9 +549,9 @@ function App() {
       getState: () => openState() ?? null,
       currentProjectPath: () => projectRef.current?.path,
       stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
-      hide: () => {
-        patchChat(sessionId, { archived: true, unread: false });
-        if (selectedSessionId === sessionId) startNewChat();
+      hide: async () => {
+        await window.milagre.patchChat(projectPath, sessionId, { archived: true, unread: false });
+        if (projectRef.current?.path === projectPath && selectedSessionRef.current === sessionId) startNewChat();
       },
       // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
       restore: () => {
@@ -568,7 +568,7 @@ function App() {
       },
       refreshBranches: () => void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {}),
       notify: setNotice,
-    }, sessionId, mode, plan);
+    }, sessionId, mode, plan).catch(error => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -1040,7 +1040,7 @@ function App() {
     onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
     onCommit: (id) => latest.current.openGitDialog(Number(id)),
     onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-    onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+    onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
   }), []);
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
@@ -1144,7 +1144,7 @@ function App() {
           <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
         </>}
       </div>}
-      <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
+      <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
       {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
       {update?.status === "downloaded" && (
         <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">

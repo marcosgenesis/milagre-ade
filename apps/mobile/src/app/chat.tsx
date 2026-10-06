@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Reanimated from 'react-native-reanimated';
-import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
+import { Alert, Image, Keyboard, Linking, Pressable, Text, View } from 'react-native';
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
@@ -27,6 +27,7 @@ import { selectedModel, sendOptions } from '../turn-options';
 import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
+import { ArchiveProgress } from '../archive-progress';
 import { useOpenProject } from '../use-open-project';
 import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { PromptField } from '../prompt-field';
@@ -92,7 +93,9 @@ export default function ChatScreen() {
   const originChatId = `${projectPath}#${params.id ?? `new:${params.worktreeId}`}`;
   const pending = targetMatches ? Object.values(pendingStore.pendingChats).find(item => item.hostId === connected?.url && item.projectPath === projectPath && (item.originChatId === originChatId || (!!params.id && item.preview.targetSessionId === Number(params.id)))) : undefined;
   const pendingCanonicalId = pending && session.snapshot ? pendingChatSessionId(session.snapshot.project.state, pending.preview) : null;
-  const busy = actionBusy || !!pending;
+  const [archiving, setArchiving] = useState(false);
+  const archiveRequest = useRef(false);
+  const busy = actionBusy || !!pending || archiving;
   const focused = useRef<object | null>(null);
   useFocusEffect(useCallback(() => { focused.current = { client: connected, projectPath, id: params.id, worktreeId: params.worktreeId }; return () => { focused.current = null; }; }, [connected, projectPath, params.id, params.worktreeId]));
   useEffect(() => {
@@ -308,24 +311,26 @@ export default function ChatScreen() {
   // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. The
   // Chat is left once it is archived; one whose worktree stayed is brought back, and the notice shows here.
   async function archive(target: NonNullable<typeof chat>) {
-    if (busy) return;
+    if (busy || archiveRequest.current) return;
+    archiveRequest.current = true;
+    const onConfirm = () => { setArchiving(true); session.expectActivity(); };
     setError('');
     try {
       if (project.link) {
-        const result = await runChatAction({ action: 'archive', client, projectPath: project.path, state: project.state, link: project.link, chat: target, running: !!run, expectActivity: session.expectActivity, refresh: session.refresh, notify: setError });
+        const result = await runChatAction({ action: 'archive', client, projectPath: project.path, state: project.state, link: project.link, chat: target, running: !!run, onConfirm: () => setArchiving(true), expectActivity: session.expectActivity, refresh: session.refresh, notify: setError });
         if (result === 'hidden') router.replace('/projects');
         return;
       }
       const result = await archiveFromPhone({ client, alert: confirmSheet, projectPath: project.path, state: project.state, chat: target, running: !!run,
-        onConfirm: () => { setBusy(true); session.expectActivity(); }, notify: setError, refresh: session.refresh });
+        onConfirm, notify: setError, refresh: session.refresh });
       if (result === 'hidden' || result === 'removed') router.replace('/projects');
     } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    finally { archiveRequest.current = false; setArchiving(false); }
   }
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter(agent => !agent.archived);
   const diff = worktree?.diff;
-  const header = <>
+  const header = archiving ? <ArchiveProgress /> : <>
     <View style={{ alignItems: 'center', maxWidth: 230 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>{title}</Text></View>
       {!project.link && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: worktree ? 1 : 0 }}><Icon icon={GitBranchIcon} tone="ink3" size={11} /><Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 12, flexShrink: 1 }}>{worktree?.name ?? ''}</Text><Text style={{ fontSize: 12 }}><Text style={{ color: colors.green }}>{diff && (diff.added > 0 || diff.removed > 0) ? `+${diff.added}` : ''}</Text>{diff && (diff.added > 0 || diff.removed > 0) ? ' ' : ''}<Text style={{ color: colors.red }}>{diff && (diff.added > 0 || diff.removed > 0) ? `−${diff.removed}` : ''}</Text></Text></View>}
@@ -405,7 +410,7 @@ export default function ChatScreen() {
             <View style={{ maxWidth: 180, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, opacity: branchDisabled ? 0.35 : 1 }}><Icon icon={GitBranchIcon} tone="ink2" size={14} /><Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>{branchName}</Text><Icon icon={UnfoldMoreIcon} tone="ink3" size={13} /></View>
           </PullDown>
         </View>}
-        {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Icon icon={File01Icon} tone="ink2" size={18} />}<Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text><IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
+        {!!attachments.length && <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>{attachments.map(item => <View key={item.id} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: 'continuous', paddingLeft: item.image ? 4 : 10, flexDirection: 'row', alignItems: 'center', maxWidth: 220 }}>{item.image ? <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} /> : <Pressable accessibilityRole="button" accessibilityLabel={`Preview ${item.name}`} onPress={() => router.push({ pathname: '/file-preview', params: item.path ? { path: item.path } : { uri: item.uri, name: item.name } })} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}><Icon icon={File01Icon} tone="ink2" size={18} /><Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text></Pressable>}{item.image && <Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>{item.name}</Text>}<IconButton label={`Remove ${item.name}`} icon={Cancel01Icon} size={32} disabled={busy || picking} onPress={() => composer.setAttachments(current => ({ ...current, [chatId]: (current[chatId] || []).filter(attachment => attachment.id !== item.id) }))} /></View>)}</PageScroll>}
         <PromptField key={chatId} client={client} projectPath={worktree?.path || (project.link ? '' : project.path)} draft={draft} onChangeText={value => composer.setDrafts(current => ({ ...current, [chatId]: value }))} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
           <PullDown label="Add photos or files" nativeTrigger={{ systemImage: 'plus', disabled: attachmentDisabled }} sections={[{ items: [{ id: 'photos', title: 'Photo Library', systemImage: 'photo.on.rectangle', disabled: attachmentDisabled }, { id: 'camera', title: 'Take Photo', systemImage: 'camera', disabled: attachmentDisabled }, { id: 'files', title: 'Choose Files', systemImage: 'folder', disabled: attachmentDisabled }] }]} onSelect={kind => void pick(kind as 'photos' | 'camera' | 'files')}>

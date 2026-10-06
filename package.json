@@ -84,6 +84,7 @@
     "appId": "com.milagre.app",
     "productName": "Milagre",
     "asar": true,
+    "afterPack": "scripts/package-cloudflared.cjs",
     "asarUnpack": [
       "node_modules/@milagre/core/src/bundled-skills/**/*",
       "node_modules/expo-device-hub/**/*",

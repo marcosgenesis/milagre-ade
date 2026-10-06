@@ -82,6 +82,7 @@ const PATHS = Object.freeze({
   'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
   'worktree:pull-request': ([worktreePath]) => [worktreePath],
   'project:branches': ([projectPath]) => [projectPath],
+  'attachment:preview': ([file]) => [attached(file)],
   'skills:list': ([projectPath]) => [projectPath],
   'worktree:create': ([value]) => [value?.projectPath],
   'git:diff-files': ([value]) => [value?.cwd],

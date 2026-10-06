@@ -35,6 +35,7 @@ import type { AgentPort, DiffStat, PullRequest } from "@/model";
 import { portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
+import { useDismiss } from "../../lib/use-dismiss";
 
 const toneClass = { red: "text-red", orange: "text-orange" } as const;
 
@@ -80,7 +81,7 @@ export type ChatRowActions = {
   onCommit?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
-  onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => void;
+  onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => Promise<unknown> | void;
 };
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
@@ -167,6 +168,8 @@ export const ChatRow = memo(function ChatRow({
   actions: ChatRowActions;
   shortcutHint?: string;
 }) {
+  const [archiving, setArchiving] = useState(false);
+  const archivePending = useRef(false);
   const mark = item.mark ?? "idle";
   const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
   const hasPullRequests = pullRequests.length > 0;
@@ -211,7 +214,7 @@ export const ChatRow = memo(function ChatRow({
   useEffect(() => clearHover, []);
 
   const openMenu = (x: number, y: number) => {
-    if (item.pending) return;
+    if (item.pending || archivePending.current) return;
     hideCard();
     setMenu({ x: Math.min(x, window.innerWidth - MENU_WIDTH - 8), y });
   };
@@ -245,6 +248,8 @@ export const ChatRow = memo(function ChatRow({
           data-row
           type="button"
           onClick={() => onPick(item)}
+          aria-busy={archiving || undefined}
+          aria-label={archiving ? `Archiving ${item.label}` : undefined}
           aria-current={active ? "page" : undefined}
           className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
             active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
@@ -252,7 +257,7 @@ export const ChatRow = memo(function ChatRow({
         >
           <span className="sidebar-chat-initials relative size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">
             {recentInitials(item.label)}
-            {mark === "running" ? (
+            {archiving || mark === "running" ? (
               <span aria-hidden className="absolute -right-1 -top-1 flex rounded-full bg-surface p-px">
                 <SpinnerRing size={10} stroke={1.75} />
               </span>
@@ -266,7 +271,7 @@ export const ChatRow = memo(function ChatRow({
               item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
             }`}
           >
-            <ChatTitle label={item.label} />
+            {archiving ? <span role="status" className="inline-flex items-center gap-2"><SpinnerRing size={12} />Archiving...</span> : <ChatTitle label={item.label} />}
             {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
           </span>
         </button>
@@ -289,6 +294,7 @@ export const ChatRow = memo(function ChatRow({
         <button
           ref={triggerRef}
           type="button"
+          disabled={archiving}
           aria-label="Chat actions"
           aria-haspopup="menu"
           aria-expanded={Boolean(menu)}
@@ -312,7 +318,13 @@ export const ChatRow = memo(function ChatRow({
           trigger={triggerRef}
           onClose={() => setMenu(null)}
           onRename={() => setRenaming(true)}
-          actions={actions}
+          actions={{ ...actions, onArchive: actions.onArchive ? async (id, mode, plan) => {
+            if (archivePending.current) return;
+            archivePending.current = true;
+            setArchiving(true);
+            try { await actions.onArchive?.(id, mode, plan); }
+            finally { archivePending.current = false; setArchiving(false); }
+          } : undefined }}
         />
       )}
     </div>
@@ -584,25 +596,7 @@ function ChatMenu({
     // Checked once per opening; the menu remounts each time it opens.
   }, []);
 
-  useEffect(() => {
-    const close = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!menuRef.current?.contains(target) && !trigger.current?.contains(target)) onClose();
-    };
-    const closeOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener("pointerdown", close, true);
-    window.addEventListener("scroll", closeOnScroll, true);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
-    return () => {
-      document.removeEventListener("pointerdown", close, true);
-      window.removeEventListener("scroll", closeOnScroll, true);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", onClose);
-    };
-  }, [onClose, trigger]);
+  useDismiss(true, onClose, (target) => !!(menuRef.current?.contains(target) || trigger.current?.contains(target)));
 
   const run = (action: () => void) => () => {
     onClose();

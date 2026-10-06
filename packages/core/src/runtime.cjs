@@ -262,6 +262,11 @@ function createRuntime(options) {
     return { path: projectPath, name: projectName(projectPath), state };
   }
 
+  commands.handle("attachment:preview", async (_event, file) => {
+    const snapshots = await Promise.all(scopeStates.projects().map(project => scopeStates.get(project)));
+    const attached = snapshots.flatMap(state => (state.messages || []).flatMap(message => message.files || []));
+    return require('./attachment-preview.cjs').readAttachment(file, scopeStates.worktreePaths(), attached);
+  });
   commands.handle("project:files", async (_event, root, query) => {
     if (!scopeStates.worktreePaths().includes(root) && !scopeStates.workspacePaths().includes(root)) throw new Error("Choose an open project's worktree.");
     if (scopeStates.workspacePaths().includes(root)) {

@@ -44,6 +44,7 @@ import { replyActivity, unspokenThought } from "../lib/reply-parts";
 import { extractOutdatedProvider } from "../lib/cli-status";
 import { splitFences } from "../lib/message-fences";
 import { CodeBlock } from "./markdown/CodeBlock";
+import { useDismiss } from "../lib/use-dismiss";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -362,19 +363,18 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
     ? worktrees.filter((worktree) => worktree.name.toLowerCase().includes(search)).map((worktree) => ({ key: String(worktree.id), name: worktree.name, description: worktree.path.split("/").filter(Boolean).pop(), selected: worktree.id === selected?.id, choose: () => onWorktreeChange(worktree.id) }))
     : branches.filter((branch) => branch.toLowerCase().includes(search)).map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
 
-  useEffect(() => {
-    if (!menu) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest("[data-new-chat-pickers]")) setMenu(null);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [menu]);
-
-  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+  const lastTrigger = useRef<HTMLElement | null>(null);
+  function place(trigger: HTMLElement) {
+    lastTrigger.current = trigger;
     const row = trigger.parentElement?.getBoundingClientRect();
     const button = trigger.getBoundingClientRect();
     setPopover({ left: button.left - (row?.left ?? button.left), maxHeight: window.innerHeight - button.bottom - 24 });
+  }
+
+  useDismiss(menu !== null, () => setMenu(null), (target) => !!target.closest("[data-picker-panel], [data-new-chat-pickers] button[aria-expanded]"), () => { if (lastTrigger.current) place(lastTrigger.current); });
+
+  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+    place(trigger);
     setQuery("");
     setMenu((current) => (current === next ? null : next));
   }

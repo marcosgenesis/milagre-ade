@@ -25,11 +25,14 @@ window.emitAgent = event => {
   window.listeners.forEach(fn => fn({ chatId: '/fixture#3', event, ...(ended ? { state: { ...state } } : {}) }));
 };
 window.milagre = new Proxy({
+  simulators: { list: async () => ({ devices: [], supported: true }) },
+  getLinkedWork: async () => ({ delegations: [], negotiations: [] }),
   getRuntimeConnection: async () => ({ connected: true }),
  // The main process always answers with a map of chat id to ports; null would crash the ports hook.
  getAgentPorts: async () => ({}),
  onQuitFailed: fn => {window.quitFailed=fn;return ()=>{};},
  retryQuit: async () => {window.retriedQuit=true;},
+ readAttachment: async file => { (window.fileReads ??= []).push(file); if (file.endsWith('missing.txt')) throw new Error('File no longer exists.'); return { text: file.endsWith('empty.txt') ? '' : 'export const greeting = "hello";', truncated: false, binary: false }; },
  showImageMenu: async (file, name) => { (window.imageMenus ??= []).push([file, name]); },
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
@@ -94,7 +97,7 @@ async function browserChecks() {
    await delay(250);
    fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), (await window.webContents.capturePage()).toPNG());
  };
- const chooseFiles = async names => { await evaluate(`(() => { const dt=new DataTransfer(); for(const [name,type] of ${JSON.stringify(names)}) dt.items.add(new File([type.startsWith('image/') ? Uint8Array.from(atob(window.imageBytes), c => c.charCodeAt(0)) : name],name,{type})); const input=document.querySelector('input[type=file]'); input.files=dt.files; input.dispatchEvent(new Event('change',{bubbles:true})); })()`); await delay(100); };
+ const chooseFiles = async names => { await evaluate(`(() => { const dt=new DataTransfer(); for(const [name,type] of ${JSON.stringify(names)}) dt.items.add(new File([type.startsWith('image/') ? Uint8Array.from(atob(window.imageBytes), c => c.charCodeAt(0)) : name.endsWith('.tsx') ? 'export const Card = () => <section title="hello">Welcome</section>;' : type === 'text/plain' ? 'export const greeting = "hello";' : name],name,{type})); const input=document.querySelector('input[type=file]'); input.files=dt.files; input.dispatchEvent(new Event('change',{bubbles:true})); })()`); await delay(100); };
  try {
   await window.loadURL(process.argv[2]);
   await waitFor(String.raw`!!document.querySelector("textarea")`);
@@ -113,7 +116,31 @@ async function browserChecks() {
   await waitFor(String.raw`!!document.querySelector("[aria-label=\"Preview clip.mp4\"]")`);
   assert.equal(await evaluate('document.querySelector("textarea").value'), '', 'Paths do not pollute draft text');
   assert.equal(await evaluate('document.querySelector("[aria-label=Send]").disabled'), false, 'File-only messages can send');
+  await chooseFiles([['Card.tsx','text/typescript']]);
+  await click('[aria-label="Preview Card.tsx"]');
+  await waitFor(`!!document.querySelector('dialog[open]')`);
+  await waitFor(`!!document.querySelector('dialog [data-file-code] [data-syntax="keyword"]')`);
+  assert.ok(await evaluate(`document.querySelector('dialog [data-syntax="tag"]')?.textContent.includes('section')`));
+  assert.equal(await evaluate(`document.querySelector('dialog [data-file-code]').textContent`), 'export const Card = () => <section title="hello">Welcome</section>;');
+  const syntaxColor = () => evaluate(`getComputedStyle(document.querySelector('dialog [data-syntax="keyword"]')).color`);
+  const darkSyntaxColor = await syntaxColor();
+  await screenshot('tsx-preview-dark');
+  await evaluate(`document.documentElement.classList.remove('dark')`);
+  assert.notEqual(await syntaxColor(), darkSyntaxColor, 'Syntax colors follow the theme');
+  await screenshot('tsx-preview-light');
+  await evaluate(`document.documentElement.classList.add('dark')`);
+  await key('Escape');
+  await waitFor(`!document.querySelector('dialog')`);
+  await click('[aria-label="Remove Card.tsx"]');
   await screenshot('attachments-draft');
+  assert.ok(await evaluate(`!!document.querySelector('[aria-label="Preview note.txt"]')`), 'Text attachment is a clickable preview button');
+  await click('[aria-label="Preview note.txt"]');
+  await waitFor(`document.querySelector('dialog[open]')?.textContent.includes('export const greeting')`);
+  assert.deepEqual(await evaluate('window.fileReads ?? []'), [], 'Unsent picked files preview locally');
+  await screenshot('text-file-preview');
+  await key('Escape');
+  await waitFor(`!document.querySelector('dialog')`);
+  assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), 'Preview note.txt');
   // The lightbox steps through every image and video in the attachments, and zooms images.
   const counter = String.raw`document.querySelector("dialog [aria-live]")?.textContent`;
   await click('[aria-label="Preview photo.png"]');
@@ -172,6 +199,12 @@ async function browserChecks() {
   assert.deepEqual(await evaluate('window.saved.messages.at(-1).files'), ['/fixture/files/note.txt','/fixture/files/clip.mp4','/fixture/files/photo.png']);
   assert.equal(await evaluate('window.saved.messages.at(-1).body'), '');
   await waitFor(String.raw`!!document.querySelector("article [aria-label=\"Preview photo.png\"]")`);
+  await click('article [aria-label="Preview note.txt"]');
+  await waitFor(`document.querySelector('dialog[open]')?.textContent.includes('export const greeting')`);
+  await key('Escape');
+  await waitFor(`!document.querySelector('dialog')`);
+  assert.deepEqual(await evaluate('window.fileReads'), ['/fixture/files/note.txt']);
+  assert.equal(await evaluate('window.interrupted'), undefined, 'File preview Escape never stops active agent');
   await click('article [aria-label="Preview photo.png"]');
   await waitFor(`document.querySelector('dialog[open] img')?.naturalWidth > 0`);
   await key('Escape');

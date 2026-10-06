@@ -15,7 +15,7 @@ window.releaseCheck = () => release?.();
 const plan = { milagreOwned: true, shared: false, status: { uncommitted: 0, unpushed: 0, branch: "fix", head: "abc", removable: true } };
 const actions = {
   onArchiveCheck: () => (window.checks++, new Promise(resolve => { release = () => resolve(plan); })),
-  onArchive: (id, mode) => window.calls.push("archive:" + mode),
+  onArchive: (id, mode) => { window.calls.push("archive:" + mode); return new Promise(resolve => { window.finishArchive = resolve; }); },
   onMarkUnread: (id, unread) => window.calls.push("unread:" + unread),
   onRename: () => {},
 };
@@ -91,6 +91,13 @@ async function browserChecks() {
     await press("Enter");
     assert.deepEqual(await evaluate("window.calls"), ["archive:remove"], "Enter confirms the archive");
     await waitFor('!document.querySelector("[data-chat-menu]")');
+
+    assert.ok(await evaluate('document.querySelector("[role=status]")?.textContent.includes("Archiving")'), "Pending archive is visible after the menu closes");
+    await shot("archiving.png");
+    await click('[aria-label="Chat actions"]');
+    assert.equal(await evaluate('!!document.querySelector("[data-chat-menu]")'), false, "Pending archive cannot be repeated");
+    await evaluate("window.finishArchive()");
+    await waitFor('!document.querySelector("[role=status]")');
 
     // A row reached with the arrow keys keeps Enter for itself.
     await evaluate("window.calls = []");

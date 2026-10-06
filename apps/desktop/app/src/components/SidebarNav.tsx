@@ -29,6 +29,7 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
+import { useDismiss } from "../lib/use-dismiss";
 
 export type { SidebarRecent } from "./sidebar/ChatRow";
 
@@ -452,26 +453,16 @@ export default memo(function SidebarNav({
     window.milagre?.forgetProject?.(path).then((list) => { if (Array.isArray(list)) setRecentProjects(list); }, () => {});
   };
 
-  const openWorkspaceMenu = () => {
-    const button = workspaceButtonRef.current;
-    if (!button) return;
-    const rect = button.getBoundingClientRect();
+  const placeWorkspaceMenu = () => {
+    const rect = workspaceButtonRef.current?.getBoundingClientRect();
+    if (!rect) return false;
     // Collapsed, the menu opens beside the rail instead of covering it.
     setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
-    setWorkspaceOpen(true);
+    return true;
   };
+  const openWorkspaceMenu = () => { if (placeWorkspaceMenu()) setWorkspaceOpen(true); };
 
-  useEffect(() => {
-    if (!workspaceOpen) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target as Element;
-      if (!target.closest("[data-workspace-trigger]") && !target.closest("[data-workspace-menu]")) {
-        setWorkspaceOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [workspaceOpen]);
+  useDismiss(workspaceOpen, () => setWorkspaceOpen(false), (target) => !!target.closest("[data-workspace-trigger], [data-workspace-menu]"), placeWorkspaceMenu);
 
   const collapse = () => {
     setCollapsed(true);

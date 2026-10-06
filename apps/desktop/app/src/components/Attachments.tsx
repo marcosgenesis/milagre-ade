@@ -4,10 +4,13 @@ import { File01Icon } from '@hugeicons/core-free-icons';
 import type { ImageAttachment } from '../model';
 import { mediaKind, mediaUrl } from '../lib/media';
 import type { LightboxItem } from './motion/MediaLightbox';
+import { lazyView } from '../lib/lazy-view';
 import { MediaLightbox } from './motion/LazyMediaLightbox';
 
+const AttachmentPreview = lazyView(() => import('./AttachmentPreview').then(module => module.AttachmentPreview));
+
 /** `leading` goes first in the row, such as the handover brief, which isn't a file the user attached. */
-export function Attachments({ images = [], files = [], removeImage, removeFile, leading }: { images?: ImageAttachment[]; files?: string[]; removeImage?: (id: string) => void; removeFile?: (path: string) => void; leading?: ReactNode }) {
+export function Attachments({ images = [], files = [], localFiles, removeImage, removeFile, leading }: { images?: ImageAttachment[]; files?: string[]; localFiles?: Map<string, File>; removeImage?: (id: string) => void; removeFile?: (path: string) => void; leading?: ReactNode }) {
   // The open item's index among the media; its thumbnail hides while the viewer shows it.
   const [open, setOpen] = useState<number | null>(null);
   const thumbs = useRef(new Map<string, HTMLButtonElement>());
@@ -26,7 +29,7 @@ export function Attachments({ images = [], files = [], removeImage, removeFile, 
       {item.kind ? <button ref={el => { if (el) thumbs.current.set(item.id, el); else thumbs.current.delete(item.id); }} type="button" aria-label={`Preview ${item.name}`} onClick={() => setOpen(media.findIndex(entry => entry.id === item.id))} onContextMenu={item.file ? event => { event.preventDefault(); void window.milagre.showImageMenu(item.file!, item.name); } : undefined} className="block rounded focus-visible:outline-2 focus-visible:outline-accent-ink">
         {item.kind === 'image' ? <img src={item.src} alt={item.name} className={`size-20 rounded object-contain ${showing(item.id) ? 'opacity-0' : ''}`} /> : <span className={`relative block ${showing(item.id) ? 'opacity-0' : ''}`}><video src={item.src} muted preload="metadata" className="h-20 w-28 rounded object-contain" /><span className="absolute bottom-0 left-0 rounded bg-surface/90 px-1 text-[10px]">Play video</span></span>}
         <span className="block max-w-28 truncate px-1 text-[10px] text-ink-2">{item.name}</span>
-      </button> : <FileTile path={item.id} name={item.name} />}
+      </button> : <FileTile path={item.id} name={item.name} file={localFiles?.get(item.id)} />}
       {item.remove && <button type="button" aria-label={`Remove ${item.name}`} onClick={item.remove} className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full border border-line bg-surface text-xs text-ink">×</button>}
     </div>)}
     {open !== null && media[open] && <MediaLightbox items={media} start={open} thumbFor={thumbFor} onIndexChange={setOpen} close={close} />}
@@ -34,13 +37,14 @@ export function Attachments({ images = [], files = [], removeImage, removeFile, 
 }
 
 /** A file that isn't an image or video (a .txt, a .md): a square tile the size of a media thumbnail, with its extension. */
-function FileTile({ path, name }: { path: string; name: string }) {
+function FileTile({ path, name, file }: { path: string; name: string; file?: File }) {
+  const [open, setOpen] = useState(false);
   const extension = /\.([^./]+)$/.exec(name)?.[1];
-  return <span title={path} className="block">
+  return <><button type="button" aria-label={`Preview ${name}`} onClick={event => { event.currentTarget.focus(); setOpen(true); }} title={path} className="block rounded hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent-ink">
     <span className="flex size-20 flex-col items-center justify-center gap-1 rounded bg-surface text-ink-2">
       <HugeiconsIcon icon={File01Icon} size={22} strokeWidth={1.6} color="currentColor" aria-hidden />
       {extension && <span className="max-w-16 truncate text-[10px] font-medium uppercase tracking-wide">{extension}</span>}
     </span>
     <span className="block max-w-20 truncate px-1 text-center text-[10px] text-ink-2">{name}</span>
-  </span>;
+  </button>{open && <AttachmentPreview file={file} path={path} name={name} close={() => setOpen(false)} />}</>;
 }

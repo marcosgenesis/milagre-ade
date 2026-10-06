@@ -42,7 +42,10 @@ async function ensureDaemon({ dataDir, version, cwd = process.cwd(), worktreeRoo
     try {
       const args = [entry, 'serve', '--data-dir', dataDir, '--app-version', version, '--cwd', cwd];
       if (worktreeRoot) args.push('--worktree-root', worktreeRoot);
-      child = spawn(executable, args, { cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, detached: true, stdio: ['ignore', log, log] });
+      child = spawn(executable, args, { cwd, env: { ...env,
+        // Electron's Node mode may not expose resourcesPath. Pass the desktop's bundled binaries to its host.
+        ...(process.resourcesPath ? { MILAGRE_BUNDLED_BIN_DIR: path.join(process.resourcesPath, 'bin') } : {}),
+        ELECTRON_RUN_AS_NODE: '1' }, detached: true, stdio: ['ignore', log, log] });
       child.on('error', error => { launchError = error; });
       child.unref();
     } finally { fs.closeSync(log); }

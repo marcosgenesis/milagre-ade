@@ -13,6 +13,16 @@ Every scrolling list or panel is a `ScrollArea` (`apps/desktop/app/src/component
 
 Every dropdown goes through `primitives/Select`; a native `<select>` opens macOS's own menu. `no-native-select.test.ts` enforces it.
 
+## Popovers and menus
+
+Every transient surface (picker, menu, anchored popover) closes through `useDismiss` (`apps/desktop/app/src/lib/use-dismiss.ts`): a pointer press anywhere outside it or the window losing focus closes it; Escape stays with the component, which also returns focus. Don't add a `pointerdown` or `blur` listener of your own.
+
+- Pass `inside` so the panel and its trigger count as the surface; the trigger's own click still toggles.
+- A surface anchored to a trigger passes `follow`, its positioning function, and stays put through scrolls and resizes. A surface anchored to a point (the chat row's context menu) omits it and closes instead.
+- While anything is open, `<html>` carries `data-popover-open` and the title bar's `.title-drag` strip stops dragging the window, so a press there closes the surface. Drag strips use that class, not an inline `app-region`.
+
+Modal dialogs are different: they use `<dialog>` with `showModal` or a full-window scrim, and the scrim press closes them.
+
 ## Sliders
 
 Every slider is a `RangeSlider` (`apps/desktop/app/src/components/primitives/RangeSlider.tsx`): tick dots per step, a bar handle that bounces as it lands, drag anywhere on the track or use the arrow keys, and no springs under reduced motion. Its value plumbing is `lib/use-slider.ts`; a native `<input type="range">` draws macOS's own control.

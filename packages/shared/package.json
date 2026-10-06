@@ -81,7 +81,11 @@
       "types": "./src/browser-receiver.d.mts",
       "default": "./src/browser-receiver.mjs"
     },
-    "./message-navigation": "./src/message-navigation.ts"
+    "./message-navigation": "./src/message-navigation.ts",
+    "./file-syntax": {
+      "types": "./src/file-syntax.d.mts",
+      "default": "./src/file-syntax.mjs"
+    }
   },
   "files": [
     "src/*.mjs",
@@ -109,6 +113,7 @@
     "typescript": "~6.0.3"
   },
   "dependencies": {
+    "refractor": "^5.0.0",
     "tweetnacl": "1.0.3"
   }
 }

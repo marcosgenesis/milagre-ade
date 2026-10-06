@@ -1,0 +1,49 @@
+# Deployment uses public, signed release metadata. It never imports the signing private key.
+name: Deploy Linux package repository
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Public stable release containing milagre-linux-repository.tar.gz
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: milagre-package-repository
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      REPOSITORY_FINGERPRINT: ${{ secrets.LINUX_REPOSITORY_KEY_FINGERPRINT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PACKAGES_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check deployment credentials and public release
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" && test -n "$REPOSITORY_FINGERPRINT"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = false
+      - name: Download signed repository bundle
+        run: |
+          gh release download "$RELEASE_TAG" --pattern milagre-linux-repository.tar.gz --dir release
+          mkdir -p release/linux-repository
+          tar -xzf release/milagre-linux-repository.tar.gz -C release/linux-repository --no-same-owner
+      - name: Verify pinned key, signatures and index checksums
+        run: node scripts/verify-linux-repository.cjs --directory release/linux-repository --tag "$RELEASE_TAG" --fingerprint "$REPOSITORY_FINGERPRINT"
+      - name: Verify public installer bytes
+        run: node scripts/verify-public-packages.cjs --directory release/linux-repository --tag "$RELEASE_TAG"
+      - name: Deploy package metadata Worker
+        run: npx -y wrangler@4.147.0 deploy --config release/linux-repository/worker/wrangler.toml
+      - name: Check published signed index
+        run: |
+          curl --retry 5 --retry-delay 5 --fail --silent --show-error https://packages.milagre.cloud/dists/stable/InRelease --output /tmp/InRelease
+          cmp /tmp/InRelease release/linux-repository/dists/stable/InRelease

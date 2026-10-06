@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pairingWindow, phoneQrSrc, phoneStatusLine } from "./phone.ts";
+import { pairedPhonesLine, pairingWindow, phoneQrSrc, phoneStatusLine } from "./phone.ts";
 
 test("the status line says what is happening and where the phone can reach this Mac", () => {
   assert.equal(phoneStatusLine(null), "Checking…");
@@ -24,6 +24,16 @@ test("the pairing window counts whole minutes up and closes at the deadline", ()
   assert.deepEqual(pairingWindow(status(600_000), 60_000), { open: true, minutes: 9 });
   assert.deepEqual(pairingWindow(status(600_000), 599_999), { open: true, minutes: 1 });
   assert.deepEqual(pairingWindow(status(600_000), 600_000), { open: false, minutes: 0 });
+});
+
+test("the paired-phone count is shown only for a relay phone", () => {
+  const relay = (pairedPhones?: number) => ({ enabled: true, state: "on" as const, remote: "relay" as const, relay: "online" as const, pairedPhones });
+  assert.equal(pairedPhonesLine(null), null);
+  assert.equal(pairedPhonesLine({ enabled: true, state: "on", remote: "cloudflare" }), null);
+  assert.equal(pairedPhonesLine(relay()), null);
+  assert.equal(pairedPhonesLine(relay(0)), "No phones yet");
+  assert.equal(pairedPhonesLine(relay(1)), "1 phone");
+  assert.equal(pairedPhonesLine(relay(3)), "3 phones");
 });
 
 test("the QR image source is an inert data URL", () => {

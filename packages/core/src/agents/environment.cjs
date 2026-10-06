@@ -109,7 +109,8 @@ function nvmBin(home, { exists, readdir, readFile }) {
 
 // Where the CLIs and their tools usually live, for when the shell can't be read or its PATH misses one.
 // Only folders that exist.
-function installDirs(home = os.homedir(), { exists = fs.existsSync, readdir = fs.readdirSync, readFile = fs.readFileSync } = {}) {
+function installDirs(home = os.homedir(), { exists = fs.existsSync, readdir = fs.readdirSync, readFile = fs.readFileSync, platform = process.platform, env = process.env } = {}) {
+  if (platform === "win32") return [path.join(home, ".local/bin"), path.join(env.APPDATA || path.join(home, "AppData/Roaming"), "npm"), path.join(env.LOCALAPPDATA || path.join(home, "AppData/Local"), "Microsoft/WinGet/Links"), env.VOLTA_HOME && path.join(env.VOLTA_HOME, "bin"), env.NVM_SYMLINK, env.PNPM_HOME, path.join(home, ".bun/bin")].filter(dir => dir && exists(dir));
   return [
     path.join(home, ".local/bin"), // Claude Code's native installer
     path.join(home, ".claude/local"), // Claude Code's older local npm install
@@ -126,12 +127,16 @@ function installDirs(home = os.homedir(), { exists = fs.existsSync, readdir = fs
 }
 
 // Joins PATH lists in order. Each folder keeps its first position; empty entries (the current folder) are dropped.
-function mergePath(...lists) {
+function mergePathFor(platform, ...lists) {
+  const delimiter = platform === "win32" ? ";" : ":";
   const seen = new Set();
   for (const list of lists) {
-    for (const dir of Array.isArray(list) ? list : String(list ?? "").split(":")) if (dir) seen.add(dir);
+    for (const dir of Array.isArray(list) ? list : String(list ?? "").split(delimiter)) if (dir) seen.add(dir);
   }
-  return [...seen].join(":");
+  return [...seen].join(delimiter);
+}
+function mergePath(...lists) {
+  return mergePathFor(process.platform, ...lists);
 }
 
 function userShell() {
@@ -145,8 +150,8 @@ function userShell() {
 // Adds the install folders that exist now to PATH, after the folders it already has. A CLI installed while
 // the app runs (its installer may create ~/.local/bin, or nvm a new node version) is found on the next check.
 function refreshInstallPath({ target = process.env, platform = process.platform, home = os.homedir(), dirs = installDirs } = {}) {
-  if (platform === "win32") return;
-  target.PATH = mergePath(target.PATH, dirs(home));
+  const name = platform === "win32" ? Object.keys(target).find(key => key.toLowerCase() === "path") || "Path" : "PATH";
+  target[name] = mergePathFor(platform, target[name], dirs(home, { platform, env: target }));
 }
 
 // Fills the app's environment from the login shell, once, at startup. Variables the app already has keep
@@ -154,8 +159,8 @@ function refreshInstallPath({ target = process.env, platform = process.platform,
 // PATH becomes the shell's folders, then the app's, then the install folders. Started from a terminal
 // (npm run dev), the app's own PATH comes first, so an `nvm use`, direnv or virtualenv there still wins,
 // then the shell's, then the install folders.
-async function loadLoginEnvironment({ target = process.env, platform = process.platform, home = os.homedir(), shell = target.SHELL || userShell() || "/bin/zsh", readShellEnv = readLoginShellEnv, dirs = installDirs } = {}) {
-  if (platform === "win32") return { source: "none" };
+async function loadLoginEnvironment({ target = process.env, platform = process.platform, home = os.homedir(), userShell: shellInfo = userShell, shell = target.SHELL || shellInfo() || (platform === "darwin" ? "/bin/zsh" : "/bin/sh"), readShellEnv = readLoginShellEnv, dirs = installDirs } = {}) {
+  if (platform === "win32") { refreshInstallPath({ target, platform, home, dirs }); return { source: "fallback" }; }
   const imported = await readShellEnv({ shell, env: { ...target } });
   for (const [key, value] of Object.entries(imported ?? {})) {
     if (key !== "PATH" && !SHELL_ONLY.has(key) && target[key] === undefined) target[key] = value;
@@ -167,10 +172,26 @@ async function loadLoginEnvironment({ target = process.env, platform = process.p
 }
 
 // Absolute path of a CLI on the app's PATH, or null when it isn't installed.
-function resolveExecutable(name, { execFileImpl = execFile } = {}) {
+function resolveExecutable(name, { platform = process.platform, env = process.env, execFileImpl = execFile, fsImpl = fs } = {}) {
+  if (platform === 'win32') {
+    // where.exe and cmd.exe search cwd before PATH. A Project must never supply
+    // the executable used for agent discovery, turns or updates.
+    if (!/^[a-z0-9_.-]+$/i.test(name)) return Promise.resolve(null);
+    const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path');
+    const extensions = (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(ext => /^\.(exe|com|cmd|bat)$/i.test(ext));
+    const hasExtension = /\.(exe|com|cmd|bat)$/i.test(name);
+    for (const directory of String(env[pathKey] || '').split(';')) {
+      if (!path.isAbsolute(directory) || directory === '.' || directory.includes('\0')) continue;
+      for (const extension of hasExtension ? [''] : extensions) {
+        const candidate = path.join(directory, name + extension.toLowerCase());
+        try { if (fsImpl.statSync(candidate).isFile()) return Promise.resolve(candidate); } catch {}
+      }
+    }
+    return Promise.resolve(null);
+  }
   return new Promise((resolve) => {
     execFileImpl("/usr/bin/which", [name], { encoding: "utf8", timeout: 5000 }, (error, stdout) => {
-      resolve(error ? null : String(stdout).trim().split("\n")[0] || null);
+      resolve(error ? null : String(stdout).trim().split(/\r?\n/)[0] || null);
     });
   });
 }

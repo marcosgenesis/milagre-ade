@@ -424,8 +424,7 @@ export function ChatComposer({
     setCanvasChat(null);
     requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>("[data-slot=subagent-track] > button")?.focus());
   }, []);
-  // Preparing a worktree is not a conversation yet. Move the composer only
-  // when the first message is committed and its draft is cleared together.
+  // A first message, including its preview while setup runs, opens the conversation layout.
   const isNewChat = messages.length === 0 && !handover?.live;
   // The note shows with the brief, until it is sent or the note is dismissed, by chat key.
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([]);
@@ -586,7 +585,7 @@ export function ChatComposer({
           onPermissionModeChange={onPermissionModeChange}
           alwaysExpanded={isNewChat}
         />
-        {isNewChat && newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
+        {newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
       </div>
       </div>
     </div>

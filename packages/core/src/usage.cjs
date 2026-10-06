@@ -1,3 +1,5 @@
+const { spawnCommand } = require("./agents/command.cjs");
+const { resolveExecutable } = require("./agents/environment.cjs");
 const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -173,12 +175,16 @@ function bankedResetsOf(count) {
   return Number.isInteger(count) && count > 0 ? { bankedResets: count } : {};
 }
 
-function readCodexUsage(deps = {}) {
+async function readCodexUsage(deps = {}) {
   const { spawnImpl = spawn, now = Date.now, timeoutMs = PROVIDER_TIMEOUT_MS } = deps;
   const done = (status, windows, message) => providerResult("codex", now, status, windows, message);
 
+  const command = deps.command || (process.platform === "win32" ? await resolveExecutable("codex") : "codex");
+  if (!command) return done("unavailable", [], "Codex CLI not found.");
   return new Promise((resolve) => {
-    const child = spawnImpl("codex", ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: process.env, windowsHide: true });
+    let child;
+    try { child = spawnCommand(command, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: process.env, windowsHide: true }, spawnImpl); }
+    catch { resolve(done("error", [], "Codex could not start.")); return; }
     let settled = false;
     let buffer = "";
     const timer = setTimeout(() => finish(done("error", [], "Codex usage timed out.")), timeoutMs);

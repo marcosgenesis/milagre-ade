@@ -1,3 +1,5 @@
+const { execCommand } = require("./agents/command.cjs");
+const { editorInvocation } = require("./editor-command.cjs");
 const { createGit } = require("./git/client.cjs");
 const { execFile } = require("node:child_process");
 const fsp = require("node:fs/promises");
@@ -29,10 +31,10 @@ async function exists(fs, target) {
 
 // The installed editors: an .app in /Applications or ~/Applications, or its CLI on PATH.
 // Each is { id, name, appPath, cli }, with null for what's missing.
-async function detectEditors({ fs = fsp, which = resolveExecutable, home = os.homedir() } = {}) {
+async function detectEditors({ fs = fsp, which = resolveExecutable, home = os.homedir(), platform = process.platform } = {}) {
   const found = await Promise.all(EDITORS.map(async (editor) => {
     let appPath = null;
-    for (const dir of ["/Applications", path.join(home, "Applications")]) {
+    for (const dir of platform === "darwin" ? ["/Applications", path.join(home, "Applications")] : []) {
       const candidate = path.join(dir, editor.app);
       if (!appPath && await exists(fs, candidate)) appPath = candidate;
     }
@@ -104,7 +106,8 @@ async function gitTopLevel(directory) {
 
 function runProgram(file, args) {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: 10_000 }, (error) => (error ? reject(error) : resolve()));
+    const invocation = editorInvocation(file, args);
+    execCommand(invocation?.file ?? file, invocation?.args ?? args, { timeout: 10_000, windowsHide: true, ...(invocation && { env: { ...process.env, ...invocation.env } }) }, (error) => (error ? reject(error) : resolve()));
   });
 }
 

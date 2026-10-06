@@ -1,3 +1,4 @@
+const { spawnCommand } = require("./command.cjs");
 const { settleSubagents } = require("./subagents.cjs");
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
@@ -94,7 +95,8 @@ class ClaudeSession {
 
   /** The Claude Code process, while it runs; the ports its commands open belong to the chat. */
   get pid() {
-    return this.closed ? null : this.child?.pid ?? null;
+    const child = this.child;
+    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : child?.pid ?? null;
   }
 
   async startTurn(request) {
@@ -244,7 +246,7 @@ class ClaudeSession {
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
-          const child = this.spawnImpl(command, args, { cwd, env, signal, stdio: ["pipe", "pipe", "pipe"], detached: true });
+          const child = spawnCommand(command, args, { cwd, env, signal, stdio: ["pipe", "pipe", "pipe"], detached: true, windowsHide: true }, this.spawnImpl);
           child.stderr?.on("data", (chunk) => { this.stderr = (this.stderr + chunk.toString()).slice(-4000); });
           this.child = child;
           return child;

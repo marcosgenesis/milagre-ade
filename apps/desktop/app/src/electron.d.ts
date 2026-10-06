@@ -33,6 +33,8 @@ export type PhoneStatus = {
   relay?: "connecting" | "online" | "offline";
   /** Only with `remote: "relay"`: when (ms since the epoch) the window in which new phones may pair ends. */
   pairingUntil?: number;
+  /** Only with `remote: "relay"`: how many phones have paired since the last reset. */
+  pairedPhones?: number;
   localUrl?: string;
   publicUrl?: string;
   pairingLink?: string;
@@ -42,8 +44,9 @@ export type PhoneStatus = {
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
-/** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects. */
-export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean };
+/** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects.
+ * `notice`: shown once, e.g. the host went away and was started again. `failed`: it couldn't be started again (`message` says why). */
+export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean; notice?: string; failed?: boolean };
 export type RuntimeSnapshot = { projects: OpenProject[]; links?: Array<{ linkId: string; state: LinkState }>; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
@@ -213,6 +216,8 @@ declare global {
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;
+      /** The "phone paired" notification was clicked: the window is back, and Settings → Phone should open. */
+      onOpenPhoneSettings: (callback: () => void) => () => void;
     };
   }
 }

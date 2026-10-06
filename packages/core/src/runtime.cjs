@@ -435,7 +435,7 @@ function createRuntime(options) {
     keepAwake.observe(chatId, event);
     void notifyIfWaiting(chatId, event).catch(() => {});
     if (!isLinkScopeKey(projectOfKey(chatId))) diffs.observe(chatId, event);
-    void (isLinkScopeKey(projectOfKey(chatId)) ? Promise.resolve() : linked.observe(chatId, event)).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
+    if (!isLinkScopeKey(projectOfKey(chatId))) void track(() => linked.observe(chatId, event), background).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
     // A turn that just failed on a login problem makes a "ready" picker status out of date.
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
@@ -767,6 +767,7 @@ function createRuntime(options) {
         await agents.closeAll();
         await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
       }
+      while (background.size) await Promise.allSettled([...background]);
       await states.close();
       await linkStore.close();
       await linked.close();

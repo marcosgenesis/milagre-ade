@@ -8,6 +8,7 @@ const YAML = require('yaml')
 
 const releaseWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf8'))
 const publishWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-installers.yml'), 'utf8'))
+const candidateWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/package-candidates.yml'), 'utf8'))
 const credentials = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']
 const credentialStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple release credentials')
 const notarizeStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
@@ -77,6 +78,23 @@ fi
   }
 }
 
+test('every candidate platform forwards the release version through npm to the packager', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-candidate-args-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(root, 'record.cjs'), "require('node:fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)))")
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: {
+    'package:mac:local': 'node record.cjs', 'package:win': 'node record.cjs', 'package:linux': 'node record.cjs',
+  } }))
+  const build = candidateWorkflow.jobs.package.steps.find(step => step.name === 'Build experimental installers')
+  for (const platform of candidateWorkflow.jobs.package.strategy.matrix.include) {
+    const command = build.run.replace('${{ matrix.command }}', platform.command)
+    const result = runStep({ run: command }, root, { RELEASE_TAG: 'v1.2.3' })
+    assert.equal(result.status, 0, result.stderr)
+    const args = JSON.parse(fs.readFileSync(path.join(root, 'args.json'), 'utf8'))
+    assert.ok(args.includes('--config.extraMetadata.version=1.2.3'), `${platform.platform}: ${JSON.stringify(args)}`)
+  }
+})
+
 test('missing Apple credentials stop the release without printing secret values', () => {
   const ready = Object.fromEntries(credentials.map(name => [name, `test-secret-${name}`]))
   for (const missing of credentials) {
@@ -129,12 +147,36 @@ test('a candidate is not published without the auto-updater metadata, and publis
   assert.doesNotMatch(f.calls(), /gh release/)
   fs.writeFileSync(path.join(f.root, 'release/latest-mac.yml'), '')
   fs.writeFileSync(path.join(f.root, 'release/Milagre-arm64-mac.zip'), '')
+  fs.mkdirSync(path.join(f.root, 'release/package-managers/homebrew'), { recursive: true })
+  fs.writeFileSync(path.join(f.root, 'release/package-managers/homebrew/milagre.rb'), 'generated cask')
+  fs.writeFileSync(path.join(f.root, 'release/package-managers/SHA256SUMS'), 'generated checksums')
   const result = runStep(uploadStep, f.root, env)
   assert.equal(result.status, 0, result.stderr)
   assert.match(f.calls(), /gh release upload v9\.9\.9 .*release\/latest-mac\.yml/)
   assert.match(f.calls(), /release\/Milagre-arm64\.dmg/)
   assert.match(f.calls(), /release\/Milagre-arm64-mac\.zip/)
+  assert.match(f.calls(), /release\/package-managers\/homebrew\/milagre\.rb/)
+  assert.match(f.calls(), /release\/package-managers\/SHA256SUMS/)
   assert.match(f.calls(), /gh release upload[\s\S]*gh release edit v9\.9\.9 --draft=false --latest/)
+})
+
+test('missing or empty Homebrew metadata stops publication before any upload', t => {
+  const f = fixture(t)
+  fs.writeFileSync(path.join(f.root, 'bin/gh'), '#!/bin/bash\nprintf \'gh %s\\n\' "$*" >> "$CALL_LOG"\n', { mode: 0o755 })
+  fs.writeFileSync(path.join(f.root, 'release/latest-mac.yml'), '')
+  const directory = path.join(f.root, 'release/package-managers')
+  fs.mkdirSync(path.join(directory, 'homebrew'), { recursive: true })
+  const env = { ...f.env, RELEASE_TAG: 'v9.9.9' }
+  for (const contents of [null, '']) {
+    if (contents !== null) {
+      fs.writeFileSync(path.join(directory, 'homebrew/milagre.rb'), contents)
+      fs.writeFileSync(path.join(directory, 'SHA256SUMS'), contents)
+    }
+    const result = runStep(uploadStep, f.root, env)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stdout, /Homebrew metadata/)
+    assert.doesNotMatch(f.calls(), /gh release/)
+  }
 })
 
 test('signature, ticket, Gatekeeper and disk image failures stop verification', t => {

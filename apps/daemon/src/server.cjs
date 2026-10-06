@@ -1,4 +1,6 @@
 const { isLinkScopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
+const { preparePrivateDirectory } = require('@milagre/core/private-files');
+const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require('./local-auth.cjs');
 const net = require('node:net');
 const fs = require('node:fs/promises');
 const { once } = require('node:events');
@@ -122,7 +124,11 @@ function eventFrame(channel, payload, seq, inlineLimit) {
   return { json, bytes: Buffer.byteLength(json) + 1 };
 }
 
-async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, pushOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, pagesTtlMs, pagesBudgetChars, onError = error => console.error(error) }) {
+async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions = {}, pushOptions = {}, maxFrameBytes = MAX_FRAME_BYTES, pagesTtlMs, pagesBudgetChars, requireAuthentication = process.platform === 'win32', authTimeoutMs = 5000, onError = error => console.error(error) }) {
+  if (process.platform === 'win32') preparePrivateDirectory(dataDir);
+  const authenticationToken = requireAuthentication ? prepareToken(dataDir) : null;
+  const sockets = new Set();
+  let unauthenticated = 0;
   // Anything bigger travels in pages, or (a state in an event) is read in pages by the client.
   const inlineLimit = Math.floor(maxFrameBytes / 4);
   const clients = new Map();
@@ -159,9 +165,17 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     }
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
-  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), ...phoneOptions });
+  // A first pairing is announced to the desktop, which tells the owner in case it was not them.
+  const phone = createPhone({ dataDir, onChange: status => broadcast('phone:status', status), onPaired: info => broadcast('phone:paired', info), ...phoneOptions });
   const server = net.createServer(socket => {
-    if (stopping) { socket.destroy(); return; }
+    if (stopping || (requireAuthentication && unauthenticated >= 32)) { socket.destroy(); return; }
+    sockets.add(socket);
+    let authenticated = !requireAuthentication;
+    let challenge;
+    let authenticationRejected = false;
+    if (!authenticated) unauthenticated++;
+    const authenticationTimeout = authenticated ? null : setTimeout(() => socket.destroy(), authTimeoutMs);
+    authenticationTimeout?.unref();
     const inflight = new Set();
     // Requests whose reply waits for paging room: they don't hold a MAX_PENDING slot, so a reader's page reads get through.
     const awaitingPages = new Set();
@@ -169,7 +183,7 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
     const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
     socket.once('close', () => { resultPages.clear(); });
     const view = { focused: false, projectPath: null, chatId: null };
-    views.set(socket, view);
+    if (authenticated) views.set(socket, view);
     const connection = wire(socket, {
       maxFrameBytes,
       onInvalid(error) {
@@ -180,13 +194,33 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
         void dispatch(request).catch(error => { onError(error); socket.destroy(); });
       },
     });
-    clients.set(socket, connection);
+    if (authenticated) clients.set(socket, connection);
     socket.on('error', () => {});
-    socket.on('close', () => { clients.delete(socket); views.delete(socket); });
+    socket.on('close', () => { clearTimeout(authenticationTimeout); if (!authenticated) unauthenticated--; sockets.delete(socket); clients.delete(socket); views.delete(socket); });
     async function dispatch(request) {
       const validId = Number.isSafeInteger(request?.id) || (typeof request?.id === 'string' && request.id.length <= 128);
       const id = validId ? request.id : null;
       function fail(code, message) { connection.send({ v: VERSION, id, error: { code, message } }); }
+      if (authenticationRejected) return;
+      if (!authenticated) {
+        const supplied = request?.args?.[0];
+        const valid = request?.v === VERSION && validId && request.method === 'daemon:authenticate' && Array.isArray(request.args) && request.args.length === 1;
+        if (valid && !challenge && validNonce(supplied?.clientNonce)) {
+          challenge = { clientNonce: supplied.clientNonce, serverNonce: authenticationNonce() };
+          connection.send({ v: VERSION, id, result: { serverNonce: challenge.serverNonce, proof: authenticationProof(authenticationToken, 'server', challenge.clientNonce, challenge.serverNonce) } });
+          return;
+        }
+        if (!valid || !challenge || !validToken(authenticationProof(authenticationToken, 'client', challenge.clientNonce, challenge.serverNonce), supplied?.proof)) {
+          authenticationRejected = true;
+          fail('UNAUTHORIZED', 'Local daemon authentication is required');
+          socket.end();
+          return;
+        }
+        authenticated = true; unauthenticated--; clearTimeout(authenticationTimeout);
+        clients.set(socket, connection); views.set(socket, view);
+        connection.send({ v: VERSION, id, result: { authenticated: true } });
+        return;
+      }
       if (request?.v !== VERSION) { fail('VERSION_MISMATCH', `Local protocol version ${VERSION} is required`); return; }
       if (!validId || typeof request.method !== 'string' || request.method.length > 128 || !Array.isArray(request.args)) {
         fail('INVALID_REQUEST', 'Expected id, method and an args array'); return;
@@ -269,10 +303,12 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
       await push.close();
       await sender.close();
       await runtime.close();
+      // Saved: tell every client this stop was asked for, so a desktop doesn't start the host again (a crash sends nothing).
+      broadcast('daemon:stopping', {});
       const stopped = listening ? new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) : Promise.resolve();
-      for (const socket of clients.keys()) socket.end();
+      for (const socket of sockets) socket.end();
       // Do not let a client that never closes its side keep shutdown alive.
-      const timeout = setTimeout(() => { for (const socket of clients.keys()) socket.destroy(); }, 1000);
+      const timeout = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 1000);
       await stopped;
       clearTimeout(timeout);
     })().catch(error => { stopping = undefined; throw error; });
@@ -281,10 +317,12 @@ async function startDaemon({ dataDir, version, runtimeOptions = {}, phoneOptions
   try {
     socketPath = pathFor(dataDir);
     prepareSocketDirectory(socketPath);
+    // This host owns the data folder (createRuntime took its lock), so a socket file here is one a crashed host left.
+    if (process.platform !== 'win32') await fs.rm(socketPath, { force: true });
     server.listen(socketPath);
     await once(server, 'listening');
     listening = true;
-    await fs.chmod(socketPath, 0o600);
+    if (process.platform !== 'win32') await fs.chmod(socketPath, 0o600);
     server.on('error', onError);
     await push.load();
     await phone.start();

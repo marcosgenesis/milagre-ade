@@ -8,6 +8,12 @@ const RESULT_PAGES = 'result-pages-v1';
 const OUTDATED_HOST = "Restart Milagre's background host to load large projects.";
 // Events waiting behind one Project's state read. Past this the connection is dropped, and the reconnect re-reads every state.
 const MAX_HELD = 10_000;
+// A host that went away without being asked to (it crashed, or was killed) is started again: this many times, the
+// delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
+const START_ATTEMPTS = 3;
+// A connection that failed this way has no host behind it, rather than a slow or older one.
+const HOST_GONE = ['ENOENT', 'ECONNREFUSED'];
+const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
 
 // The Project an event belongs to, when it names one.
 function projectOfEvent({ channel, payload }) {
@@ -21,8 +27,11 @@ const carriesState = payload => Boolean(payload && typeof payload === 'object' &
 
 async function connectDesktopRuntime(options) {
   const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
+  // The start every launch and restartHost use; tests stand in for it.
+  /** @type {typeof ensureDaemon} */
+  const startHost = options.startHost ?? ensureDaemon;
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
-  let client = await ensureDaemon(options);
+  let client = await startHost(options);
   const status = client.status ?? await client.call('daemon:status');
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
@@ -94,6 +103,8 @@ async function connectDesktopRuntime(options) {
   function attach(connection) {
     connection.on('event', event => {
       if (client !== connection || closed) return;
+      // The host was asked to stop (by this desktop or anyone else) and saved: it stays stopped.
+      if (event.channel === 'daemon:stopping') { hostStopped = true; return; }
       if (!recovering) { deliver(connection, event); return; }
       if (!capturingSnapshot) return; // The later snapshot covers restoration events.
       bufferedBytes += Buffer.byteLength(JSON.stringify(event));
@@ -112,18 +123,32 @@ async function connectDesktopRuntime(options) {
       if (!recovering) scheduleReconnect();
     });
   }
+  // A host stopped on purpose stays stopped: an update, a restart until it starts its own, a quit, or a stop the host
+  // announced (daemon:stopping). Its reconnects only connect, and the next desktop launch can start it again. A host
+  // that went away otherwise is started again (see START_ATTEMPTS). Only the connection is retried: a command that
+  // was sent, or refused while disconnected, is never sent again.
+  let hostStopped = false;
+  // Starts tried since the host went away; reset once connected.
+  let starts = 0;
+  const mayStart = () => !hostStopped && starts < START_ATTEMPTS;
   function scheduleReconnect() {
     if (closed || timer) return;
-    timer = setTimeout(() => { timer = null; void reconnect(); }, reconnectMs);
+    timer = setTimeout(() => { timer = null; void reconnect(); }, mayStart() ? reconnectMs * 2 ** starts : reconnectMs);
   }
-  // A reconnect never starts or stops a daemon: an explicit host stop must stay stopped, and the next desktop launch
-  // can start it again. The exception is a restart whose new host didn't come up: its retries keep starting one.
-  let startOnRetry = false;
   /** Resolves with the error when it couldn't connect (it then retries by itself), or nothing once connected. */
   async function reconnect() {
     let connection;
+    let started = false;
     try {
-      connection = await (startOnRetry ? ensureDaemon(options) : compatibleClient(dataDir));
+      if (mayStart()) {
+        try { connection = await compatibleClient(dataDir); }
+        catch (error) {
+          if (!(error instanceof Error) || !('code' in error) || !HOST_GONE.includes(String(error.code))) throw error;
+          starts++; started = true;
+          if (!restarting) emit('runtime:connection', { connected: false, message: "Milagre's background host stopped. Starting it again…" });
+          connection = await startHost(options);
+        }
+      } else connection = await compatibleClient(dataDir);
       if (closed) { connection.close(); return undefined; }
       adopt(connection.status ?? await connection.call('daemon:status'));
       client = connection;
@@ -152,15 +177,21 @@ async function connectDesktopRuntime(options) {
       emit('runtime:snapshot', snapshot);
       for (const event of buffered) if (event.seq > snapshot.eventSeq) deliver(connection, event);
       buffered = []; recovering = false;
-      startOnRetry = false;
-      emit('runtime:connection', connectedState());
+      // A restart the user asked for needs no notice; one that happened by itself does.
+      const restarted = starts > 0 && !restarting;
+      hostStopped = false; starts = 0;
+      emit('runtime:connection', restarted ? { ...connectedState(), notice: RESTARTED_HOST } : connectedState());
       return undefined;
     } catch (error) {
       recovering = false; buffered = [];
       if (client === connection) client = null;
       connection?.close();
       if (!closed) {
-        emit('runtime:connection', { connected: false, message: `Host unavailable: ${error instanceof Error ? error.message : String(error)}` });
+        const reason = error instanceof Error ? error.message : String(error);
+        // The last start failed too: say why, and keep that on screen while the retries only try to connect to a host
+        // started some other way.
+        if (started && starts >= START_ATTEMPTS) emit('runtime:connection', { connected: false, failed: true, message: `Milagre's background host couldn't start again: ${reason}` });
+        else if (hostStopped || starts < START_ATTEMPTS) emit('runtime:connection', { connected: false, message: `Host unavailable: ${reason}` });
         scheduleReconnect();
       }
       return error;
@@ -211,8 +242,8 @@ async function connectDesktopRuntime(options) {
         emit('runtime:connection', { connected: false, message: 'Restarting the background host…' });
         await stopHost(connection, 'The background host has not stopped. Try again.');
         clearTimeout(timer); timer = null;
-        // A new host that fails to start is reported to the window; the retries that follow keep starting one.
-        startOnRetry = true;
+        // A new host that fails to start is reported to the window; the retries that follow start one again.
+        hostStopped = false; starts = 0;
         const failure = await reconnect();
         if (failure) throw failure;
       } catch (error) {
@@ -224,9 +255,12 @@ async function connectDesktopRuntime(options) {
       if (closed) return;
       if (stop) {
         if (!client || recovering) throw new Error('Reconnect to the host before installing an update.');
+        const connection = client;
         // A stop acknowledgement follows saving. Socket closure also confirms
         // host shutdown before the installer can replace its files.
-        await stopHost(client, 'The host has not stopped. The update was not installed.');
+        hostStopped = true;
+        try { await stopHost(connection, 'The host has not stopped. The update was not installed.'); }
+        catch (error) { if (client === connection) hostStopped = false; throw error; }
       } else if (client && !recovering) await client.call('daemon:flush');
       closed = true;
       clearTimeout(timer);

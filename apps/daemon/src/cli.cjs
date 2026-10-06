@@ -17,7 +17,7 @@ async function main() {
     'app-version': { type: 'string' }, cwd: { type: 'string' }, 'worktree-root': { type: 'string' },
   } });
   if (values.help) {
-    console.log('milagre daemon <serve|status|stop|request METHOD [JSON_ARGS]> --data-dir /absolute/path\nmilagre daemon bridge --data-dir /absolute/path --connection-file /absolute/new-file.json [--port 8787]\n\nLocal macOS/Linux daemon. Use a separate profile and close these Projects in older desktop releases.');
+    console.log('milagre daemon <serve|status|stop|request METHOD [JSON_ARGS]> --data-dir /absolute/path\nmilagre daemon bridge --data-dir /absolute/path --connection-file /absolute/new-file.json [--port 8787]\n\nLocal macOS/Linux/Windows daemon. Use a separate profile and close these Projects in older desktop releases.');
     return;
   }
   const command = positionals[0];

@@ -170,9 +170,9 @@ Approved and executed inline. The Link-only PR records the final validation and 
 
 ## Final verification
 
-Desktop/shared typecheck and production build passed. `test:agent` passed 1,368 tests (120 shared, 877 core, 223 desktop, 148 daemon); `test:ui` passed 218. The real Electron Project Links, canvas Links and Delegation checks passed. Claude and Codex edited both owned Worktrees while leaving main checkouts untouched. A real Codex continuation after restart preserved its native session, exact bindings and canonical transcript.
+Desktop/shared typecheck and production build passed after merging current main. `test:agent` passed 1,433 tests (122 shared, 913 core, 231 desktop, 167 daemon); 10 native Windows checks were skipped on macOS. `test:ui` passed 219. The real Electron Project Links, canvas Links and Delegation checks passed. Claude and Codex edited both owned Worktrees while leaving main checkouts untouched. A real Codex continuation after restart preserved its native session, exact bindings and canonical transcript.
 
-Independent review found and verified fixes for interrupted ignored setup output, replacement directories, missing-member continuation markers, canonical canvas reads, and late acknowledgements across same-text drafts and scope navigation. No Critical/Important findings remain; no minor findings were deferred. Screenshot commit: `1fbc026ea858a61c7cd409e83354ea96135224de` on the orphan screenshots branch.
+Independent review found and verified fixes for interrupted ignored setup output, replacement directories, missing-member continuation markers, canonical canvas reads, and late acknowledgements across same-text drafts and scope navigation. A blocked-save regression also proved shutdown must await Delegation observations before releasing profile ownership; the fix passed all 34 Delegation/runtime tests and independent review. No Critical/Important findings remain; no minor findings were deferred. Screenshot commit: `12cde4335dd1b36d78c29215ca2c63405e41ac62` on the orphan screenshots branch.
 
 Implementation rulings:
 - Keep LinkWorkspace as a separate scoped view using existing composer primitives. This avoids a fictional Project in ordinary App state; it requires keeping view behavior in step with Project Chats.

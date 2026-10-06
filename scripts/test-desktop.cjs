@@ -1,5 +1,5 @@
 // Runs the real main process, preload, and built renderer against temporary legacy-format data.
-// npm run build && npm run test:desktop [-- --packaged release/mac-arm64/Milagre.app]
+// npm run build && npm run test:desktop [-- --packaged <.app, unpacked directory, or executable>]
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -10,6 +10,12 @@ const { setTimeout: delay } = require("node:timers/promises");
 const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..");
+
+async function packagedExecutable(input) {
+  const bundle = path.resolve(input);
+  if (!(await fs.stat(bundle)).isDirectory()) return bundle;
+  return path.join(bundle, process.platform === 'darwin' ? 'Contents/MacOS/Milagre' : process.platform === 'win32' ? 'Milagre.exe' : 'milagre');
+}
 
 async function waitFor(read, description) {
   for (let i = 0; i < 400; i++) {
@@ -22,11 +28,15 @@ async function waitFor(read, description) {
 
 async function connect(url) {
   const socket = new WebSocket(url);
-  await once(socket, "open");
+  try { await once(socket, "open", { signal: AbortSignal.timeout(20000) }); }
+  catch (error) { socket.close(); throw error; }
   let id = 0;
   const pending = new Map();
   socket.addEventListener("message", ({ data }) => {
     const reply = JSON.parse(data);
+    if (reply.method === 'Runtime.exceptionThrown' || reply.method === 'Log.entryAdded') {
+      console.error('Desktop renderer:', JSON.stringify(reply.params));
+    }
     const request = pending.get(reply.id);
     if (!request) return;
     pending.delete(reply.id);
@@ -48,6 +58,7 @@ async function connect(url) {
 }
 
 async function checkApp({ executable, args, profile, project, expectTheme, expectStartupError = false, recoverOwnership }) {
+  console.log(`CHECK: ${expectTheme ? 'installed' : 'source'} desktop${expectStartupError ? ' ownership recovery' : ''}`);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   env.MILAGRE_DEV_SERVER_URL = pathToFileURL(path.join(root, "apps/desktop/dist/index.html")).href;
@@ -63,16 +74,19 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     debuggerPort ??= output.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/)?.[1];
   });
   let connection;
+  let failure;
   try {
     await waitFor(() => {
       assert.equal(child.exitCode, null, output);
       return debuggerPort;
     }, "Electron debugger");
     const page = await waitFor(async () => {
-      const pages = await fetch(`http://127.0.0.1:${debuggerPort}/json/list`).then(response => response.json());
+      const pages = await fetch(`http://127.0.0.1:${debuggerPort}/json/list`, { signal: AbortSignal.timeout(5000) }).then(response => response.json());
       return pages.find(page => page.type === "page" && page.url.startsWith("file:"));
     }, "desktop page");
     connection = await connect(page.webSocketDebuggerUrl);
+    await connection.call('Runtime.enable');
+    await connection.call('Log.enable');
     const evaluate = async expression => {
       const result = await connection.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
@@ -147,9 +161,38 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     await waitFor(() => evaluate('!document.querySelector("[data-host-disconnected]")'), 'desktop reconnect without reload');
     assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="Prompt"]\').value'), 'Keep this unsent draft');
     console.log('PASS: a shared client updates desktop and host restart restores state without losing its draft');
+    // A host that dies without being asked to stop (killed outright: its lock and socket stay behind) is started again.
+    const crashed = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    let crashedPid;
+    try { ({ pid: crashedPid } = await crashed.call('daemon:status')); } finally { crashed.close(); }
+    process.kill(crashedPid, 'SIGKILL');
+    await waitFor(() => evaluate('document.body?.textContent.includes("stopped unexpectedly, so it was started again") && !document.querySelector("[data-host-disconnected]")'), 'host started again after a crash');
+    const replacement = await require('@milagre/daemon/client').connect({ dataDir: profile });
+    try { assert.notEqual((await replacement.call('daemon:status')).pid, crashedPid); } finally { replacement.close(); }
+    assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="Prompt"]\').value'), 'Keep this unsent draft');
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      const shot = await connection.call('Page.captureScreenshot');
+      await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'host-restarted.png'), Buffer.from(shot.data, 'base64'));
+    }
+    console.log('PASS: a host that crashed is started again, the window says so, and the draft stays');
     console.log(`PASS: ${expectTheme ? "packaged" : "source"} desktop opens existing Chats, provider IDs, Project settings, bundled skills and saved UI preferences`);
   } catch (error) {
+    failure = error;
     console.error(output);
+    console.error(error);
+    if (connection) {
+      try {
+        const state = await connection.call('Runtime.evaluate', { expression: 'JSON.stringify({url:location.href,body:document.body?.textContent,bridge:typeof window.milagre})', returnByValue: true });
+        console.error('Desktop page at failure:', state.result.value);
+        if (process.env.MILAGRE_SCREENSHOT_DIR) {
+          await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+          const shot = await connection.call('Page.captureScreenshot');
+          await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, 'desktop-failure.png'), Buffer.from(shot.data, 'base64'));
+        }
+      } catch (diagnosticError) { console.error('Desktop diagnostics failed:', diagnosticError); }
+    }
+    try { console.error(await fs.readFile(path.join(profile, 'daemon.log'), 'utf8')); }
+    catch (logError) { if (logError.code !== 'ENOENT') console.error(logError); }
     throw error;
   } finally {
     connection?.close();
@@ -159,12 +202,17 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     clearTimeout(timeout);
     // Desktop quit leaves the shared host available. This fixture alone owns
     // the temporary profile, so explicitly stop it before deleting test data.
-    const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
     try {
-      assert.ok((await shared.call('daemon:status')).capabilities.includes('desktop-v1'));
-      await shared.call('daemon:stop');
-    } finally { shared.close(); }
-    await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
+      const shared = await require('@milagre/daemon/client').connect({ dataDir: profile });
+      try {
+        assert.ok((await shared.call('daemon:status')).capabilities.includes('desktop-v1'));
+        await shared.call('daemon:stop');
+      } finally { shared.close(); }
+      await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
+    } catch (cleanupError) {
+      if (!failure) throw cleanupError;
+      console.error('Fixture cleanup failed:', cleanupError);
+    }
   }
 }
 
@@ -193,9 +241,8 @@ async function main() {
     await checkApp({ executable: require("electron"), args: [path.join(root, "apps/desktop")], profile, project, expectTheme: false });
     const packagedIndex = process.argv.indexOf("--packaged");
     if (packagedIndex !== -1) {
-      assert.ok(process.argv[packagedIndex + 1], "Pass the packaged .app path after --packaged");
-      const bundle = path.resolve(process.argv[packagedIndex + 1]);
-      await checkApp({ executable: path.join(bundle, "Contents/MacOS/Milagre"), args: [], profile, project, expectTheme: true });
+      assert.ok(process.argv[packagedIndex + 1], "Pass the packaged application path after --packaged");
+      await checkApp({ executable: await packagedExecutable(process.argv[packagedIndex + 1]), args: [], profile, project, expectTheme: true });
     }
     const { acquireOwnership } = require("@milagre/core/ownership");
     const owner = acquireOwnership(path.join(project, ".milagre/runtime.lock"));
@@ -205,7 +252,7 @@ async function main() {
     const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
     assert.deepEqual(saved.messages, state.messages, "Launching and quitting must preserve the transcript");
   } finally {
-    await fs.rm(temporary, { recursive: true, force: true });
+    await fs.rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

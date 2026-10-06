@@ -1,26 +1,30 @@
-# Turns a release candidate into a real release. Run it from the Actions tab with the candidate's
-# tag: it builds both macOS architectures in one job — electron-builder then writes a single
-# latest-mac.yml naming every installer, which the app's auto-updater reads from the release —
-# notarizes and verifies them, attaches them to the draft, and only then publishes it. The release
-# stays a draft until the installers and latest-mac.yml are attached, so installed apps never see
-# a release they can't update to.
+# Signed installers remain drafts until selected platforms pass native checks.
 name: Publish installers
-
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag of the release candidate to package and publish (e.g. v0.21.0)"
+        description: Tag of the release candidate to package and publish (e.g. v0.21.0)
         required: true
         type: string
-
+      platforms:
+        description: Platforms to publish; all requires Windows signing and Linux repository credentials
+        type: choice
+        options:
+          - macos
+          - all
+        default: macos
+        required: true
+      initialize_linux_repository:
+        description: "First Linux publication only: start a new package map"
+        type: boolean
+        default: false
+        required: false
 permissions:
   contents: write
-
 concurrency:
   group: publish-installers
   cancel-in-progress: false
-
 jobs:
   package-macos:
     runs-on: macos-latest
@@ -35,6 +39,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Require a stable draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |-
+          node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) process.exit(1)'
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
       - name: Check Apple release credentials
         shell: bash
         env:
@@ -113,16 +125,211 @@ jobs:
             xcrun stapler validate "$dmg"
             hdiutil verify "$dmg"
           done
+      - name: Exercise signed macOS app
+        run: |-
+          app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
+          npm run test:desktop -- --packaged "$app"
+      - name: Refresh feeds after DMG notarization
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform macos
+      - name: Generate Homebrew cask from signed installers
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: npm run package:managers -- --tag "$RELEASE_TAG" --platform macos
       - name: Upload installers and publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
+          PUBLISH_PLATFORMS: ${{ inputs.platforms }}
         run: |
           if [ ! -f release/latest-mac.yml ]; then
             echo "::error::release/latest-mac.yml was not generated; without it installed apps cannot discover this update."
             exit 1
           fi
+          if [ ! -s release/package-managers/homebrew/milagre.rb ] || [ ! -s release/package-managers/SHA256SUMS ]; then
+            echo "::error::Homebrew metadata was not generated from the signed installers."
+            exit 1
+          fi
           shopt -s nullglob
-          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml --clobber
+          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/package-managers/homebrew/milagre.rb release/package-managers/SHA256SUMS --clobber
+          if [ "${PUBLISH_PLATFORMS:-macos}" = macos ]; then
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
+      - name: Stage signed macOS artifacts
+        if: inputs.platforms == 'all'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-macos
+          path: |-
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/latest-mac.yml
+          if-no-files-found: error
+  package-windows:
+    if: inputs.platforms == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - &a1
+        name: Check out released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - &a2
+        name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require Windows signing credentials
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: if (!$env:CSC_LINK -or !$env:CSC_KEY_PASSWORD) { throw 'Configure WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD before publishing Windows installers' }
+      - name: Install dependencies
+        run: npm ci
+      - name: Test Windows agent protocol
+        timeout-minutes: 5
+        run: node --test --test-reporter=tap --test-timeout=60000 packages/core/src/agents/codex-provider.test.cjs
+      - name: Test Windows runtime
+        timeout-minutes: 15
+        run: node --test --test-reporter=tap --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs
+      - name: Build signed Windows installer
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run package:win -- --config.extraMetadata.version="${RELEASE_TAG#v}" --config.forceCodeSigning=true
+      - name: Verify installer Authenticode
+        shell: pwsh
+        run: |-
+          Get-ChildItem release/Milagre-Setup-*-x64.exe | ForEach-Object {
+            $signature = Get-AuthenticodeSignature $_.FullName
+            if ($signature.Status -ne 'Valid') { throw "Invalid installer signature: $($signature.Status)" }
+          }
+      - name: Install and exercise Windows NSIS
+        shell: pwsh
+        run: |-
+          $installer = (Get-ChildItem release/Milagre-Setup-*-x64.exe | Select-Object -First 1).FullName
+          $destination = Join-Path $env:RUNNER_TEMP 'Milagre Installed'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser', "/D=$destination") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited $($install.ExitCode)" }
+          $executable = Join-Path $destination 'Milagre.exe'
+          if (!(Test-Path $executable)) { throw 'Installed executable is missing' }
+          node scripts/test-desktop.cjs --packaged $executable
+          if ($LASTEXITCODE -ne 0) { throw 'Installed desktop check failed' }
+      - name: Stage signed Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows
+          path: |-
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          if-no-files-found: error
+  package-linux:
+    if: inputs.platforms == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      MILAGRE_LINUX_SIGNING_KEY: ${{ secrets.LINUX_REPOSITORY_KEY_FINGERPRINT }}
+    steps:
+      - *a1
+      - *a2
+      - name: Require Linux signing credentials
+        env:
+          PRIVATE_KEY: ${{ secrets.LINUX_REPOSITORY_PRIVATE_KEY }}
+        run: test -n "$PRIVATE_KEY" && test -n "$MILAGRE_LINUX_SIGNING_KEY"
+      - name: Install Linux tools
+        run: sudo apt-get update && sudo apt-get install -y rpm createrepo-c gnupg xvfb desktop-file-utils libgbm1 libgtk-3-0 libnss3 libasound2t64
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Linux installers
+        run: npm run package:linux -- --config.extraMetadata.version="${RELEASE_TAG#v}"
+      - name: Exercise installed Linux desktop
+        run: |-
+          sudo apt-get install -y ./release/*.deb
+          desktop-file-validate /usr/share/applications/milagre.desktop
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a npm run test:desktop -- --packaged /opt/Milagre/milagre
+      - name: Import repository signing key
+        env:
+          PRIVATE_KEY: ${{ secrets.LINUX_REPOSITORY_PRIVATE_KEY }}
+        run: |-
+          export GNUPGHOME="$RUNNER_TEMP/milagre-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf "%s" "$PRIVATE_KEY" | gpg --batch --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+      - name: Retain previous package downloads
+        if: "!inputs.initialize_linux_repository"
+        run: node scripts/fetch-package-map.cjs "$RUNNER_TEMP/milagre-repository-maps"
+      - name: Sign RPM and generate signed repositories
+        run: |-
+          previous=()
+          if [ -f "$RUNNER_TEMP/milagre-repository-maps/package-map.json" ]; then previous=(--previous "$RUNNER_TEMP/milagre-repository-maps/package-map.json" --previous-metadata "$RUNNER_TEMP/milagre-repository-maps/immutable-metadata.json"); fi
+          node scripts/generate-linux-repository.cjs --tag "$RELEASE_TAG" --artifacts release --output release/linux-repository --sign-rpm "${previous[@]}"
+          node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform linux
+          tar -C release/linux-repository -czf release/milagre-linux-repository.tar.gz .
+      - name: Verify signed Linux repository bundle
+        run: node scripts/verify-linux-repository.cjs --directory release/linux-repository --tag "$RELEASE_TAG" --fingerprint "$MILAGRE_LINUX_SIGNING_KEY" --artifacts release
+      - name: Install and exercise signed Fedora RPM
+        run: |-
+          docker build --platform linux/amd64 -f scripts/linux-runtime.Dockerfile -t milagre-fedora-check scripts
+          mkdir -p "$RUNNER_TEMP/milagre-source"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/milagre-source"
+          docker run --rm --platform linux/amd64 --cap-add=SYS_ADMIN --security-opt seccomp=unconfined -v "$RUNNER_TEMP/milagre-source:/source:ro" -v "$PWD/release:/installers:ro" -v "$PWD/release/linux-repository/archive-keyring.asc:/public-key.asc:ro" milagre-fedora-check bash /source/scripts/test-linux-rpm.sh /source /installers /public-key.asc
+      - name: Exercise Linux AppImage payload
+        run: |-
+          "release/Milagre-${RELEASE_TAG#v}-x86_64.AppImage" --appimage-extract > /dev/null
+          xvfb-run -a npm run test:desktop -- --packaged squashfs-root/AppRun
+      - name: Stage signed Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-linux
+          path: |-
+            release/*.deb
+            release/*.rpm
+            release/*.AppImage
+            release/latest-linux.yml
+            release/milagre-linux-repository.tar.gz
+          if-no-files-found: error
+      - name: Remove temporary signing key
+        if: always()
+        run: if [ -n "$GNUPGHOME" ]; then gpgconf --kill gpg-agent || true; rm -rf "$GNUPGHOME"; fi
+  publish-all:
+    if: inputs.platforms == 'all'
+    needs:
+      - package-macos
+      - package-windows
+      - package-linux
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - *a1
+      - *a2
+      - name: Install metadata dependencies
+        run: npm ci --ignore-scripts
+      - name: Collect signed installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: signed-*
+          merge-multiple: true
+          path: release
+      - name: Generate final installer checksums and manifests
+        run: npm run package:managers -- --tag "$RELEASE_TAG" --platform all
+      - name: Require complete updater feeds
+        run: node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --check
+      - name: Upload all platforms and publish draft
+        run: |-
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest*.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest

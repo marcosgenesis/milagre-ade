@@ -124,6 +124,8 @@ test('independent clients reconnect to a running Chat and its pending approval',
   const stopping = once(observer, 'close');
   await second.call('daemon:stop');
   await stopping;
+  // Every client hears the stop was asked for, so a desktop doesn't start the host again.
+  assert.equal(events.at(-1).channel, 'daemon:stopping');
   assert.equal(sessions[0].closed, true);
   const saved = JSON.parse(await fs.readFile(path.join(project, '.milagre/coordination.json'), 'utf8'));
   assert.ok(saved.sessions[session.id].resumeTurn, 'stop saves resumable turn state');
@@ -155,7 +157,9 @@ test('a failed daemon stop reports the save error and permits a retry after reco
  const {project,sessions,client}=await fixture(t);const first=await client();const opened=await first.call('project:open',[project]);const session=Object.values(opened.state.sessions)[0];
  await first.call('chat:send',[{projectPath:project,sessionId:session.id,body:'Keep me',provider:'codex',model:'test'}]);await waitFor(()=>sessions.length===1);
  const rename=fs.rename;let fail=true;t.mock.method(fs,'rename',async(...args)=>{if(fail && String(args[1]).endsWith('/coordination.json'))throw new Error('disk full');return rename(...args);});
+ const events=[];first.on('event',event=>events.push(event.channel));
  try {await assert.rejects(first.call('daemon:stop'),/disk full/);assert.equal(sessions[0].closed,true);} finally {fail=false;}
+ assert.equal(events.includes('daemon:stopping'),false,'a stop that failed to save is not announced');
  assert.equal((await first.call('daemon:stop')).stopping,true);
 });
 
@@ -440,6 +444,27 @@ test('phone methods are advertised to desktop, drive a real bridge, and stay out
   assert.equal((await desktop.call('phone:set-enabled', [false])).state, 'off');
   await unreachable(again.localUrl + '/rpc');
   assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'mobile.json'), 'utf8')).enabled, false);
+});
+
+test('a first pairing reaches the desktop as phone:paired, with the count in the phone status', async t => {
+  const relays = [];
+  const startRelay = options => { relays.push(options); return { close: async () => {}, status: () => 'online' }; };
+  const { client } = await fixture(t, { phoneOptions: { localPort: 0, startRelay } });
+  const desktop = await client();
+  const paired = [];
+  desktop.on('event', event => { if (event.channel === 'phone:paired') paired.push(event.payload); });
+  await desktop.call('phone:set-enabled', [true]);
+  assert.equal((await phoneStatus(desktop, 'on')).pairedPhones, 0);
+  await relays[0].phones.add('phoneA');
+  await waitFor(() => paired.length === 1);
+  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.equal((await desktop.call('phone:status')).pairedPhones, 1);
+});
+
+test('a phone reset while the phone is off answers off', async t => {
+  const { client } = await fixture(t, { phoneOptions: fakePhoneOptions() });
+  const desktop = await client();
+  assert.deepEqual(await desktop.call('phone:reset'), { enabled: false, state: 'off', remote: 'none' });
 });
 
 test('an enabled phone comes back when the daemon restarts, and stopping the daemon closes its bridge', async t => {

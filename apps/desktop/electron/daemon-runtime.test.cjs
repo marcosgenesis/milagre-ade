@@ -7,6 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { startDaemon } = require('@milagre/daemon/server');
 const { connect } = require('@milagre/daemon/client');
+const { compatibleClient } = require('@milagre/daemon/bootstrap');
 const { connectDesktopRuntime } = require('./daemon-runtime.cjs');
 
 async function waitFor(read, attempts = 200) {
@@ -325,4 +326,159 @@ test('large Link events hydrate from the Link snapshot and retain one completed 
   assert.deepEqual(host.reads, [id]);
   assert.equal(events.find(event => event.channel === 'link:state').payload.state.messages.length, 1);
   assert.equal(events.find(event => event.channel === 'agent:event').payload.state.messages[0].body, 'Shared reply');
+});
+
+// A host that can go away and come back on one temporary socket, keeping every request it was sent. chat:send is never
+// answered: it is still running when the host goes away.
+async function restartableHost(t) {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  const { socketPath, prepareSocketDirectory } = require('../../daemon/src/paths.cjs');
+  const { wire } = require('../../daemon/src/protocol.cjs');
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-restartable-host-')));
+  const socket = socketPath(dataDir); prepareSocketDirectory(socket);
+  const connections = new Map();
+  const host = { dataDir, requests: [], server: null, onStop: null };
+  host.listen = async () => {
+    const server = net.createServer(connection => {
+      connection.on('error', () => {});
+      const protocol = wire(connection, {
+        onInvalid() { connection.destroy(); },
+        onMessage(request) {
+          host.requests.push(request.method);
+          if (request.method === 'chat:send') return;
+          if (request.method === 'daemon:stop') { protocol.send({ v: 1, id: request.id, result: { stopping: true } }); void host.onStop?.(); return; }
+          const result = request.method === 'daemon:status' ? { capabilities: ['desktop-v1', 'snapshot-pages-v1', 'result-pages-v1'], methods: ['chat:send', 'chat:patch'] }
+            : request.method === 'daemon:snapshot' ? { snapshotId: 1, pageCount: 1, eventSeq: 0 }
+            : request.method === 'daemon:snapshot-page' ? JSON.stringify({ projects: [], eventSeq: 0 }) : null;
+          protocol.send({ v: 1, id: request.id, result });
+        },
+      });
+      connections.set(connection, protocol);
+      connection.on('close', () => connections.delete(connection));
+    });
+    server.listen(socket); await once(server, 'listening');
+    host.server = server;
+  };
+  // A crash drops every connection with nothing said first. A stop that was asked for says so (daemon:stopping), then closes.
+  host.goAway = async ({ announced = false } = {}) => {
+    const server = host.server; host.server = null;
+    const closed = new Promise(resolve => server.close(() => resolve()));
+    for (const [connection, protocol] of connections) {
+      if (announced) { protocol.send({ v: 1, event: { seq: 1, channel: 'daemon:stopping', payload: {} } }); connection.end(); }
+      else connection.destroy();
+    }
+    await closed;
+  };
+  await host.listen();
+  t.after(async () => { if (host.server) await host.goAway(); await fs.rm(dataDir, { recursive: true, force: true }); });
+  return host;
+}
+// The desktop on a restartableHost. `start` stands in for starting a host again (ensureDaemon); the launch's own start
+// only connects, and isn't counted.
+async function desktopOn(t, host, start = async () => { await host.listen(); return compatibleClient(host.dataDir); }) {
+  const events = [];
+  const times = [];
+  let launched = false;
+  const desktop = await connectDesktopRuntime({ dataDir: host.dataDir, version: 'test', reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }),
+    startHost: async () => {
+      if (!launched) { launched = true; return compatibleClient(host.dataDir); }
+      times.push(Date.now());
+      return start();
+    } });
+  t.after(() => desktop.close().catch(() => {}));
+  return { desktop, events, starts: times };
+}
+const connections = events => events.filter(event => event.channel === 'runtime:connection').map(event => event.payload);
+
+test('a host that went away by itself is started again once, and the window is told', async t => {
+  const host = await restartableHost(t);
+  const { events, starts } = await desktopOn(t, host);
+  await host.goAway();
+  await waitFor(() => connections(events).some(state => state.connected));
+  await delay(100);
+  assert.equal(starts.length, 1);
+  assert.deepEqual(connections(events), [
+    { connected: false, message: 'Connection to the host was interrupted. Reconnecting…' },
+    { connected: false, message: "Milagre's background host stopped. Starting it again…" },
+    { connected: true, notice: "Milagre's background host stopped unexpectedly, so it was started again." },
+  ]);
+  assert.equal(events.filter(event => event.channel === 'runtime:snapshot').length, 1, 'reconnected once');
+});
+
+test('a command is never sent again: not one that was running, nor one refused while the host was away', async t => {
+  const host = await restartableHost(t);
+  let comeBack = () => {};
+  const back = new Promise(resolve => { comeBack = resolve; });
+  const { desktop, events } = await desktopOn(t, host, async () => { await back; await host.listen(); return compatibleClient(host.dataDir); });
+  const running = desktop.invoke('chat:send', [{ body: 'Hello' }]);
+  await waitFor(() => host.requests.includes('chat:send'));
+  await host.goAway();
+  await assert.rejects(running, /closed/);
+  await waitFor(() => connections(events).some(state => /Starting it again/.test(state.message ?? '')));
+  await assert.rejects(desktop.invoke('chat:patch', ['/p', 2, { title: 'Must not replay' }]), /not sent/);
+  comeBack();
+  await waitFor(() => connections(events).some(state => state.connected));
+  await delay(100);
+  assert.equal(host.requests.filter(method => method === 'chat:send').length, 1);
+  assert.equal(host.requests.includes('chat:patch'), false);
+});
+
+test('a host stopped on purpose stays stopped, and the desktop reconnects when one is started some other way', async t => {
+  const host = await restartableHost(t);
+  const { events, starts } = await desktopOn(t, host);
+  await host.goAway({ announced: true });
+  await waitFor(() => connections(events).some(state => !state.connected));
+  await delay(200); // Several reconnects.
+  assert.equal(starts.length, 0);
+  assert.equal(connections(events).some(state => /Starting it again/.test(state.message ?? '')), false);
+  await host.listen();
+  await waitFor(() => connections(events).some(state => state.connected));
+  assert.equal(connections(events).find(state => state.connected)?.notice, undefined);
+  assert.equal(starts.length, 0);
+});
+
+test('a desktop update stops the host without starting it again, even one that does not announce its stop', async t => {
+  const host = await restartableHost(t);
+  host.onStop = async () => { await delay(10); await host.goAway(); };
+  const { desktop, starts } = await desktopOn(t, host);
+  await desktop.close({ stopHost: true });
+  await delay(150);
+  assert.equal(starts.length, 0);
+  assert.equal(host.server, null);
+});
+
+test('a host that cannot be started again backs off, then says why and stops starting it', async t => {
+  const host = await restartableHost(t);
+  const { events, starts } = await desktopOn(t, host, async () => { throw new Error('no host here'); });
+  await host.goAway();
+  await waitFor(() => connections(events).some(state => state.failed));
+  await delay(150);
+  assert.equal(starts.length, 3);
+  const [first, second, third] = starts;
+  assert.ok(second - first >= 35 && third - second >= 75, `the delay doubles: ${second - first}ms, then ${third - second}ms`);
+  assert.deepEqual(connections(events).filter(state => state.failed), [
+    { connected: false, failed: true, message: "Milagre's background host couldn't start again: no host here" },
+  ]);
+});
+
+test('a real host killed outright is started again over its locks and socket, with its Project open', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-desktop-crash-')));
+  const project = path.join(root, 'project'); await fs.mkdir(project);
+  execFileSync('git', ['init', '-b', 'main', project], { stdio: 'ignore' });
+  const dataDir = path.join(root, 'profile');
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', cwd: project, reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(async () => { await desktop.close({ stopHost: true }).catch(() => {}); await fs.rm(root, { recursive: true, force: true }); });
+  await desktop.openProject(project);
+  const observer = await connect({ dataDir });
+  const { pid } = await observer.call('daemon:status');
+  observer.close();
+  process.kill(pid, 'SIGKILL');
+  await waitFor(() => connections(events).some(state => state.connected && state.notice), 1000);
+  const again = await connect({ dataDir }); t.after(() => again.close());
+  const restarted = (await again.call('daemon:status')).pid;
+  assert.notEqual(restarted, pid);
+  assert.equal((await desktop.invoke('project:current')).path, project);
+  assert.equal(JSON.parse(await fs.readFile(path.join(project, '.milagre/runtime.lock/owner.json'), 'utf8')).pid, restarted, 'the Project lock was taken over');
 });

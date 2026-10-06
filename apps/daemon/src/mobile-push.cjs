@@ -1,3 +1,4 @@
+const { preparePrivateDirectory, assertPrivate } = require('@milagre/core/private-files');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -43,6 +44,7 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
   const ordered = task => { const next = writes.then(task); writes = next.catch(() => {}); return next; };
   async function save(next) {
     await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") preparePrivateDirectory(dataDir);
     const temporary = `${file}.${randomUUID()}.tmp`;
     try {
       await fs.writeFile(temporary, JSON.stringify([...next.values()]), { flag: 'wx', mode: 0o600 });

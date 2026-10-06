@@ -123,7 +123,8 @@ class CodexSession {
 
   /** The app-server process, while it runs; the ports its commands open belong to the chat. */
   get pid() {
-    return this.closed ? null : this.rpc?.child?.pid ?? null;
+    const child = this.rpc?.child;
+    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : child?.pid ?? null;
   }
 
   async startTurn(request) {

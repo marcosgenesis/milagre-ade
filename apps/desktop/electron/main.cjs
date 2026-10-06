@@ -84,21 +84,23 @@ async function checkEditorRoot(root) {
 const openEditor = createEditorOpener({ editors, open: openInEditor, checkRoot: checkEditorRoot });
 ipcMain.handle("editor:open", (_event, request) => openEditor(request));
 
-// Brings the window back from a notification click and opens the chat it was about.
-function openChatFromNotification(chatId) {
+// Brings the window back from a notification click and tells it what to open.
+function openFromNotification(channel, ...args) {
   const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed());
   if (!window) return;
   if (window.isMinimized()) window.restore();
   window.show();
   if (process.platform === "darwin") app.focus({ steal: true });
   window.focus();
-  window.webContents.send("notification:open-chat", chatId);
+  window.webContents.send(channel, ...args);
 }
+const openChatFromNotification = (chatId) => openFromNotification("notification:open-chat", chatId);
 
 const notifier = new AttentionNotifier({
   createNotification: ({ title, subtitle, body }) => new Notification({ title, body, ...(subtitle ? { subtitle } : {}) }),
   isAppFocused: () => Boolean(BrowserWindow.getFocusedWindow()),
   openChat: openChatFromNotification,
+  openPhoneSettings: () => openFromNotification("notification:open-phone-settings"),
   setBadge: value => app.dock?.setBadge(value),
 });
 
@@ -130,13 +132,19 @@ runtime = await connectDesktopRuntime({
   emit(channel, payload) {
     if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
     if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
-    if (channel === "runtime:connection") connectionState = payload;
+    if (channel === "phone:paired" && Notification.isSupported()) notifier.notifyPhonePaired();
+    if (channel === "runtime:connection") {
+      connectionState = payload;
+      // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)
+      if (payload.connected && runtime) registerHostMethods();
+    }
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
     }
   },
 });
 } catch (error) {
+  console.error("Milagre cannot open its saved state:", error);
   void app.whenReady().then(() => { dialog.showErrorBox("Milagre cannot open its saved state", error instanceof Error ? error.message : String(error)); app.quit(); });
   return;
 }
@@ -268,4 +276,7 @@ app.on("before-quit", (event) => {
 });
 
 }
-void startDesktop().catch(error => { void app.whenReady().then(() => { dialog.showErrorBox("Milagre could not start", error.message); app.quit(); }); });
+void startDesktop().catch(error => {
+  console.error("Milagre could not start:", error);
+  void app.whenReady().then(() => { dialog.showErrorBox("Milagre could not start", error.message); app.quit(); });
+});

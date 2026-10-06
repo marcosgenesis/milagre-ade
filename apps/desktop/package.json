@@ -1,6 +1,10 @@
 {
   "name": "milagre",
   "productName": "Milagre",
+  "description": "A local-first desktop ADE for coordinating coding agents",
+  "homepage": "https://github.com/the-ptf/milagre-ade",
+  "author": "Milagre contributors",
+  "license": "MIT",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -41,5 +45,6 @@
     "typescript": "~6.0.3",
     "vite": "^7.1.7",
     "wait-on": "^8.0.4"
-  }
+  },
+  "desktopName": "milagre.desktop"
 }

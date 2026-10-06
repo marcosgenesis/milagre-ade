@@ -154,12 +154,12 @@ const snapshot = projectPath => ({ project: { path: projectPath, state: { sessio
 const relayRuntime = { name: 'relay runtime' };
 function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
   const react = hookHost({ effects });
-  const { useSessionState } = load('session.tsx', {
+  const { useSessionState, PendingChatsProvider } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
     './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, savedNavigation: { read: async () => null, save: async () => {} }, readPermission: async () => null, savePermission: async () => {} },
-    './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/model': {},
-  }, '\nexport { useSessionState };');
-  return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount });
+    './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'), '@milagre/shared/model': {},
+  }, '\nexport { useSessionState, PendingChatsProvider };');
+  return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount, pending: props => { react.begin(); return PendingChatsProvider(props).props.value; } });
 }
 
 test('pairing through the relay builds the client from the pairing and saves the relay link', async () => {
@@ -270,14 +270,15 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const calls = [];
   const params = { worktreeId: '1' };
   const session = {
-    client: { call: (method, args) => { calls.push({ method, args }); return call ? call(method, args) : method === 'project:branches' ? Promise.resolve(['main']) : sending.promise; } },
-    snapshot: { project: { path: '/p', name: 'P', state: { sessions: {}, messages: [], worktrees: {} } }, runs: { runs: {} } },
+    client: { url: 'mac', call: (method, args) => { calls.push({ method, args }); return call ? call(method, args) : method === 'project:branches' ? Promise.resolve(['main']) : sending.promise; } },
+    snapshot: { project: { path: '/p', name: 'P', state: { next_id: 4, projects: {}, sessions: {}, messages: [], tasks: {}, worktrees: { 1: { id: 1, name: 'main', path: '/p', project_id: 1 } } } }, runs: { runs: {} } },
+    pendingChats: {}, setPendingChats(fn) { session.pendingChats = fn(session.pendingChats); },
     drafts: { '/p#new:1': 'first message' },
     attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
     preferences: {}, defaults: require('../apps/mobile/src/turn-options.ts').defaultPreferences, setDefaultPermission() {}, models: null, cliStatus: null,
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
-    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, isSelected: () => true,
+    refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, rememberChat() {}, isSelected: () => true,
   };
   const react = hookHost({ effects });
   const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
@@ -286,14 +287,14 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.useEffect(fn, [fn]) },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
     '@hugeicons/core-free-icons': icons, '@milagre/shared/pr-blockers': require('@milagre/shared/pr-blockers'), '../indicators': require('../apps/mobile/src/indicators.ts'), '../icons': { Icon: 'Icon' }, '../bottom-fade': { BottomFade: 'BottomFade', EdgeFade: 'EdgeFade' }, '../side-panels': { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children }, '../loading-logo': { LoadingLogo: 'LoadingLogo' },
-    '../use-open-project': load('use-open-project.ts', { react, 'expo-router': { router, useFocusEffect: fn => react.useEffect(fn, [fn]) }, './session': { useSession: () => session } }), '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
+    '../use-open-project': load('use-open-project.ts', { react, 'expo-router': { router, useFocusEffect: fn => react.effect(fn, [fn]) }, './session': { useSession: () => session } }), '../dot-background': { useDotBackground: () => ({}) }, 'react-native-keyboard-controller': { KeyboardChatScrollView: 'KeyboardChatScrollView', KeyboardStickyView: 'KeyboardStickyView' }, '../running-logo': { ThinkingIndicator: 'ThinkingIndicator' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     '@milagre/shared/model': require('@milagre/shared/model'),
-    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': { isListedChat: (_chat, count) => count > 0 }, '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'), '../confirm-store': { confirmSheet: (...args) => alert(...args) },
+    '@milagre/shared/agent-runs': { lastUserModel: () => '' }, '@milagre/shared/chats': require('@milagre/shared/chats'), '../session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, '../attachment-picker': { pickAttachments }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { PullRequestAction: 'PullRequestAction', SubagentChip: 'SubagentChip', usePullRequest: () => null }, '../questions': { Approval: 'Approval', Questions: 'Questions' }, '../chat-reply': { ChatReply: 'ChatReply' }, '../ui': ui, '../agent-controls': { AgentControls: 'AgentControls', PermissionChip: 'PermissionChip' }, '../turn-options': require('../apps/mobile/src/turn-options.ts'), '../archive': require('../apps/mobile/src/archive.ts'), '../confirm-store': { confirmSheet: (...args) => alert(...args) },
   });
-  const render = () => { react.begin(); return ChatScreen(); };
+  const render = () => { react.begin(); const tree = ChatScreen(); react.flush(); return tree; };
   const field = () => find(render(), node => node.type === 'Field' && node.props.label === 'Message').props;
   const send = () => find(render(), node => node.type === 'IconButton' && node.props.label === 'Send message').props.onPress();
   return { session, sending, params, field, send, render, router, calls };
@@ -374,7 +375,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const routes = [];
   const opened = [];
   const state = snapshot('/last'); state.project.state.sessions[3] = { id: 3 }; state.project.state.worktrees = { 1: { id: 1, path: '/last' } };
-  const session = { client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
+  const session = { pendingChats: {}, client: { url: 'mac', call: async (...args) => { calls.push(args); } }, recent: [{ path: '/last' }], hosts: [], snapshot: state, open: (...args) => { opened.push(args); return opening; }, reloadProjects: async () => { calls.push(['reload']); }, ...extra };
   const native = { Alert: { alert, prompt() {} } };
   // Confirmations use the real sheet store, shown through the host's alert in the order the sheet would list them.
   const confirmStore = load('confirm-store.ts', {});
@@ -384,7 +385,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     'react-native': { ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Pressable', 'RefreshControl', 'Text', 'View'].map(name => [name, name])), ...native, Platform: { OS: 'ios' }, StyleSheet: { create: styles => styles } },
     'expo-clipboard': { setStringAsync: async () => {} },
     '@hugeicons/core-free-icons': {}, 'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
-    '@milagre/shared/chats': { isListedChat: () => true }, './session': { useSession: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
+    '@milagre/shared/chats': { ...require('@milagre/shared/chats'), isListedChat: () => true }, './session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, './indicators': { chatMark: () => 'idle' }, './status-indicators': { ChatMarkIcon: 'ChatMarkIcon' },
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
@@ -683,20 +684,21 @@ test('retrying a failed first send reuses the created worktree and keeps the dra
   assert.equal(screen.params.id, '7');
 });
 
-test('a late new-worktree creation cannot send or navigate after switching Projects', async () => {
+test('new-worktree preparation finishes its send in the background without navigating after switching Projects', async () => {
   const creating = deferred();
-  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : creating.promise });
+  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : method === 'worktree:create' ? creating.promise : Promise.resolve({ sessionId: 7 }) });
   screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: 'main' } };
   find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose isolation').props.onSelect('worktree');
   await settle();
   screen.send(); await settle();
-  screen.session.snapshot.project.path = '/other';
+  screen.session.snapshot = { ...screen.session.snapshot, project: { ...screen.session.snapshot.project, path: '/other' } };
   screen.render();
   creating.resolve({ worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } });
   await settle();
-  assert.equal(screen.calls.filter(call => call.method === 'chat:send').length, 0);
+  assert.equal(screen.calls.filter(call => call.method === 'chat:send').length, 1);
+  assert.equal(screen.calls.find(call => call.method === 'chat:send').args[0].projectPath, '/p');
   assert.equal(screen.params.id, undefined);
-  assert.equal(screen.session.drafts['/p#new:1'], 'first message');
+  assert.equal(screen.session.drafts['/p#new:1'], undefined);
 });
 
 test('the attachment pull-down opens the selected picker and blocks a second pick', async () => {
@@ -741,14 +743,14 @@ test('a successful first send clears the sent draft', async () => {
   assert.equal(screen.session.drafts['/p#new:1'], undefined);
 });
 
-test('a failed first send keeps the current draft and releases the composer', async () => {
+test('a failed first send restores the sent text alongside the next draft and releases the composer', async () => {
   const screen = chatHost();
   screen.send();
   screen.field().onChangeText('edited during failed send');
   screen.sending.reject(new Error('Connection lost'));
   await settle();
   assert.equal(screen.params.id, undefined);
-  assert.equal(screen.field().value, 'edited during failed send');
+  assert.equal(screen.field().value, 'first message\n\nedited during failed send');
   const button = find(screen.render(), node => node.type === 'IconButton' && node.props.label === 'Send message');
   assert.equal(button.props.disabled, false);
   assert.equal(find(screen.render(), node => node.type === 'ErrorNotice').props.message, 'Connection lost');
@@ -815,7 +817,7 @@ test('late Chat rename cannot pop another screen after its form loses focus', as
   const { default: Form } = load('app/chat-details.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text' },
     'expo-router': { Redirect: 'Redirect', router: { back: () => backs++ }, useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => { cleanup = fn(); } },
-    '../session': { useSession: () => session, useComposer: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
+    '../session': { useSession: () => session, useComposer: () => session, usePendingChats: () => session }, '../attachment-picker': { pickAttachments: async () => [] }, '../attachments': require('../apps/mobile/src/attachments.ts'), '../status-indicators': { ChatStatus: 'ChatStatus', AgentStatus: 'AgentStatus', WorktreeStatus: 'WorktreeStatus' }, '../ui': { ...Object.fromEntries(['Button', 'ErrorNotice', 'Field', 'PageScroll'].map(name => [name, name])), styles: {} },
   });
   react.begin(); const tree = Form();
   find(tree, n => n.type === 'Button' && n.props.title === 'Save name').props.onPress();
@@ -1358,4 +1360,105 @@ test('refreshing saved hosts during startup cannot cancel the claimed auto-open'
   assert.equal(routes[0].pathname, '/projects');
   assert.equal(routes[0].params.resume, '1');
   react.cleanup();
+});
+
+
+test('first send immediately shows input and a running Chat in the drawer before uploads or setup finish', async () => {
+  const upload = deferred(), creating = deferred();
+  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : creating.promise });
+  screen.session.client.upload = () => upload.promise;
+  screen.session.attachments['/p#new:1'] = [{ id: 'file', name: 'notes.txt', uri: 'file:///phone/notes.txt', base64: 'Zm9v' }];
+  find(screen.render(), node => node.type === 'PullDown' && node.props.label === 'Choose isolation').props.onSelect('worktree');
+  await settle();
+  screen.send();
+  assert.equal(screen.field().value, '', 'clear the composer before the first await');
+  const reply = find(screen.render(), node => node.type === 'ChatReply' && node.props.message?.role === 'user');
+  assert.equal(reply.props.message.body, 'first message');
+  assert.deepEqual(Array.from(reply.props.message.files), ['notes.txt']);
+  assert.ok(find(screen.render(), node => node.type === 'ThinkingIndicator'));
+  const nav = navigationHost(Promise.resolve(), { session: { ...screen.session, recent: [{ path: '/p' }] } });
+  const row = nav.rows().props.data.find(row => row.kind === 'chat');
+  assert.equal(row.chat.title, 'first message');
+  assert.equal(row.mark, 'running');
+  nav.open(nav.row('chat')).props.onPress();
+  assert.equal(nav.routes[0].params.worktreeId, '1');
+  assert.equal(nav.routes[0].params.id, undefined, 'a preview never opens a negative host Chat id');
+  screen.field().onChangeText('next draft');
+  upload.resolve({ path: '/p/notes.txt' }); await settle();
+  assert.equal(screen.calls.filter(call => call.method === 'worktree:create').length, 1);
+  creating.reject(new Error('Setup failed')); await settle();
+  assert.equal(screen.field().value, 'first message\n\nnext draft');
+  assert.equal(screen.session.attachments['/p#new:1'][0].id, 'file');
+  nav.session.pendingChats = screen.session.pendingChats;
+  assert.equal(nav.rows().props.data.filter(row => row.kind === 'chat').length, 0, 'failed preparation removes its drawer preview');
+});
+
+test('canonical mobile input replaces the preview before acknowledgement and keeps the next draft', async () => {
+  const sending = deferred();
+  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : sending.promise });
+  screen.send(); await settle();
+  screen.field().onChangeText('next draft');
+  const request = screen.calls.find(call => call.method === 'chat:send').args[0];
+  const state = screen.session.snapshot.project.state;
+  state.sessions[7] = { id: 7, worktree_id: 1, agent_name: 'main', title: 'first message', status: 'Created' };
+  state.messages = [{ id: 8, session_id: 7, role: 'user', body: 'first message', context: null, clientMessageId: request.clientMessageId }];
+  const nav = navigationHost(Promise.resolve(), { session: { ...screen.session, recent: [{ path: '/p' }] } });
+  assert.equal(nav.rows().props.data.filter(row => row.kind === 'chat').length, 1);
+  assert.equal(nav.rows().props.data.find(row => row.kind === 'chat').chat.id, 7);
+  assert.equal(find(screen.render(), node => node.type === 'ChatReply' && node.props.message?.role === 'user').props.message.id, 8);
+  sending.resolve({ sessionId: 7 }); await settle();
+  assert.equal(screen.params.id, '7');
+  assert.equal(screen.field().value, 'next draft');
+});
+
+
+test('mobile keeps an acknowledged Chat preview until its own host snapshot contains the input', () => {
+  const { createPendingChat } = require('@milagre/shared/chats');
+  const state = { next_id: 4, projects: {}, worktrees: {}, sessions: {}, messages: [], tasks: {} };
+  const preview = createPendingChat({ state, worktreeId: 1, body: 'Hello', provider: 'codex', model: 'm' });
+  const provider = sessionHost({});
+  const props = { hostId: 'mac', snapshot: { project: { path: '/p', state } } };
+  provider.pending(props).setPendingChats(() => ({ first: { preview, hostId: 'mac', projectPath: '/p', accepted: false } }));
+  const saved = { ...state, messages: [{ ...preview.message, id: 8, session_id: 7 }] };
+  const updated = { ...props, snapshot: { project: { path: '/p', state: saved } } };
+  assert.ok(provider.pending(updated).pendingChats.first, 'live input alone cannot release a send still awaiting acknowledgement');
+  provider.pending(updated).setPendingChats(current => ({ first: { ...current.first, accepted: true } }));
+  assert.ok(provider.pending({ ...updated, hostId: 'other' }).pendingChats.first, 'another host cannot retire the preview');
+  assert.ok(provider.pending(props).pendingChats.first, 'acknowledgement alone keeps the preview while the snapshot catches up');
+  assert.ok(provider.pending(updated).pendingChats.first, 'a returning origin route still needs to adopt its saved Chat');
+  provider.pending(updated).setPendingChats(current => ({ first: { ...current.first, promoted: true } }));
+  provider.pending(updated);
+  assert.equal(provider.pending(updated).pendingChats.first, undefined);
+});
+
+
+test('reopening a pending mobile Chat adopts its saved id before the preview retires', async () => {
+  const sending = deferred();
+  const screen = chatHost({ effects: true, call: method => method === 'project:branches' ? Promise.resolve(['main']) : sending.promise });
+  screen.send(); await settle();
+  const request = screen.calls.find(call => call.method === 'chat:send').args[0];
+  const state = screen.session.snapshot.project.state;
+  state.sessions[2] = { id: 2, worktree_id: 1, provider: 'codex', status: 'Created' };
+  screen.params.id = '2'; screen.render();
+  delete screen.params.id; screen.render();
+  state.sessions[7] = { id: 7, worktree_id: 1, provider: 'codex', status: 'Created' };
+  state.messages = [{ id: 8, session_id: 7, role: 'user', body: 'first message', context: null, clientMessageId: request.clientMessageId }];
+  sending.resolve({ sessionId: 7 }); await settle();
+  screen.render();
+  assert.equal(screen.params.id, '7', 'the focused screen adopts its own pending Chat after returning');
+  screen.session.pendingChats = {};
+  assert.equal(find(screen.render(), node => node.type === 'ChatReply' && node.props.message?.role === 'user').props.message.id, 8);
+});
+
+
+test('an accepted preview cannot assign its Chat id to a different requested Project while that Project loads', () => {
+  const screen = chatHost({ effects: true });
+  screen.session.open = async () => null;
+  const { createPendingChat } = require('@milagre/shared/chats');
+  const preview = createPendingChat({ state: screen.session.snapshot.project.state, worktreeId: 1, body: 'Hello', provider: 'codex', model: 'm' });
+  screen.session.pendingChats['mac|/p#new:1'] = { preview: { ...preview, targetSessionId: 7 }, hostId: 'mac', projectPath: '/p', originChatId: '/p#new:1', originSessionId: null, worktreeId: 1, newWorktree: false, accepted: true };
+  screen.params.projectPath = '/other';
+  screen.render();
+  assert.equal(screen.params.id, undefined);
+  assert.equal(screen.session.pendingChats['mac|/p#new:1'].promoted, undefined);
 });

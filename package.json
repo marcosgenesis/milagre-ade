@@ -16,6 +16,7 @@
     "test:question-card": "node scripts/test-question-card.cjs",
     "test:chat-selections": "node scripts/test-chat-selections.cjs",
     "test:chat-timer": "node scripts/test-chat-timer.cjs",
+    "test:chat-send-feedback": "node scripts/test-chat-send-feedback.cjs",
     "test:find-in-chat": "node scripts/test-find-in-chat.cjs",
     "test:subagents": "node scripts/test-subagents.cjs",
     "test:reply-thought": "node scripts/test-reply-thought.cjs",
@@ -38,7 +39,10 @@
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run --no-ci",
     "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",
-    "test:release": "node --test scripts/release-workflow.test.cjs",
+    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "package:linux": "npm run build && electron-builder --linux AppImage deb rpm --x64 --publish never",
+    "package:managers": "node scripts/generate-package-managers.cjs",
+    "test:release": "node --test scripts/release-workflow.test.cjs scripts/package-managers.test.cjs scripts/update-feeds.test.cjs scripts/linux-repository.test.cjs",
     "package:mac:local": "npm run package:mac -- --config.mac.identity=- --config.mac.notarize=false",
     "test:worktree-setup": "node scripts/test-worktree-setup.cjs",
     "test:monorepo": "node --test scripts/monorepo.test.cjs",
@@ -56,7 +60,8 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "test:mobile": "npm run test --workspace @milagre/mobile && node --test scripts/mobile-demo.test.cjs scripts/review-demo.test.cjs scripts/mobile-host.test.cjs scripts/mobile-ui.test.cjs scripts/mobile-push-native.test.cjs scripts/mobile-tunnel.test.cjs scripts/mobile-cloudflare.test.cjs scripts/mobile-pairing.test.cjs",
     "test:delegation": "node scripts/test-delegation.cjs",
-    "test:project-links": "node scripts/test-project-links.cjs"
+    "test:project-links": "node scripts/test-project-links.cjs",
+    "package:repositories": "node scripts/generate-linux-repository.cjs"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -89,6 +94,7 @@
       "app": "apps/desktop"
     },
     "mac": {
+      "artifactName": "Milagre-${version}-${arch}.${ext}",
       "category": "public.app-category.developer-tools",
       "icon": "apps/desktop/app/public/logo-milagre-image.png",
       "target": [
@@ -101,9 +107,36 @@
     "dmg": {
       "title": "Milagre"
     },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Milagre-Setup-${version}-${arch}.${ext}",
+      "icon": "apps/desktop/app/public/logo-milagre-image.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "artifactName": "Milagre-${version}-${arch}.${ext}",
+      "executableName": "milagre",
+      "category": "Development",
+      "maintainer": "Milagre contributors",
+      "icon": "apps/desktop/app/public/logo-milagre-image.png",
+      "syncDesktopName": true
+    },
     "publish": {
       "provider": "github",
-      "owner": "marcosgenesis",
+      "owner": "the-ptf",
       "repo": "milagre-ade",
       "releaseType": "release"
     }

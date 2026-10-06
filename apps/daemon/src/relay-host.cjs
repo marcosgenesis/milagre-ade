@@ -39,8 +39,11 @@ const routeOk = path => typeof path === 'string' && path.startsWith('/') && !pat
 /**
  * Keeps the Mac connected to the public relay and serves each phone that comes through it:
  * an encrypted channel per phone, with requests and live sockets forwarded to the loopback bridge.
+ * `retired`: the identity is one Reset replaced. It holds the old room only to turn every phone away with
+ * `{ code: 'bad-token', reason: 'reset' }`; it needs only `identity.hostId` and `identity.sign`. Apps that predate
+ * `reason` still read it as an older code and say to scan again.
  */
-function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair, WebSocket = require('ws').WebSocket, fetch: fetchBridge = globalThis.fetch, random = defaultRandom, onStatus, timing }) {
+function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair, retired = false, WebSocket = require('ws').WebSocket, fetch: fetchBridge = globalThis.fetch, random = defaultRandom, onStatus, timing }) {
   const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter } = { ...DEFAULT_TIMING, ...timing };
   let status = 'connecting';
   let closed = false;
@@ -73,13 +76,15 @@ function startRelayHost({ relayUrl, identity, phones, token, bridgeUrl, canPair,
     if (notify) sendFrame(current, CLOSE, conn);
   }
 
-  function refuse(current, conn, code) {
-    sendFrame(current, DATA, conn, new Uint8Array([ERROR_MARK, ...encoder.encode(JSON.stringify({ t: 'error', code }))]));
+  function refuse(current, conn, code, extra) {
+    sendFrame(current, DATA, conn, new Uint8Array([ERROR_MARK, ...encoder.encode(JSON.stringify({ t: 'error', code, ...extra }))]));
     dropConn(current, conn, true);
   }
 
   async function hello(current, conn, record, bytes) {
     record.state = 'accepting';
+    // Nothing to decrypt: whoever dials a retired room only needs to hear that the Mac was reset.
+    if (retired) return refuse(current, conn, 'bad-token', { reason: 'reset' });
     let accepted;
     try {
       accepted = hostAccept({ host: identity.box, hello: bytes, isKnown: id => phones.isKnown(id), canPair: !!canPair(), token, random });

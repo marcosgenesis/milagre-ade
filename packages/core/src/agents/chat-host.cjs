@@ -261,6 +261,7 @@ class ChatHost {
       // `context` marks a message no person typed, such as a Delegation from another Chat.
       const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: request.context ?? null, ...(request.operationId ? { operationId: request.operationId } : {}), role: "user", model };
       pendingId = message.id;
+      if (typeof request.clientMessageId === 'string') message.clientMessageId = request.clientMessageId;
       stagedSession = { ...withoutDraft(session), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {

@@ -163,6 +163,8 @@ export interface OpenLink {
 
 export interface ChatMessage {
   id: number;
+  /** Matches a local send preview to the saved input across snapshots and the send response. */
+  clientMessageId?: string;
   session_id: number;
   body: string;
   context: ChatContext;
@@ -392,6 +394,7 @@ export type AgentEvent =
 /** A message for a chat. The main process saves it, then starts or steers the chat's turn. */
 export interface ChatSendRequest {
   projectPath: string;
+  clientMessageId?: string;
   /** The chat to send to, or null for a new chat in the worktree. */
   sessionId: number | null;
   worktreeId: number;

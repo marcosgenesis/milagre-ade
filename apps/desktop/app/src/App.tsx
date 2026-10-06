@@ -59,7 +59,7 @@ import SidebarNav from "./components/SidebarNav";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
-import { isListedChat } from "@milagre/shared/chats";
+import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat, type PendingChat } from "@milagre/shared/chats";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
@@ -102,6 +102,9 @@ function latestSessionId(state: CoordinatorState) {
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
+type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number };
+type PreparedSendTarget = { view: number; projectPath: string; sessionId: number | null; worktreeId: number };
+type FailedSend = PendingSend & { draft: string; error: string; target: PreparedSendTarget | null };
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
@@ -218,7 +221,23 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
-  const [preparing, setPreparing] = useState(false);
+  // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
+  const chatView = useRef(0);
+  const nextChatView = useRef(0);
+  const [, setChatView] = useState(0);
+  function advanceChatView() {
+    chatView.current = ++nextChatView.current;
+    setChatView(chatView.current);
+  }
+  const sendInFlight = useRef(false);
+  const [preparingView, setPreparingView] = useState<number | null>(null);
+  const preparing = preparingView !== null;
+  const preparingHere = preparingView === chatView.current;
+  const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
+  // If persistence fails after setup, retry in the Worktree already prepared for this Chat.
+  const preparedTarget = useRef<PreparedSendTarget | null>(null);
+  const [failedSends, setFailedSends] = useState<FailedSend[]>([]);
+  const [restoringSend, setRestoringSend] = useState<FailedSend | null>(null);
   const [loading, setLoading] = useState(true);
   const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
   const [restartingHost, setRestartingHost] = useState(false);
@@ -256,7 +275,11 @@ function App() {
 
   useEffect(() => {
     let updated = false;
-    const off = window.milagre.onRuntimeConnection?.(state => { updated = true; setHostConnection(state); });
+    const off = window.milagre.onRuntimeConnection?.(state => {
+      updated = true;
+      setHostConnection(state);
+      if (state.notice) setNotice(state.notice);
+    });
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
@@ -281,8 +304,25 @@ function App() {
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
   const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
-  const imageDraft = usePastedImages(`${project?.path ?? ""}:${selectedSessionId ?? "new"}:${selectedWorktree?.path ?? ""}`);
+  // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
+  const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`);
+  useEffect(() => {
+    if (!restoringSend) return;
+    imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
+    setRestoringSend(null);
+  }, [restoringSend]);
   const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
+  const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
+  const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
+  const sidebarState = useMemo(() => {
+    if (!state) return state;
+    const recovered = failedSends.filter(send => send.projectPath === project?.path).reduce((current, send) => withPendingChat(current, send), state);
+    return pendingSend?.projectPath === project?.path ? withPendingChat(recovered, pendingSend) : recovered;
+  }, [state, pendingSend, failedSends, project?.path]);
+  // The renderer's preview never enters project state. The main process still owns the persisted transcript.
+  const displayedMessages = useMemo(() => pendingHere && pendingSend
+    ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : messages.length ? messages : [pendingSend.message]
+    : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
@@ -312,7 +352,7 @@ function App() {
     : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const agentPorts = useAgentPorts();
-  const isSending = preparing || Boolean(run);
+  const isSending = preparingHere || Boolean(run);
   const usage = useUsage();
   const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
 
@@ -387,16 +427,17 @@ function App() {
   const delegated = useStableSet(useMemo(() => delegatedChats(linkedWork, project?.path ?? ""), [linkedWork, project?.path]));
   const messagesBySession = useMemo(() => {
     const grouped = new Map<number, ChatMessage[]>();
-    for (const message of state?.messages ?? []) {
+    for (const message of sidebarState?.messages ?? []) {
       const list = grouped.get(message.session_id);
       if (list) list.push(message);
       else grouped.set(message.session_id, [message]);
     }
     return grouped;
-  }, [state?.messages]);
+  }, [sidebarState?.messages]);
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
   const chats = useMemo(() => {
+    const state = sidebarState;
     if (!state) return [];
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived)
@@ -405,26 +446,29 @@ function App() {
     const rows = orderChats(withMessages, chatOrder)
       .map(({ session, sessionMessages }) => {
         const worktree = state.worktrees[session.worktree_id];
+        const failed = failedSends.find(send => send.projectPath === project?.path && session.id === send.session.id);
+        const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
         // The commit dialog's notes aren't replies: they don't hide a failed turn.
         const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
         return {
           id: String(session.id),
           label: chatTitle(session, sessionMessages),
-          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), delegated: delegated.has(session.id), running: running.has(session.id), unread: Boolean(session.unread) }),
+          pending: pending || Boolean(failed),
+          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), delegated: delegated.has(session.id), running: running.has(session.id) || pending, unread: Boolean(session.unread) }),
           unread: Boolean(session.unread),
           details: {
             branch: worktree?.name,
             path: worktree?.path,
             diff: worktree?.diff,
             pullRequests: worktree ? chatPullRequests(readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
-            failed: lastReply?.outcome === "failed",
+            failed: Boolean(failed) || lastReply?.outcome === "failed",
             ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
           },
         };
       });
     // Rows that came out the same stay the same objects, so only a changed chat's row renders.
     return previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows);
-  }, [state, messagesBySession, chatOrder, asking, waiting, delegated, running, pullRequests, chatPrs, agentPorts, project]);
+  }, [sidebarState, pendingSend, failedSends, pendingCanonicalId, messagesBySession, chatOrder, asking, waiting, delegated, running, pullRequests, chatPrs, agentPorts, project]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
@@ -446,6 +490,29 @@ function App() {
   }
 
   function openChat(sessionId: number) {
+    const failed = failedSends.find(send => send.projectPath === projectRef.current?.path && send.session.id === sessionId);
+    if (failed) {
+      chatView.current = failed.view;
+      setChatView(failed.view);
+      setSelectedSessionId(failed.originSessionId);
+      setSelectedWorktreeId(failed.originWorktreeId);
+      setView("chat");
+      setDraft([failed.draft, draftStore.get()].filter(Boolean).join("\n\n"));
+      setNewChatError(failed.error);
+      preparedTarget.current = failed.target;
+      setRestoringSend(failed);
+      setFailedSends(current => current.filter(send => send !== failed));
+      return;
+    }
+    if (pendingSend && pendingSend.projectPath === projectRef.current?.path && (sessionId === pendingSend.session.id || sessionId === pendingCanonicalId)) {
+      chatView.current = pendingSend.view;
+      setChatView(chatView.current);
+      setSelectedSessionId(pendingSend.originSessionId);
+      setSelectedWorktreeId(pendingSend.originWorktreeId);
+      setView("chat");
+      return;
+    }
+    if (sessionId !== selectedSessionRef.current) advanceChatView();
     setSelectedSessionId(sessionId);
     setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? null);
     setView("chat");
@@ -484,6 +551,7 @@ function App() {
       // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
       // worktree moves the selection on.
       applyRemoval: (removed) => {
+        if (removed.sessionIds.includes(selectedSessionRef.current ?? -1) || removed.worktreeId === selectedWorktree?.id) advanceChatView();
         setSelectedSessionId((current) => (current !== null && removed.sessionIds.includes(current) ? null : current));
         setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
       },
@@ -593,7 +661,11 @@ function App() {
     void switchProject(chatId.slice(0, separator));
   }), []);
 
+  // Clicking the "phone paired" notification opens Settings → Phone, where access can be reset.
+  useEffect(() => window.milagre.onOpenPhoneSettings(() => { setSettingsSection("phone"); setView("settings"); }), []);
+
   function startNewChat() {
+    advanceChatView();
     const latest = openState();
     if (latest && projectRef.current) restoreProjectChoices(latest, projectRef.current.path);
     setSelectedSessionId(null);
@@ -618,6 +690,7 @@ function App() {
   function adoptProject(nextProject: OpenProject) {
     if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
     setSelectedLink(null);
+    advanceChatView();
     setStartupError(null);
     setLoading(false);
     receiveState(nextProject.path, nextProject.state);
@@ -654,6 +727,7 @@ function App() {
     try {
       const next = await window.milagre.openNamedLink(id);
       if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
+      advanceChatView();
       setLinkStates(previous => ({ ...previous, [id]: next.state })); setLinkInitialSession(sessionId); setSelectedLink(next); setView('chat'); setNewChatError(null);
     } catch (error) { setNotice(ipcErrorMessage(error)); }
   }
@@ -669,15 +743,19 @@ function App() {
   // from the main process, and a new chat in "New worktree" isolation gets its own worktree first.
   async function resolveSendTarget(body: string) {
     if (!state || !project || !selectedWorktree) return null;
+    if (preparedTarget.current?.view === chatView.current && preparedTarget.current.projectPath === project.path) return preparedTarget.current;
     if (selectedSession) return { sessionId: selectedSession.id as number | null, worktreeId: selectedWorktree.id };
     if (isolation === "local") return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
     const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
+    receiveState(project.path, created.project.state);
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
-    void window.milagre.listBranches(project.path).then(setBranches);
+    void window.milagre.listBranches(project.path).then(next => {
+      if (projectRef.current?.path === project.path) setBranches(next);
+    }).catch(() => {});
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
   }
 
@@ -685,29 +763,46 @@ function App() {
   async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
     // The brief is sent with the main process's copy of the draft, so the message may be empty.
     const briefAttached = handoverDraft !== undefined;
-    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return false;
-    setPreparing(true);
+    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
+    sendInFlight.current = true;
+    const view = chatView.current;
+    const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
+    setPreparingView(view);
     setNewChatError(null);
-
-    let target: Awaited<ReturnType<typeof resolveSendTarget>>;
+    const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
+    const firstMessage = messages.length === 0;
+    const submittedDraft = draftStore.get();
+    const preview = firstMessage ? createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: selectedWorktree.id, body, images, files, model: model.id, provider: model.provider }) : null;
+    if (preview) {
+      setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
+        message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
+      });
+      if (!preserveComposer) {
+        setDraft("");
+        imageDraft.clear();
+      }
+    }
+    // Capture the user's choices before setup runs in the background.
+    const options = {
+      provider: model.provider,
+      model: model.id,
+      permissionMode: mode,
+      effort: effortFor(capabilityFor(model, capabilities), effort),
+      ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
+      fastMode: capabilityFor(model, capabilities).fastMode && fastMode,
+      replies: getSettings().claudeReplies,
+      tldrEnabled: getSettings().tldrEnabled,
+    };
+    let target: Awaited<ReturnType<typeof resolveSendTarget>> = null;
     try {
       target = await resolveSendTarget(body);
-    } catch (error) {
-      setNewChatError(`Could not create the worktree: ${ipcErrorMessage(error)}`);
-      setPreparing(false);
-      return false;
-    }
-    if (!target || projectRef.current?.path !== project.path) {
-      setPreparing(false);
-      return false;
-    }
-    // The main process saves the message, then starts the chat's turn, or steers the one running.
-    const latest = openState();
-    const session = target.sessionId !== null ? latest?.sessions[target.sessionId] : undefined;
-    const model = modelForChat(selectedModel, session?.provider, latest?.messages.filter((message) => message.session_id === target.sessionId) ?? [], models);
-    try {
+      if (!target) return false;
+      if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
+      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId } : pending);
+      // The main process saves the message, then starts the Chat's turn, even if the user has navigated away.
       const { sessionId } = await agentRuns.send({
         projectPath: project.path,
+        clientMessageId: preview?.message.clientMessageId,
         sessionId: target.sessionId,
         worktreeId: target.worktreeId,
         body,
@@ -715,29 +810,39 @@ function App() {
         files,
         // With the brief there is no fallback text for an empty message: the brief is the prompt.
         prompt: briefAttached && !body ? (files.length ? `Attached files:\n${files.join("\n")}` : "") : attachmentPrompt(body, files),
-        provider: model.provider,
-        model: model.id,
-        permissionMode: mode,
-        effort: effortFor(capabilityFor(model, capabilities), effort),
-        ultracode: capabilityFor(model, capabilities).ultracode && ultracode,
-        fastMode: capabilityFor(model, capabilities).fastMode && fastMode,
-        replies: getSettings().claudeReplies,
-        tldrEnabled: getSettings().tldrEnabled,
+        ...options,
       });
-      if (projectRef.current?.path === project.path) {
+      if (preparedTarget.current?.view === view) preparedTarget.current = null;
+      if (stillHere()) {
         setSelectedSessionId(sessionId);
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
-        if (!preserveComposer) {
+        if (!preserveComposer && !firstMessage) {
           setDraft("");
           imageDraft.clear();
         }
       }
       return true;
     } catch (error) {
-      setNewChatError(`Could not send the message: ${ipcErrorMessage(error)}`);
+      const message = `${target ? "Could not send the message" : "Could not create the worktree"}: ${ipcErrorMessage(error)}`;
+      if (stillHere()) {
+        setNewChatError(message);
+        if (firstMessage && !preserveComposer) {
+          const nextDraft = draftStore.get();
+          setDraft([submittedDraft || body, nextDraft].filter(Boolean).join("\n\n"));
+          imageDraft.restore(images, files);
+        }
+      } else {
+        if (preview && !preserveComposer) setFailedSends(current => [...current, { ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
+          draft: submittedDraft || body, error: message, target: target ? { ...target, view, projectPath: project.path } : null,
+          message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
+        }]);
+        setNotice(message);
+      }
       return false;
     } finally {
-      setPreparing(false);
+      setPendingSend(null);
+      sendInFlight.current = false;
+      setPreparingView(null);
     }
   }
 
@@ -776,6 +881,7 @@ function App() {
         tldrEnabled: getSettings().tldrEnabled,
       });
       if (projectRef.current?.path !== project.path) return;
+      advanceChatView();
       setSelectedSessionId(sessionId);
       setSelectedModel(target);
     } catch (error) {
@@ -992,8 +1098,13 @@ function App() {
         }} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">{restartingHost ? "Restarting…" : "Restart host"}</button>
       </div>}
       {!hostConnection.connected && <div role="status" data-host-disconnected className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]">
-        <p className="font-medium">Reconnecting to your computer</p>
-        <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+        {hostConnection.failed ? <>
+          <p className="font-medium">Couldn't restart Milagre's background host</p>
+          <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
+        </> : <>
+          <p className="font-medium">Reconnecting to your computer</p>
+          <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+        </>}
       </div>}
       <div aria-hidden className="fixed inset-x-0 top-0 z-50 h-10 [-webkit-app-region:drag]" />
       {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
@@ -1018,7 +1129,7 @@ function App() {
         onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)}
         onOpenProject={openProjectFromSidebar}
         recents={chats}
-        activeId={view === "chat" && selectedSession ? String(selectedSession.id) : null}
+        activeId={view === "chat" ? pendingHere && pendingSend ? String(pendingCanonicalId ?? pendingSend.session.id) : selectedSession ? String(selectedSession.id) : null : null}
         onPick={pickChat}
         chatActions={chatActions}
         onNewChat={startNewChatFromSidebar}
@@ -1057,7 +1168,7 @@ function App() {
           <DraftChatComposer
             key={project.path}
             store={draftStore}
-            messages={messages}
+            messages={displayedMessages}
             imageDraft={imageDraft}
             projectPath={selectedWorktree?.path ?? project.path}
             onSend={() => void sendMessage()}
@@ -1074,7 +1185,7 @@ function App() {
               : undefined}
             isSending={isSending}
             sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
-            runStartedAt={run?.startedAt}
+            runStartedAt={pendingHere ? pendingSend?.startedAt : run?.startedAt}
             streamingText={run?.text}
             streamingSteps={run?.steps}
             subagents={subagents}
@@ -1097,7 +1208,7 @@ function App() {
             } : undefined}
             resume={project && selectedSession?.resumeTurn ? { onContinue: () => void window.milagre.resumeChat(project.path, selectedSession.id).catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)) } : undefined}
             onOpenLinkedChat={(key) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
-            handover={state ? { ...handoverLinks(selectedSession, state), onOpen: (id) => { setSelectedSessionId(id); setSelectedWorktreeId(state.sessions[id]?.worktree_id ?? null); } } : undefined}
+            handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
             models={models}
             cliStatus={cliStatus}
             onModelPickerOpen={refreshCliStatus}
@@ -1118,14 +1229,15 @@ function App() {
             worktrees={composerWorktrees}
             selectedWorktreeId={selectedWorktree?.id}
             onWorktreeChange={(id) => {
+              advanceChatView();
               setSelectedWorktreeId(id);
               saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
             }}
             isolation={isolation}
-            onIsolationChange={(next) => { setIsolation(next); saveChatPreferences(localStorage, project.path, { isolation: next }); setNewChatError(null); }}
+            onIsolationChange={(next) => { preparedTarget.current = null; setIsolation(next); saveChatPreferences(localStorage, project.path, { isolation: next }); setNewChatError(null); }}
             branches={branches}
             baseBranch={effectiveBaseBranch}
-            onBaseBranchChange={(branch) => { setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
+            onBaseBranchChange={(branch) => { preparedTarget.current = null; setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
             newChatError={newChatError}
             findOpen={findOpen}
             findSignal={findSignal}

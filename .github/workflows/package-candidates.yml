@@ -1,0 +1,175 @@
+# Native installer validation. Test signatures never grant production trust.
+name: Build package candidates
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Installer version to validate (vX.Y.Z); builds the selected branch
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/package-candidates.yml'
+      - 'package*.json'
+      - 'apps/desktop/**'
+      - 'apps/daemon/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'distribution/**'
+  pull_request:
+    paths:
+      - '.github/workflows/package-candidates.yml'
+      - 'package*.json'
+      - 'apps/desktop/**'
+      - 'apps/daemon/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'distribution/**'
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-latest
+            command: npm run package:mac:local -- --x64 --arm64
+          - platform: windows
+            runner: windows-latest
+            command: npm run package:win --
+          - platform: linux
+            runner: ubuntu-latest
+            command: npm run package:linux --
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.tag || 'v0.1.0' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+      - name: Validate stable release tag
+        run: |
+          node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) { console.error("Expected vX.Y.Z"); process.exit(1); }'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Capture native desktop screenshots
+        run: echo "MILAGRE_SCREENSHOT_DIR=$RUNNER_TEMP/package-screenshots" >> "$GITHUB_ENV"
+      - name: Install Linux packaging tools
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm xvfb desktop-file-utils libgbm1 libgtk-3-0 libnss3 libasound2t64 createrepo-c gnupg
+      - name: Install dependencies
+        run: npm ci
+      - name: Test manifest generation
+        run: node --test scripts/package-managers.test.cjs
+      - name: Test Windows agent protocol
+        if: matrix.platform == 'windows'
+        timeout-minutes: 5
+        run: node --test --test-reporter=tap --test-timeout=60000 packages/core/src/agents/codex-provider.test.cjs
+      - name: Test Windows runtime and pipe security
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        timeout-minutes: 15
+        run: node --test --test-reporter=tap --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs
+      - name: Test real Linux repository signing and installation
+        if: matrix.platform == 'linux'
+        run: |-
+          export GNUPGHOME="$RUNNER_TEMP/milagre-test-key"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'Milagre CI fixture' rsa3072 sign 1d
+          MILAGRE_LINUX_SIGNING_KEY=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+          export MILAGRE_LINUX_SIGNING_KEY
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "MILAGRE_LINUX_SIGNING_KEY=$MILAGRE_LINUX_SIGNING_KEY" >> "$GITHUB_ENV"
+          MILAGRE_LINUX_REPOSITORY_INTEGRATION=1 node --test scripts/linux-repository.test.cjs
+      - name: Exercise a real Windows npm agent launcher
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |-
+          $prefix = Join-Path $env:RUNNER_TEMP 'Agent CLI Test'
+          npm install --global --prefix $prefix --no-audit --no-fund @openai/codex@0.160.0
+          if ($LASTEXITCODE -ne 0) { throw 'Test CLI installation failed' }
+          node scripts/test-windows-cli.cjs $prefix
+          if ($LASTEXITCODE -ne 0) { throw 'Real Windows CLI check failed' }
+      - name: Build experimental installers
+        run: ${{ matrix.command }} --config.extraMetadata.version="${RELEASE_TAG#v}"
+      - name: Install and exercise Linux DEB
+        if: matrix.platform == 'linux'
+        run: |-
+          sudo apt-get install -y ./release/*.deb
+          desktop-file-validate /usr/share/applications/milagre.desktop
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a npm run test:desktop -- --packaged /opt/Milagre/milagre
+      - name: Install and exercise Windows NSIS
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |-
+          $installer = (Get-ChildItem release/Milagre-Setup-*-x64.exe | Select-Object -First 1).FullName
+          $destination = Join-Path $env:RUNNER_TEMP 'Milagre Installed'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser', "/D=$destination") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited $($install.ExitCode)" }
+          $executable = Join-Path $destination 'Milagre.exe'
+          if (!(Test-Path $executable)) { throw 'Installed executable is missing' }
+          node scripts/test-desktop.cjs --packaged $executable
+          if ($LASTEXITCODE -ne 0) { throw 'Installed desktop check failed' }
+      - name: Exercise packaged macOS app
+        if: matrix.platform == 'macos'
+        run: |-
+          app=$(node -p 'process.arch === "arm64" ? "release/mac-arm64/Milagre.app" : "release/mac/Milagre.app"')
+          npm run test:desktop -- --packaged "$app"
+      - name: Sign and verify Linux candidates with temporary test key
+        if: matrix.platform == 'linux'
+        run: |-
+          node scripts/generate-linux-repository.cjs --tag "$RELEASE_TAG" --artifacts release --output release/linux-repository --sign-rpm
+          node scripts/verify-linux-repository.cjs --directory release/linux-repository --tag "$RELEASE_TAG" --fingerprint "$MILAGRE_LINUX_SIGNING_KEY" --artifacts release
+          node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform linux
+      - name: Install and exercise signed Fedora RPM
+        run: |-
+          docker build --platform linux/amd64 -f scripts/linux-runtime.Dockerfile -t milagre-fedora-check scripts
+          mkdir -p "$RUNNER_TEMP/milagre-source"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/milagre-source"
+          docker run --rm --platform linux/amd64 --cap-add=SYS_ADMIN --security-opt seccomp=unconfined -v "$RUNNER_TEMP/milagre-source:/source:ro" -v "$PWD/release:/installers:ro" -v "$PWD/release/linux-repository/archive-keyring.asc:/public-key.asc:ro" milagre-fedora-check bash /source/scripts/test-linux-rpm.sh /source /installers /public-key.asc
+        if: matrix.platform == 'linux'
+      - name: Exercise Linux AppImage payload
+        run: |-
+          "release/Milagre-${RELEASE_TAG#v}-x86_64.AppImage" --appimage-extract > /dev/null
+          xvfb-run -a npm run test:desktop -- --packaged squashfs-root/AppRun
+        if: matrix.platform == 'linux'
+      - name: Generate package metadata from installer bytes
+        run: npm run package:managers -- --tag "$RELEASE_TAG" --platform "${{ matrix.platform }}"
+      - name: Upload native desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: ${{ runner.temp }}/package-screenshots
+          if-no-files-found: ignore
+      - name: Upload experimental installers and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-${{ matrix.platform }}-${{ inputs.tag }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.blockmap
+            release/latest*.yml
+            release/package-managers/**
+      - name: Remove temporary repository test key
+        if: always() && matrix.platform == 'linux'
+        run: if [ -n "$GNUPGHOME" ]; then gpgconf --kill gpg-agent || true; rm -rf "$GNUPGHOME"; fi

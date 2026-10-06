@@ -1,9 +1,20 @@
 ---
+import { Image } from "astro:assets";
 import Base from "../layouts/Base.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import Hero from "../components/Hero.astro";
 import HeroScene from "../components/HeroScene.astro";
+import Section from "../components/Section.astro";
+import PhoneChats from "../components/PhoneChats.astro";
+import Faq from "../components/Faq.astro";
+import DownloadButtons from "../components/DownloadButtons.astro";
+import CopyCommand from "../components/CopyCommand.astro";
+import { BREW_COMMAND, IPHONE_BETA_URL } from "../links";
+import approval from "../assets/screenshots/approval.png";
+import sidebar from "../assets/screenshots/sidebar.png";
+import canvas from "../assets/screenshots/canvas.png";
+
 const title = "Milagre: run Claude Code and Codex on your Mac, answer from anywhere";
 const description = "Milagre runs Claude Code and Codex on your Mac, one Git Worktree per Chat. When an agent needs an approval or an answer, it shows up on your desk and on your iPhone.";
 ---
@@ -11,6 +22,66 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
   <Nav />
   <main>
     <Hero><HeroScene /></Hero>
+
+    <Section id="approvals" title="Agents stop for you. You'll notice.">
+      <p>A task can run for an hour and stop five minutes in for an approval or a question. Milagre puts both inside the Chat, so you answer where you read.</p>
+      <p>Pick Ask approval, Auto or Full permissions for each agent.</p>
+      <Image slot="visual" src={approval} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="A Milagre Chat waiting for approval to run the swipe navigation checks" />
+    </Section>
+
+    <Section id="worktrees" title="Several changes at once, no mixed files" reverse>
+      <p>Projects keep related Chats together. Each Chat gets its own Git Worktree, so parallel agents never edit the same files.</p>
+      <p>Pull request status sits beside every Chat.</p>
+      <Image slot="visual" src={sidebar} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="The Milagre sidebar with six Chats, each on its own branch" />
+    </Section>
+
+    <Section id="links" title="Agents that work across repos">
+      <p>Link Projects on the canvas. An agent can read the linked side, delegate a change to that side's agent and negotiate a shared contract, such as an API shape, before either side writes code.</p>
+      <Image slot="visual" src={canvas} widths={[800, 1360]} sizes="(max-width: 860px) 100vw, 640px" alt="Two linked Projects, Frontend and Backend, on the Milagre canvas" />
+    </Section>
+
+    <Section id="phone" title="Your Mac does the work. Your phone keeps up." reverse>
+      <p>Pair your iPhone by scanning the QR code in Settings &gt; Phone. Follow running agents, reply, answer questions and approvals, attach files and inspect changes.</p>
+      <p>Your Mac runs the agents, so it needs to stay awake and online.</p>
+      <p><a class="link" href={IPHONE_BETA_URL}>Get the iPhone beta</a></p>
+      <div slot="visual"><PhoneChats /></div>
+    </Section>
+
+    <section id="local" class="plain container">
+      <h2>Local-first</h2>
+      <ul class="facts">
+        <li><b>Your machine, your login.</b> Agents run on your Mac with your own Claude Code or Codex login. Milagre provides no model credentials and no hosted inference.</li>
+        <li><b>A relay that can't read.</b> The default phone relay forwards encrypted frames and cannot read Chat traffic.</li>
+        <li><b>Requirements.</b> macOS on Apple Silicon or Intel, with Claude Code 2.1.288 or newer, or Codex CLI 0.160.0 or newer. Windows and Linux are coming.</li>
+      </ul>
+    </section>
+
+    <section id="faq" class="plain container">
+      <h2>Questions</h2>
+      <Faq />
+    </section>
+
+    <section id="download" class="plain closing container">
+      <h2>Download Milagre</h2>
+      <DownloadButtons />
+      <CopyCommand command={BREW_COMMAND} />
+    </section>
   </main>
   <Footer />
 </Base>
+
+<style>
+  .plain { padding: 96px 0; border-top: 1px solid var(--line); }
+  .plain h2 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; margin-bottom: 28px; }
+  .facts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .facts li { padding: 20px; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); color: var(--ink-2); }
+  .facts b { display: block; margin-bottom: 6px; color: var(--ink); }
+  .closing { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+  .closing h2 { margin-bottom: 8px; }
+  .link { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+  .link:hover { text-decoration: underline; }
+  @media (max-width: 860px) {
+    .plain { padding: 64px 0; }
+    .facts { grid-template-columns: 1fr; }
+  }
+</style>

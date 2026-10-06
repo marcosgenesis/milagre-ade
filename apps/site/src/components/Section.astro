@@ -1,0 +1,24 @@
+---
+interface Props { id: string; title: string; reverse?: boolean }
+const { id, title, reverse = false } = Astro.props;
+---
+<section id={id} class:list={["section container", { reverse }]}>
+  <div class="copy">
+    <h2>{title}</h2>
+    <div class="body muted"><slot /></div>
+  </div>
+  <div class="visual"><slot name="visual" /></div>
+</section>
+
+<style>
+  .section { display: grid; grid-template-columns: 5fr 7fr; align-items: center; gap: 56px; padding: 96px 0; border-top: 1px solid var(--line); }
+  .reverse .copy { order: 2; }
+  h2 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; }
+  .body { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; font-size: 17px; }
+  .visual :global(img) { border-radius: var(--radius-window); box-shadow: var(--shadow-overlay); }
+  .visual { display: flex; justify-content: center; min-width: 0; }
+  @media (max-width: 860px) {
+    .section { grid-template-columns: 1fr; gap: 32px; padding: 64px 0; }
+    .reverse .copy { order: 0; }
+  }
+</style>

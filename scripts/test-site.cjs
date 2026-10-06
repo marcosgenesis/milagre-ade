@@ -103,6 +103,39 @@ const checks = [
       window.destroy();
     },
   },
+  {
+    name: "sections appear in order with FAQ, images and a closing download",
+    async run(open, evaluate, shot) {
+      const window = await open({ width: 1440, height: 900 });
+      const headings = await evaluate(window, `[...document.querySelectorAll("main h2")].map(h => h.textContent.trim())`);
+      assert.deepEqual(headings, [
+        "Agents stop for you. You'll notice.",
+        "Several changes at once, no mixed files",
+        "Agents that work across repos",
+        "Your Mac does the work. Your phone keeps up.",
+        "Local-first",
+        "Questions",
+        "Download Milagre",
+      ]);
+      assert.equal(await evaluate(window, `document.querySelectorAll("main details").length`), 5);
+      const images = await evaluate(window, `[...document.querySelectorAll("main img")].map(img => ({ alt: img.alt, w: img.getAttribute("width"), h: img.getAttribute("height"), loaded: img.complete && img.naturalWidth > 0 }))`);
+      assert.equal(images.length, 3);
+      for (const image of images) {
+        assert.ok(image.alt.length > 10, "alt text");
+        assert.ok(image.w && image.h, "explicit size");
+      }
+      assert.ok(await evaluate(window, `document.querySelectorAll('main a[href="/download/mac-arm64"]').length >= 2`), "closing download");
+      assert.ok(!(await evaluate(window, `/[\\u2013\\u2014]/.test(document.body.innerText)`)), "no en or em dashes in copy");
+      const height = await evaluate(window, `document.documentElement.scrollHeight`);
+      window.setContentSize(1440, Math.min(height, 12000));
+      await shot(window, "desktop-full.png");
+      window.destroy();
+      const phone = await open({ width: 390, height: 844, mobile: true });
+      const widths = await evaluate(phone, `[document.documentElement.scrollWidth, window.innerWidth]`);
+      assert.ok(widths[0] <= widths[1], `phone scrollWidth ${widths[0]} > ${widths[1]}`);
+      phone.destroy();
+    },
+  },
 ];
 
 async function browserChecks() {

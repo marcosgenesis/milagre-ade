@@ -19,6 +19,7 @@ const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daem
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
+  'chat:archive-subagent', 'chat:archive-finished-subagents',
   'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',
   // Archive's confirm step: whether the Chat's worktree is Milagre's and what removing it would lose, then the removal,
   // which the daemon checks again against what the phone saw after closing the Chat's agent.

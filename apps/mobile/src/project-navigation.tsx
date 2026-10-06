@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { Href } from 'expo-router';
-import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, FilterHorizontalIcon, FolderAddIcon, GitBranchIcon, LaptopIcon, Link04Icon, MoreHorizontalIcon, Search01Icon, Settings01Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isListedChat, pendingChatSessionId, withPendingChat } from '@milagre/shared/chats';
 import type { AgentSession } from '@milagre/shared/model';
@@ -13,10 +13,7 @@ import { chatMark, type ChatMark } from './indicators';
 import { ChatMarkIcon } from './status-indicators';
 import { Icon } from './icons';
 import { LoadingLogo } from './loading-logo';
-import { ErrorNotice, Field, IconButton, PageScroll, PullDown, colors, styles } from './ui';
-import { SettingsView, type SettingsPage } from './app/settings';
-import { NotificationsView } from './app/notifications';
-import { UsageSection } from './usage-section';
+import { ErrorNotice, Field, IconButton, PullDown, colors, styles } from './ui';
 import { ProjectIcon, ProjectIcons } from './project-icon';
 import { ProjectSearch } from './project-search';
 import { chatMenu, runChatAction } from './chat-actions';
@@ -46,8 +43,7 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [show, setShow] = useState<Show>('all');
-  // Settings open inside the navigation, so reaching them never passes through the screen behind it.
-  const [page, setPage] = useState<'settings' | SettingsPage | 'add' | null>(null);
+  const [page, setPage] = useState<'add' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -175,16 +171,18 @@ export function ProjectNavigation({ onNavigate, onClose, activeChatId }: { onNav
   }
   const footer = <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
     <Pressable accessibilityRole="button" accessibilityLabel="Add project" disabled={busy} onPress={() => setPage('add')} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={FolderAddIcon} tone="ink2" size={18} /><Text style={s.secondary}>Add project</Text></Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel="Link projects" disabled={busy} onPress={() => onNavigate('/link-projects', true)} style={({ pressed }) => [s.footerAction, { opacity: pressed ? 0.55 : 1 }]}><Icon icon={Add01Icon} tone="ink2" size={18} /><Text style={s.secondary}>Link projects</Text></Pressable>
-    <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => setPage('settings')} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <IconButton label="Link projects" icon={Link04Icon} size={44} disabled={busy} onPress={() => onNavigate('/link-projects', true)} />
+      <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate('/settings', true)} />
+    </View>
   </View>;
   if (page) return <View style={styles.screen}>
     <View style={{ paddingTop: insets.top + 4, paddingHorizontal: 8, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <IconButton label={page === 'settings' || page === 'add' ? 'Back to Projects' : 'Back to Settings'} icon={ArrowLeft01Icon} size={44} onPress={() => setPage(page === 'settings' || page === 'add' ? null : 'settings')} />
-      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>{page === 'add' ? 'Add project' : page === 'settings' ? 'Settings' : page === 'notifications' ? 'Notifications' : 'Plan usage'}</Text>
+      <IconButton label="Back to Projects" icon={ArrowLeft01Icon} size={44} onPress={() => setPage(null)} />
+      <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: colors.ink, fontSize: 17, fontWeight: '600' }}>Add project</Text>
       {onClose && <IconButton label="Close navigation" icon={Cancel01Icon} size={44} onPress={onClose} />}
     </View>
-    {page === 'add' ? <ProjectSearch onOpen={addProject} /> : page === 'settings' ? <PageScroll><SettingsView onOpen={setPage} /></PageScroll> : page === 'notifications' ? <NotificationsView /> : <PageScroll><UsageSection /></PageScroll>}
+    <ProjectSearch onOpen={addProject} />
   </View>;
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 16, paddingBottom: 12 }}>

@@ -13,7 +13,7 @@ export default function NotificationsScreen() {
   </>;
 }
 
-/** The notification settings; the navigation panel shows them too. */
+/** Notification controls for the native Settings stack. */
 export function NotificationsView() {
   const push = usePush();
   const session = useSession();

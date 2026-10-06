@@ -71,7 +71,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 
 function Row({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-6 px-4 py-3">
+    <div className="flex min-h-12 items-center justify-between gap-6 px-4 py-2">
       <div className="grid min-w-0 gap-0.5">
         <span className="text-[13.5px] font-medium text-ink">{label}</span>
         {description && <span className="text-[12px] text-ink-3">{description}</span>}

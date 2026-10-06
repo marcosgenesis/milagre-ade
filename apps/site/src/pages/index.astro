@@ -3,13 +3,14 @@ import Base from "../layouts/Base.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import Hero from "../components/Hero.astro";
+import HeroScene from "../components/HeroScene.astro";
 const title = "Milagre: run Claude Code and Codex on your Mac, answer from anywhere";
 const description = "Milagre runs Claude Code and Codex on your Mac, one Git Worktree per Chat. When an agent needs an approval or an answer, it shows up on your desk and on your iPhone.";
 ---
 <Base title={title} description={description}>
   <Nav />
   <main>
-    <Hero />
+    <Hero><HeroScene /></Hero>
   </main>
   <Footer />
 </Base>

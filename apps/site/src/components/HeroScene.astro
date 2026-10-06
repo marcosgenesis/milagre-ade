@@ -1,0 +1,121 @@
+---
+import PhoneFrame from "./PhoneFrame.astro";
+---
+<p class="scene-description">
+  Illustration: a Milagre Chat on a Mac stops at an approval to run the mobile tests, the same approval appears on an iPhone, and approving it on the phone lets the agent finish.
+</p>
+<div class="scene" aria-hidden="true">
+  <div class="mac">
+    <div class="mac-bar"><span></span><span></span><span></span></div>
+    <div class="mac-body">
+      <aside class="side">
+        <p class="side-label">Milagre</p>
+        <p class="row active"><i class="dot status"></i>Swipe between Chat and Changes</p>
+        <p class="row"><i class="dot running"></i>Phone pairing follow-ups</p>
+        <p class="row"><i class="dot"></i>Keep the Chat timer running</p>
+        <p class="row"><i class="dot"></i>Link Worktrees and share context</p>
+      </aside>
+      <div class="chat">
+        <p class="msg">Run the swipe navigation checks and fix what fails.</p>
+        <p class="tool t1"><b>Read</b> apps/mobile/src/chat-pager.tsx</p>
+        <p class="tool t2"><b>Edit</b> apps/mobile/src/chat-pager.tsx <span class="add">+18</span> <span class="del">−4</span></p>
+        <p class="tool t3"><b>Read</b> scripts/test-mobile.cjs</p>
+        <div class="slot">
+          <div class="card approval desk-approval" data-frame="approval">
+            <p class="card-title">Run <code>npm run test:mobile</code>?</p>
+            <p class="card-sub">Run the swipe navigation checks</p>
+            <div class="actions"><span class="btn">Deny</span><span class="btn primary">Approve</span></div>
+          </div>
+          <div class="card approved desk-approved"><p>Approved from iPhone</p></div>
+        </div>
+        <p class="done">Checks pass. Ready for review.</p>
+      </div>
+    </div>
+  </div>
+  <PhoneFrame class="scene-phone">
+    <div class="notice">
+      <p class="notice-app">Milagre</p>
+      <p>Swipe between Chat and Changes needs your approval</p>
+    </div>
+    <p class="phone-title">Swipe between Chat and Changes</p>
+    <div class="slot">
+      <div class="card approval phone-approval" data-frame="approval">
+        <p class="card-title">Run <code>npm run test:mobile</code>?</p>
+        <p class="card-sub">Run the swipe navigation checks</p>
+        <div class="actions"><span class="btn">Deny</span><span class="btn primary tap">Approve</span></div>
+      </div>
+      <div class="card approved phone-approved"><p>Approved</p></div>
+    </div>
+  </PhoneFrame>
+</div>
+
+<style>
+  .scene-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .scene { position: relative; display: flex; align-items: flex-start; justify-content: center; min-height: 600px; text-align: left; font-size: 13px; }
+  .mac { width: min(880px, 100%); border-radius: var(--radius-window); background: var(--canvas); box-shadow: var(--shadow-overlay); overflow: hidden; }
+  .mac-bar { display: flex; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .mac-bar span { width: 12px; height: 12px; border-radius: 50%; background: var(--line-strong); }
+  .mac-body { display: grid; grid-template-columns: 240px 1fr; min-height: 380px; }
+  .side { padding: 14px 10px; border-right: 1px solid var(--line); background: var(--page); }
+  .side-label { padding: 0 8px 8px; color: var(--ink-3); font-size: 12px; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-control); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.active { background: var(--hover-2); color: var(--ink); }
+  .dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+  .dot.running { background: var(--accent); }
+  .dot.status { background: var(--orange); }
+  .chat { display: flex; flex-direction: column; gap: 10px; padding: 22px 270px 22px 26px; } /* keep clear of the phone overlapping the right edge */
+  .msg { align-self: flex-end; max-width: 80%; padding: 8px 12px; border-radius: var(--radius-card); background: var(--hover); }
+  .tool { color: var(--ink-2); font-family: var(--font-mono); font-size: 12px; }
+  .tool b { color: var(--ink); font-weight: 600; margin-right: 6px; }
+  .add { color: var(--green); }
+  .del { color: var(--orange); }
+  .slot { display: grid; }
+  .slot > * { grid-area: 1 / 1; }
+  .card { padding: 12px 14px; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); }
+  .card-title { color: var(--ink); font-weight: 600; }
+  .card-title code { font-size: 12px; color: var(--accent-ink); }
+  .card-sub { margin-top: 2px; color: var(--ink-2); font-size: 12px; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+  .btn { padding: 5px 12px; border-radius: var(--radius-chip); background: var(--hover); font-size: 12px; font-weight: 600; }
+  .btn.primary { background: var(--ink); color: var(--page); }
+  .approved { opacity: 0; color: var(--green); font-weight: 600; background: var(--green-tint); box-shadow: none; }
+  .done { opacity: 0; color: var(--green); font-weight: 600; }
+  /* PhoneFrame renders its own root, so reach it with :global inside .scene. */
+  .scene :global(.scene-phone) { position: absolute; right: max(0px, calc(50% - 520px)); bottom: 0; width: 240px; }
+  .scene :global(.scene-phone .phone-screen) { display: flex; flex-direction: column; gap: 10px; }
+  .notice { position: absolute; top: 46px; left: 10px; right: 10px; padding: 10px 12px; border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-raised); opacity: 0; z-index: 3; }
+  .notice-app { color: var(--ink-3); font-size: 11px; font-weight: 600; }
+  .phone-title { font-size: 14px; font-weight: 650; }
+
+  @media (max-width: 760px) {
+    .mac-body { grid-template-columns: 1fr; min-height: 340px; }
+    .side { display: none; }
+    .chat { padding: 16px; }
+    .scene { min-height: 0; padding-bottom: 300px; } /* room for the scaled phone below the Mac card */
+    .scene :global(.scene-phone) { right: 0; bottom: 0; transform: scale(0.62); transform-origin: bottom right; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .t1 { animation: t1 8s infinite; }
+    .t2 { animation: t2 8s infinite; }
+    .t3 { animation: t3 8s infinite; }
+    .desk-approval { animation: desk-approval 8s infinite; }
+    .desk-approved, .phone-approved { animation: approved 8s infinite; }
+    .done { animation: done 8s infinite; }
+    .dot.status { animation: status 8s infinite; }
+    .notice { animation: notice 8s infinite var(--ease-out-strong); }
+    .phone-approval { animation: phone-approval 8s infinite; }
+    .tap { animation: tap 8s infinite; }
+  }
+
+  @keyframes t1 { 0%, 2% { opacity: 0; transform: translateY(4px); } 6%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @keyframes t2 { 0%, 8% { opacity: 0; transform: translateY(4px); } 12%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @keyframes t3 { 0%, 14% { opacity: 0; transform: translateY(4px); } 18%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @keyframes desk-approval { 0%, 24% { opacity: 0; transform: translateY(6px); } 28%, 64% { opacity: 1; transform: none; } 68%, 100% { opacity: 0; } }
+  @keyframes approved { 0%, 64% { opacity: 0; } 68%, 92% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes done { 0%, 74% { opacity: 0; transform: translateY(4px); } 78%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @keyframes status { 0%, 24% { background: var(--accent); } 28%, 64% { background: var(--orange); } 68%, 74% { background: var(--accent); } 78%, 92% { background: var(--green); } 100% { background: var(--accent); } }
+  @keyframes notice { 0%, 32% { opacity: 0; transform: translateY(-12px); } 36%, 44% { opacity: 1; transform: none; } 48%, 100% { opacity: 0; transform: translateY(-12px); } }
+  @keyframes phone-approval { 0%, 46% { opacity: 0; transform: translateY(6px); } 50%, 64% { opacity: 1; transform: none; } 68%, 100% { opacity: 0; } }
+  @keyframes tap { 0%, 56% { transform: none; } 58% { transform: scale(0.92); } 60%, 100% { transform: none; } }
+</style>

@@ -81,6 +81,28 @@ const checks = [
       window.destroy();
     },
   },
+  {
+    name: "hero scene animates when motion is allowed",
+    async run(open, evaluate) {
+      const window = await open({ width: 1440, height: 900 });
+      assert.ok(await evaluate(window, `!!document.querySelector(".scene")`), "scene exists");
+      assert.equal(await evaluate(window, `document.querySelector(".scene").getAttribute("aria-hidden")`), "true");
+      assert.ok(await evaluate(window, `document.querySelector(".scene").getAnimations({ subtree: true }).length > 0`), "animations running");
+      window.destroy();
+    },
+  },
+  {
+    name: "reduced motion shows the approval on both devices, without animation",
+    async run(open, evaluate, shot) {
+      const window = await open({ width: 1440, height: 900, reducedMotion: true });
+      assert.equal(await evaluate(window, `document.querySelector(".scene").getAnimations({ subtree: true }).length`), 0);
+      const opacities = await evaluate(window, `[...document.querySelectorAll('.scene [data-frame="approval"]')].map(el => getComputedStyle(el).opacity)`);
+      assert.deepEqual(opacities, ["1", "1"]);
+      assert.ok(await evaluate(window, `!!document.querySelector(".scene-description")?.textContent.includes("approval")`), "described for screen readers");
+      await shot(window, "desktop-reduced-motion.png");
+      window.destroy();
+    },
+  },
 ];
 
 async function browserChecks() {

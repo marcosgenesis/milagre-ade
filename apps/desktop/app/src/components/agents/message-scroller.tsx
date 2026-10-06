@@ -490,14 +490,14 @@ export function MessageScroller({
         <div className="pointer-events-none absolute inset-x-0 bottom-12 z-20 flex justify-center">
           <button
             type="button"
+            aria-label="Go to bottom"
             onClick={() => {
               setFollowing(true);
               scrollToEnd(reduce || !smooth ? "auto" : "smooth");
             }}
-            className="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-line-strong bg-surface px-3 text-[12px] font-medium text-ink shadow-overlay transition-colors hover:bg-field focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink"
+            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-line-strong/50 bg-surface/60 text-ink shadow-overlay backdrop-blur-chip transition-colors hover:bg-surface/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink"
           >
-            <HugeiconsIcon icon={ArrowDown01Icon} size={16} aria-hidden="true" />
-            Go to bottom
+            <HugeiconsIcon icon={ArrowDown01Icon} size={20} aria-hidden="true" />
           </button>
         </div>
       )}

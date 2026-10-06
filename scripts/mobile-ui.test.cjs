@@ -375,7 +375,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, rememberChat() {}, isSelected: () => true,
   };
   const react = hookHost({ effects });
-  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
+  const ui = { ...Object.fromEntries(['Button', 'GlassIconButton', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
@@ -877,7 +877,7 @@ test('the transcript follows new content, also after the agent settings sheet op
 test('Go to bottom returns the mobile transcript to the end and resumes following', () => {
   const screen = chatHost({ effects: true });
   const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
-  const jump = () => find(screen.render(), node => node.type === 'PillButton' && node.props.title === 'Go to bottom');
+  const jump = () => find(screen.render(), node => node.type === 'GlassIconButton' && node.props.label === 'Go to bottom');
   const scrolls = [];
   page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
   page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });

@@ -25,7 +25,7 @@ import { Icon } from '../icons';
 import { PanelSwipe, useSidePanels } from '../side-panels';
 import { LoadingLogo } from '../loading-logo';
 import { useOpenProject } from '../use-open-project';
-import { ErrorNotice, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from '../ui';
 import { PromptField } from '../prompt-field';
 import { archiveFromPhone } from '../archive';
 import { confirmSheet } from '../confirm-store';
@@ -322,7 +322,7 @@ export default function ChatScreen() {
     <EdgeFade edge="top" height={insets.top + 72} />
     <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
     {showJumpToBottom && <View pointerEvents="box-none" style={{ height: 56, alignItems: 'center', zIndex: 1 }}>
-      <PillButton title="Go to bottom" icon={ArrowDown01Icon} secondary onPress={jumpToBottom} style={{ height: 44, boxShadow: '0 2px 8px #00000014' }} />
+      <GlassIconButton label="Go to bottom" systemImage="chevron.down" icon={ArrowDown01Icon} onPress={jumpToBottom} />
     </View>}
     {/* The transcript blurs and fades under the composer like desktop's. */}
     <BottomFade height={dockHeight + 48} />

@@ -66,7 +66,7 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 50');
-    const jumpButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Go to bottom')`;
+    const jumpButton = `document.querySelector('button[aria-label="Go to bottom"]')`;
     const distanceFromBottom = `(() => { const v = document.querySelector('[aria-label="Conversation"]'); return v.scrollHeight - v.clientHeight - v.scrollTop; })()`;
     const readEarlier = `(() => {
       const viewport = document.querySelector('[aria-label="Conversation"]');
@@ -79,6 +79,7 @@ async function browserChecks() {
     if (process.env.MILAGRE_SCREENSHOT_DIR) await window.webContents.capturePage().then(image => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-at-bottom.png"), image.toPNG()));
     await evaluate(readEarlier);
     await waitFor(`!!(${jumpButton})`);
+    assert.ok(await evaluate(`(() => { const button = (${jumpButton}); const rect = button.getBoundingClientRect(); return button.textContent.trim() === '' && rect.width === rect.height && getComputedStyle(button).backdropFilter !== 'none'; })()`), 'The jump button is a circular glass icon with an accessible label');
     assert.ok(await evaluate(`(${jumpButton}).getBoundingClientRect().bottom < document.querySelector('[data-promptbar]').getBoundingClientRect().top`), 'Go to bottom sits above the composer');
     assert.ok(await evaluate(`(() => { const button = (${jumpButton}); const rect = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)); })()`), 'The jump button receives clicks through the bottom fade');
     await delay(250);

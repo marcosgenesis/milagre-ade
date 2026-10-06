@@ -30,7 +30,6 @@ import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 import { useDismiss } from "../lib/use-dismiss";
 
-export type { SidebarRecent } from "./sidebar/ChatRow";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];

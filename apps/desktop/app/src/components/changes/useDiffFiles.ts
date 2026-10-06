@@ -5,7 +5,7 @@ import { parsePatch, type DiffHunk } from "../../lib/diff-parse";
 // Patches load as files scroll into view; a few at a time keeps git from competing with the agent.
 const MAX_IN_FLIGHT = 4;
 // Past this many changed lines a file waits for "Show diff" instead of loading and highlighting on scroll.
-export const LARGE_DIFF_LINES = 3000;
+const LARGE_DIFF_LINES = 3000;
 
 export type PatchState = { status: "loading" } | { status: "error"; message: string } | ({ status: "ready" } & DiffFileResult);
 

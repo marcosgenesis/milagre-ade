@@ -4,9 +4,8 @@ import type { ClipboardEvent } from "react";
 import type { ImageAttachment } from "../model";
 
 const TYPES = new Set(IMAGE_TYPES);
-export { MAX_IMAGE_BYTES, MAX_IMAGES } from "@milagre/shared/limits";
 
-export function isAttachableImage(file: File): boolean {
+function isAttachableImage(file: File): boolean {
   return TYPES.has(file.type) && file.size <= MAX_IMAGE_BYTES;
 }
 

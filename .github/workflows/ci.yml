@@ -52,6 +52,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Dead code
+        run: npm run knip
       - name: Typecheck mobile
         run: npm run typecheck:mobile
       - name: Typecheck relay

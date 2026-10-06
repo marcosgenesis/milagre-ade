@@ -2,7 +2,7 @@
 // Progress is where the screen sits: 1 shows the left panel, -1 the right one, 0 neither.
 
 /** Sideways speed, in points per second, past which a released drag goes where it was heading. */
-export const FLICK = 500;
+const FLICK = 500;
 
 /** Progress under the finger, kept inside what the gesture may reach. */
 export function dragTo(from: number, translation: number, width: number, min: number, max: number) {

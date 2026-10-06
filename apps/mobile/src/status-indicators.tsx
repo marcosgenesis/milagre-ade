@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { AppState, Linking, Pressable, Text, View } from 'react-native';
+import { AppState, Pressable, Text, View } from 'react-native';
 import { BubbleChatIcon, GitPullRequestIcon, ShieldAlertIcon, Alert02Icon } from '@hugeicons/core-free-icons';
 import type { PullRequest, Subagent, Worktree } from '@milagre/shared/model';
 import { BLOCKERS, pullRequestBlockers } from '@milagre/shared/pr-blockers';
@@ -36,21 +36,6 @@ export function ChatMarkIcon({ mark }: { mark: ChatMark }) {
     : mark === 'running' ? <SpinnerRing size={14} />
     : <View style={{ width: mark === 'idle' ? 6 : 8, height: mark === 'idle' ? 6 : 8, borderRadius: 4, backgroundColor: mark === 'unread' ? colors.accent : mark === 'failed' ? colors.red : colors.idleDot }} />;
   return <View accessible={mark !== 'idle'} accessibilityLabel={MARK_LABEL[mark] || undefined} style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>{body}</View>;
-}
-
-/** Desktop sidebar wording: "#142" in muted text, then the first blocker in its tone, "CI running" in orange, or "Ready" in green. */
-export function PullRequestLabel({ pr, compact = false }: { pr: PullRequest; compact?: boolean }) {
-  const blocker = pullRequestBlockers(pr)[0];
-  const checking = pr.state === 'OPEN' && pr.checks === 'running' && !blocker;
-  const ready = pr.state === 'OPEN' && !blocker && !checking && pr.conflictStatusKnown !== false;
-  const tone = pr.state === 'MERGED' ? '#a855f7' : blocker ? (BLOCKERS[blocker].tone === 'red' ? colors.red : colors.orange) : checking ? colors.orange : colors.green;
-  const status = pr.state === 'MERGED' ? 'Merged' : blocker ? BLOCKERS[blocker].short : checking ? 'CI running' : ready ? 'Ready' : '';
-  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pr comes unvalidated from the host's JSON response, so pr.url may be missing and startsWith would throw
-  return <Pressable accessibilityRole="link" accessibilityLabel={`Pull request ${pr.number}${status ? `, ${status}` : ''}`} onPress={() => { if (/^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {}); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-    <Icon icon={GitPullRequestIcon} tone="ink3" size={12} />
-    <Text style={{ color: colors.ink3, fontSize: 13 }}>#{pr.number}</Text>
-    {!!status && !compact && <Text style={{ color: tone, fontSize: 13 }}>{status}</Text>}
-  </Pressable>;
 }
 
 /** Desktop's pullRequestAction chip: the first blocker's fix, sent to the agent. */

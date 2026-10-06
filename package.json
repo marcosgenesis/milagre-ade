@@ -32,7 +32,8 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "package:repositories": "node scripts/generate-linux-repository.cjs",
     "lint": "oxlint",
-    "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\""
+    "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\"",
+    "knip": "knip"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -40,6 +41,7 @@
     "@semantic-release/release-notes-generator": "^14.1.1",
     "electron": "^44.5.1",
     "electron-builder": "26.17.0",
+    "knip": "6.39.0",
     "lefthook": "2.1.17",
     "oxlint": "1.87.0",
     "qrcode-terminal": "^0.12.0",

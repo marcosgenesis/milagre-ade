@@ -1,7 +1,7 @@
 import type { AlertButton, ShowAlert } from './archive';
 
 /** A question shown in the confirmation sheet; `choose` runs once, with the button picked or null when dismissed. */
-export type Confirmation = { title: string; message?: string; buttons: AlertButton[]; choose: (index: number | null) => void };
+type Confirmation = { title: string; message?: string; buttons: AlertButton[]; choose: (index: number | null) => void };
 
 let current: Confirmation | null = null;
 let present: (() => void) | null = null;

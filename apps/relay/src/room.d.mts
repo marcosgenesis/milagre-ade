@@ -1,4 +1,3 @@
-export const MAX_FRAME: number;
 export const MAX_PHONES: number;
 export type Payload = string | ArrayBuffer | ArrayBufferView;
 export interface RoomSocket {

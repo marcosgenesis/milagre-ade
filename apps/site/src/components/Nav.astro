@@ -1,0 +1,28 @@
+---
+import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_ARM64, REPO_URL } from "../links";
+---
+<header class="nav container">
+  <a class="brand" href="/" aria-label="Milagre home">
+    <img src="/app-icon.svg" alt="" width="28" height="28" />
+    <span>Milagre</span>
+  </a>
+  <nav aria-label="Main">
+    <a href={DOCS_URL}>Docs</a>
+    <a href={CHANGELOG_URL}>Changelog</a>
+    <a href={REPO_URL}>GitHub</a>
+    <a class="button button-primary nav-download" href={DOWNLOAD_ARM64}>Download</a>
+  </nav>
+</header>
+
+<style>
+  .nav { display: flex; align-items: center; justify-content: space-between; height: 72px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 18px; text-decoration: none; }
+  .brand img { border-radius: 7px; }
+  nav { display: flex; align-items: center; gap: 22px; font-size: 15px; }
+  nav a:not(.button) { color: var(--ink-2); text-decoration: none; }
+  nav a:not(.button):hover { color: var(--ink); }
+  .nav-download { height: 36px; padding: 0 14px; }
+  @media (max-width: 640px) {
+    nav a:not(.button) { display: none; }
+  }
+</style>

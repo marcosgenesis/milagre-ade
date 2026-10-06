@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, "..");
 
 test("npm discovers the desktop and shared packages from the repository root", () => {
   const workspaces = JSON.parse(execFileSync("npm", ["query", ".workspace"], { cwd: root, encoding: "utf8" }));
-  assert.deepEqual(workspaces.map(item => item.name).sort(), ["@milagre/core", "@milagre/daemon", "@milagre/mobile", "@milagre/relay", "@milagre/shared", "milagre"]);
+  assert.deepEqual(workspaces.map(item => item.name).sort(), ["@milagre/core", "@milagre/daemon", "@milagre/mobile", "@milagre/relay", "@milagre/shared", "@milagre/site", "milagre"]);
 });
 
 test("Electron CommonJS and renderer imports share the same chat operations", async () => {

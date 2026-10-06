@@ -1,0 +1,30 @@
+@import "./tokens.css";
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--page); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+body { margin: 0; font-size: 16px; line-height: 1.55; overflow-x: hidden; }
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+code, pre { font-family: var(--font-mono); }
+h1, h2, h3 { line-height: 1.1; letter-spacing: -0.02em; margin: 0; }
+p { margin: 0; }
+
+.container { width: min(1120px, 100% - 40px); margin-inline: auto; }
+.muted { color: var(--ink-2); }
+.eyebrow { color: var(--accent-ink); font-size: 14px; font-weight: 600; }
+
+.button {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px;
+  border-radius: var(--radius-control); background: var(--surface); color: var(--ink);
+  box-shadow: var(--shadow-btn); font-weight: 600; text-decoration: none;
+  transition: background-color 120ms var(--ease-out-strong), transform 100ms var(--ease-out-strong);
+}
+.button:hover { background: var(--hover); }
+.button:active { transform: scale(0.98); }
+.button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.button-primary { background: var(--ink); color: var(--page); }
+.button-primary:hover { background: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .button { transition: none; }
+}

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { ArrowLeft01Icon, ArrowRight01Icon, ArrowUp02Icon, Cancel01Icon, PencilEdit02Icon, ShieldAlertIcon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { ArrowLeft01Icon, ArrowRight01Icon, ArrowUp01Icon, Cancel01Icon, PencilEdit02Icon, ShieldAlertIcon, Tick02Icon } from '@hugeicons/core-free-icons';
 import type { AgentQuestion, PermissionDecision, PermissionRequest, QuestionAnswers, QuestionRequest } from '@milagre/shared/model';
 import { Icon } from './icons';
 import { IconButton, PillButton, colors, styles } from './ui';
@@ -65,7 +65,7 @@ export function Questions({ request, busy, submit }: { request: QuestionRequest;
       {(question.allowOther || !question.options.length) && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, paddingLeft: 12, paddingRight: 6, borderRadius: 14, borderCurve: 'continuous', borderWidth: typed[question.id] ? 1.5 : 1, borderColor: typed[question.id] ? colors.ink : colors.line, backgroundColor: typed[question.id] ? colors.surface : colors.page }}>
         <View style={{ width: 26, alignItems: 'center' }}><Icon icon={PencilEdit02Icon} tone="ink2" size={16} /></View>
         <TextInput accessibilityLabel={`Your own answer to: ${question.question}`} placeholder="Type your answer…" placeholderTextColor={colors.ink3} secureTextEntry={question.secret} value={typed[question.id] || ''} onChangeText={text => setTyped(current => ({ ...current, [question.id]: text }))} onSubmitEditing={sendTyped} returnKeyType="send" editable={!busy} style={{ flex: 1, color: colors.ink, fontSize: 15, paddingVertical: 12 }} />
-        {!!typed[question.id]?.trim() && !question.multiSelect && <IconButton label="Send answer" icon={ArrowUp02Icon} filled size={32} onPress={sendTyped} disabled={busy} />}
+        {!!typed[question.id]?.trim() && !question.multiSelect && <IconButton label="Send answer" icon={ArrowUp01Icon} filled size={32} onPress={sendTyped} disabled={busy} />}
       </View>}
     </View>
     {question.multiSelect && <PillButton title={count ? `Send ${count} answer${count === 1 ? '' : 's'}` : 'Pick at least one'} disabled={busy || !count} loading={busy} onPress={() => finish(picked)} style={{ marginTop: 6 }} />}

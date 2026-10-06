@@ -3,7 +3,7 @@ import type Reanimated from 'react-native-reanimated';
 import { Alert, Image, Keyboard, Linking, Text, View } from 'react-native';
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Add01Icon, ArrowUp02Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+import { Add01Icon, ArrowUp01Icon, Cancel01Icon, File01Icon, GitBranchIcon, GitForkIcon, LaptopIcon, StopIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons';
 import { sessionForWorktree } from '@milagre/shared/model';
 import { createPendingChat, pendingChatSessionId } from '@milagre/shared/chats';
 import type { Client, OpenProject } from '../client';
@@ -336,7 +336,7 @@ export default function ChatScreen() {
           <PermissionChip mode={preferences.permissionMode} onPress={() => router.push({ pathname: '/permission-sheet', params: { chatId, ...(run ? { busy: '1' } : {}) } })} />
           <View style={{ flex: 1 }} />
           {run && !draft.trim() && !attachments.length && <IconButton label="Stop" icon={StopIcon} filled size={34} disabled={busy} onPress={() => void action(() => client.call('agent:interrupt', [chatId]))} />}
-          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp02Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
+          {(!run || !!draft.trim() || !!attachments.length) && <IconButton label={busy ? 'Sending...' : run ? 'Send follow-up' : 'Send message'} icon={ArrowUp01Icon} filled size={34} loading={busy} disabled={busy || picking || (newWorktree && !base) || (!draft.trim() && !attachments.length) || !!session.error || !!chat?.archived || unavailable} onPress={() => void send()} />}
         </View>
       </View>}
     </View>

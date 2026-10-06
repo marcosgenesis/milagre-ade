@@ -12,7 +12,7 @@ function createLinkStore({ dataDir }) {
     save: (id, state) => saveProjectState(directory(id), state, { durable: true }),
   });
   return {
-    directory,
+    directory, cached: id => states.states.get(id),
     has: id => states.has(id), ids: () => states.projects(),
     get: id => { directory(id); return states.get(id); },
     update: (id, change, options) => { directory(id); return states.update(id, change, options); },

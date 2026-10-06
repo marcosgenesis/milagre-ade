@@ -202,7 +202,7 @@ async function fakeHost(t, { capabilities = ['desktop-v1', 'snapshot-pages-v1', 
     const protocol = wire(connection, {
       onInvalid() { connection.destroy(); },
       onMessage(request) {
-        if (request.method === 'project:snapshot') { host.reads.push(request.args[0]); void snapshot(request, protocol); return; }
+        if (['project:snapshot', 'link:snapshot'].includes(request.method)) { host.reads.push(request.args[0]); void snapshot(request, protocol); return; }
         if (request.method === 'daemon:stop') { protocol.send({ v: 1, id: request.id, result: { stopping: true } }); void onStop?.(connection, server); return; }
         const result = request.method === 'daemon:status' ? { capabilities, methods: ['project:open'] } : null;
         protocol.send({ v: 1, id: request.id, result });
@@ -310,4 +310,19 @@ test('a restart whose new host fails to start says why, and its retries start on
   await desktop.close({ stopHost: true });
   hostStarted = false;
   await assert.rejects(fs.stat(path.join(dataDir, 'runtime.lock')), { code: 'ENOENT' }, 'the new host stopped');
+});
+
+
+test('large Link events hydrate from the Link snapshot and retain one completed reply', async t => {
+  const id = require('node:crypto').randomUUID();
+  const state = { next_id: 3, sessions: { 1: { id: 1 } }, messages: [{ id: 2, session_id: 1, body: 'Shared reply' }], preparations: {} };
+  const { dataDir, host } = await fakeHost(t, { snapshot: (request, protocol) => protocol.send({ v: 1, id: request.id, result: { link: { id }, state } }) });
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: 'test', emit: (channel, payload) => events.push({ channel, payload }) }); t.after(() => desktop.close());
+  host.push(1, 'link:state', { linkId: id, stateTooLarge: true });
+  host.push(2, 'agent:event', { chatId: `milagre-link:${id}#1`, event: { type: 'turn-completed' }, seq: 2, stateTooLarge: true });
+  await waitFor(() => events.some(event => event.channel === 'agent:event'));
+  assert.deepEqual(host.reads, [id]);
+  assert.equal(events.find(event => event.channel === 'link:state').payload.state.messages.length, 1);
+  assert.equal(events.find(event => event.channel === 'agent:event').payload.state.messages[0].body, 'Shared reply');
 });

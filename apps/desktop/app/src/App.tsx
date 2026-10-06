@@ -1,3 +1,5 @@
+import type { LinkState } from '@milagre/shared/model';
+import { isLinkScopeKey, scopeFromKey } from '@milagre/shared/chat-scopes';
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
@@ -105,6 +107,7 @@ function App() {
   projectRef.current = project;
   // The latest state of every project the main process has sent this window; it's their only writer
   // (see ADR-0001). The ref leads, so callbacks read a state that arrived since the last render.
+  const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
   const [states, setStates] = useState<Record<string, CoordinatorState>>({});
   const statesRef = useRef(states);
   const state = project ? states[project.path] ?? null : null;
@@ -240,6 +243,7 @@ function App() {
   }
 
   useEffect(() => { void loadInitialProject(); }, []);
+  useEffect(() => window.milagre.onLinkState?.(update => setLinkStates(previous => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
     let updated = false;
@@ -247,6 +251,7 @@ function App() {
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
+      for (const next of snapshot.links ?? []) setLinkStates(previous => ({ ...previous, [next.linkId]: next.state }));
     });
     return () => { updated = true; off?.(); snapshotOff?.(); };
   }, []);
@@ -354,7 +359,9 @@ function App() {
     if (next.id !== selectedModel.id) setSelectedModel(next);
   }, [selectedSession?.id, selectedSession?.provider]);
 
-  function receiveState(projectPath: string, next: CoordinatorState) {
+  function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
+    if (isLinkScopeKey(projectPath)) { setLinkStates(previous => ({ ...previous, [scopeFromKey(projectPath).kind === 'link' ? projectPath.slice('milagre-link:'.length) : projectPath]: next as LinkState })); return; }
+    if (!('worktrees' in next)) return;
     statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
   }

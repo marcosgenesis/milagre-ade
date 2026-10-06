@@ -1,3 +1,4 @@
+import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from '@milagre/shared/model';
 import type { Result } from "@milagre/shared/result";
 
 import type { AgentRuns } from "./lib/agent-runs";
@@ -43,7 +44,7 @@ export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@
 
 /** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects. */
 export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean };
-export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+export type RuntimeSnapshot = { projects: OpenProject[]; links?: Array<{ linkId: string; state: LinkState }>; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
 export type CanvasSnapshot = {
@@ -125,6 +126,11 @@ declare global {
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
       /** Every opened Project, seeded once from existing coordination files. */
+      listNamedLinks: () => Promise<NamedProjectLink[]>;
+      createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
+      openNamedLink: (id: string) => Promise<OpenLink>;
+      sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
+      onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       getCanvas: () => Promise<CanvasSnapshot>;
@@ -175,7 +181,7 @@ declare global {
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
-      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
+      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */

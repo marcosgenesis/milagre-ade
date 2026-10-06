@@ -84,6 +84,7 @@ export interface Worktree {
   base?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
+  sharedChat?: { linkId: string; sessionId: number };
 }
 
 export interface AgentSession {
@@ -175,6 +176,7 @@ export interface ChatMessage {
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
+  operationId?: string;
 }
 
 /**
@@ -494,3 +496,6 @@ export interface ProviderUsage {
 export interface UsageSnapshot {
   providers: ProviderUsage[];
 }
+
+export interface TranscriptState { next_id: number; sessions: Record<string, AgentSession | LinkChatSession>; messages: ChatMessage[]; }
+export type LinkSendRequest = Omit<ChatSendRequest, 'projectPath' | 'worktreeId'> & { linkId: string; operationId: string };

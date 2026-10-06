@@ -71,6 +71,7 @@ class ChatHost {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const worktree = latest.worktrees[worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
+      if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
       const result = starterChat(latest, worktree);
       sessionId = result.session.id;
       return result.state;
@@ -93,7 +94,7 @@ class ChatHost {
       if (!this.states.has(projectPath) || this.runs[chatId] || this.quitting) return;
       const saved = await this.states.get(projectPath);
       const session = saved.sessions[sessionId];
-      const cwd = saved.worktrees[session?.worktree_id]?.path;
+      const cwd = session?.workspacePath ?? saved.worktrees?.[session?.worktree_id]?.path;
       if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
       const unknown = (session.subagents ?? []).filter(agent => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
       if (!unknown.length) return;
@@ -101,7 +102,7 @@ class ChatHost {
       if (!events.length) return;
       const { state, changed } = await this.states.update(projectPath, (latest) => {
         const current = latest.sessions[sessionId];
-        if (this.quitting || this.runs[chatId] || !current || current.archived || current.provider !== session.provider || current.native_session_id !== session.native_session_id || current.worktree_id !== session.worktree_id || latest.worktrees[current.worktree_id]?.path !== cwd) return latest;
+        if (this.quitting || this.runs[chatId] || !current || current.archived || current.provider !== session.provider || current.native_session_id !== session.native_session_id || current.worktree_id !== session.worktree_id || (current.workspacePath ?? latest.worktrees?.[current.worktree_id]?.path) !== cwd) return latest;
         let next = latest;
         for (const event of events) {
           if (event.type !== "subagent-update" || !["completed", "failed", "cancelled"].includes(event.agent?.status)) continue;
@@ -232,7 +233,8 @@ class ChatHost {
    */
   async send(request) {
     const { projectPath, body, images = [], files = [], provider, model } = request;
-    const storedImages = await storeImages(projectPath, images);
+    const execution = this.states.executionContext && request.sessionId != null ? await this.states.executionContext(projectPath, request.sessionId) : null;
+    const storedImages = await storeImages(this.states.storageDirectory?.(projectPath) ?? projectPath, images);
     let target = null;
     let brief;
     let pendingId;
@@ -242,8 +244,9 @@ class ChatHost {
       let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
       if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
       // A chat runs in its own worktree; a new one goes to the worktree asked for.
-      const worktree = latest.worktrees[session?.worktree_id ?? request.worktreeId];
+      const worktree = session?.workspacePath ? { path: session.workspacePath } : latest.worktrees[session?.worktree_id ?? request.worktreeId];
       if (!worktree) throw new Error("That worktree is no longer in the project.");
+      if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
       const started = session ? { state: latest, session } : starterChat(latest, worktree);
       session = started.session;
       const firstMessage = !latest.messages.some(message => message.session_id === session.id);
@@ -256,7 +259,7 @@ class ChatHost {
       const next = withSession;
       originalSession = session;
       // `context` marks a message no person typed, such as a Delegation from another Chat.
-      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: request.context ?? null, role: "user", model };
+      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: request.context ?? null, ...(request.operationId ? { operationId: request.operationId } : {}), role: "user", model };
       pendingId = message.id;
       stagedSession = { ...withoutDraft(session), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
@@ -306,7 +309,7 @@ class ChatHost {
       prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
     };
     this.turns.set(target.chatId, turn);
-    const started = this.startTurn({ ...turn, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => {
+    const started = this.startTurn({ ...turn, ...execution, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => {
       void this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) });
       return null;
     });
@@ -339,7 +342,7 @@ class ChatHost {
         sessions: {
           ...latest.sessions,
           [sessionId]: { ...source, handedOverTo: target },
-          [target]: { id: target, worktree_id: source.worktree_id, agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: `${providerName(provider)} · ${chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId))}` },
+          [target]: { id: target, ...(source.workspacePath ? { workspacePath: source.workspacePath, worktrees: source.worktrees } : { worktree_id: source.worktree_id }), agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: `${providerName(provider)} · ${chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId))}` },
         },
       };
     });
@@ -360,7 +363,7 @@ class ChatHost {
       const transcript = renderTranscript(state, sessionId);
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
       const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
-      const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, cwd: state.worktrees[source.worktree_id].path });
+      const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, worktrees: source.worktrees, cwd: source.workspacePath ?? state.worktrees[source.worktree_id].path });
       await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);

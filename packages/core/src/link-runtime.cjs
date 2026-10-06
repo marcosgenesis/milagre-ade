@@ -1,0 +1,51 @@
+const { randomUUID } = require('node:crypto');
+const { scopeKey, validLinkId } = require('@milagre/shared/chat-scopes');
+function registerLinkRuntime({ commands, registry, store, workspaces, chats, broadcast, titles }) {
+  const queues = new Map();
+  async function definition(id) {
+    if (!validLinkId(id)) throw new Error('Invalid Link ID');
+    const link = (await registry().listProjectGroups()).find(item => item.id === id);
+    if (!link) throw new Error('Link no longer exists');
+    return link;
+  }
+  async function open(id) {
+    const link = await definition(id), key = scopeKey({ kind: 'link', linkId: id });
+    let state = await store.get(id);
+    await chats.resumeInterrupted(key, state).catch(() => {});
+    state = await store.get(id); titles.resume(key, state);
+    void chats.recoverHandovers(key, state).catch(() => {});
+    const projects = await registry().list();
+    return { link, state, projects: link.projectIds.map(projectId => projects.find(project => project.id === projectId) ?? { id: projectId, name: require('node:path').basename(require('node:path').dirname(projectId)), path: '' }) };
+  }
+  commands.handle('link:list', () => registry().listProjectGroups());
+  commands.handle('link:create', (_event, request) => registry().createProjectGroup(request));
+  commands.handle('link:open', (_event, id) => open(id));
+  commands.handle('link:snapshot', async (_event, id) => ({ link: await definition(id), state: await store.get(id) }));
+  commands.handle('link:send', (_event, request) => {
+    const run = (queues.get(request.linkId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const link = await definition(request.linkId);
+      const operationId = request.operationId;
+      if (!validLinkId(operationId)) throw new Error('Invalid send operation');
+      if (!store.has(link.id)) throw new Error('Open the Link before sending');
+      let state = await store.get(link.id);
+      const earlier = state.messages.find(message => message.operationId === operationId);
+      if (earlier) return { sessionId: earlier.session_id };
+      await workspaces.membersAvailable(link);
+      let sessionId = request.sessionId;
+      if (sessionId == null) {
+        sessionId = Object.values(state.preparations).find(prep => prep.operationId === operationId)?.chatId ?? state.next_id;
+        const prepared = await workspaces.prepareLinkChat({ link, chatId: sessionId, prompt: request.body || '', operationId });
+        await store.update(link.id, latest => latest.sessions[sessionId] ? latest : { ...latest, sessions: { ...latest.sessions, [sessionId]: { id: sessionId, agent_name: link.name, status: 'Created', ...prepared } } });
+        await store.flush(link.id);
+      }
+      const key = scopeKey({ kind: 'link', linkId: link.id });
+      const sent = await chats.send({ ...request, projectPath: key, sessionId, operationId, context: undefined });
+      broadcast(key, await store.get(link.id));
+      return { sessionId: sent.sessionId };
+    });
+    queues.set(request.linkId, run); run.finally(() => { if (queues.get(request.linkId) === run) queues.delete(request.linkId); }).catch(() => {});
+    return run;
+  });
+  return { definition, open };
+}
+module.exports = { registerLinkRuntime };

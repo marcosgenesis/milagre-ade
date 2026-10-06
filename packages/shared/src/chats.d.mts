@@ -1,5 +1,5 @@
-import type { AgentSession, ChatMessage } from "./model.ts";
+import type { AgentSession, LinkChatSession, ChatMessage } from "./model.ts";
 
-export function chatTitle(session: AgentSession, messages: ChatMessage[]): string;
-export function isHandoverChat(session: AgentSession | undefined): boolean;
-export function isListedChat(session: AgentSession | undefined, messageCount: number): boolean;
+export function chatTitle(session: AgentSession | LinkChatSession, messages: ChatMessage[]): string;
+export function isHandoverChat(session: AgentSession | LinkChatSession | undefined): boolean;
+export function isListedChat(session: AgentSession | LinkChatSession | undefined, messageCount: number): boolean;

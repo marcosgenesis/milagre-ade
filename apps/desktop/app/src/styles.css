@@ -627,6 +627,10 @@ a:focus-visible .animated-underline::after {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
 }
+/* An opening conversation measures every message once; contain-intrinsic-size remembers it from then on. */
+[data-measuring] [data-slot="message"] {
+  content-visibility: visible;
+}
 
 /* The diff's sticky file headers sit at its top edge, so only the bottom fades. */
 .diff-scroll.scroll-fade[data-fade-top] {

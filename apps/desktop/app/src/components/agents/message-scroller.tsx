@@ -129,6 +129,9 @@ export function MessageScroller({
   const [activeRailId, setActiveRailId] = useState("");
   const [railOverflowing, setRailOverflowing] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // A newly opened conversation lays out every message at its real size once, so the skipped ones keep that size
+  // instead of a guess that would shift the scroll position after it opens at the bottom.
+  const [measuring, setMeasuring] = useState(true);
   const {
     onScroll: onViewportScroll,
     onWheel: onViewportWheel,
@@ -316,6 +319,17 @@ export function MessageScroller({
     programmaticScrollRef.current = false;
   }, []);
 
+  useEffect(() => {
+    let settle = 0;
+    const first = requestAnimationFrame(() => {
+      settle = requestAnimationFrame(() => setMeasuring(false));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(settle);
+    };
+  }, []);
+
   useLayoutEffect(() => {
     followingRef.current = followOutput;
     // Position a newly opened conversation before the browser can paint its top.
@@ -460,6 +474,7 @@ export function MessageScroller({
         aria-live="polite"
         aria-relevant="additions text"
         aria-busy={busy}
+        data-measuring={measuring || undefined}
         className={contentClassName}
         {...contentProps}
       >

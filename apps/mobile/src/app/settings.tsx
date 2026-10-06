@@ -1,12 +1,12 @@
 import { View } from 'react-native';
 import { Stack, router } from 'expo-router';
-import { ChartBarLineIcon, Download04Icon, Notification01Icon, UserMultipleIcon } from '@hugeicons/core-free-icons';
+import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, UserMultipleIcon } from '@hugeicons/core-free-icons';
 import { usePush } from '../push';
 import { useAppUpdates } from '../update-sheet';
 import { Icon } from '../icons';
 import { ListRow, PageScroll, styles } from '../ui';
 
-type SettingsPage = 'notifications' | 'usage' | 'accounts';
+type SettingsPage = 'notifications' | 'usage' | 'accounts' | 'skills';
 
 export default function SettingsScreen() {
   return <>
@@ -28,6 +28,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
       leading={<Icon icon={Notification01Icon} tone="ink" size={20} />} onPress={() => onOpen('notifications')} />
     <View style={styles.separator} />
     <ListRow compact title="Plan usage" leading={<Icon icon={ChartBarLineIcon} tone="ink" size={20} />} onPress={() => onOpen('usage')} />
+    <View style={styles.separator} />
+    <ListRow compact title="Skills" leading={<Icon icon={MagicWand01Icon} tone="ink" size={20} />} onPress={() => onOpen('skills')} />
     <View style={styles.separator} />
     {/* Checks now and shows the update sheet, which follows the check to Up to date or Update now. */}
     <ListRow compact title="App update" subtitle={update} disabled={status === 'disabled'} leading={<Icon icon={Download04Icon} tone="ink" size={20} />} onPress={() => { void updates.check(true); router.push('/update-sheet'); }} />

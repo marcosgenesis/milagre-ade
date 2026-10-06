@@ -1,3 +1,4 @@
+import { isChatScope } from './chat-scope.ts';
 export type ChatLocation = { hostId: string; projectPath: string; chatId: number };
 type Storage = { getItemAsync: (key: string) => Promise<string | null>; setItemAsync: (key: string, value: string) => Promise<void> };
 const key = 'milagre.last-chat.v1';
@@ -5,7 +6,7 @@ const key = 'milagre.last-chat.v1';
 export function parseLocation(raw: string | null): ChatLocation | null {
   try {
     const value = JSON.parse(raw || 'null');
-    return value && typeof value.hostId === 'string' && value.hostId && typeof value.projectPath === 'string' && value.projectPath.startsWith('/') && Number.isSafeInteger(value.chatId) && value.chatId > 0
+    return value && typeof value.hostId === 'string' && value.hostId && isChatScope(value.projectPath) && Number.isSafeInteger(value.chatId) && value.chatId > 0
       ? { hostId: value.hostId, projectPath: value.projectPath, chatId: value.chatId } : null;
   } catch { return null; }
 }

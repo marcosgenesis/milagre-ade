@@ -247,11 +247,14 @@ const snapshot = projectPath => ({ project: { path: projectPath, state: { sessio
 
 const relayRuntime = { name: 'relay runtime' };
 function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
+  client.recentScopes ??= () => client.call('project:recent');
+  client.open ??= async owner => { await client.call('project:open', [owner]); return client.snapshot(owner); };
   const react = hookHost({ effects });
   const { useSessionState, PendingChatsProvider } = load('session.tsx', {
     react, '@milagre/shared/reconcile': require('@milagre/shared/reconcile'), 'react/jsx-runtime': { jsx }, 'react-native': { AppState }, './client': { createClient: (...args) => { created.push(args); return client; } }, './relay-native': { relayRuntime }, './live': require('../apps/mobile/src/live.ts'),
     './hosts-native': { savedHosts: { save: async host => { saved.push(host); }, list: async () => [] }, savedNavigation: { read: async () => null, save: async () => {} }, readPermission: async () => null, savePermission: async () => {} },
     './turn-options': require('../apps/mobile/src/turn-options.ts'), '@milagre/shared/chats': require('@milagre/shared/chats'), '@milagre/shared/model': {},
+    './link-operations': require('../apps/mobile/src/link-operations.ts'),
   }, '\nexport { useSessionState, PendingChatsProvider };');
   return Object.assign(() => { react.begin(); return useSessionState(); }, { unmount: react.unmount, pending: props => { react.begin(); return PendingChatsProvider(props).props.value; } });
 }
@@ -370,16 +373,21 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     drafts: { '/p#new:1': 'first message' },
     attachments: {}, setAttachments(fn) { this.attachments = fn(this.attachments); },
     preferences: {}, defaults: require('../apps/mobile/src/turn-options.ts').defaultPreferences, setDefaultPermission() {}, models: null, cliStatus: null,
+    linkOperations: require('../apps/mobile/src/link-operations.ts').createLinkOperations(),
     setPreferences(fn) { this.preferences = fn(this.preferences); },
     setDrafts(fn) { this.drafts = fn(this.drafts); },
     refresh: async () => { session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' }; }, expectActivity() {}, rememberChat() {}, isSelected: () => true,
   };
   const react = hookHost({ effects });
-  const ui = { ...Object.fromEntries(['Button', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
+  const ui = { ...Object.fromEntries(['Button', 'GlassIconButton', 'IconButton', 'ErrorNotice', 'Field', 'PageScroll', 'PillButton', 'PullDown', 'HeaderButton'].map(name => [name, name])), styles: { code: {} }, colors: {} };
   const native = { ...Object.fromEntries(['KeyboardAvoidingView', 'Text', 'View', 'Image'].map(name => [name, name])), Platform: { OS: 'ios' }, Keyboard: { dismiss() {} }, Alert: { alert }, Linking: {}, StyleSheet: { absoluteFill: {} } };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = { setParams: values => Object.assign(params, values), push() {}, replace(route) { router.replaced = route; }, back() { router.backs = (router.backs ?? 0) + 1; } };
   const { default: ChatScreen } = load('app/chat.tsx', {
+    'expo-crypto': { randomUUID: require('node:crypto').randomUUID },
+    '../chat-actions': load('chat-actions.ts', { 'react-native': { Alert: { alert } }, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': { confirmSheet: (...args) => alert(...args), confirm: async () => true } }),
+    '@milagre/shared/message-navigation': require('@milagre/shared/message-navigation'),
+    '../message-navigation': { MessageNavigation: 'MessageNavigation' },
     '../prompt-field': { PromptField: 'PromptField' },
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen', Toolbar: Object.assign(() => null, { Menu: 'ToolbarMenu', MenuAction: 'ToolbarMenuAction', Button: 'ToolbarButton' }) }, router, useLocalSearchParams: () => params, useFocusEffect: fn => react.effect(fn, [fn]) },
@@ -396,11 +404,102 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+function subagentsHost({ call = async () => {} } = {}) {
+  const react = hookHost();
+  const calls = [];
+  const state = { sessions: { 7: { id: 7, subagents: ['running', 'completed', 'failed', 'cancelled', 'unknown'].map(status => ({ id: status, title: status, status, transcript: [] })) } } };
+  const session = { snapshot: { project: { path: '/project', state } }, client: { async call(method, args) {
+    calls.push({ method, args: Array.from(args) });
+    await call(method, args);
+    const edits = require('@milagre/shared/project-edits');
+    const next = method === 'chat:archive-finished-subagents' ? edits.archiveFinishedSubagents(state, args[1]) : edits.archiveSubagent(state, args[1], args[2], args[3]);
+    state.sessions = next.sessions;
+  } }, refresh: async () => {}, expectActivity() {} };
+  const { default: AgentsSheet } = load('app/agents.tsx', {
+    react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Text: 'Text', View: 'View' },
+    'expo-router': { router: { back() {} }, useLocalSearchParams: () => ({ id: '7' }) },
+    '@hugeicons/core-free-icons': new Proxy({}, { get: (_, name) => String(name) }),
+    '@milagre/shared/project-edits': require('@milagre/shared/project-edits'),
+    '../session': { useSession: () => session }, '../subagent-item': { SubagentItem: 'SubagentItem' }, '../icons': { Icon: 'Icon' },
+    '../ui': { CircleButton: 'CircleButton', IconButton: 'IconButton', ListRow: 'ListRow', ErrorNotice: 'ErrorNotice', PageScroll: 'PageScroll', colors: {}, styles: {} },
+  });
+  const render = () => { react.begin(); return AgentsSheet(); };
+  const button = title => find(render(), node => node.props?.title === title || node.props?.label === title);
+  return { render, button, calls, state, session };
+}
+
+test('mobile archives finished subagents without offering archived browsing', async () => {
+  const host = subagentsHost();
+  const archive = host.button('Archive finished subagents');
+  assert.ok(archive, 'the sheet must offer bulk archive');
+  await archive.props.onPress();
+  assert.deepEqual(host.calls[0], { method: 'chat:archive-finished-subagents', args: ['/project', 7] });
+  assert.deepEqual(host.state.sessions[7].subagents.filter(agent => agent.archived).map(agent => agent.id), ['completed', 'failed', 'cancelled']);
+  assert.equal(host.button('Archive finished subagents').props.disabled, true);
+  assert.equal(host.button('Archived (3)'), undefined);
+  assert.equal(host.button('Restore completed'), undefined);
+  assert.equal(find(host.render(), node => node.type === 'SubagentItem' && node.props.agent.archived), undefined);
+  await host.button('Archive running').props.onPress();
+  assert.deepEqual(host.calls[1], { method: 'chat:archive-subagent', args: ['/project', 7, 'running', true] });
+  assert.equal(find(host.render(), node => node.type === 'SubagentItem' && node.props.agent.id === 'running'), undefined);
+});
+
+test('mobile blocks duplicate archive taps and reports a failed request without hiding entries', async () => {
+  const pending = deferred();
+  const host = subagentsHost({ call: () => pending.promise });
+  const archive = host.button('Archive finished subagents');
+  assert.ok(archive, 'the sheet must offer bulk archive');
+  const first = archive.props.onPress();
+  await archive.props.onPress();
+  assert.equal(host.calls.length, 1);
+  assert.equal(host.button('Archive finished subagents').props.disabled, true);
+  pending.reject(new Error('Computer disconnected'));
+  await first;
+  assert.match(find(host.render(), node => node.type === 'ErrorNotice').props.message, /Computer disconnected/);
+  assert.equal(host.state.sessions[7].subagents.some(agent => agent.archived), false);
+  assert.equal(host.button('Archive finished subagents').props.disabled, false);
+});
+
+test('archived-only subagents hide the mobile Chat menu action and pill', () => {
+  const chat = chatHost();
+  chat.params.id = '7';
+  chat.session.snapshot.project.state.sessions[7] = { id: 7, worktree_id: 1, subagents: [{ id: 'done', status: 'completed', archived: true }] };
+  assert.equal(find(chat.render(), node => node.type === 'ToolbarMenuAction' && node.props.children === 'Subagents'), undefined);
+  assert.equal(find(chat.render(), node => node.type === 'SubagentChip'), undefined);
+});
+
 test('the mobile composer loads skills from the selected Chat Worktree', () => {
   const chat = chatHost();
   chat.session.snapshot.project.state.worktrees[2] = { id: 2, name: 'feature', path: '/worktrees/feature', project_id: 1 };
   chat.params.worktreeId = '2';
   assert.equal(chat.field().projectPath, '/worktrees/feature');
+});
+
+test('a mobile Link draft sends through its canonical owner and retries the same operation', async () => {
+  let attempts = 0;
+  const chat = chatHost({ effects: true, call: async method => {
+    if (method === 'link:send' && ++attempts === 1) throw new Error('Connection lost');
+    return { sessionId: 42 };
+  } });
+  const id = '40996067-6cc2-4427-bc1e-9007c5f51875', owner = `milagre-link:${id}`;
+  const link = { link: { id, name: 'Food', projectIds: ['api', 'web'] }, projects: [{ id: 'api', path: '/api', name: 'API' }, { id: 'web', path: '/web', name: 'Web' }], state: { next_id: 1, sessions: {}, messages: [], preparations: {} } };
+  chat.session.snapshot = require('../apps/mobile/src/chat-scope.ts').phoneSnapshot({ link, runs: { runs: {} } });
+  chat.params.worktreeId = '0';
+  chat.session.drafts = { [`${owner}#new:0`]: 'Update both Projects' };
+  assert.equal(chat.field().projectPath, '', 'A new shared draft never selects a primary Project for skills');
+  await chat.send();
+  await settle();
+  assert.equal(chat.field().value, 'Update both Projects', 'Failure restores the draft');
+  await chat.send();
+  await settle();
+  const sends = chat.calls.filter(call => call.method === 'link:send');
+  assert.equal(sends.length, 2);
+  assert.equal(sends[0].args[0].linkId, id);
+  assert.equal(sends[0].args[0].sessionId, null);
+  assert.equal(sends[0].args[0].operationId, sends[1].args[0].operationId);
+  assert.equal('worktreeId' in sends[0].args[0], false);
+  assert.equal(chat.calls.some(call => ['worktree:create', 'chat:send'].includes(call.method)), false);
+  assert.equal(chat.params.id, '42');
 });
 
 test('browsing another Project in the drawer leaves the current Chat selected', async () => {
@@ -491,7 +590,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     './icons': { Icon: 'Icon', SpinnerRing: 'SpinnerRing' }, './loading-logo': { LoadingLogo: 'LoadingLogo' },
     './ui': { ...Object.fromEntries(['ErrorNotice', 'Field', 'IconButton', 'PillButton', 'PullDown'].map(name => [name, name])), colors: {}, styles: {} },
     './chat-actions': load('chat-actions.ts', { 'react-native': native, 'expo-clipboard': { setStringAsync: async () => {} }, './archive': require('../apps/mobile/src/archive.ts'), './confirm-store': confirmStore }),
-    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon' }, './project-search': { ProjectSearch: 'ProjectSearch' },
+    '@milagre/shared/chat-scopes': require('@milagre/shared/chat-scopes'),
+    './confirm-store': confirmStore, './app/settings': { SettingsView: 'SettingsView' }, './app/notifications': { NotificationsView: 'NotificationsView' }, './usage-section': { UsageSection: 'UsageSection' }, './project-icon': { ProjectIcon: 'ProjectIcon', ProjectIcons: 'ProjectIcons' }, './project-search': { ProjectSearch: 'ProjectSearch' },
   });
   const render = () => { react.begin(); return ProjectNavigation({ onNavigate: route => routes.push(route) }); };
   const rows = () => find(render(), node => node.type === 'FlatList');
@@ -872,6 +972,75 @@ test('the transcript follows new content, also after the agent settings sheet op
   find(tree, node => node.type === 'AgentControls').props.onToggle();
   page.props.onContentSizeChange(0, 1000);
   assert.equal(scrolls, 2);
+});
+
+test('mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling', () => {
+  const screen = chatHost();
+  screen.params.id = '42';
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: 'codex' };
+  screen.session.snapshot.project.state.messages = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, session_id: 42, role: 'assistant', body: `Message ${index + 1}` }));
+  const tree = screen.render();
+  const rail = find(tree, node => node.type === 'MessageNavigation');
+  assert.ok(rail, 'Chats have a navigation rail');
+  assert.equal(rail.props.items.length, 15);
+  assert.equal(rail.props.items[0].index, 0);
+  assert.equal(rail.props.items.at(-1).index, 99);
+  const page = find(tree, node => node.type === 'KeyboardChatScrollView');
+  const scrolls = [];
+  page.props.ref.current = { scrollTo: options => scrolls.push(options), scrollToEnd: options => scrolls.push({ end: true, ...options }) };
+  rail.props.onSelect(0);
+  const earlier = screen.render();
+  const target = find(earlier, node => node.props?.nativeID === 'chat-message-1');
+  assert.ok(target, 'selecting an unloaded message mounts it');
+  target.props.onLayout({ nativeEvent: { layout: { y: 84 } } });
+  assert.equal(scrolls.at(-1).y, 12, 'the first message stays below the transparent header');
+  find(earlier, node => node.type === 'MessageNavigation').props.onSelect(99);
+  assert.equal(scrolls.at(-1).end, true, 'the latest tick returns to live output');
+});
+
+test('the mobile rail stays above the composer when the keyboard lifts it', () => {
+  const keyboard = { height: { value: -300 }, progress: { value: 1 } };
+  const { MessageNavigation } = load('message-navigation.tsx', {
+    'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { Pressable: 'Pressable', View: 'View' },
+    'react-native-reanimated': { default: { View: 'AnimatedView' }, useAnimatedStyle: fn => fn() },
+    'react-native-keyboard-controller': { useReanimatedKeyboardAnimation: () => keyboard },
+    './theme': { colors: {} },
+  });
+  const props = { items: [{ index: 0, label: 'First' }, { index: 99, label: 'Latest' }], onSelect() {}, top: 134, bottom: 152, keyboardOffset: 24 };
+  const bottom = tree => Object.assign({}, ...[tree.props.style].flat()).bottom;
+  assert.equal(bottom(MessageNavigation(props)), 428, 'the rail follows the composer by the keyboard height minus its lift offset');
+  keyboard.height.value = 0; keyboard.progress.value = 0;
+  assert.equal(bottom(MessageNavigation(props)), 152, 'closing the keyboard restores the rail bounds');
+});
+
+test('Go to bottom returns the mobile transcript to the end and resumes following', () => {
+  const screen = chatHost({ effects: true });
+  const page = () => find(screen.render(), node => node.type === 'KeyboardChatScrollView');
+  const jump = () => find(screen.render(), node => node.type === 'GlassIconButton' && node.props.label === 'Go to bottom');
+  const scrolls = [];
+  page().props.ref.current = { scrollToEnd(options) { scrolls.push(options); } };
+  page().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'No button when the end is visible, including short chats');
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });
+  page().props.onEndVisible(false);
+  assert.ok(jump(), 'The keyboard-aware end callback reveals the button');
+  page().props.onContentSizeChange(0, 1900);
+  assert.equal(scrolls.length, 0, 'New output leaves earlier messages in place');
+  jump().props.onPress();
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), 'The jump reaches the end without intermediate scroll events disabling follow');
+  assert.equal(jump(), undefined);
+  page().props.onContentSizeChange(0, 2000);
+  assert.equal(scrolls.length, 2, 'Following resumes after the jump');
+  page().props.onEndVisible(false);
+  assert.ok(jump());
+  page().props.onEndVisible(true);
+  assert.equal(jump(), undefined, 'Scrolling back to the end manually hides the button');
+  page().props.onEndVisible(false);
+  screen.params.id = '42';
+  screen.render();
+  assert.equal(jump(), undefined, 'Switching Chats clears the previous button state');
 });
 
 test('live tool activity opens in the activity sheet instead of expanding in the transcript', () => {

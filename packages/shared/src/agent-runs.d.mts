@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentTask, ChatStep, CoordinatorState, PermissionDecision, PermissionRequest, QuestionRequest } from "./model.ts";
+import type { AgentEvent, AgentTask, ChatStep, CoordinatorState, TranscriptState, PermissionDecision, PermissionRequest, QuestionRequest } from "./model.ts";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
 export type SentAnswer = PermissionDecision | "answered" | "dismissed";
@@ -27,11 +27,11 @@ export interface AgentRun {
 
 export type AgentRuns = Record<string, AgentRun>;
 
-export type AppliedEvent = { state: CoordinatorState; runs: AgentRuns; changed: boolean };
+export type AppliedEvent<T = CoordinatorState> = { state: T; runs: AgentRuns; changed: boolean };
 
 export const MAX_OUTPUT: number;
 export function capOutput(text: string): string;
-export function lastUserModel(state: CoordinatorState, sessionId: number): string;
+export function lastUserModel(state: TranscriptState, sessionId: number): string;
 export function chatKey(projectPath: string, sessionId: number): string;
 export function sessionIdFromKey(key: string): number;
 export function projectOfKey(key: string): string;
@@ -40,6 +40,6 @@ export function startRun(runs: AgentRuns, chatId: string, model: string): AgentR
 export function isTurnEnd(event: AgentEvent): boolean;
 export function runStatus(run: AgentRun | undefined): "idle" | "working" | "waiting";
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
-export function applyAgentEvent(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent;
-export function splitRunForSteer(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent;
-export function recordAnswers(state: CoordinatorState, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: CoordinatorState; runs: AgentRuns; messageId: number | null };
+export function applyAgentEvent<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent<T>;
+export function splitRunForSteer<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent<T>;
+export function recordAnswers<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: T; runs: AgentRuns; messageId: number | null };

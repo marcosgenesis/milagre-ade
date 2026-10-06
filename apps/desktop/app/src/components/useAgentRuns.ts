@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatSendRequest, CoordinatorState, PermissionDecision, QuestionAnswers } from "../model";
+import type { ChatSendRequest, CoordinatorState, LinkState, PermissionDecision, QuestionAnswers } from "../model";
 import { applyRunEvent, clearAnswered, markAnswered, projectOfKey } from "../lib/agent-runs";
 import { answerSummary } from "../lib/question-answers";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
@@ -10,7 +10,7 @@ import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
  * event that changed a project's state brings that state along, handed to `onState`.
  * `modelFor(chatId)` names the model of a turn that starts without a message from this window.
  */
-export function useAgentRuns(onState: (projectPath: string, state: CoordinatorState) => void, modelFor: (chatId: string) => string = () => "") {
+export function useAgentRuns(onState: (projectPath: string, state: CoordinatorState | LinkState) => void, modelFor: (chatId: string) => string = () => "") {
   const [runs, setRuns] = useState<AgentRuns>({});
   const runsRef = useRef(runs);
   const onStateRef = useRef(onState);

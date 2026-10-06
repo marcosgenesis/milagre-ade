@@ -1,10 +1,10 @@
 import { Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import type { AgentSession } from '@milagre/shared/model';
+import type { AgentSession, OpenLink } from '@milagre/shared/model';
 import type { Client } from './client';
 import type { MenuSection } from './ui';
 import { archiveFromPhone, type ArchiveRequest } from './archive';
-import { confirmSheet } from './confirm-store';
+import { confirm, confirmSheet } from './confirm-store';
 
 /** Desktop's ⋯ menu for a Chat, less what only makes sense at the Mac (Finder, editor, commit). */
 export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: string }): MenuSection[] {
@@ -19,11 +19,19 @@ export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: 
  * Runs a choice from `chatMenu` against the Chat's Project. Archive asks first, as desktop does, with what removing the
  * Chat's worktree would lose, and stops a running Chat. Returns what archiving did, so a screen showing the Chat can leave.
  */
-export async function runChatAction({ action, chat, running, client, projectPath, state, refresh, expectActivity, notify }: {
+export async function runChatAction({ action, chat, running, client, projectPath, state, link, refresh, expectActivity, notify }: {
   action: string; chat: AgentSession; running: boolean; client: Client; projectPath: string; state: ArchiveRequest['state'];
+  link?: OpenLink;
   refresh: () => Promise<unknown>; expectActivity: () => void; notify: (message: string) => void;
 }) {
   if (action === 'archive' && !chat.archived) {
+    if (link) {
+      if (!await confirm('Archive this shared Chat?', 'The Chat leaves the list. Its Worktrees and changes stay on your computer.', running ? 'Stop and archive' : 'Archive')) return;
+      expectActivity();
+      await client.call('agent:interrupt', [`${projectPath}#${chat.id}`]);
+      await client.call('chat:patch', [projectPath, chat.id, { archived: true }]);
+      await refresh(); return 'hidden';
+    }
     return archiveFromPhone({ client, alert: confirmSheet, projectPath, state, chat, running, onConfirm: expectActivity, notify, refresh: async () => { await refresh(); } });
   }
   if (action === 'archive') await client.call('chat:patch', [projectPath, chat.id, { archived: false }]);

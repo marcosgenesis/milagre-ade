@@ -16,7 +16,7 @@ export function PromptField({ client, projectPath, draft, onChangeText }: {
   draft: string;
   onChangeText: (value: string) => void;
 }) {
-  const { data, loading, error, refresh } = useRpc<SkillCatalog>(client, 'skills:list', [projectPath]);
+  const { data, loading, error, refresh } = useRpc<SkillCatalog>(projectPath ? client : null, 'skills:list', [projectPath]);
   const skills = data?.skills;
   const parts = useMemo(() => promptSkillParts(draft, (skills ?? []).map(skill => skill.name)), [draft, skills]);
   const [selection, setSelection] = useState({ start: 0, end: 0 });

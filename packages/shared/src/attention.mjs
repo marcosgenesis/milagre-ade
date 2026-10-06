@@ -28,7 +28,7 @@ export function attentionContext(state, projectName, sessionId) {
   if (!session) return { projectName };
   return {
     projectName,
-    worktreeName: state.worktrees[session.worktree_id]?.name,
+    worktreeName: state.worktrees?.[session.worktree_id]?.name,
     chatTitle: chatTitle(session, state.messages.filter((message) => message.session_id === session.id)),
     provider: session.provider,
   };

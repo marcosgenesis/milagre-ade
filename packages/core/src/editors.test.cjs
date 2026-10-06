@@ -5,6 +5,17 @@ const path = require("node:path");
 const test = require("node:test");
 const { requireWorktreeRoot, detectEditors, openCommand, openInEditor, resolveInside } = require("./editors.cjs");
 
+test('a validated shared workspace opens member aliases but refuses unrelated symlink targets', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-editor-owned-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace'), member = path.join(root, 'member');
+  await fs.mkdir(workspace); await fs.mkdir(member); await fs.writeFile(path.join(member, 'file.ts'), 'owned');
+  await fs.writeFile(path.join(root, 'secret.txt'), 'external');
+  await fs.symlink(member, path.join(workspace, 'api')); await fs.symlink(root, path.join(workspace, 'escape'));
+  assert.equal((await resolveInside(workspace, 'api/file.ts', [member])).target, path.join(member, 'file.ts'));
+  await assert.rejects(resolveInside(workspace, 'escape/secret.txt', [member]), /outside/);
+});
+
 const fakeFs = (present) => ({ access: async (target) => { if (!present.includes(target)) throw new Error("ENOENT"); } });
 const fakeWhich = (found) => async (name) => found[name] ?? null;
 

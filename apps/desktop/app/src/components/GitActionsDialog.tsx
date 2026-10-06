@@ -149,8 +149,9 @@ const BUTTON_SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-control b
  * "Commit and open PR": commits the chat's folder, pushes its branch and opens a PR, with a generated,
  * editable commit message and PR text. Milagre runs git and gh itself; the agent isn't asked.
  */
-export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClose, onSendToAgent, onRan }: {
+export function GitActionsDialog({ projectName, cwd, base, provider, chat, turnRunning, onClose, onSendToAgent, onRan }: {
   /** The chat's folder: its worktree, or the project's checkout. */
+  projectName?: string;
   cwd: string;
   /** The ref the worktree started from; the repo's default branch when absent. */
   base?: string;
@@ -413,7 +414,7 @@ export function GitActionsDialog({ cwd, base, provider, chat, turnRunning, onClo
         style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both" }}
       >
         <header className="flex items-center gap-3 px-4 pb-2 pt-3.5">
-          <h2 id="git-dialog-title" className="min-w-0 flex-1 text-[15px] font-semibold">Commit and open PR</h2>
+          <h2 id="git-dialog-title" className="min-w-0 flex-1 text-[15px] font-semibold">Commit and open PR</h2>{projectName && <p className="mt-1 text-[12px] text-ink-2">{projectName}</p>}
           <button type="button" aria-label="Close" onClick={close} disabled={running} className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40">
             <Icon icon={Cancel01Icon} size={16} />
           </button>

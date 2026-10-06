@@ -11,6 +11,23 @@ const chatId = '/project#1';
 const approval = { type: 'permission-request', requestId: 'request-1', kind: 'command', title: 'Run?', command: 'ls', tool: 'Shell' };
 const registration = (extra = {}) => ({ deviceId, token, hostId: 'https://mac.example.com', notifyWhenWaiting: true, notifyOnCompletion: true, ...extra });
 
+test('named Link notifications retain their canonical owner and focus suppresses them', async t => {
+  const { push, messages } = await fixture(t);
+  const owner = 'milagre-link:40996067-6cc2-4427-bc1e-9007c5f51875';
+  const linkedChat = `${owner}#1`;
+  await push.register(registration());
+  push.observe(linkedChat, { type: 'turn-started' });
+  push.observe(linkedChat, approval);
+  await push.settled();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].data.projectPath, owner);
+  push.focus({ deviceId, chatId: linkedChat });
+  push.observe(linkedChat, { type: 'turn-completed' });
+  await push.settled();
+  assert.equal(messages.length, 1);
+  assert.throws(() => push.focus({ deviceId, chatId: 'milagre-link:invalid#1' }), /Invalid focused Chat/);
+});
+
 test('accepted input followed by a startup failure starts a fresh notification lifecycle', async t => {
   const { push, messages } = await fixture(t);
   await push.register(registration());

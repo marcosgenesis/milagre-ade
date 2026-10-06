@@ -6,11 +6,11 @@ import { DOWNLOAD_ARM64, DOWNLOAD_X64 } from "../links";
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5v8.2l2.9-2.9 1 1L8 12.4 4.1 7.8l1-1L8 9.7V1.5h0zM2.5 13h11v1.5h-11z"/></svg>
     Download for macOS
   </a>
-  <a class="intel" href={DOWNLOAD_X64}>Intel Mac</a>
+  <p class="arch">For Apple Silicon Macs. <a class="intel" href={DOWNLOAD_X64}>Intel Mac</a></p>
 </div>
 
 <style>
   .downloads { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-  .intel { color: var(--ink-3); font-size: 14px; }
-  .intel:hover { color: var(--ink-2); }
+  .arch { margin: 0; color: var(--ink-2); font-size: 14px; }
+  .intel { color: var(--ink); text-decoration: underline; }
 </style>

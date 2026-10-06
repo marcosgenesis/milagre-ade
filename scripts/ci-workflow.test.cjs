@@ -60,6 +60,7 @@ test('native tests and Electron checks run only when a PR touches desktop code; 
   const changes = ci.jobs.changes
   assert.ok(changes, 'a changes job decides what a PR touched')
   const filter = changes.steps.find(step => step.id === 'filter')
+  assert.equal(filter.if, "github.event_name == 'pull_request'", 'the filter only runs where a PR base exists; pushes run every job')
   assert.equal(filter.uses, 'dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590')
   const desktop = YAML.parse(filter.with.filters).desktop
   assert.ok(desktop.includes('apps/desktop/**') && desktop.includes('packages/**'))

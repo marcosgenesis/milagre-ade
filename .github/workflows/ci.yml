@@ -122,7 +122,9 @@ jobs:
       - name: Run Electron checks
         env:
           MILAGRE_SCREENSHOT_DIR: ${{ runner.temp }}/electron-screenshots
-        run: xvfb-run -a -s "-screen 0 1600x1200x24" npm test -- --electron
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          ELECTRON_ENABLE_LOGGING: "1"
+        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -11,6 +11,7 @@
     "checkJs": true,
     "noEmit": true,
     "strict": true,
+    "noImplicitOverride": true,
     "noUnusedParameters": true,
     "noUnusedLocals": true,
     "noImplicitAny": false,

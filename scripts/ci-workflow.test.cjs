@@ -102,3 +102,10 @@ test('CI looks for dead code right after linting', () => {
   assert.equal(steps[lint + 1].run, 'npm run knip')
   assert.equal(require('../package.json').scripts.knip, 'knip')
 })
+
+test('CI lints the lockfile before installing and verifies signatures after', () => {
+  const steps = ci.jobs.javascript.steps
+  const install = steps.findIndex(step => step.run === 'npm ci')
+  assert.equal(steps[install - 1].run, 'npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity')
+  assert.equal(steps[install + 1].run, 'npm audit signatures')
+})

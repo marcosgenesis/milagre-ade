@@ -1,0 +1,114 @@
+import type { RelayTransport } from "./relay-transport.ts";
+import type { LanRoute } from "./lan-route.ts";
+
+export const PROBE_TIMEOUT = 2_500;
+/** An endpoint that answered its probe but would not open waits this long before it is tried again. */
+export const HOLD_MS = 5 * 60_000;
+
+export type ActiveRoute = { kind: "primary" } | { kind: "lan"; endpoint: string; transport: RelayTransport };
+export type RouteSupervisor = {
+  current(): ActiveRoute;
+  /** Moves to the best route that works now: a LAN endpoint if one answers and opens, else the paired route. */
+  check(): Promise<ActiveRoute>;
+  /** The app is going to the background: closes the LAN socket and keeps the route, which reopens on next use. */
+  suspend(): void;
+  subscribe(listener: (route: ActiveRoute) => void): () => void;
+  close(): void;
+};
+export type RouteSupervisorOptions = {
+  lan: () => LanRoute | undefined;
+  probe: (endpoint: string, hostId: string) => Promise<boolean>;
+  openLan: (endpoint: string, lan: LanRoute, onLost: () => void) => Promise<RelayTransport>;
+  now?: () => number;
+};
+const PRIMARY: ActiveRoute = { kind: "primary" };
+
+/** A transport that fails to close must not stop the supervisor from moving on. */
+function closeQuietly(transport: RelayTransport) {
+  try {
+    transport.close();
+  } catch {
+    /* already going away */
+  }
+}
+
+/** Which way one computer is reached: its LAN endpoints when they work, its paired route (Cloudflare or relay) otherwise. */
+export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: RouteSupervisorOptions): RouteSupervisor {
+  let active: ActiveRoute = PRIMARY;
+  let walking: Promise<ActiveRoute> | null = null;
+  let closed = false;
+  const held = new Map<string, number>();
+  const listeners = new Set<(route: ActiveRoute) => void>();
+
+  function set(next: ActiveRoute) {
+    const previous = active;
+    if (previous === next) return;
+    active = next;
+    for (const listener of listeners) {
+      try {
+        listener(next);
+      } catch {
+        /* a listener must not stop the switch */
+      }
+    }
+    if (previous.kind === "lan") closeQuietly(previous.transport);
+  }
+
+  async function walk(): Promise<ActiveRoute> {
+    const route = lan();
+    if (active.kind === "lan") {
+      const { endpoint } = active;
+      const still = route?.endpoints.includes(endpoint) && (await probe(endpoint, route.hostId).catch(() => false));
+      if (closed) return active;
+      if (still) return active;
+      set(PRIMARY);
+    }
+    if (!route) return active;
+    const candidates = route.endpoints.filter((endpoint) => (held.get(endpoint) ?? 0) <= now());
+    const probes = candidates.map((endpoint) => probe(endpoint, route.hostId).catch(() => false));
+    for (const [index, endpoint] of candidates.entries()) {
+      if (!(await probes[index]) || closed) continue;
+      let transport: RelayTransport;
+      try {
+        transport = await openLan(endpoint, route, () => {
+          if (active.kind === "lan" && active.endpoint === endpoint) set(PRIMARY);
+        });
+      } catch {
+        held.set(endpoint, now() + HOLD_MS);
+        continue;
+      }
+      if (closed) {
+        closeQuietly(transport);
+        return active;
+      }
+      set({ kind: "lan", endpoint, transport });
+      return active;
+    }
+    return active;
+  }
+
+  return {
+    current: () => active,
+    check() {
+      if (closed) return Promise.resolve(active);
+      walking ??= walk().finally(() => {
+        walking = null;
+      });
+      return walking;
+    },
+    suspend() {
+      if (active.kind === "lan") closeQuietly(active.transport);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    close() {
+      closed = true;
+      listeners.clear();
+      const previous = active;
+      active = PRIMARY;
+      if (previous.kind === "lan") closeQuietly(previous.transport);
+    },
+  };
+}

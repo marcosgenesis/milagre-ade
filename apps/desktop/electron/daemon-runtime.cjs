@@ -37,6 +37,7 @@ async function connectDesktopRuntime(options) {
   let closed = false;
   let restarting = false;
   let timer;
+  /** @type {string | null} */
   let currentProject = null;
   let currentChat = null;
   let focused = false;

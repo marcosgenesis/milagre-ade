@@ -14,12 +14,13 @@ import {
   LaptopIcon,
   Link04Icon,
   MoreHorizontalIcon,
+  PinIcon,
   Search01Icon,
   Settings01Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
+import { comparePins, isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
 import type { AgentSession } from "@milagre/shared/model";
 import type { RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
@@ -168,8 +169,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             !needle ||
             [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
         )
-        // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => b.sortId - a.sortId);
+        // Pinned Chats first in their order, then the newest Chat first, by when it was created, so rows don't jump around as agents reply.
+        .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       const section = project.link ? "Links" : "Projects";
       if (session.recent.some((item) => item.link) && !result.some((row) => row.kind === "section" && row.name === section))
@@ -531,7 +532,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           return (
             <View style={[s.chat, { backgroundColor: selected ? colors.hover : "transparent" }]}>
               <PullDown
-                label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
+                label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
                 title={title}
                 sections={item.pending ? [] : menu}
                 onSelect={(action) => {
@@ -547,6 +548,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                       {title}
                     </Text>
                     <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
+                      {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                       {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
                         {copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}

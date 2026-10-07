@@ -4,6 +4,9 @@ export function chatTitle(session: AgentSession | LinkChatSession, messages: Cha
 export function isHandoverChat(session: AgentSession | LinkChatSession | undefined): boolean;
 export function isListedChat(session: AgentSession | LinkChatSession | undefined, messageCount: number): boolean;
 
+export function comparePins(a: Pick<AgentSession, "pinned" | "pin_order">, b: Pick<AgentSession, "pinned" | "pin_order">): number;
+export function pinOrderAt(orders: number[], index: number): number;
+
 export type PendingChat = {
   session: AgentSession;
   message: ChatMessage;

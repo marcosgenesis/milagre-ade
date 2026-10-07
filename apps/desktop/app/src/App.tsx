@@ -584,6 +584,8 @@ function App() {
         id: String(session.id),
         label: chatTitle(session, sessionMessages),
         pending: pending || Boolean(failed),
+        pinned: Boolean(session.pinned),
+        pinOrder: session.pin_order,
         mark: chatMark({
           asking: asking.has(session.id),
           waiting: waiting.has(session.id),
@@ -1333,6 +1335,7 @@ function App() {
     () => ({
       onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
       onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
+      onPin: (id, order) => latest.current.patchChat(Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order }),
       onReveal: (id) => latest.current.revealChat(Number(id)),
       onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),

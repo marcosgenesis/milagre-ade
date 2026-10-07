@@ -23,6 +23,22 @@ export function isListedChat(session, messageCount) {
   return messageCount > 0 || isHandoverChat(session);
 }
 
+/** Sorts pinned chats first, in their manual order; 0 for two unpinned chats, so the list's own order decides those. */
+export function comparePins(a, b) {
+  if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+  return a.pinned ? (a.pin_order ?? 0) - (b.pin_order ?? 0) : 0;
+}
+
+/** The `pin_order` that puts a chat at `index` among pinned chats whose orders are `orders`, lowest first. */
+export function pinOrderAt(orders, index) {
+  const before = orders[index - 1],
+    after = orders[index];
+  if (before === undefined && after === undefined) return 0;
+  if (before === undefined) return after - 1;
+  if (after === undefined) return before + 1;
+  return (before + after) / 2;
+}
+
 let nextPreviewId = -2;
 
 /** A local message preview. It is never written into the Project's persisted state. */

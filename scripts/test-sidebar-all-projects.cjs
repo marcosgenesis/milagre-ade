@@ -114,21 +114,30 @@ async function browserChecks() {
     await click('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-row]');
     assert.equal(await evaluate("window.opened"), "/work/shop#7", "Another Project's chat opens through onOpenScopeChat");
 
-    // Another Project's chat pins from its row menu, and moves into that group's Pinned section.
+    // Another Project's chat pins from its row menu and moves to the Pinned section on top of every group.
     await evaluate(`document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id="7"] [aria-label="Chat actions"]').click()`);
     await waitFor(`!!document.querySelector("[data-chat-menu]")`);
     await evaluate(`[...document.querySelectorAll("[data-chat-menu] [data-menu-row]")].find((row) => row.textContent.trim() === "Pin").click()`);
     assert.deepEqual(await evaluate("window.patched"), ["/work/shop", 7, { pinned: true, pin_order: 0 }]);
-    await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/shop"] [data-pinned-chats] [data-chat-id="7"]')`);
+    await waitFor(`!!document.querySelector('[data-all-pinned] [data-pinned-scope="/work/shop"] [data-chat-id="7"]')`);
+    assert.equal(
+      await evaluate(
+        `document.querySelector("[data-all-pinned]").compareDocumentPosition(document.querySelector('[data-sidebar-scope]')) & Node.DOCUMENT_POSITION_FOLLOWING`,
+      ),
+      4,
+      "Pinned comes before the first group",
+    );
+    assert.deepEqual(await chats("/work/shop"), [], "The pinned chat leaves its group");
     await screenshot("pinned-other-project");
 
     await evaluate(
       `window.pushShop({ sessions: { 7: { id: 7, worktree_id: 1, agent_name: "Claude", status: "Idle", pinned: true, pin_order: 0 }, 8: { id: 8, worktree_id: 1, agent_name: "Claude", status: "Idle" } }, worktrees: {}, messages: [{ id: 7, session_id: 7, role: "user", body: "Shop chat" }, { id: 8, session_id: 8, role: "user", body: "New from the phone" }] })`,
     );
-    await waitFor(`document.querySelectorAll('[data-sidebar-scope="/work/shop"] [data-chat-id]').length === 2`);
+    await waitFor(`document.querySelectorAll('[data-sidebar-scope="/work/shop"] [data-chat-id]').length === 1`);
 
     await click('[data-sidebar-scope="/work/shop"] [data-scope-toggle]');
     assert.deepEqual(await chats("/work/shop"), [], "Folding a group hides its chats");
+    assert.equal(await evaluate(`!!document.querySelector('[data-all-pinned] [data-chat-id="7"]')`), true, "Its pinned chat stays on top");
     assert.deepEqual(JSON.parse(await evaluate(`localStorage.getItem("milagre.sidebarClosedScopes")`)), ["/work/shop"]);
     await screenshot("folded");
 
@@ -139,7 +148,7 @@ async function browserChecks() {
     assert.deepEqual(errors, []);
     await reset();
     console.log(
-      "PASS: the all-Projects sidebar lists each Project and Link with its chats, skips a hidden Project, pins and opens other chats, marks Link chats waiting on the user, follows live changes, and folds groups",
+      "PASS: the all-Projects sidebar lists each Project and Link with its chats, skips a hidden Project, pins other chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups",
     );
     app.exit(0);
   } catch (error) {

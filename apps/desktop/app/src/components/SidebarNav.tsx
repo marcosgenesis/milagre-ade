@@ -641,6 +641,24 @@ export default memo(function SidebarNav({
   };
   const openScope = useRef((key: string, id: string) => onOpenScopeChat?.(key, id));
   openScope.current = (key: string, id: string) => onOpenScopeChat?.(key, id);
+  const groups = showAll
+    ? scopes.map((scope) => {
+        const current = scope.key === currentKey;
+        const state = scopeStates[scope.key];
+        const rows = current ? recents : state ? scopeChats(scope.key, state, chatOrder, marks) : [];
+        const list = current
+          ? {
+              isActive: (item: SidebarRecent) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle),
+              collapsed: false,
+              actions: chatActions,
+              showHints,
+              onPick: pickChat,
+              linkProjectId: !selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null,
+            }
+          : { isActive: NEVER_ACTIVE, collapsed: false, actions: actionsFor(scope.key), showHints: false, onPick: pickerFor(scope.key), linkProjectId: null };
+        return { scope, current, state, list, pinned: rows.filter((row) => row.pinned), rest: rows.filter((row) => !row.pinned) };
+      })
+    : [];
   const [closedScopes, setClosedScopes] = useState(readClosedScopes);
   const toggleScope = (key: string) =>
     setClosedScopes((previous) => {
@@ -872,71 +890,65 @@ export default memo(function SidebarNav({
               </Tooltip>
             )}
             {showAll ? (
-              scopes.map((scope, index) => {
-                const current = scope.key === currentKey;
-                const open = !closedScopes.includes(scope.key);
-                const state = scopeStates[scope.key];
-                const others = !current && open && state ? scopeChats(scope.key, state, chatOrder, marks) : [];
-                return (
-                  <section key={scope.key} data-sidebar-scope={scope.key} aria-label={scope.name} className="mb-2">
-                    {scope.link && !scopes[index - 1]?.link && <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>}
-                    <ScopeHeader
-                      name={scope.name}
-                      icon={
-                        scope.link ? (
-                          <ProjectAvatarStack
-                            projects={scope.link.projectIds.map(
-                              (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
-                            )}
-                          />
-                        ) : (
-                          <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
-                            <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
-                          </span>
-                        )
-                      }
-                      open={open}
-                      current={current}
-                      attention={!current && attentionPaths.includes(scope.key)}
-                      onToggle={() => toggleScope(scope.key)}
-                      onAction={
-                        current
-                          ? () => {
-                              if (activeTitle === undefined) setDemoActiveTitle(null);
-                              onNewChat?.();
-                            }
-                          : () => (scope.link ? onSwitchLink?.(scope.link.id) : onSwitchProject?.(scope.key))
-                      }
-                    />
-                    {open &&
-                      (current ? (
-                        <ChatList
-                          recents={recents}
-                          isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
-                          collapsed={false}
-                          actions={chatActions}
-                          showHints={showHints}
-                          onPick={pickChat}
-                          linkProjectId={!selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null}
-                          header={null}
-                        />
-                      ) : others.length > 0 ? (
-                        <ChatList
-                          recents={others}
-                          isActive={NEVER_ACTIVE}
-                          collapsed={false}
-                          actions={actionsFor(scope.key)}
-                          showHints={false}
-                          onPick={pickerFor(scope.key)}
-                          linkProjectId={null}
-                          header={null}
-                        />
-                      ) : (
-                        <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state ? "No chats yet" : "Loading chats…"}</p>
+              <>
+                {/* Pinned chats of every Project and Link sit on top, like the single-project sidebar; each group lists the rest. */}
+                {groups.some((group) => group.pinned.length > 0) && (
+                  <div data-all-pinned className="mb-2">
+                    <p className="sidebar-copy mx-2 mb-1 h-8 pl-2 text-[12.5px] font-medium leading-8 text-ink-3">Pinned</p>
+                    {groups
+                      .filter((group) => group.pinned.length > 0)
+                      .map((group) => (
+                        <div key={group.scope.key} data-pinned-scope={group.scope.key}>
+                          <ChatList recents={group.pinned} {...group.list} pinnedHeader={false} header={null} />
+                        </div>
                       ))}
-                  </section>
-                );
-              })
+                  </div>
+                )}
+                {groups.map(({ scope, current, state, rest, pinned, list }, index) => {
+                  const open = !closedScopes.includes(scope.key);
+                  return (
+                    <section key={scope.key} data-sidebar-scope={scope.key} aria-label={scope.name} className="mb-2">
+                      {scope.link && !scopes[index - 1]?.link && (
+                        <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
+                      )}
+                      <ScopeHeader
+                        name={scope.name}
+                        icon={
+                          scope.link ? (
+                            <ProjectAvatarStack
+                              projects={scope.link.projectIds.map(
+                                (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
+                              )}
+                            />
+                          ) : (
+                            <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+                              <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
+                            </span>
+                          )
+                        }
+                        open={open}
+                        current={current}
+                        attention={!current && attentionPaths.includes(scope.key)}
+                        onToggle={() => toggleScope(scope.key)}
+                        onAction={
+                          current
+                            ? () => {
+                                if (activeTitle === undefined) setDemoActiveTitle(null);
+                                onNewChat?.();
+                              }
+                            : () => (scope.link ? onSwitchLink?.(scope.link.id) : onSwitchProject?.(scope.key))
+                        }
+                      />
+                      {open &&
+                        (rest.length > 0 ? (
+                          <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
+                        ) : pinned.length > 0 ? null : (
+                          <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                        ))}
+                    </section>
+                  );
+                })}
+              </>
             ) : (
               <ChatList
                 recents={recents}
@@ -1046,6 +1058,8 @@ function ChatList({
   onPick,
   linkProjectId,
   header,
+  pinnedHeader = true,
+  hintOffset = 0,
 }: {
   recents: SidebarRecent[];
   isActive: (item: SidebarRecent) => boolean;
@@ -1057,6 +1071,10 @@ function ChatList({
   linkProjectId: string | null;
   /** The "Chats" header, between the pinned chats and the rest. */
   header: ReactNode;
+  /** False when the caller shows one Pinned heading over several lists (the all-Projects sidebar). */
+  pinnedHeader?: boolean;
+  /** Where this list's ⌘1–9 hints start, when its chats follow others in the same Project. */
+  hintOffset?: number;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<ChatDrag | null>(null);
@@ -1392,7 +1410,7 @@ function ChatList({
       active={isActive(item)}
       collapsed={collapsed}
       actions={rowActions}
-      shortcutHint={showHints && index < 9 ? `${shortcutModifier}${index + 1}` : undefined}
+      shortcutHint={showHints && hintOffset + index < 9 ? `${shortcutModifier}${hintOffset + index + 1}` : undefined}
       onPick={onPick}
       dragging={drag?.id === item.id}
     />
@@ -1400,7 +1418,7 @@ function ChatList({
 
   return (
     <div ref={listRef} data-chat-list className="relative" onPointerDown={startPointer} onKeyDown={keyDown} onKeyUp={keyUp}>
-      {(pinned.length > 0 || drag) && !collapsed && (
+      {pinnedHeader && (pinned.length > 0 || drag) && !collapsed && (
         <div className="sidebar-copy mx-2 mb-1 flex h-8 items-center pl-2">
           <span className="text-[12.5px] font-medium text-ink-3">Pinned</span>
         </div>

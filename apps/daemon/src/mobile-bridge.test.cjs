@@ -1060,6 +1060,17 @@ test("drawer snapshots are marked and cached separately from full snapshots", as
   assert.equal((await request(route + "&view=chats", { headers: { "if-none-match": response.headers.get("etag") } })).status, 304);
 });
 
+test("phone port RPCs preserve Chat scope and cannot stop an unowned process", async (t) => {
+  const f = await fixture(t);
+  const chatId = f.project + "#1";
+  const list = await f.rpc("chat:ports", [chatId]);
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).result, { chatId, ports: [] });
+  const stop = await f.rpc("agent:stop-port", [chatId, process.pid]);
+  assert.equal(stop.status, 200);
+  assert.equal((await stop.json()).result, false);
+});
+
 test("account assignment changes notify live phones independently of Project state signals", async (t) => {
   const { project, bridge, rpc, request, token } = await fixture(t);
   await rpc("project:open", [project]);

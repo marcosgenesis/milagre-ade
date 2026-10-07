@@ -51,7 +51,8 @@ function Fixture() {
     { id: 4, session_id: 1, context: null, role: "assistant", body: "Warmer greens.", steps: [step(2, 0)] },
     ...(revised ? [{ id: 5, session_id: 1, context: null, role: "assistant", body: "Orange accent.", steps: [step(3, 0)] }] : []),
   ];
-  return <div data-chat-pane style={{ height: "100%", padding: 12 }}>
+  // The app's layout: the chat pane inside the workspace, beside a 260px sidebar.
+  return <div style={{ display: "flex", height: "100%" }}><aside style={{ width: 260, flexShrink: 0 }} /><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false}
@@ -61,7 +62,7 @@ function Fixture() {
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
       onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
       isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} />
-  </div>;
+  </div></main></div>;
 }
 document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<Fixture />);
@@ -119,6 +120,7 @@ async function browserChecks() {
       `(() => { const d = ${dock}.getBoundingClientRect(); const p = document.querySelector("[data-chat-pane]").getBoundingClientRect(); return { dock: d.left, pane: p.right, top: d.top }; })()`,
     );
     assert.ok(layout.pane <= layout.dock, "the chat ends where the design begins");
+    assert.ok(layout.dock - 260 > 400, "the chat keeps its room: the workspace reserves the dock once, not again in the chat pane");
     assert.equal(layout.top, 40, "the design docks at the top right");
     await screenshot("docked");
 
@@ -130,11 +132,25 @@ async function browserChecks() {
     await waitFor(`/Version 2 of 3/.test(${dock}.textContent) && !/follows/.test(${dock}.textContent)`);
     await screenshot("earlier-version");
 
+    // The design can fill the workspace beside the sidebar, covering the chat, and go back beside it.
+    await evaluate(`${dock}.querySelector("[aria-label='Fill the window with the design']").click()`);
+    await waitFor(`${dock}.dataset.full === "true" && Math.round(${dock}.getBoundingClientRect().left) === 260`);
+    assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "a full design reserves nothing");
+    await screenshot("expanded");
+    await evaluate(`${dock}.querySelector("[aria-label='Show the chat beside the design']").click()`);
+    await waitFor(`!${dock}.dataset.full`);
+    // Too narrow for a useful chat beside it, the design fills the workspace on its own.
+    window.setContentSize(1100, 820);
+    await waitFor(`${dock}.dataset.full === "true" && !${dock}.querySelector("[aria-label='Fill the window with the design']")`);
+    await screenshot("narrow");
+    window.setContentSize(1280, 820);
+    await waitFor(`!${dock}.dataset.full`);
+
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor(`!${dock}`);
     assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "closing gives the chat its width back");
     console.log(
-      "PASS: a shown design is a card outside the activity with a sandboxed preview that can't make requests; Open docks it at the top right beside the chat, the dock follows the agent's revision, steps back through versions and closes on Escape",
+      "PASS: a shown design is a card outside the activity with a sandboxed preview that can't make requests; Open docks it at the top right beside the chat (filling the workspace when expanded or when the window is narrow), the dock follows the agent's revision, steps back through versions and closes on Escape",
     );
     app.exit(0);
   } catch (error) {

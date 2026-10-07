@@ -1,13 +1,38 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, ArrowExpand01Icon, ArrowShrink01Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
 import { artifactDocument, type Artifact } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
 const DOCK_WIDTH = 560;
+// Narrower than this beside the dock, the chat is no use: the design takes the whole workspace instead.
+const MIN_CHAT_WIDTH = 420;
+
+/** The workspace beside the sidebar, which an expanded design fills. */
+function useWorkspaceArea() {
+  const [area, setArea] = useState<{ left: number; width: number } | null>(null);
+  useEffect(() => {
+    const main = document.querySelector<HTMLElement>("[data-workspace-main]") ?? document.querySelector<HTMLElement>("[data-chat-pane]");
+    if (!main) return;
+    // The workspace's own width, without the space a dock reserves in it.
+    const measure = () => {
+      const rect = main.getBoundingClientRect();
+      setArea({ left: rect.left, width: window.innerWidth - rect.left });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(main);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  return area;
+}
 
 type ArtifactsValue = {
   /** The Chat's key, or null where designs can't be read (a new Chat, a shared Link Chat). */
@@ -150,13 +175,19 @@ function ArtifactDock({
   // Following the newest, a revision the agent shows replaces what is open.
   const newest = latest.get(id)?.version;
   const { artifact, error } = useArtifact(chatId, id, version ?? newest ?? null);
+  const [expanded, setExpanded] = useState(false);
+  const area = useWorkspaceArea();
+  const cramped = !!area && area.width - DOCK_WIDTH - 12 < MIN_CHAT_WIDTH;
+  const full = expanded || cramped;
+  // Beside the chat, the chat makes room; filling the workspace, the design covers it.
   useEffect(() => {
+    if (full) return;
     const root = document.documentElement.style;
     root.setProperty("--artifact-dock", `${DOCK_WIDTH + 12}px`);
     return () => {
       root.removeProperty("--artifact-dock");
     };
-  }, []);
+  }, [full]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && !event.defaultPrevented && onClose();
     window.addEventListener("keydown", onKey);
@@ -171,8 +202,13 @@ function ArtifactDock({
       aria-label={artifact?.title ?? "Design"}
       aria-modal="false"
       data-slot="artifact-dock"
+      data-full={full || undefined}
       // Beside a docked simulator, not under it.
-      style={{ top: 40, right: "calc(12px + var(--simulator-dock, 0px))", bottom: 12, width: DOCK_WIDTH }}
+      style={
+        full && area
+          ? { top: 40, left: area.left, right: "calc(12px + var(--simulator-dock, 0px))", bottom: 12 }
+          : { top: 40, right: "calc(12px + var(--simulator-dock, 0px))", bottom: 12, width: DOCK_WIDTH }
+      }
       className="fixed z-40 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
@@ -206,6 +242,19 @@ function ArtifactDock({
             <HugeiconsIcon icon={ArrowRight01Icon} size={16} aria-hidden />
           </button>
         </Tooltip>
+        {!cramped && (
+          <Tooltip label={expanded ? "Show the chat beside the design" : "Fill the window with the design"}>
+            <button
+              type="button"
+              aria-label={expanded ? "Show the chat beside the design" : "Fill the window with the design"}
+              aria-pressed={expanded}
+              onClick={() => setExpanded((value) => !value)}
+              className="rounded p-1 text-ink-2 hover:bg-hover"
+            >
+              <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={16} aria-hidden />
+            </button>
+          </Tooltip>
+        )}
         <Tooltip label="Close design">
           <button type="button" aria-label="Close design" onClick={onClose} className="rounded p-1 text-ink-2 hover:bg-hover">
             <HugeiconsIcon icon={Cancel01Icon} size={16} aria-hidden />

@@ -17,24 +17,27 @@ test("a phone learns the LAN route over the bridge, then calls the daemon over t
   const dataDir = path.join(directory, "profile");
   const project = path.join(directory, "project");
   await fs.mkdir(project);
-  const daemon = await startDaemon({
+  let daemon;
+  let client;
+  const phones = [];
+  // One hook, registered before anything can fail, in this order: hooks run in the order they were added, and the
+  // folder must outlive the daemon.
+  t.after(async () => {
+    for (const phone of phones) phone.close();
+    client?.close();
+    try {
+      await daemon?.close();
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+  daemon = await startDaemon({
     dataDir,
     version: "9.8.7",
     runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {} },
     phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", addresses: () => ["127.0.0.1"], startRelay },
   });
-  const client = await connect({ dataDir });
-  const phones = [];
-  // One hook, in this order: hooks run in the order they were added, and the folder must outlive the daemon.
-  t.after(async () => {
-    for (const phone of phones) phone.close();
-    client.close();
-    try {
-      await daemon.close();
-    } finally {
-      await fs.rm(directory, { recursive: true, force: true });
-    }
-  });
+  client = await connect({ dataDir });
 
   await client.call("phone:set-enabled", [true]);
   // Turning it on returns while the bridge and the LAN listener are still starting.
@@ -49,7 +52,9 @@ test("a phone learns the LAN route over the bridge, then calls the daemon over t
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ v: 1, method: "phone:routes", args: [{ phoneKey: b64url(key.publicKey) }] }),
+    signal: AbortSignal.timeout(5000),
   }).then((response) => response.json());
+  assert.equal(routes.error, undefined, `phone:routes failed: ${JSON.stringify(routes)}`);
   assert.equal(routes.result.lan.length, 1);
   assert.match(routes.result.lan[0], /^ws:\/\/127\.0\.0\.1:\d+$/);
 

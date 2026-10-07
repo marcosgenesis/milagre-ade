@@ -13,6 +13,14 @@ const PING_MS = 30_000;
 // Larger than one sealed 256 KiB upload chunk, base64 and all.
 const MAX_FRAME = 4 * 1024 * 1024;
 const HELLO_MS = 15_000;
+// The listener is on by default on every network, public Wi-Fi included, so it bounds what a stranger can hold open.
+const MAX_CONNECTIONS = 64;
+// A socket that has not finished its request line and headers, or sent anything at all, is not a phone.
+const HEADERS_MS = 5_000;
+const REQUEST_MS = 5_000;
+const IDLE_MS = 10_000;
+// The hello is a few hundred bytes; a bigger first message is not one.
+const MAX_HELLO = 4 * 1024;
 const notFound = "HTTP/1.1 404 Not Found\r\nconnection: close\r\ncontent-length: 0\r\n\r\n";
 
 /** A request target is attacker-controlled bytes: one that is not a URL is just a 404, never an exception. */
@@ -42,6 +50,7 @@ function startLanHost({
   random = (n) => new Uint8Array(randomBytes(n)),
   helloMs = HELLO_MS,
   pingMs = PING_MS,
+  idleMs = IDLE_MS,
 }) {
   const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair: () => false, WebSocket, fetch, random, helloMs });
   const sockets = new Map(); // conn id -> the phone's socket
@@ -74,6 +83,11 @@ function startLanHost({
     }
     res.writeHead(404).end();
   });
+  server.maxConnections = MAX_CONNECTIONS;
+  server.headersTimeout = HEADERS_MS;
+  server.requestTimeout = REQUEST_MS;
+  // Until a socket becomes a phone's, silence is a reason to drop it.
+  server.on("connection", (socket) => socket.setTimeout(idleMs, () => socket.destroy()));
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => {});
@@ -88,6 +102,8 @@ function startLanHost({
       socket.end(notFound);
       return;
     }
+    // From here the liveness ping watches the socket.
+    socket.setTimeout(0);
     wss.handleUpgrade(req, socket, head, (ws) => {
       const conn = nextConn++;
       sockets.set(conn, ws);
@@ -100,6 +116,7 @@ function startLanHost({
         alive.add(ws);
         try {
           if (!isBinary) return ws.close(1003);
+          if (data.length > MAX_HELLO && session.conns.get(conn)?.state === "hello") return ws.terminate();
           channels.onFrame(session, frame(DATA, conn, new Uint8Array(data)));
         } catch {
           ws.terminate();

@@ -193,3 +193,77 @@ test("a port that is taken rejects without leaving a liveness timer behind", asy
     [],
   );
 });
+
+/** Resolves once the server ends a raw socket, or false after `ms`. */
+function endsWithin(socket, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    socket.on("close", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+test("a TCP socket that sends nothing is destroyed after the idle timeout", async (t) => {
+  const { host } = await lanMac(t, { idleMs: 100 });
+  const socket = net.connect(host.port, "127.0.0.1");
+  socket.on("error", () => {});
+  t.after(() => socket.destroy());
+  assert.equal(await endsWithin(socket, 3000), true);
+  assert.equal(await helloStatus(host.port), 200);
+});
+
+test("the idle timeout does not touch a phone socket, which the liveness ping watches instead", async (t) => {
+  const { identity, key, url } = await lanMac(t, { idleMs: 100 });
+  const phone = connectPhone({ relayUrl: url, identity, key });
+  t.after(() => phone.close());
+  assert.ok((await phone.hello()).channel);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  phone.request(1, { method: "POST", path: "/rpc", headers: { "content-type": "application/json" }, body: '{"v":1,"method":"daemon:status","args":[]}' });
+  assert.equal((await phone.response(1)).status, 200);
+});
+
+test("a first message over 4 KiB closes the socket", async (t) => {
+  const { identity, url } = await lanMac(t);
+  const { WebSocket } = require("ws");
+  const ws = new WebSocket(`${url}/v1/phone?id=${identity.hostId}`);
+  t.after(() => ws.terminate());
+  await new Promise((resolve, reject) => {
+    ws.on("open", resolve);
+    ws.on("error", reject);
+  });
+  const closed = new Promise((resolve) => ws.on("close", () => resolve(true)));
+  let answers = 0;
+  ws.on("message", () => answers++);
+  ws.send(Buffer.alloc(4 * 1024 + 1, 1));
+  assert.equal(await Promise.race([closed, new Promise((resolve) => setTimeout(() => resolve(false), 3000))]), true);
+  assert.equal(answers, 0, "an oversize hello is dropped before it is even parsed, with no refusal to read");
+});
+
+test("a phone that finished its hello may send messages over 4 KiB", async (t) => {
+  const { identity, key, bridge, url } = await lanMac(t);
+  const phone = connectPhone({ relayUrl: url, identity, key });
+  t.after(() => phone.close());
+  assert.ok((await phone.hello()).channel);
+  phone.request(1, { method: "POST", path: "/attachments", headers: { "content-type": "application/json" }, body: "x".repeat(100_000) });
+  const response = await phone.response(1);
+  assert.equal(response.status, 200);
+  assert.equal(bridge.seen.uploads.at(-1).body.length, 100_000);
+});
+
+test("no more than 64 sockets are held at once", async (t) => {
+  const { host } = await lanMac(t);
+  const held = [];
+  t.after(() => held.forEach((socket) => socket.destroy()));
+  for (let index = 0; index < 64; index++) {
+    const socket = net.connect(host.port, "127.0.0.1");
+    socket.on("error", () => {});
+    held.push(socket);
+    await new Promise((resolve) => socket.once("connect", resolve));
+  }
+  const extra = net.connect(host.port, "127.0.0.1");
+  extra.on("error", () => {});
+  t.after(() => extra.destroy());
+  assert.equal(await endsWithin(extra, 3000), true);
+});

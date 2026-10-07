@@ -48,6 +48,7 @@ const PATHS = Object.freeze({
   "simulator:close": denySimulator,
   // A design is read through its Chat, which must be in the folder.
   "artifact:get": ([value]) => [chatProject(value?.chatId)],
+  "artifact:list": ([value]) => [chatProject(value?.chatId)],
   "push:register": none,
   "push:unregister": none,
   "push:focus": ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),

@@ -323,6 +323,8 @@ const MessageTranscript = memo(function MessageTranscript({
 });
 
 interface ChatComposerProps {
+  /** Sends a comment on a design, or the design the user chose, to the agent; resolves whether it went. */
+  onSendDesignMessage?: (text: string) => Promise<boolean>;
   scopeKind?: "project" | "link";
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
@@ -643,6 +645,7 @@ export function ChatComposer({
   onFindClose,
   notice,
   onDismissNotice,
+  onSendDesignMessage,
 }: ChatComposerProps) {
   const root = useRef<HTMLDivElement>(null);
   const chatId = messages[0]?.session_id ?? "new";
@@ -667,6 +670,7 @@ export function ChatComposer({
   // Designs are read through the Chat's key, which a new Chat and a shared Link Chat don't have here.
   const artifactChat = typeof chatId === "number" && chatId > 0 && projectPath && scopeKind !== "link" ? `${projectPath}#${chatId}` : null;
   const artifactSteps = useMemo(() => [...messages.flatMap((message) => message.steps ?? []), ...(streamingSteps ?? [])], [messages, streamingSteps]);
+  const userBodies = useMemo(() => messages.filter((message) => message.role === "user").map((message) => message.body), [messages]);
 
   function handleFileDrop(event: DragEvent<HTMLDivElement>) {
     const files = Array.from(event.dataTransfer.files);
@@ -677,7 +681,7 @@ export function ChatComposer({
   }
 
   return (
-    <ArtifactsProvider chatId={artifactChat} steps={artifactSteps}>
+    <ArtifactsProvider chatId={artifactChat} steps={artifactSteps} bodies={userBodies} onSend={onSendDesignMessage}>
       <div
         ref={root}
         className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}

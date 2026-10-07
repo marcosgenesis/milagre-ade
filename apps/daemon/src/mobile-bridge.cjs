@@ -41,6 +41,7 @@ const METHODS = new Set([
   "simulator:input",
   "simulator:close",
   "artifact:get",
+  "artifact:list",
   "project:registry",
   "link:list",
   "link:create",

@@ -25,7 +25,7 @@ test("a design keeps each version the agent showed", async (t) => {
   assert.equal(first.version, 1);
   assert.match(first.id, /^[a-z0-9-]+$/);
   const second = JSON.parse(await tools.artifact_show.run({ id: first.id, title: "Login, darker", html: "<p>two</p>" }));
-  assert.deepEqual(second, { id: first.id, title: "Login, darker", version: 2, versions: 2 });
+  assert.deepEqual(second, { id: first.id, title: "Login, darker", version: 2, versions: 2, width: 1280, height: 800 });
   assert.equal((await api.get({ chatId: CHAT, id: first.id })).html, "<p>two</p>");
   const old = await api.get({ chatId: CHAT, id: first.id, version: 1 });
   assert.deepEqual([old.html, old.title, old.latest], ["<p>one</p>", "Login", 2]);
@@ -46,6 +46,8 @@ test("a design belongs to its Chat", async (t) => {
     title: "Home",
     version: 1,
     versions: 1,
+    width: 1280,
+    height: 800,
   });
 });
 
@@ -53,4 +55,18 @@ test("ids can't leave the Chat's folder", async (t) => {
   const { api } = await fixture(t);
   await assert.rejects(api.get({ chatId: CHAT, id: "../secrets" }), /lowercase letters/);
   await assert.rejects(api.show({ chatId: CHAT, id: "../x", title: "x", html: "x" }), /lowercase letters/);
+});
+
+test("a design keeps the screen size it was shown at until a revision names another", async (t) => {
+  const { api, tools } = await fixture(t);
+  await tools.artifact_show.run({ id: "phone", title: "Phone", html: "<p>1</p>", width: 390, height: 844 });
+  await tools.artifact_show.run({ id: "phone", title: "Phone", html: "<p>2</p>" });
+  await tools.artifact_show.run({ id: "wide", title: "Wide", html: "<p>w</p>" });
+  assert.deepEqual(
+    (await api.list({ chatId: CHAT })).map(({ id, version, width, height }) => [id, version, width, height]),
+    [
+      ["phone", 2, 390, 844],
+      ["wide", 1, 1280, 800],
+    ],
+  );
 });

@@ -1853,6 +1853,7 @@ function App() {
                   imageDraft={imageDraft}
                   projectPath={selectedWorktree?.path ?? project.path}
                   onSend={() => void sendMessage()}
+                  onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                   pullRequestAction={
                     selectedSession && selectedPullRequest && pullRequestBlocker

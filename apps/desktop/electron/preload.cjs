@@ -17,6 +17,7 @@ const bridge = {
   },
   artifacts: {
     get: (request) => ipcRenderer.invoke("artifact:get", request),
+    list: (request) => ipcRenderer.invoke("artifact:list", request),
   },
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   restartHost: () => ipcRenderer.invoke("runtime:restart-host"),

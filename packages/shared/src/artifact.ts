@@ -1,10 +1,43 @@
 import type { ArtifactRef } from "./model.ts";
 
+/** A design as `artifact:list` returns it: its newest version, and the screen it is laid out on. */
+export type ArtifactSummary = ArtifactRef & { versions: number; width: number; height: number };
+
 /** One version of a design an agent showed, as `artifact:get` returns it. */
-export type Artifact = ArtifactRef & { versions: number; latest: number; html: string };
+export type Artifact = ArtifactSummary & { latest: number; html: string };
 
 export interface ArtifactApi {
   get(request: { chatId: string; id: string; version?: number }): Promise<Artifact>;
+  list(request: { chatId: string }): Promise<ArtifactSummary[]>;
+}
+
+/** A comment on a design: where on it (fractions of its screen) when it was pinned, and what the user wrote. */
+export type DesignComment = { design: ArtifactRef; x?: number; y?: number; text: string };
+
+// Plain text: the message shows in the user's bubble as typed, without markdown.
+const designName = (design: ArtifactRef) => `the design "${design.title}" (${design.id}, version ${design.version})`;
+
+/** The message that sends the user's comments on designs to the agent. */
+export function designCommentsMessage(comments: DesignComment[]): string {
+  const lines = comments.map((comment, index) => {
+    const at = comment.x === undefined || comment.y === undefined ? "" : `, ${Math.round(comment.x * 100)}% across and ${Math.round(comment.y * 100)}% down`;
+    return `${index + 1}. On ${designName(comment.design)}${at}: ${comment.text.trim()}`;
+  });
+  return `${comments.length === 1 ? "A comment" : "Comments"} on the designs:\n\n${lines.join("\n")}\n\nRevise them with artifact_show and keep their ids.`;
+}
+
+/** The message that tells the agent which design the user chose. */
+export function designChoiceMessage(design: ArtifactRef): string {
+  return `I chose ${designName(design)}. Continue from this one.`;
+}
+
+/** The design the user last chose in these messages, read back from the message designChoiceMessage wrote. */
+export function chosenDesign(bodies: string[]): { id: string; version: number } | null {
+  for (const body of [...bodies].reverse()) {
+    const [, id, version] = /^I chose the design ".*" \(([a-z0-9-]+), version (\d+)\)\. Continue from this one\.$/s.exec(body) ?? [];
+    if (id && version) return { id, version: Number(version) };
+  }
+  return null;
 }
 
 /**

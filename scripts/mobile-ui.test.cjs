@@ -3433,7 +3433,7 @@ for (const provider of ["claude", "codex"])
         },
       },
     };
-    const { ProjectAccountsForComputer } = load("project-accounts-section.tsx", {
+    const { ProjectAccountsSection } = load("project-accounts-section.tsx", {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
       "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
@@ -3447,7 +3447,7 @@ for (const provider of ["claude", "codex"])
     });
     const render = () => {
       react.begin();
-      return ProjectAccountsForComputer();
+      return ProjectAccountsSection().type();
     };
     const settle = () => new Promise((resolve) => setImmediate(resolve));
     try {

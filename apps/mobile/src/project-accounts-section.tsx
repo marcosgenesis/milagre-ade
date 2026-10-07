@@ -14,7 +14,7 @@ export function ProjectAccountsSection() {
   return <ProjectAccountsForComputer key={session.client?.url || "disconnected"} />;
 }
 
-export function ProjectAccountsForComputer() {
+function ProjectAccountsForComputer() {
   const session = useSession();
   const client = session.client;
   const [scopes, setScopes] = useState<ProjectAccountScope[]>([]);

@@ -59,7 +59,7 @@ function Fixture() {
     id: index + 1, session_id: 1, context: null, role: index === 0 ? "user" : "assistant",
     body: index === 0 ? "Review authentication and run the relevant tests." : "I started two subagents. Their progress is available below.",
   }));
-  return <div style={{ height: "100%", padding: 12 }}>
+  return <div data-chat-pane style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
@@ -137,19 +137,29 @@ async function browserChecks() {
     await click('[data-simulator-device="device-0"]');
     await waitFor("window.simulatorCalls.length===1");
     await waitFor('document.querySelector("[data-slot=simulator-frame]")');
-    await click('[aria-label="Expand simulator"]');
-    await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.expanded==="true"');
-    await screenshot("expanded-dark");
+    await click('[aria-label="Dock simulator to the right"]');
+    await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.docked==="true"');
+    assert.ok(
+      await evaluate(
+        '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
+      ),
+      "docked viewer sits beside the chat pane",
+    );
+    await click("textarea");
+    await delay(100);
+    assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), "pressing the chat keeps the docked viewer");
+    await screenshot("docked-dark");
     const footerMatches =
       '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
     await waitFor(footerMatches);
     await evaluate("window.setDark(false)");
     await waitFor(footerMatches);
     assert.equal(await evaluate("window.simulatorCalls.length"), 1, "theme changes must preserve the viewer session");
-    await screenshot("expanded-light");
+    await screenshot("docked-light");
     await evaluate("window.setDark(true)");
     await waitFor(footerMatches);
-    await click('[aria-label="Collapse simulator"]');
+    await click('[aria-label="Undock simulator"]');
+    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "undocking returns the space");
     window.setContentSize(390, 500);
     await delay(200);
     assert.ok(
@@ -193,7 +203,7 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
     await screenshot("last-detached");
     console.log(
-      "PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots",
+      "PASS: icon/count and composer placement, on-demand capture, chooser, dock/undock, narrow layout, close cleanup, Escape, light/dark screenshots",
     );
     app.exit(0);
   } catch (error) {

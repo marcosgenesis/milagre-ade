@@ -516,6 +516,8 @@ export interface UsageSnapshot {
 
 /** Provider identities only. Credentials stay with the CLI on the connected computer. */
 export type ProviderAccount = {
+  /** An explicit assignment whose saved profile was removed. */
+  missing?: boolean;
   id: string;
   provider: ModelProvider;
   label: string;
@@ -531,3 +533,10 @@ export interface TranscriptState {
   messages: ChatMessage[];
 }
 export type LinkSendRequest = Omit<ChatSendRequest, "projectPath" | "worktreeId"> & { linkId: string; operationId: string };
+
+/** Host-local account assignments; null follows the computer selection. */
+export type ProjectAccountScope = { key: string; name: string; kind: "project" | "link"; projects: { id: string; path: string; name: string }[] };
+export type ProjectAccountsSnapshot = {
+  scopeKey: string;
+  providers: { provider: ModelProvider; accountId: string | null; effectiveId: string; defaultId: string; accounts: ProviderAccount[] }[];
+};

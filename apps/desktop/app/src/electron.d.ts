@@ -1,4 +1,12 @@
-import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from "@milagre/shared/model";
+import type {
+  ProjectAccountScope,
+  ProjectAccountsSnapshot,
+  NamedProjectLink,
+  OpenLink,
+  LinkState,
+  LinkSendRequest,
+  TranscriptState,
+} from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
 
@@ -223,9 +231,12 @@ declare global {
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
       /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
-      getModels: () => Promise<AgentModels>;
+      listAccountScopes: () => Promise<ProjectAccountScope[]>;
+      getProjectAccounts: (scopeKey: string, refresh?: boolean) => Promise<ProjectAccountsSnapshot>;
+      assignProjectAccount: (scopeKey: string, provider: ModelProvider, accountId: string | null) => Promise<ProjectAccountsSnapshot>;
+      getModels: (scopeKey?: string) => Promise<AgentModels>;
       /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
-      getCliStatus: () => Promise<AgentCliStatus>;
+      getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
@@ -258,10 +269,10 @@ declare global {
         value: string,
       ) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       onAccountsChanged: (callback: () => void) => () => void;
-      readUsage: () => Promise<UsageSnapshot>;
+      readUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;
-      getCachedUsage: () => Promise<UsageSnapshot>;
+      getCachedUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether a chat that waits on the user while Milagre is in the background gets a system notification. */
       setNotifyWhenWaiting: (on: boolean) => Promise<void>;
       /** Whether the window lets the blurred desktop show through (macOS). `theme` picks the blur material. */

@@ -166,3 +166,29 @@ test("signals during a fetch collapse into one, and a Project fetch covers the r
   assert.deepEqual(fetched, ["project", "project", "runs"]);
   stop();
 });
+
+test("account changes pass through the socket and refresh account state without fetching a Project", () => {
+  const { timers } = clock();
+  const { made, create } = sockets();
+  let accountChanges = 0;
+  const stop = syncProject({
+    connect: (options) => openLive("ws://mac/live", {}, { ...options, create, timers }),
+    snapshot: async () => {},
+    runs: async () => {
+      throw new Error("Accounts must not fetch runs");
+    },
+    accounts: () => {
+      accountChanges++;
+    },
+    onError: (error) => {
+      throw error;
+    },
+    active: () => true,
+    watchActive: () => () => {},
+    pollDelay: () => 1000,
+    timers,
+  });
+  made[0].onmessage!({ data: '{"type":"accounts"}' });
+  assert.equal(accountChanges, 1);
+  stop();
+});

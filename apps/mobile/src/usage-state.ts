@@ -1,11 +1,11 @@
 import type { UsageSnapshot } from "@milagre/shared/model";
 import { mergeSnapshot, seedSnapshot } from "@milagre/shared/usage";
 
-type UsageClient = { call: <T>(method: string) => Promise<T> };
+type UsageClient = { call: <T>(method: string, args?: unknown[]) => Promise<T> };
 export type UsageState = { snapshot: UsageSnapshot | null; loading: boolean; error: string };
 
 /** One computer's usage. Reads share a request, and a failed refresh keeps unexpired last-known limits. */
-export function createUsageState(client: UsageClient, now = Date.now) {
+export function createUsageState(client: UsageClient, now = Date.now, scopeKey?: string) {
   let state: UsageState = { snapshot: null, loading: true, error: "" };
   let inFlight: Promise<void> | null = null;
   let cached: Promise<void> | null = null;
@@ -17,7 +17,7 @@ export function createUsageState(client: UsageClient, now = Date.now) {
   };
   const loadCached = () =>
     (cached ??= client
-      .call<UsageSnapshot>("usage:cached")
+      .call<UsageSnapshot>("usage:cached", scopeKey ? [scopeKey] : [])
       .then((value) => {
         const snapshot = state.snapshot?.providers.every((provider) => provider.status === "error")
           ? mergeSnapshot(value, state.snapshot, now())
@@ -30,7 +30,7 @@ export function createUsageState(client: UsageClient, now = Date.now) {
     lastAttempt = now();
     publish({ ...state, loading: true });
     inFlight = client
-      .call<UsageSnapshot>("usage:read")
+      .call<UsageSnapshot>("usage:read", scopeKey ? [scopeKey] : [])
       .then((next) => {
         publish({ snapshot: mergeSnapshot(state.snapshot, next, now()), loading: false, error: "" });
       })

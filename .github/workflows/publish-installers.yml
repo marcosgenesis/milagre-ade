@@ -8,10 +8,11 @@ on:
         required: true
         type: string
       platforms:
-        description: Platforms to publish; all requires Windows signing and Linux repository credentials
+        description: Platforms to publish; macos+linux needs Linux repository credentials, all also needs Windows signing
         type: choice
         options:
           - macos
+          - macos+linux
           - all
         default: macos
         required: true
@@ -118,7 +119,7 @@ jobs:
             release/latest.yml
           if-no-files-found: error
   package-linux:
-    if: inputs.platforms == 'all'
+    if: contains(inputs.platforms, 'linux') || inputs.platforms == 'all'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -216,4 +217,37 @@ jobs:
         run: |-
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
           gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest*.yml release/beta-mac.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+  publish-macos-linux:
+    if: inputs.platforms == 'macos+linux'
+    needs:
+      - package-macos
+      - package-linux
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - *a1
+      - *a2
+      - name: Install metadata dependencies
+        run: npm ci --ignore-scripts
+      - name: Collect signed installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: signed-*
+          merge-multiple: true
+          path: release
+      - name: Generate final installer checksums and manifests
+        run: npm run package:managers -- --tag "$RELEASE_TAG" --platform macos,linux
+      - name: Require complete updater feeds
+        run: |-
+          for feed in latest-mac.yml beta-mac.yml latest-linux.yml; do
+            test -f "release/$feed" || { echo "::error::release/$feed is missing"; exit 1; }
+          done
+          node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform macos,linux --check
+      - name: Upload macOS and Linux and publish draft
+        run: |-
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest-mac.yml release/beta-mac.yml release/latest-linux.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest

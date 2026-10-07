@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createClient, localEndpoint, type RelayRuntime } from "./client.ts";
+import { createClient, localEndpoint, type RelayRuntime, type RouteView } from "./client.ts";
 import { RelayTransportError, type RelayResponse, type RelayTransport } from "./relay-transport.ts";
 
 test("endpoint accepts HTTPS and emulator loopback, rejecting plaintext remote and credential/path tricks", () => {
@@ -175,7 +175,7 @@ function fakeRelay(answer: (sent: Sent) => Promise<RelayResponse> | RelayRespons
       },
     },
   };
-  return { sent, lives, written, opened, runtime };
+  return { sent, lives, written, opened, runtime, transport };
 }
 
 test("a relay host sends its calls through the relay transport and reads the JSON reply", async () => {
@@ -380,4 +380,180 @@ test("drawer previews use a separate ETag route and accept full snapshots from a
   await client.snapshot("/p");
   assert.ok(routes[0].endsWith("/snapshot?projectPath=%2Fp&view=chats"));
   assert.ok(routes[1].endsWith("/snapshot?projectPath=%2Fp"));
+});
+
+const cloudflareHost = {
+  address: "https://mac.example.com",
+  token: "a".repeat(64),
+  access: { id: `${"a".repeat(32)}.access`, secret: "b".repeat(40) },
+};
+/** A route view the test can switch, like the supervisor's. */
+function lanView(first: RelayTransport | null) {
+  const listeners = new Set<() => void>();
+  let transport = first;
+  const view: RouteView & { switch(next: RelayTransport | null): void } = {
+    current: () => transport,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    switch(next) {
+      transport = next;
+      for (const listener of listeners) listener();
+    },
+  };
+  return { view, listeners };
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("a Cloudflare computer's requests go through the LAN transport while it is up, and back to HTTPS after", async () => {
+  const lan = fakeRelay(() => reply({ v: 1, result: "over-lan" }));
+  const { view } = lanView(null);
+  const asked: string[] = [];
+  const fetcher = (async (url: string) => (asked.push(url), new Response(JSON.stringify({ v: 1, result: "over-https" })))) as unknown as typeof fetch;
+  const hosts: unknown[] = [];
+  const client = createClient(cloudflareHost, fetcher, 30000, {
+    ...lan.runtime,
+    lan: (host) => (hosts.push(host), view),
+  });
+  assert.deepEqual(hosts, [{ id: "https://mac.example.com", token: cloudflareHost.token }]);
+  assert.equal(await client.call("daemon:status"), "over-https");
+  assert.equal(lan.sent.length, 0);
+  view.switch(lan.transport);
+  assert.equal(await client.call("daemon:status"), "over-lan");
+  assert.equal(lan.sent.length, 1);
+  assert.equal(lan.sent[0].path, "/rpc");
+  assert.equal(lan.sent[0].headers.Authorization, undefined, "the LAN handshake carries the token, not each request");
+  assert.equal(lan.opened.length, 0, "a Cloudflare computer has no relay to open");
+  view.switch(null);
+  assert.equal(await client.call("daemon:status"), "over-https");
+  assert.equal(asked.length, 2);
+  assert.equal(lan.sent.length, 1);
+});
+
+test("a relay computer's requests prefer the LAN transport and fall back to the relay", async () => {
+  const lan = fakeRelay(() => reply({ v: 1, result: "over-lan" }));
+  const relay = fakeRelay(() => reply({ v: 1, result: "over-relay" }));
+  const { view } = lanView(lan.transport);
+  const client = createClient(relayHost, fetch, 30000, { ...relay.runtime, lan: () => view });
+  assert.equal(await client.call("daemon:status"), "over-lan");
+  assert.equal(relay.sent.length, 0);
+  view.switch(null);
+  assert.equal(await client.call("daemon:status"), "over-relay");
+  assert.equal(relay.sent.length, 1);
+});
+
+test("a client without a LAN route in its runtime behaves as before", async () => {
+  const relay = fakeRelay(() => reply({ v: 1, result: "over-relay" }));
+  const client = createClient(relayHost, fetch, 30000, relay.runtime);
+  assert.equal(await client.call("daemon:status"), "over-relay");
+  const live = client.live("/p", { onSignal() {}, onStatus() {} });
+  await settle();
+  assert.equal(relay.lives.length, 1);
+  live.close();
+});
+
+test("a request over a LAN that dropped fails with the lost-connection copy", async () => {
+  const lan = fakeRelay(() => {
+    throw new Error("socket closed");
+  });
+  const { view } = lanView(lan.transport);
+  const client = createClient(cloudflareHost, async () => new Response(JSON.stringify({ v: 1, result: "over-https" })), 30000, {
+    ...lan.runtime,
+    lan: () => view,
+  });
+  await assert.rejects(client.call("daemon:status"), /Connection lost/);
+});
+
+test("a Cloudflare computer's live stream follows the LAN: the old stream closes and the new one opens", async () => {
+  const lan = fakeRelay(() => reply({ v: 1 }));
+  const { view, listeners } = lanView(null);
+  const sockets: { url: string; closed: boolean }[] = [];
+  const create = (url: string) => {
+    const socket = { url, closed: false, onopen: null, onmessage: null, onerror: null, onclose: null, close: () => void (socket.closed = true) };
+    sockets.push(socket);
+    return socket;
+  };
+  const statuses: boolean[] = [];
+  const client = createClient(cloudflareHost, fetch, 30000, { ...lan.runtime, lan: () => view });
+  const live = client.live("/p", { onSignal() {}, onStatus: (up) => statuses.push(up), create });
+  assert.equal(sockets.length, 1, "opened over the tunnel");
+  assert.equal(sockets[0].url, "wss://mac.example.com/live?projectPath=%2Fp");
+  view.switch(lan.transport);
+  await settle();
+  assert.equal(sockets[0].closed, true, "the tunnel stream closed");
+  assert.equal(lan.lives.length, 1, "reopened on the LAN");
+  assert.equal(lan.lives[0].path, "/live?projectPath=%2Fp");
+  assert.equal(sockets.length, 1);
+  assert.deepEqual(statuses, [false]);
+  view.switch(null);
+  await settle();
+  assert.equal(lan.lives[0].closed, true, "the LAN stream closed when the LAN went away");
+  assert.equal(sockets.length, 2, "back on the tunnel");
+  live.close();
+  assert.equal(sockets[1].closed, true);
+  assert.equal(listeners.size, 0, "closing the stream stops watching the route");
+});
+
+test("a relay computer's live stream reopens on the LAN, and back on the relay, closing each old one", async () => {
+  const lan = fakeRelay(() => reply({ v: 1 }));
+  const relay = fakeRelay(() => reply({ v: 1 }));
+  const { view, listeners } = lanView(null);
+  const client = createClient(relayHost, fetch, 30000, { ...relay.runtime, lan: () => view });
+  const signals: string[] = [];
+  const live = client.live("/p", { onSignal: (signal) => signals.push(signal), onStatus() {} });
+  await settle();
+  assert.equal(relay.lives.length, 1);
+  view.switch(lan.transport);
+  await settle();
+  assert.equal(relay.lives[0].closed, true);
+  assert.equal(lan.lives.length, 1);
+  lan.lives[0].onData('{"type":"runs"}');
+  assert.deepEqual(signals, ["runs"]);
+  view.switch(null);
+  await settle();
+  assert.equal(lan.lives[0].closed, true);
+  assert.equal(relay.lives.length, 2);
+  assert.equal(relay.lives[1].closed, false);
+  live.close();
+  assert.equal(relay.lives[1].closed, true);
+  assert.equal(listeners.size, 0);
+});
+
+test("a route change that leaves the same transport in place does not reopen the stream", async () => {
+  const lan = fakeRelay(() => reply({ v: 1 }));
+  const { view } = lanView(lan.transport);
+  const client = createClient(cloudflareHost, fetch, 30000, { ...lan.runtime, lan: () => view });
+  const live = client.live("/p", { onSignal() {}, onStatus() {} });
+  await settle();
+  view.switch(lan.transport);
+  await settle();
+  assert.equal(lan.lives.length, 1);
+  assert.equal(lan.lives[0].closed, false);
+  live.close();
+});
+
+test("images of a Cloudflare computer load through the LAN transport while it is up", async () => {
+  const lan = fakeRelay(() => ({ status: 200, headers: {}, body: new Uint8Array([1, 2, 3]) }));
+  const { view } = lanView(lan.transport);
+  const client = createClient(
+    cloudflareHost,
+    async () => {
+      throw new Error("the LAN carries images while it is up");
+    },
+    30000,
+    { ...lan.runtime, lan: () => view },
+  );
+  const source = client.image("/p", "/p/a.png");
+  assert.ok(source instanceof Promise, "an image over the LAN is fetched to a file");
+  assert.match((await source).uri, /^file:\/\/\/cache\/relay-media\/[a-f0-9]{16}\.png$/);
+  assert.equal(lan.sent[0].path, "/media?projectPath=%2Fp&path=%2Fp%2Fa.png");
+  assert.throws(() => client.media("/p", "/p/a.png"), /mediaFile/);
+});
+
+test("images of a Cloudflare computer stay URLs while the LAN is down", () => {
+  const lan = fakeRelay(() => reply({ v: 1 }));
+  const { view } = lanView(null);
+  const client = createClient(cloudflareHost, fetch, 30000, { ...lan.runtime, lan: () => view });
+  assert.deepEqual(client.image("/p", "/p/a.png"), client.media("/p", "/p/a.png"));
 });

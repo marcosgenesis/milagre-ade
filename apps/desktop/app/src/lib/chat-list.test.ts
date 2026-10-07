@@ -28,18 +28,46 @@ test("formatLineCount and folderName", () => {
 });
 
 test("orderChats sorts newest first by start, or by latest message", () => {
-  const chat = (name: string, ids: number[]) => ({ name, session: {}, sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[] });
+  const chat = (name: string, ids: number[]) => ({
+    name,
+    session: {},
+    sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[],
+  });
   const chats = [chat("old but active", [1, 9]), chat("newest", [7, 8]), chat("middle", [4, 5])];
-  assert.deepEqual(orderChats(chats, "created").map((c) => c.name), ["newest", "middle", "old but active"]);
-  assert.deepEqual(orderChats(chats, "recent").map((c) => c.name), ["old but active", "newest", "middle"]);
-  assert.deepEqual(chats.map((c) => c.name), ["old but active", "newest", "middle"]);
+  assert.deepEqual(
+    orderChats(chats, "created").map((c) => c.name),
+    ["newest", "middle", "old but active"],
+  );
+  assert.deepEqual(
+    orderChats(chats, "recent").map((c) => c.name),
+    ["old but active", "newest", "middle"],
+  );
+  assert.deepEqual(
+    chats.map((c) => c.name),
+    ["old but active", "newest", "middle"],
+  );
 });
 
 test("orderChats keeps pinned chats on top in their own order, whatever their activity", () => {
-  const chat = (name: string, ids: number[], session = {}) => ({ name, session, sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[] });
-  const chats = [chat("busy", [1, 99]), chat("second pin", [2], { pinned: true, pin_order: 1 }), chat("first pin", [3, 98], { pinned: true, pin_order: 0 }), chat("quiet", [4])];
-  assert.deepEqual(orderChats(chats, "recent").map((c) => c.name), ["first pin", "second pin", "busy", "quiet"]);
-  assert.deepEqual(orderChats(chats, "created").map((c) => c.name), ["first pin", "second pin", "quiet", "busy"]);
+  const chat = (name: string, ids: number[], session = {}) => ({
+    name,
+    session,
+    sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[],
+  });
+  const chats = [
+    chat("busy", [1, 99]),
+    chat("second pin", [2], { pinned: true, pin_order: 1 }),
+    chat("first pin", [3, 98], { pinned: true, pin_order: 0 }),
+    chat("quiet", [4]),
+  ];
+  assert.deepEqual(
+    orderChats(chats, "recent").map((c) => c.name),
+    ["first pin", "second pin", "busy", "quiet"],
+  );
+  assert.deepEqual(
+    orderChats(chats, "created").map((c) => c.name),
+    ["first pin", "second pin", "quiet", "busy"],
+  );
 });
 
 test("dropIntent: between rows pins, unpins or reorders; on a row links other Worktrees", () => {

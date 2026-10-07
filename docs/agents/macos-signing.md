@@ -10,13 +10,13 @@ Public releases use a **Developer ID Application** certificate for direct distri
 4. Generate an [app-specific password](https://support.apple.com/pt-br/102654) for notarization from your Apple Account. Use a dedicated password for Milagre, not the account's login password.
 5. Add the following repository secrets in [GitHub Actions settings](https://github.com/the-ptf/milagre-ade/settings/secrets/actions):
 
-| Secret | Value |
-| --- | --- |
-| `CSC_LINK` | Base64-encoded Developer ID Application `.p12`, including its private key |
-| `CSC_KEY_PASSWORD` | Password used when exporting the `.p12` |
-| `APPLE_ID` | Apple Account email used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Dedicated app-specific password |
-| `APPLE_TEAM_ID` | Team ID associated with the signing certificate |
+| Secret                        | Value                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `CSC_LINK`                    | Base64-encoded Developer ID Application `.p12`, including its private key |
+| `CSC_KEY_PASSWORD`            | Password used when exporting the `.p12`                                   |
+| `APPLE_ID`                    | Apple Account email used for notarization                                 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | Dedicated app-specific password                                           |
+| `APPLE_TEAM_ID`               | Team ID associated with the signing certificate                           |
 
 Use the GitHub CLI without placing secret values in shell arguments or history:
 
@@ -39,7 +39,7 @@ The workflow checks that all five secrets exist before `semantic-release` create
 
 Apple ID, app-specific password and Team ID have surrounding whitespace removed before both app and DMG notarization. The certificate export password is preserved exactly.
 
-The workflow also signs the DMG, uploads it to Apple and retains the submission ID while waiting. Temporary network failures use up to four attempts with increasing delays; retries during the wait reuse the same submission instead of uploading again. Rejected submissions and authentication failures stop immediately. The workflow requires the explicit `Accepted` status and staples the DMG ticket. The macOS job has a 90-minute limit to allow both app and DMG analysis to finish. Before uploading installers, it verifies the app and DMG signatures, validates stapled tickets, checks Gatekeeper acceptance for the app and verifies DMG integrity. A missing credential, rejected submission or failed check stops the workflow. `npm run test:release` exercises these failure paths without real credentials or Apple requests.
+The workflow also signs the DMG, uploads it to Apple and retains the submission ID while waiting. Temporary network failures use up to four attempts with increasing delays; retries during the wait reuse the same submission instead of uploading again. Rejected submissions and authentication failures stop immediately. The workflow requires the explicit `Accepted` status and staples the DMG ticket. The macOS job has a 90-minute limit to allow both app and DMG analysis to finish. Before uploading installers, it verifies the app and DMG signatures, validates stapled tickets, checks Gatekeeper acceptance for the app and verifies DMG integrity. A missing credential, rejected submission or failed check stops the workflow. `npm test -- --only release-workflow` exercises these failure paths without real credentials or Apple requests.
 
 After configuring secrets, merge a Conventional Commit with a `fix:` or `feat:` prefix into `main` to generate a new release. Existing release installers are not automatically replaced by this setup. Download the new DMG through a browser and test installation on a Mac that has no existing Milagre security exception.
 

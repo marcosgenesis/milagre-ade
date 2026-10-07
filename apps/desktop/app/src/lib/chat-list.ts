@@ -6,7 +6,19 @@ export { chatTitle, pinOrderAt } from "@milagre/shared/chats";
 export type ChatMark = "question" | "waiting" | "delegated" | "running" | "unread" | "idle";
 
 /** `delegated`: a Delegation from another Chat is queued or running here. */
-export function chatMark({ asking = false, waiting, delegated = false, running, unread }: { asking?: boolean; waiting: boolean; delegated?: boolean; running: boolean; unread: boolean }): ChatMark {
+export function chatMark({
+  asking = false,
+  waiting,
+  delegated = false,
+  running,
+  unread,
+}: {
+  asking?: boolean;
+  waiting: boolean;
+  delegated?: boolean;
+  running: boolean;
+  unread: boolean;
+}): ChatMark {
   if (asking) return "question";
   if (waiting) return "waiting";
   if (delegated) return "delegated";
@@ -22,7 +34,10 @@ export type ChatOrder = "created" | "recent";
  * Pinned chats first, in their manual order, so a finishing turn never moves them; then the rest newest first.
  * Message ids only grow, so a chat's first message dates its start and its last one its latest activity.
  */
-export function orderChats<T extends { session: Pick<AgentSession, "pinned" | "pin_order">; sessionMessages: ChatMessage[] }>(chats: T[], order: ChatOrder): T[] {
+export function orderChats<T extends { session: Pick<AgentSession, "pinned" | "pin_order">; sessionMessages: ChatMessage[] }>(
+  chats: T[],
+  order: ChatOrder,
+): T[] {
   const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
   return [...chats].sort((a, b) => comparePins(a.session, b.session) || key(b) - key(a));
 }
@@ -36,7 +51,12 @@ export type DropIntent = "reorder" | "pin" | "unpin" | "link" | "none" | { inval
  * What dropping `source` at `zone` of `target` does. A null target is the empty Pinned section.
  * `linked`: a Link already joins the two chats' Worktrees.
  */
-export function dropIntent(source: { pinned?: boolean; worktree?: string }, target: { pinned?: boolean; worktree?: string } | null, zone: DropZone, linked = false): DropIntent {
+export function dropIntent(
+  source: { pinned?: boolean; worktree?: string },
+  target: { pinned?: boolean; worktree?: string } | null,
+  zone: DropZone,
+  linked = false,
+): DropIntent {
   if (!target) return source.pinned ? "none" : "pin";
   if (zone === "on") {
     if (source.worktree && source.worktree === target.worktree) return { invalid: "same-worktree" };
@@ -59,5 +79,10 @@ function trimDecimal(value: number) {
 
 /** The folder name at the end of a path. */
 export function folderName(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  return (
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || path
+  );
 }

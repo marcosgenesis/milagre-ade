@@ -4,7 +4,6 @@ export type PermissionMode = "ask" | "auto" | "full";
 /** Where a new chat runs: the selected checkout, or a fresh git worktree. */
 export type Isolation = "local" | "worktree";
 
-
 /** Effort ids come from the agents themselves (Claude: low…max, Codex adds ultra). */
 export type EffortLevel = string;
 
@@ -19,7 +18,6 @@ export interface ModelCapability {
 }
 
 export type ModelCapabilities = Record<ModelProvider, Record<string, ModelCapability>>;
-
 
 export interface ModelOption {
   id: string;
@@ -124,7 +122,7 @@ export interface AgentSession {
 }
 
 /** A named Link owns one conversation across an isolated Worktree in each member Project. */
-export type ChatScope = { kind: 'project'; projectPath: string } | { kind: 'link'; linkId: string };
+export type ChatScope = { kind: "project"; projectPath: string } | { kind: "link"; linkId: string };
 export interface NamedProjectLink {
   id: string;
   name: string;
@@ -138,14 +136,14 @@ export interface WorktreeBinding {
   branch: string;
   base: string;
 }
-export interface LinkChatSession extends Omit<AgentSession, 'worktree_id'> {
+export interface LinkChatSession extends Omit<AgentSession, "worktree_id"> {
   workspacePath: string;
   worktrees: WorktreeBinding[];
 }
 export interface LinkPreparation {
   operationId: string;
   chatId: number;
-  status: 'reserved' | 'creating' | 'setup' | 'ready' | 'failed';
+  status: "reserved" | "creating" | "setup" | "ready" | "failed";
   members: Array<WorktreeBinding & { created?: boolean; setupDone?: boolean }>;
   workspacePath: string;
   error?: string;
@@ -162,8 +160,6 @@ export interface OpenLink {
   state: LinkState;
   projects: Array<{ id: string; path: string; name: string }>;
 }
-
-
 
 export interface ChatMessage {
   id: number;
@@ -194,7 +190,14 @@ export type ChatContext = LinkedContext | { kind: "git-action" } | "handover" | 
 
 export type LinkedContext =
   | { kind: "delegation"; delegationId: string; from: string; fromLabel: string; negotiation?: { id: string; round: number } }
-  | { kind: "delegation-report"; delegationId: string; from: string | null; fromLabel: string; status: "done" | "cancelled" | "failed"; negotiation?: { id: string; round: number } }
+  | {
+      kind: "delegation-report";
+      delegationId: string;
+      from: string | null;
+      fromLabel: string;
+      status: "done" | "cancelled" | "failed";
+      negotiation?: { id: string; round: number };
+    }
   | { kind: "negotiation-agreement"; negotiationId: string; with: string; by?: string }
   | { kind: "linked-notice"; negotiationId?: string; delegationId?: string; with?: string };
 
@@ -423,7 +426,10 @@ export interface ChatSendRequest {
 }
 
 /** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
-export type ChatHandoverRequest = Pick<ChatSendRequest, "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"> & { sessionId: number };
+export type ChatHandoverRequest = Pick<
+  ChatSendRequest,
+  "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"
+> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {
@@ -516,5 +522,9 @@ export type ProviderAccount = {
   message?: string;
 };
 export type AccountsSnapshot = { providers: { provider: ModelProvider; selectedId: string; accounts: ProviderAccount[] }[] };
-export interface TranscriptState { next_id: number; sessions: Record<string, AgentSession | LinkChatSession>; messages: ChatMessage[]; }
-export type LinkSendRequest = Omit<ChatSendRequest, 'projectPath' | 'worktreeId'> & { linkId: string; operationId: string };
+export interface TranscriptState {
+  next_id: number;
+  sessions: Record<string, AgentSession | LinkChatSession>;
+  messages: ChatMessage[];
+}
+export type LinkSendRequest = Omit<ChatSendRequest, "projectPath" | "worktreeId"> & { linkId: string; operationId: string };

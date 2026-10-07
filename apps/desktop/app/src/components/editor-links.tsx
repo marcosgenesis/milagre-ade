@@ -14,7 +14,10 @@ export function EditorLinks({ root, children }: { root: string; children: ReactN
 export function useFileOpener(): { open: (path: string, line?: number) => void; title: string } | null {
   const root = useContext(RootContext);
   const { editor } = useEditors();
-  return useMemo(() => (root && editor ? { open: (path, line) => void openInEditor(root, { path, line }), title: `Open in ${editor.name}` } : null), [root, editor]);
+  return useMemo(
+    () => (root && editor ? { open: (path, line) => void openInEditor(root, { path, line }), title: `Open in ${editor.name}` } : null),
+    [root, editor],
+  );
 }
 
 /** The small notice at the bottom of the window. */

@@ -40,10 +40,14 @@ export function lossReason(status) {
 
 /** The loss line and how to avoid it: "2 uncommitted files will be lost. Commit them first to keep them." */
 export function deleteNote(status) {
-  const pointer = status.uncommitted > 0 && status.unpushed > 0 ? "Commit and push them first to keep them."
-    : status.uncommitted > 0 ? "Commit them first to keep them."
-    : status.unpushed > 0 ? "Push them first to keep them."
-    : "Check out a branch first to keep it.";
+  const pointer =
+    status.uncommitted > 0 && status.unpushed > 0
+      ? "Commit and push them first to keep them."
+      : status.uncommitted > 0
+        ? "Commit them first to keep them."
+        : status.unpushed > 0
+          ? "Push them first to keep them."
+          : "Check out a branch first to keep it.";
   return `${lossReason(status)}. ${pointer}`;
 }
 
@@ -63,9 +67,7 @@ export function archiveChoices({ plan, running }) {
     return { choices: [{ mode: "remove", label: running ? "Stop, archive and remove worktree" : "Archive and remove worktree", tone: "plain" }], reason: null };
   }
   return {
-    choices: [
-      { mode: "delete", label: running ? "Stop, archive and delete worktree" : "Archive and delete worktree", tone: "danger" },
-    ],
+    choices: [{ mode: "delete", label: running ? "Stop, archive and delete worktree" : "Archive and delete worktree", tone: "danger" }],
     reason: deleteNote(status),
   };
 }
@@ -77,7 +79,10 @@ export function archiveChoices({ plan, running }) {
 export function removeFailureNotice(error) {
   // The daemon refuses a removal that the worktree outgrew after the user looked at it.
   if (ipcErrorCode(error) === GIT_CODES.WORKTREE_CHANGED) return gitMessage(GIT_CODES.WORKTREE_CHANGED);
-  const message = ipcErrorMessage(error).replace(/^fatal: /, "").trim().replace(/[.\s]+$/, "");
+  const message = ipcErrorMessage(error)
+    .replace(/^fatal: /, "")
+    .trim()
+    .replace(/[.\s]+$/, "");
   return `Couldn't remove the worktree: ${message}. The chat stays so you can find it.`;
 }
 
@@ -95,7 +100,9 @@ export async function archiveChat(deps, sessionId, mode, plan) {
   const stopped = deps.stop();
   await deps.hide();
   if (!removing || !plan?.status) return "hidden";
-  const sessionIds = Object.values(latest.sessions).filter((session) => session.worktree_id === removing.id).map((session) => session.id);
+  const sessionIds = Object.values(latest.sessions)
+    .filter((session) => session.worktree_id === removing.id)
+    .map((session) => session.id);
   // The turn must have wound down before the daemon closes the agent and looks at the folder.
   await stopped;
   try {

@@ -12,7 +12,8 @@ async function fixture(t) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, "shop");
   await fs.mkdir(project);
-  const git = (...args) => execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
+  const git = (...args) =>
+    execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
   git("init", "-b", "main");
   await fs.writeFile(path.join(project, "README.md"), "shop\n");
   git("add", ".");
@@ -38,8 +39,12 @@ test("createWorktree branches from the base outside the project", async (t) => {
   const worktreeRoot = path.join(root, "worktrees");
   const created = await createWorktree({ projectPath: project, baseBranch: "release/v2", prompt: "Add a checkout page", root: worktreeRoot, suffix: "ab12" });
 
-  assert.deepEqual(created, { branch: "milagre/add-a-checkout-page-ab12", path: path.join(worktreeRoot, "shop", "add-a-checkout-page-ab12"), base: "release/v2" });
-  assert.equal((await fs.readFile(path.join(created.path, "README.md"), "utf8")), "shop\n");
+  assert.deepEqual(created, {
+    branch: "milagre/add-a-checkout-page-ab12",
+    path: path.join(worktreeRoot, "shop", "add-a-checkout-page-ab12"),
+    base: "release/v2",
+  });
+  assert.equal(await fs.readFile(path.join(created.path, "README.md"), "utf8"), "shop\n");
   assert.match(git("worktree", "list", "--porcelain"), /branch refs\/heads\/milagre\/add-a-checkout-page-ab12/);
   assert.equal(git("rev-parse", created.branch).trim(), git("rev-parse", "release/v2").trim());
 });
@@ -56,7 +61,11 @@ test("createWorktree refuses a base that is not an existing ref, so it can never
   const { root, project, git } = await fixture(t);
   const worktreeRoot = path.join(root, "worktrees");
   for (const baseBranch of ["--lock", "--no-checkout", "-b", "--detach", "", "main\n--lock", 42, null]) {
-    await assert.rejects(createWorktree({ projectPath: project, baseBranch, prompt: "x", root: worktreeRoot, suffix: "op1" }), /missing from this project/, String(baseBranch));
+    await assert.rejects(
+      createWorktree({ projectPath: project, baseBranch, prompt: "x", root: worktreeRoot, suffix: "op1" }),
+      /missing from this project/,
+      String(baseBranch),
+    );
   }
   assert.doesNotMatch(git("worktree", "list", "--porcelain"), /milagre\/x-op1|locked/);
   await assert.rejects(fs.stat(worktreeRoot), { code: "ENOENT" });
@@ -67,11 +76,23 @@ test("createWorktree refuses a base that is not an existing ref, so it can never
 
 test("renameWorktreeBranch renames a running worktree's branch and keeps its folder", async (t) => {
   const { root, project, git } = await fixture(t);
-  const created = await createWorktree({ projectPath: project, baseBranch: "main", prompt: "the sidebar thing is broken", root: path.join(root, "worktrees"), suffix: "ef56" });
+  const created = await createWorktree({
+    projectPath: project,
+    baseBranch: "main",
+    prompt: "the sidebar thing is broken",
+    root: path.join(root, "worktrees"),
+    suffix: "ef56",
+  });
 
-  assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug: "Fix sidebar collapse" }), "milagre/fix-sidebar-collapse-ef56");
+  assert.equal(
+    await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug: "Fix sidebar collapse" }),
+    "milagre/fix-sidebar-collapse-ef56",
+  );
   assert.equal(execFileSync("git", ["-C", created.path, "branch", "--show-current"], { encoding: "utf8" }).trim(), "milagre/fix-sidebar-collapse-ef56");
-  assert.match(git("worktree", "list", "--porcelain"), /the-sidebar-thing-is-broken-ef56\nHEAD [0-9a-f]+\nbranch refs\/heads\/milagre\/fix-sidebar-collapse-ef56/);
+  assert.match(
+    git("worktree", "list", "--porcelain"),
+    /the-sidebar-thing-is-broken-ef56\nHEAD [0-9a-f]+\nbranch refs\/heads\/milagre\/fix-sidebar-collapse-ef56/,
+  );
 
   // Nothing to do, or the old branch is already gone.
   assert.equal(await renameWorktreeBranch({ worktreePath: created.path, branch: "milagre/fix-sidebar-collapse-ef56", slug: "fix-sidebar-collapse" }), null);
@@ -84,7 +105,8 @@ async function trailingClone(t) {
   const { root, project: remote, git: remoteGit } = await fixture(t);
   const project = path.join(root, "clone");
   execFileSync("git", ["clone", "--quiet", remote, project]);
-  const git = (...args) => execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
+  const git = (...args) =>
+    execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
   await fs.writeFile(path.join(remote, "NEWS.md"), "shipped\n");
   remoteGit("add", ".");
   remoteGit("commit", "-m", "ship");
@@ -136,7 +158,11 @@ async function ignoredFixture(t, files = {}) {
 }
 
 const create = (fx, extra = {}) => createWorktree({ projectPath: fx.project, baseBranch: "main", prompt: "x", root: fx.worktreeRoot, suffix: "cp1", ...extra });
-const exists = (file) => fs.lstat(file).then(() => true, () => false);
+const exists = (file) =>
+  fs.lstat(file).then(
+    () => true,
+    () => false,
+  );
 
 test("the default pattern copies ignored env files but not a tracked one", async (t) => {
   const fx = await ignoredFixture(t);
@@ -227,7 +253,13 @@ test("a worktree with nothing to copy returns the plain result", async (t) => {
 });
 
 test("dependency and build folders are skipped by the default and by unanchored patterns", async (t) => {
-  const fx = await ignoredFixture(t, { "node_modules/pkg/.env": "DEP=1\n", "apps/web/node_modules/pkg/.env": "DEP=2\n", "dist/.env": "BUILD=1\n", ".venv/lib/.env": "PY=1\n", "vendor/bundle/gem/.env": "RB=1\n" });
+  const fx = await ignoredFixture(t, {
+    "node_modules/pkg/.env": "DEP=1\n",
+    "apps/web/node_modules/pkg/.env": "DEP=2\n",
+    "dist/.env": "BUILD=1\n",
+    ".venv/lib/.env": "PY=1\n",
+    "vendor/bundle/gem/.env": "RB=1\n",
+  });
   const created = await create(fx);
   assert.deepEqual([...created.copy.copied].sort(), [".env", ".env.local"]);
   assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, [".env", ".env.local"]);
@@ -235,7 +267,12 @@ test("dependency and build folders are skipped by the default and by unanchored 
 });
 
 test("an anchored pattern can still ask for a file inside an excluded folder", async (t) => {
-  const fx = await ignoredFixture(t, { "dist/config.json": "{}", "dist/other.json": "{}", "node_modules/pkg/.env": "DEP=1\n", "vendor/bundle/gem/.env": "RB=1\n" });
+  const fx = await ignoredFixture(t, {
+    "dist/config.json": "{}",
+    "dist/other.json": "{}",
+    "node_modules/pkg/.env": "DEP=1\n",
+    "vendor/bundle/gem/.env": "RB=1\n",
+  });
   await fs.appendFile(path.join(fx.project, ".gitignore"), "dist/\n*.json\n");
   const created = await create(fx, { copyPatterns: ["dist/config.json", "vendor/bundle/gem/.env"] });
   assert.deepEqual([...created.copy.copied].sort(), ["dist/config.json", "vendor/bundle/gem/.env"]);
@@ -244,7 +281,15 @@ test("an anchored pattern can still ask for a file inside an excluded folder", a
 });
 
 test("a negated pattern never lifts an exclusion, and more build folders are skipped", async (t) => {
-  const fx = await ignoredFixture(t, { "node_modules/p1/.env": "1", "node_modules/p2/.env": "2", "Pods/x/.env": "3", ".gradle/.env": "4", ".expo/.env": "5", ".dart_tool/.env": "6", "coverage/.env": "7" });
+  const fx = await ignoredFixture(t, {
+    "node_modules/p1/.env": "1",
+    "node_modules/p2/.env": "2",
+    "Pods/x/.env": "3",
+    ".gradle/.env": "4",
+    ".expo/.env": "5",
+    ".dart_tool/.env": "6",
+    "coverage/.env": "7",
+  });
   assert.deepEqual((await previewFilesToCopy(fx.project, [".env*", "!node_modules/p1/.env"])).matches, [".env", ".env.local"]);
   assert.deepEqual(EXCLUDED_FOLDERS.filter((folder) => ["Pods", ".gradle", ".expo", ".dart_tool", "coverage"].includes(folder)).length, 5);
   assert.deepEqual((await previewFilesToCopy(fx.project, undefined)).matches, [".env", ".env.local"]);

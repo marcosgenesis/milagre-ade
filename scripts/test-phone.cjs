@@ -1,4 +1,4 @@
-// Run with npm run test:phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
+// Run with npm test -- --only test-phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
 // directory and socket, port chosen by the OS): turn phone access on, see the QR code and the relay status, copy the
 // link, see a phone pair, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
@@ -50,23 +50,54 @@ async function browserChecks() {
   await app.whenReady();
   // The check never dials the public relay: this stand-in reports that it connected. A reset's retired room has no onStatus.
   const relays = [];
-  const startRelay = (options) => { relays.push(options); setTimeout(() => options.onStatus?.("online"), 20); return { close: async () => {}, status: () => "online" }; };
-  const daemon = await startDaemon({ dataDir, version: "test", phoneOptions: { localPort: 0, startRelay }, runtimeOptions: {
-    cwd: dataDir, environmentReady: Promise.resolve(), titleModels: {}, agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
-  } });
+  const startRelay = (options) => {
+    relays.push(options);
+    setTimeout(() => options.onStatus?.("online"), 20);
+    return { close: async () => {}, status: () => "online" };
+  };
+  const daemon = await startDaemon({
+    dataDir,
+    version: "test",
+    phoneOptions: { localPort: 0, startRelay },
+    runtimeOptions: {
+      cwd: dataDir,
+      environmentReady: Promise.resolve(),
+      titleModels: {},
+      agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
+    },
+  });
   const host = await connect({ dataDir });
   const paired = [];
-  host.on("event", ({ channel, payload }) => { if (channel === "phone:paired") paired.push(payload); });
-  const window = new BrowserWindow({ width: 1100, height: 760, useContentSize: true, show: false, webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false } });
-  for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"]) ipcMain.handle(method, (_event, ...args) => host.call(method, args));
-  host.on("event", ({ channel, payload }) => { if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload); });
-  window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
+  host.on("event", ({ channel, payload }) => {
+    if (channel === "phone:paired") paired.push(payload);
+  });
+  const window = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    useContentSize: true,
+    show: false,
+    webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false },
+  });
+  for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"])
+    ipcMain.handle(method, (_event, ...args) => host.call(method, args));
+  host.on("event", ({ channel, payload }) => {
+    if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload);
+  });
+  window.webContents.on("console-message", (event) => {
+    if (event.level === "error") console.error(event.message);
+  });
   const evaluate = async (source) => {
-    try { return await window.webContents.executeJavaScript(source); }
-    catch (error) { throw new Error(`${source}: ${error.message}`); }
+    try {
+      return await window.webContents.executeJavaScript(source);
+    } catch (error) {
+      throw new Error(`${source}: ${error.message}`);
+    }
   };
   async function waitFor(source) {
-    for (let n = 0; n < 200; n++) { if (await evaluate(source)) return; await delay(25); }
+    for (let n = 0; n < 200; n++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
     throw Error(`Timed out: ${source}`);
   }
   async function click(text) {
@@ -125,7 +156,10 @@ async function browserChecks() {
 
     // Paired phones: none yet, then one once a phone pairs through the relay (here, the host's phone list directly).
     await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
-    await relays.filter((options) => !options.retired).at(-1).phones.add("phone-key");
+    await relays
+      .filter((options) => !options.retired)
+      .at(-1)
+      .phones.add("phone-key");
     await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === '1 phone'`);
     assert.deepEqual(paired, [{ pairedPhones: 1 }]);
     await evaluate(`document.querySelector('[data-phone-paired]').scrollIntoView({ block: 'center' })`);
@@ -143,8 +177,13 @@ async function browserChecks() {
     await click("Reset and disconnect");
     // The old code stays up until the host has restarted with the new token.
     let second = first;
-    for (let n = 0; n < 200 && second === first; n++) { await delay(25); second = await token().catch(() => first); }
-    await waitFor(`(() => { const img = document.querySelector('[data-phone-qr]'); return img && img.complete && img.naturalWidth > 0 && document.body.textContent.includes('Make a new code'); })()`);
+    for (let n = 0; n < 200 && second === first; n++) {
+      await delay(25);
+      second = await token().catch(() => first);
+    }
+    await waitFor(
+      `(() => { const img = document.querySelector('[data-phone-qr]'); return img && img.complete && img.naturalWidth > 0 && document.body.textContent.includes('Make a new code'); })()`,
+    );
     assert.notEqual(second, first);
     await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
     // The old room is held only to tell the phone that paired there that this Mac was reset.
@@ -180,19 +219,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "phone-fixture",
-      resolveId(id) { if (id === "/__phone_fixture.tsx") return id; },
-      load(id) { if (id === "/__phone_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__phone__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__phone_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "phone-fixture",
+        resolveId(id) {
+          if (id === "/__phone_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__phone_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__phone__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__phone_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();

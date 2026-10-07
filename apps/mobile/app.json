@@ -2,10 +2,7 @@
   "expo": {
     "name": "Milagre",
     "slug": "milagre",
-    "scheme": [
-      "milagre",
-      "milagre-local"
-    ],
+    "scheme": ["milagre", "milagre-local"],
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -67,9 +64,7 @@
     },
     "android": {
       "package": "com.victorlucas.milagre",
-      "permissions": [
-        "android.permission.CAMERA"
-      ]
+      "permissions": ["android.permission.CAMERA"]
     },
     "extra": {
       "router": {},

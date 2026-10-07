@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, FlatList, Image, Pressable, Text, View, useWindowDimensions, type ImageSourcePropType } from 'react-native';
-import { router } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Cancel01Icon } from '@hugeicons/core-free-icons';
-import { Icon } from '../icons';
-import { useMedia } from '../chat-reply';
-import { viewerImages, type MediaValue, type ThumbRect } from '../viewer-store';
+import { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, Animated, FlatList, Image, Pressable, Text, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "../icons";
+import { useMedia } from "../chat-reply";
+import { viewerImages, type MediaValue, type ThumbRect } from "../viewer-store";
 
 // Desktop's SPRING_LAYOUT (lib/ease.ts), the spring its lightbox morphs with.
 const SPRING = { stiffness: 360, damping: 32, mass: 0.6, useNativeDriver: true } as const;
@@ -15,10 +15,14 @@ const FILL = 0.78;
 async function naturalSize(value: MediaValue | undefined): Promise<{ width: number; height: number } | null> {
   let source: ImageSourcePropType | undefined;
   // A relay image still loading does not hold up the opening morph; it fades in instead.
-  try { source = await Promise.race([value, new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1000))]); } catch { return null; }
+  try {
+    source = await Promise.race([value, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1000))]);
+  } catch {
+    return null;
+  }
   const remote = source as { uri?: string; headers?: Record<string, string> };
   if (!remote?.uri) return Promise.resolve(null);
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const done = (width: number, height: number) => resolve(width && height ? { width, height } : null);
     if (remote.headers) Image.getSizeWithHeaders(remote.uri!, remote.headers, done, () => resolve(null));
     else Image.getSize(remote.uri!, done, () => resolve(null));
@@ -28,7 +32,11 @@ async function naturalSize(value: MediaValue | undefined): Promise<{ width: numb
 /** One full-screen image; a relay image that is still loading leaves the space empty. */
 function Figure({ name, source, width, height }: { name: string; source: MediaValue; width: number; height: number }) {
   const ready = useMedia(source);
-  return ready ? <Image accessibilityLabel={name} source={ready} resizeMode="contain" style={{ width, height }} /> : <View accessibilityLabel={name} style={{ width, height }} />;
+  return ready ? (
+    <Image accessibilityLabel={name} source={ready} resizeMode="contain" style={{ width, height }} />
+  ) : (
+    <View accessibilityLabel={name} style={{ width, height }} />
+  );
 }
 
 /**
@@ -72,7 +80,9 @@ export default function Viewer() {
       setPose(reduced ? null : start);
       Animated.spring(progress, { toValue: 1, ...SPRING }).start();
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- opens once
 
   const close = () => {
@@ -86,15 +96,20 @@ export default function Viewer() {
 
   // A vertical drag pulls the image down; far or fast enough closes, like Photos.
   const pull = {
-    onTouchStart: ({ nativeEvent: e }: { nativeEvent: { pageX: number; pageY: number; timestamp: number } }) => { touch.current = { x: e.pageX, y: e.pageY, t: e.timestamp }; },
+    onTouchStart: ({ nativeEvent: e }: { nativeEvent: { pageX: number; pageY: number; timestamp: number } }) => {
+      touch.current = { x: e.pageX, y: e.pageY, t: e.timestamp };
+    },
     onMoveShouldSetResponder: ({ nativeEvent: e }: { nativeEvent: { pageX: number; pageY: number } }) => {
-      const dy = e.pageY - touch.current.y, dx = e.pageX - touch.current.x;
+      const dy = e.pageY - touch.current.y,
+        dx = e.pageX - touch.current.x;
       return dy > 12 && Math.abs(dy) > Math.abs(dx) * 1.5;
     },
     onResponderMove: ({ nativeEvent: e }: { nativeEvent: { pageY: number } }) => drag.setValue(Math.max(0, e.pageY - touch.current.y)),
     onResponderRelease: ({ nativeEvent: e }: { nativeEvent: { pageY: number; timestamp: number } }) => {
-      const dy = e.pageY - touch.current.y, speed = dy / Math.max(1, e.timestamp - touch.current.t);
-      if (dy > 140 || speed > 1.2) close(); else Animated.spring(drag, { toValue: 0, ...SPRING }).start();
+      const dy = e.pageY - touch.current.y,
+        speed = dy / Math.max(1, e.timestamp - touch.current.t);
+      if (dy > 140 || speed > 1.2) close();
+      else Animated.spring(drag, { toValue: 0, ...SPRING }).start();
     },
   };
   // At progress 0 the image sits on its thumbnail (or is faded and slightly small); at 1 it fills the screen.
@@ -107,19 +122,79 @@ export default function Viewer() {
       { scale: Animated.add(1, Animated.multiply(Animated.subtract(pose.scale, 1), rest)) },
     ],
   };
-  const chrome = { opacity: Animated.multiply(progress, drag.interpolate({ inputRange: [0, 200], outputRange: [1, 0], extrapolate: 'clamp' })) };
-  return <View {...pull} style={{ flex: 1 }}>
-    <Animated.View pointerEvents="none" style={{ position: 'absolute', inset: 0, backgroundColor: '#000', opacity: Animated.multiply(progress, drag.interpolate({ inputRange: [0, 300], outputRange: [1, 0.4], extrapolate: 'clamp' })) }} />
-    <Animated.View style={[{ flex: 1 }, figure]}>
-      <FlatList data={images} horizontal pagingEnabled initialScrollIndex={index} getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })} keyExtractor={(_, i) => String(i)} showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={({ nativeEvent }) => setPage(Math.round(nativeEvent.contentOffset.x / width))}
-        renderItem={({ item }) => <View style={{ width, height, justifyContent: 'center' }}><Figure name={item.name} source={item.source} width={width} height={height * FILL} /></View>} />
-    </Animated.View>
-    <Animated.View style={[{ position: 'absolute', top: insets.top + 6, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, chrome]}>
-      <View style={{ width: 44 }} />
-      <View style={{ alignItems: 'center', flex: 1 }}><Text numberOfLines={1} style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{images.length > 1 ? `${page + 1} of ${images.length}` : current?.name}</Text>{images.length > 1 && <Text numberOfLines={1} style={{ color: '#ffffff99', fontSize: 12 }}>{current?.name}</Text>}</View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Close" hitSlop={6} onPress={close} style={({ pressed }) => ({ width: 44, height: 44, borderRadius: 22, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}><Icon icon={Cancel01Icon} color="#ffffff" size={20} /></Pressable>
-    </Animated.View>
-    {images.length > 1 && <Animated.View style={[{ position: 'absolute', bottom: insets.bottom + 18, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 }, chrome]}>{images.map((_, i) => <View key={i} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: i === page ? '#fff' : '#ffffff59' }} />)}</Animated.View>}
-  </View>;
+  const chrome = { opacity: Animated.multiply(progress, drag.interpolate({ inputRange: [0, 200], outputRange: [1, 0], extrapolate: "clamp" })) };
+  return (
+    <View {...pull} style={{ flex: 1 }}>
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundColor: "#000",
+          opacity: Animated.multiply(progress, drag.interpolate({ inputRange: [0, 300], outputRange: [1, 0.4], extrapolate: "clamp" })),
+        }}
+      />
+      <Animated.View style={[{ flex: 1 }, figure]}>
+        <FlatList
+          data={images}
+          horizontal
+          pagingEnabled
+          initialScrollIndex={index}
+          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          keyExtractor={(_, i) => String(i)}
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={({ nativeEvent }) => setPage(Math.round(nativeEvent.contentOffset.x / width))}
+          renderItem={({ item }) => (
+            <View style={{ width, height, justifyContent: "center" }}>
+              <Figure name={item.name} source={item.source} width={width} height={height * FILL} />
+            </View>
+          )}
+        />
+      </Animated.View>
+      <Animated.View
+        style={[
+          { position: "absolute", top: insets.top + 6, left: 16, right: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+          chrome,
+        ]}
+      >
+        <View style={{ width: 44 }} />
+        <View style={{ alignItems: "center", flex: 1 }}>
+          <Text numberOfLines={1} style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>
+            {images.length > 1 ? `${page + 1} of ${images.length}` : current?.name}
+          </Text>
+          {images.length > 1 && (
+            <Text numberOfLines={1} style={{ color: "#ffffff99", fontSize: 12 }}>
+              {current?.name}
+            </Text>
+          )}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          hitSlop={6}
+          onPress={close}
+          style={({ pressed }) => ({
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: "#ffffff26",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <Icon icon={Cancel01Icon} color="#ffffff" size={20} />
+        </Pressable>
+      </Animated.View>
+      {images.length > 1 && (
+        <Animated.View
+          style={[{ position: "absolute", bottom: insets.bottom + 18, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 6 }, chrome]}
+        >
+          {images.map((_, i) => (
+            <View key={i} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: i === page ? "#fff" : "#ffffff59" }} />
+          ))}
+        </Animated.View>
+      )}
+    </View>
+  );
 }

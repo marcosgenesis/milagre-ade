@@ -7,7 +7,14 @@ import { useDismiss } from "../../lib/use-dismiss";
  * popover (or the popover itself, when it has none) takes focus when it opens. The popover is never taller
  * than `height`, so a long list scrolls instead of climbing the window.
  */
-export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: preferred, height = 360 }: {
+export function useAnchoredPopover({
+  opened,
+  setOpened,
+  trigger,
+  panel,
+  width: preferred,
+  height = 360,
+}: {
   opened: boolean;
   setOpened: (opened: boolean) => void;
   trigger: RefObject<HTMLElement | null>;
@@ -21,12 +28,24 @@ export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: p
     const rect = trigger.current?.getBoundingClientRect();
     if (!rect) return;
     const width = Math.min(preferred, window.innerWidth - 24);
-    setBounds({ left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8, width, maxHeight: Math.max(60, Math.min(height, rect.top - 20)) });
+    setBounds({
+      left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
+      bottom: window.innerHeight - rect.top + 8,
+      width,
+      maxHeight: Math.max(60, Math.min(height, rect.top - 20)),
+    });
   };
 
-  useLayoutEffect(() => { if (opened) position(); }, [opened, preferred, height]);
+  useLayoutEffect(() => {
+    if (opened) position();
+  }, [opened, preferred, height]);
 
-  useDismiss(opened, () => setOpened(false), (target) => !!(panel.current?.contains(target) || trigger.current?.contains(target)), position);
+  useDismiss(
+    opened,
+    () => setOpened(false),
+    (target) => !!(panel.current?.contains(target) || trigger.current?.contains(target)),
+    position,
+  );
 
   useEffect(() => {
     if (!opened) return;
@@ -39,7 +58,10 @@ export function useAnchoredPopover({ opened, setOpened, trigger, panel, width: p
       trigger.current?.focus();
     };
     document.addEventListener("keydown", escape, true);
-    return () => { cancelAnimationFrame(frame); document.removeEventListener("keydown", escape, true); };
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", escape, true);
+    };
   }, [opened]);
 
   return bounds;

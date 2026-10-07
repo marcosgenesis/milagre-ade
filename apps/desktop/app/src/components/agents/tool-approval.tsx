@@ -2,14 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Alert02Icon,
-  ArrowDown01Icon,
-  Cancel01Icon,
-  Loading03Icon,
-  SecurityCheckIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowDown01Icon, Cancel01Icon, Loading03Icon, SecurityCheckIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { ComponentProps } from "react";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -20,16 +13,9 @@ function Icon({ icon, size = 15 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type ToolApprovalStatus =
-  | "pending"
-  | "approving"
-  | "approved"
-  | "denied"
-  | "running"
-  | "complete"
-  | "error";
+export type ToolApprovalStatus = "pending" | "approving" | "approved" | "denied" | "running" | "complete" | "error";
 
-export type ToolApprovalCodeLanguage = "text" | "bash" | "diff" | "json" | "tsx" | "typescript";
+type ToolApprovalCodeLanguage = "text" | "bash" | "diff" | "json" | "tsx" | "typescript";
 
 export interface ToolApprovalParameter {
   id: string;
@@ -82,7 +68,11 @@ function StatusIcon({ status, reduce }: { status: ToolApprovalStatus; reduce: bo
   if (status === "denied") return <Icon icon={Cancel01Icon} size={14} />;
   if (status === "approved" || status === "complete") return <Icon icon={Tick02Icon} size={14} />;
   if (status === "approving" || status === "running") {
-    return <span className={reduce ? undefined : "animate-spin"}><Icon icon={Loading03Icon} size={14} /></span>;
+    return (
+      <span className={reduce ? undefined : "animate-spin"}>
+        <Icon icon={Loading03Icon} size={14} />
+      </span>
+    );
   }
   return <Icon icon={SecurityCheckIcon} size={14} />;
 }
@@ -91,7 +81,9 @@ export function ToolApprovalCode({ code, language = "bash", className = "" }: To
   return (
     <div className={`min-w-0 overflow-hidden rounded-control border border-line bg-inset ${className}`}>
       <div className="border-b border-line px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">{language}</div>
-      <pre className="max-h-44 overflow-auto px-2.5 py-2 text-[11px] leading-5 text-ink-2"><code className="whitespace-pre-wrap break-words">{code}</code></pre>
+      <pre className="max-h-44 overflow-auto px-2.5 py-2 text-[11px] leading-5 text-ink-2">
+        <code className="whitespace-pre-wrap break-words">{code}</code>
+      </pre>
     </div>
   );
 }
@@ -179,14 +171,14 @@ export function ToolApproval({
                 className="flex min-h-0 flex-1 flex-col overflow-hidden"
               >
                 <ScrollArea className="[scrollbar-gutter:stable]">
-                <div className="grid gap-2 border-t border-line bg-inset px-4 py-3">
-                  {parameters.map((parameter) => (
-                    <div key={parameter.id} className="grid gap-1 text-xs">
-                      <span className="font-medium text-ink-3">{parameter.label}</span>
-                      <div className="min-w-0 break-words text-ink-2">{parameter.value}</div>
-                    </div>
-                  ))}
-                </div>
+                  <div className="grid gap-2 border-t border-line bg-inset px-4 py-3">
+                    {parameters.map((parameter) => (
+                      <div key={parameter.id} className="grid gap-1 text-xs">
+                        <span className="font-medium text-ink-3">{parameter.label}</span>
+                        <div className="min-w-0 break-words text-ink-2">{parameter.value}</div>
+                      </div>
+                    ))}
+                  </div>
                 </ScrollArea>
               </motion.div>
             )}
@@ -203,13 +195,33 @@ export function ToolApproval({
             transition={reduce ? { duration: 0 } : SPRING_SWAP}
             className="flex flex-wrap justify-end gap-2 border-t border-line bg-inset px-4 py-3"
           >
-            <motion.button type="button" onClick={onDeny} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover">
+            <motion.button
+              type="button"
+              onClick={onDeny}
+              whileTap={reduce ? undefined : { scale: 0.97 }}
+              transition={SPRING_PRESS}
+              className="rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover"
+            >
               Deny
             </motion.button>
-            {onAlwaysAllow && <motion.button type="button" onClick={onAlwaysAllow} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover">
-              {alwaysAllowLabel}
-            </motion.button>}
-            <motion.button type="button" onClick={onApprove} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="rounded-control bg-ink px-3 py-2 text-xs font-medium text-surface transition-opacity hover:opacity-85">
+            {onAlwaysAllow && (
+              <motion.button
+                type="button"
+                onClick={onAlwaysAllow}
+                whileTap={reduce ? undefined : { scale: 0.97 }}
+                transition={SPRING_PRESS}
+                className="rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover"
+              >
+                {alwaysAllowLabel}
+              </motion.button>
+            )}
+            <motion.button
+              type="button"
+              onClick={onApprove}
+              whileTap={reduce ? undefined : { scale: 0.97 }}
+              transition={SPRING_PRESS}
+              className="rounded-control bg-ink px-3 py-2 text-xs font-medium text-surface transition-opacity hover:opacity-85"
+            >
               Allow once
             </motion.button>
           </motion.div>

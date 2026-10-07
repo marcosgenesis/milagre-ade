@@ -16,7 +16,40 @@ test("relative file paths, with or without a line, are links", () => {
 });
 
 test("plain words, commands, versions and URLs stay code", () => {
-  for (const code of ["npm test", "useState", "v1.2.3", "1.2.3", "https://example.com/a.ts", "http://localhost:5180", "console.log", "Math.max", "example.com", "e.g.", "foo.bar", "git status", "--flag", "a.ts b.ts", "", "src/", "src/utils", "file.ts:", "file.ts:0", "file.ts:x", "file.ts:1:2:3", "C:\\Users\\a.ts", "$HOME/a.ts", "~/a.ts", "/etc/hosts", "/abs/path/a.ts", "../outside.ts", "a/../b.ts", "mailto:a@b.co", "foo.tsx()", "name@1.2.0", "a.ts\nb.ts"]) {
+  for (const code of [
+    "npm test",
+    "useState",
+    "v1.2.3",
+    "1.2.3",
+    "https://example.com/a.ts",
+    "http://localhost:5180",
+    "console.log",
+    "Math.max",
+    "example.com",
+    "e.g.",
+    "foo.bar",
+    "git status",
+    "--flag",
+    "a.ts b.ts",
+    "",
+    "src/",
+    "src/utils",
+    "file.ts:",
+    "file.ts:0",
+    "file.ts:x",
+    "file.ts:1:2:3",
+    "C:\\Users\\a.ts",
+    "$HOME/a.ts",
+    "~/a.ts",
+    "/etc/hosts",
+    "/abs/path/a.ts",
+    "../outside.ts",
+    "a/../b.ts",
+    "mailto:a@b.co",
+    "foo.tsx()",
+    "name@1.2.0",
+    "a.ts\nb.ts",
+  ]) {
     assert.equal(fileLinkTarget(code), null, code);
   }
 });

@@ -1,0 +1,10 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.{js,jsx,ts,tsx,cjs,mjs}"
+      run: npx oxlint {staged_files}
+    format:
+      glob: "*.{js,jsx,ts,tsx,cjs,mjs,cts,mts,json,md,yml,yaml,css}"
+      exclude: ["package-lock.json"]
+      run: npx oxfmt --check --no-error-on-unmatched-pattern {staged_files}

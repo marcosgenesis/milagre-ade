@@ -33,7 +33,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 320, height: 180, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -41,13 +41,14 @@ async function browserChecks() {
     }
     throw new Error(`Timed out: ${source}`);
   }
-  const geometry = () => evaluate(`(() => [...document.querySelectorAll('.sidebar-usage-row')].map(row =>
+  const geometry = () =>
+    evaluate(`(() => [...document.querySelectorAll('.sidebar-usage-row')].map(row =>
     [...row.querySelectorAll('.sidebar-copy .overflow-hidden')].map(bar => {
       const rect = bar.getBoundingClientRect();
       return { left: rect.left, right: rect.right, width: rect.width, fill: bar.firstElementChild.style.width };
     })
   ))()`);
-  const screenshot = async name => {
+  const screenshot = async (name) => {
     await delay(350);
     const image = await window.webContents.capturePage();
     require("node:fs").writeFileSync(path.join(require("node:os").tmpdir(), `milagre-usage-${name}.png`), image.toPNG());
@@ -62,12 +63,21 @@ async function browserChecks() {
     assert.equal(codex[0].right, claude[1].right);
     assert.equal(codex[0].fill, "96%", "Full-width track preserves actual usage");
     await screenshot("weekly-only-dark");
-    await evaluate('window.setSession(true)');
+    await evaluate("window.setSession(true)");
     await waitFor('document.querySelectorAll(".sidebar-usage-row")[1].textContent.includes("5h")');
     const [twoClaude, twoCodex] = await geometry();
-    assert.deepEqual(twoCodex.map(({ left, right, width }) => ({ left, right, width })), twoClaude.map(({ left, right, width }) => ({ left, right, width })));
-    assert.deepEqual(twoCodex.map(bar => bar.width), [52, 52]);
-    assert.deepEqual(twoCodex.map(bar => bar.fill), ["32%", "96%"]);
+    assert.deepEqual(
+      twoCodex.map(({ left, right, width }) => ({ left, right, width })),
+      twoClaude.map(({ left, right, width }) => ({ left, right, width })),
+    );
+    assert.deepEqual(
+      twoCodex.map((bar) => bar.width),
+      [52, 52],
+    );
+    assert.deepEqual(
+      twoCodex.map((bar) => bar.fill),
+      ["32%", "96%"],
+    );
     await screenshot("5h-dark");
     await evaluate('document.documentElement.classList.remove("dark")');
     await screenshot("5h-light");
@@ -89,11 +99,13 @@ async function browserChecks() {
     await waitFor(`${cardText}.includes("Claude")`);
     assert.doesNotMatch(await evaluate(cardText), /Banked/, "No banked row when the account has none");
     await evaluate('document.querySelector("aside").style.marginTop = ""');
-    await evaluate('window.setCollapsed(true)');
+    await evaluate("window.setCollapsed(true)");
     await waitFor('document.querySelector("aside").dataset.sidebarCollapsed === "true"');
     assert.equal(await evaluate('getComputedStyle(document.querySelectorAll(".sidebar-usage-row")[1].querySelector(".sidebar-copy")).display'), "none");
     assert.equal(await evaluate('document.querySelectorAll(".sidebar-usage-rail")[1].firstElementChild.getBoundingClientRect().width'), 16);
-    console.log("PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail; five screenshots saved to the temp directory");
+    console.log(
+      "PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail; five screenshots saved to the temp directory",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -106,19 +118,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "sidebar-usage-fixture",
-      resolveId(id) { if (id === "/__sidebar_usage_fixture.tsx") return id; },
-      load(id) { if (id === "/__sidebar_usage_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__sidebar_usage__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__sidebar_usage_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "sidebar-usage-fixture",
+        resolveId(id) {
+          if (id === "/__sidebar_usage_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__sidebar_usage_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__sidebar_usage__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__sidebar_usage_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -127,13 +148,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__sidebar_usage__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

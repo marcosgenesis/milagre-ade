@@ -1,4 +1,4 @@
-import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from '@milagre/shared/model';
+import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
 
@@ -7,7 +7,24 @@ import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, LinkedWork, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type {
+  AgentCliStatus,
+  AgentModels,
+  AgentPorts,
+  EditorInfo,
+  AgentEvent,
+  ChatHandoverRequest,
+  ChatSendRequest,
+  CoordinatorState,
+  LinkedWork,
+  OpenProject,
+  PermissionDecision,
+  PermissionMode,
+  QuestionAnswers,
+  SkillCatalog,
+  UsageSnapshot,
+  WorktreeRequest,
+} from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -21,7 +38,12 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
-export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
+export type ReleaseChannel = "stable" | "beta";
+export type UpdateState = {
+  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable";
+  version: string | null;
+  progress: number;
+};
 
 /** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
 export type PhoneStatus = {
@@ -48,7 +70,13 @@ export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@
 /** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects.
  * `notice`: shown once, e.g. the host went away and was started again. `failed`: it couldn't be started again (`message` says why). */
 export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean; notice?: string; failed?: boolean };
-export type RuntimeSnapshot = { projects: OpenProject[]; links?: Array<{ linkId: string; state: LinkState }>; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+export type RuntimeSnapshot = {
+  projects: OpenProject[];
+  links?: Array<{ linkId: string; state: LinkState }>;
+  runs: { runs: AgentRuns; seq: number };
+  ports: AgentPorts;
+  eventSeq: number;
+};
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
 export type CanvasSnapshot = {
@@ -86,7 +114,10 @@ declare global {
        * and checks again against `seen`, the status the user saw. Rejects with git's message, or a message that
        * says the worktree changed after it was checked.
        */
-      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; alreadyRemoved?: boolean; branch: string | null; branchDeleted: boolean }>;
+      removeWorktree: (
+        worktreePath: string,
+        options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus },
+      ) => Promise<{ removed: boolean; alreadyRemoved?: boolean; branch: string | null; branchDeleted: boolean }>;
       /** The project's saved "Files to copy" patterns, with what the effective patterns match now. */
       readFilesToCopy: (projectPath: string) => Promise<FilesToCopy & { filesToCopy: string[] }>;
       /** What patterns would match, without saving them. `.worktreeinclude` still wins. */
@@ -139,7 +170,10 @@ declare global {
       sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
       onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
-      setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
+      setProjectPosition: (
+        id: string,
+        position: { x: number; y: number },
+      ) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       getCanvas: () => Promise<CanvasSnapshot>;
       addLink: (a: LinkEndpoint, b: LinkEndpoint) => Promise<ProjectLink[]>;
       removeLink: (id: string) => Promise<ProjectLink[]>;
@@ -197,6 +231,8 @@ declare global {
       onAgentPorts: (callback: (ports: AgentPorts) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
       checkForUpdates: () => Promise<UpdateState>;
+      getReleaseChannel: () => Promise<ReleaseChannel>;
+      setReleaseChannel: (channel: ReleaseChannel) => Promise<ReleaseChannel>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       getPhoneStatus: () => Promise<PhoneStatus>;
@@ -208,7 +244,11 @@ declare global {
       openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
-      accountAction: (action: "add" | "select" | "login" | "cancel" | "remove", provider: ModelProvider, value: string) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      accountAction: (
+        action: "add" | "select" | "login" | "cancel" | "remove",
+        provider: ModelProvider,
+        value: string,
+      ) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       onAccountsChanged: (callback: () => void) => () => void;
       readUsage: () => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
@@ -219,7 +259,13 @@ declare global {
       /** Whether the window lets the blurred desktop show through (macOS). `theme` picks the blur material. */
       setWindowTranslucent: (on: boolean, theme: "light" | "dark") => Promise<void>;
       /** The open project's unread chats and the notification settings, for completion alerts and the Dock badge. */
-      syncNotifications: (state: { projectPath: string; activeChatId: string | null; unread: string[]; notifyOnCompletion: boolean; showDockBadge: boolean }) => Promise<void>;
+      syncNotifications: (state: {
+        projectPath: string;
+        activeChatId: string | null;
+        unread: string[];
+        notifyOnCompletion: boolean;
+        showDockBadge: boolean;
+      }) => Promise<void>;
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;

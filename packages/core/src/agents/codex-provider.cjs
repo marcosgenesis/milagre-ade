@@ -1,4 +1,4 @@
-const { isDeepStrictEqual } = require('node:util');
+const { isDeepStrictEqual } = require("node:util");
 const { active: activeSubagent, settleSubagents } = require("./subagents.cjs");
 const fs = require("node:fs/promises");
 const { createHash } = require("node:crypto");
@@ -8,7 +8,16 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { CODEX_FAST_TIER } = require("./models.cjs");
-const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, loginMessage, mapCodexNotification, missingCliMessage } = require("./events.cjs");
+const {
+  milagreInstructions,
+  RESUME_FAILED_MESSAGE,
+  crashMessage,
+  failedWith,
+  isTerminal,
+  loginMessage,
+  mapCodexNotification,
+  missingCliMessage,
+} = require("./events.cjs");
 const { PendingPermissions, codexCommandRequest, codexDecision, codexFileRequest, insideRoot, insideWorkspace } = require("./permissions.cjs");
 const { PendingQuestions, codexQuestionRequest, codexQuestionResponse } = require("./questions.cjs");
 
@@ -23,7 +32,13 @@ function codexPolicy(permissionMode, cwd, workspaceRoots = []) {
   return {
     approvalPolicy: permissionMode === "auto" ? "on-request" : "untrusted",
     sandbox: "workspace-write",
-    sandboxPolicy: { type: "workspaceWrite", writableRoots: [...new Set([cwd, ...workspaceRoots])], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: [...new Set([cwd, ...workspaceRoots])],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
   };
 }
 
@@ -53,28 +68,33 @@ function saveGeneratedImage(item, directory = path.join(os.tmpdir(), "milagre-ge
 
 // Tool image blocks are separate visible steps; their base64 never bloats the saved transcript.
 function toolImageEvents(item) {
-  if (!['mcpToolCall', 'dynamicToolCall'].includes(item?.type) || item.status !== 'completed' || item.success === false || item.error) return [];
-  const content = item.type === 'mcpToolCall' ? item.result?.content : item.contentItems;
+  if (!["mcpToolCall", "dynamicToolCall"].includes(item?.type) || item.status !== "completed" || item.success === false || item.error) return [];
+  const content = item.type === "mcpToolCall" ? item.result?.content : item.contentItems;
   if (!Array.isArray(content)) return [];
   const events = [];
   for (const [index, block] of content.entries()) {
-    if (!['image', 'inputImage'].includes(block?.type)) continue;
+    if (!["image", "inputImage"].includes(block?.type)) continue;
     try {
       const dataUrl = block.data ? `data:${block.mimeType};base64,${block.data}` : block.imageUrl || block.image_url;
       const [{ bytes, mime }] = decodeImages([{ dataUrl }]);
-      const hash = createHash('sha256').update(bytes).digest('hex');
-      const directory = path.join(os.tmpdir(), 'milagre-generated-images');
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      const directory = path.join(os.tmpdir(), "milagre-generated-images");
       mkdirSync(directory, { recursive: true });
-      const file = path.join(directory, `${hash}.${mime === 'image/jpeg' ? 'jpg' : mime.slice(6)}`);
+      const file = path.join(directory, `${hash}.${mime === "image/jpeg" ? "jpg" : mime.slice(6)}`);
       writeFileSync(file, bytes, { mode: 0o600 });
       const id = `${item.id}:image:${index}`;
-      events.push({ type: 'step-started', step: { id, kind: 'image', title: 'Image from tool', file } }, { type: 'step-completed', id, status: 'done', file });
-    } catch { /* Unsupported tool media must not interrupt its text result. */ }
+      events.push({ type: "step-started", step: { id, kind: "image", title: "Image from tool", file } }, { type: "step-completed", id, status: "done", file });
+    } catch {
+      /* Unsupported tool media must not interrupt its text result. */
+    }
   }
   return events;
 }
 
-const turnInput = (prompt, files) => [{ type: "text", text: prompt, text_elements: [] }, ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file }))];
+const turnInput = (prompt, files) => [
+  { type: "text", text: prompt, text_elements: [] },
+  ...(files?.paths ?? []).map((file) => ({ type: "localImage", path: file })),
+];
 
 // account/read answers in well under a second; a Codex that doesn't is not held up for the default RPC timeout.
 const ACCOUNT_TIMEOUT_MS = 8000;
@@ -96,8 +116,34 @@ async function readLatestChildTurn(rpc, threadId) {
 }
 
 class CodexSession {
-  constructor({ cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled = true, linked = null, clientVersion = "0.0.0", interruptGraceMs = 3000, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { cwd, resumeId, command, env, emit, workspaceRoots, workspaceInstructions, tldrEnabled, linked, clientVersion, interruptGraceMs, createRpc });
+  constructor({
+    cwd,
+    resumeId,
+    command,
+    env,
+    emit,
+    workspaceRoots,
+    workspaceInstructions,
+    tldrEnabled = true,
+    linked = null,
+    clientVersion = "0.0.0",
+    interruptGraceMs = 3000,
+    createRpc = (options) => new CodexRpc(options),
+  }) {
+    Object.assign(this, {
+      cwd,
+      resumeId,
+      command,
+      env,
+      emit,
+      workspaceRoots,
+      workspaceInstructions,
+      tldrEnabled,
+      linked,
+      clientVersion,
+      interruptGraceMs,
+      createRpc,
+    });
     // steps: ids of the tool steps started in this turn and not yet completed.
     this.state = { threadId: resumeId ?? null, turnId: null, lastItemId: null, hasText: false, steps: new Set() };
     this.rpc = null;
@@ -124,7 +170,7 @@ class CodexSession {
   /** The app-server process, while it runs; the ports its commands open belong to the chat. */
   get pid() {
     const child = this.rpc?.child;
-    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : child?.pid ?? null;
+    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : (child?.pid ?? null);
   }
 
   async startTurn(request) {
@@ -137,8 +183,12 @@ class CodexSession {
     this.cancelRequested = false;
     Object.assign(this.state, { turnId: null, lastItemId: null, hasText: false });
     let markReady;
-    this.turnReady = new Promise((resolve) => { markReady = resolve; });
-    this.turnEnded = new Promise((resolve) => { this.markTurnEnded = resolve; });
+    this.turnReady = new Promise((resolve) => {
+      markReady = resolve;
+    });
+    this.turnEnded = new Promise((resolve) => {
+      this.markTurnEnded = resolve;
+    });
     try {
       return await this.beginTurn(request);
     } finally {
@@ -158,19 +208,23 @@ class CodexSession {
       }
       const files = images.length ? await writeImages(images) : null;
       if (files) this.imageSets.push(files);
-      const { turn } = await this.rpc.request("turn/start", {
-        threadId: this.state.threadId,
-        input: turnInput(prompt, files),
-        model,
-        ...(effort ? { effort } : {}),
-        // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
-        summary: "auto",
-        // The composer's fast mode toggle decides each turn's speed tier, as it does for Claude; off means
-        // standard speed even where ~/.codex/config.toml sets service_tier. Per turn, so the thread keeps none.
-        serviceTierForTurn: fastMode ? CODEX_FAST_TIER : "default",
-        approvalPolicy: policy.approvalPolicy,
-        sandboxPolicy: policy.sandboxPolicy,
-      }, { timeoutMs: 90_000 });
+      const { turn } = await this.rpc.request(
+        "turn/start",
+        {
+          threadId: this.state.threadId,
+          input: turnInput(prompt, files),
+          model,
+          ...(effort ? { effort } : {}),
+          // Codex only sends reasoning summaries when asked; they are the reply's thinking steps.
+          summary: "auto",
+          // The composer's fast mode toggle decides each turn's speed tier, as it does for Claude; off means
+          // standard speed even where ~/.codex/config.toml sets service_tier. Per turn, so the thread keeps none.
+          serviceTierForTurn: fastMode ? CODEX_FAST_TIER : "default",
+          approvalPolicy: policy.approvalPolicy,
+          sandboxPolicy: policy.sandboxPolicy,
+        },
+        { timeoutMs: 90_000 },
+      );
       this.state.turnId ??= turn?.id ?? null;
       if (this.cancelRequested) void this.interrupt();
       return { turnId: this.state.turnId, steered: false };
@@ -179,7 +233,13 @@ class CodexSession {
         await this.finishTurn([{ type: "session-reset" }, failedWith(RESUME_FAILED_MESSAGE)]);
         await this.close();
       } else {
-        await this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : error.notice ? failedWith(error.message, { login: error.login === true }) : { type: "turn-failed", message: error.message }]);
+        await this.finishTurn([
+          this.cancelRequested
+            ? { type: "turn-cancelled" }
+            : error.notice
+              ? failedWith(error.message, { login: error.login === true })
+              : { type: "turn-failed", message: error.message },
+        ]);
         // A session that never finished starting is unusable; closing it lets the manager start over.
         if (!this.ready) await this.close();
       }
@@ -235,7 +295,14 @@ class CodexSession {
     // The Chat's linked tools reach Codex as an MCP server in the thread's config (see linked-mcp-server.cjs).
     const url = this.linked ? await this.linked.url().catch(() => null) : null;
     const config = url ? { ...THREAD_CONFIG, mcp_servers: { milagre: { url, tool_timeout_sec: 86400 } } } : THREAD_CONFIG;
-    const threadParams = { cwd: this.cwd, model, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox, developerInstructions: milagreInstructions(this.tldrEnabled, this.workspaceInstructions), config };
+    const threadParams = {
+      cwd: this.cwd,
+      model,
+      approvalPolicy: policy.approvalPolicy,
+      sandbox: policy.sandbox,
+      developerInstructions: milagreInstructions(this.tldrEnabled, this.workspaceInstructions),
+      config,
+    };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
     if (thread?.id && thread.id !== this.state.threadId) {
       this.state.threadId = thread.id;
@@ -301,8 +368,9 @@ class CodexSession {
     if (method === "item/completed" && params.item?.type === "imageGeneration") params = { ...params, item: saveGeneratedImage(params.item) };
     const events = mapCodexNotification(method, params, this.state);
     // The mapper filters other threads and stale turns before any image is surfaced here.
-    if (method === 'item/completed' && events.some(event => event.type === 'step-completed' && event.id === String(params.item?.id))) events.push(...toolImageEvents(params.item));
-    if (events.some(event => event.type === "subagent-update")) this.scheduleSubagents();
+    if (method === "item/completed" && events.some((event) => event.type === "step-completed" && event.id === String(params.item?.id)))
+      events.push(...toolImageEvents(params.item));
+    if (events.some((event) => event.type === "subagent-update")) this.scheduleSubagents();
     if (!events.some(isTerminal)) {
       events.forEach((event) => this.emit(event));
       return;
@@ -325,7 +393,7 @@ class CodexSession {
     this.subagentTimer = setTimeout(async () => {
       this.subagentTimer = null;
       await this.refreshSubagents();
-      if ([...(this.state.subagents?.values() ?? [])].some(agent => this.shouldPollSubagent(agent))) this.scheduleSubagents();
+      if ([...(this.state.subagents?.values() ?? [])].some((agent) => this.shouldPollSubagent(agent))) this.scheduleSubagents();
     }, 1500);
     this.subagentTimer.unref?.();
   }
@@ -334,18 +402,33 @@ class CodexSession {
     const { thread } = await this.rpc.request("thread/read", { threadId }, { timeoutMs: 5000 });
     // The opposite-direction cursor includes its anchor turn, so an active item can
     // grow without getting lost. A one-turn descending page gives the next anchor.
-    const newest = await this.rpc.request("thread/turns/list", {
-      threadId, limit: previous?.cursor ? 1 : 20, sortDirection: "desc", itemsView: "full",
-    }, { timeoutMs: 5000 });
+    const newest = await this.rpc.request(
+      "thread/turns/list",
+      {
+        threadId,
+        limit: previous?.cursor ? 1 : 20,
+        sortDirection: "desc",
+        itemsView: "full",
+      },
+      { timeoutMs: 5000 },
+    );
     if (!previous?.cursor) return { ...thread, turns: [...newest.data].reverse(), cursor: newest.backwardsCursor };
     const turns = [];
     let cursor = previous.cursor;
     const seen = new Set();
     while (cursor && !seen.has(cursor)) {
       seen.add(cursor);
-      const page = await this.rpc.request("thread/turns/list", {
-        threadId, cursor, limit: 20, sortDirection: "asc", itemsView: "full",
-      }, { timeoutMs: 5000 });
+      const page = await this.rpc.request(
+        "thread/turns/list",
+        {
+          threadId,
+          cursor,
+          limit: 20,
+          sortDirection: "asc",
+          itemsView: "full",
+        },
+        { timeoutMs: 5000 },
+      );
       turns.push(...page.data);
       cursor = page.nextCursor;
     }
@@ -355,7 +438,9 @@ class CodexSession {
   refreshSubagents() {
     // A timer and a final refresh may overlap. One cursor owner prevents stale results.
     if (this.refreshingChildren) return this.refreshingChildren;
-    this.refreshingChildren = this.pollSubagents().finally(() => { this.refreshingChildren = null; });
+    this.refreshingChildren = this.pollSubagents().finally(() => {
+      this.refreshingChildren = null;
+    });
     return this.refreshingChildren;
   }
 
@@ -409,7 +494,12 @@ class CodexSession {
     else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
     else if (method === "item/fileChange/requestApproval") {
       const request = codexFileRequest(id, params, this.fileChanges.get(params.itemId));
-      this.permissions.add(request, answer, { inWorkspace: !params.grantRoot && request.files.length > 0 && (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files)) });
+      this.permissions.add(request, answer, {
+        inWorkspace:
+          !params.grantRoot &&
+          request.files.length > 0 &&
+          (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files)),
+      });
     } else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
@@ -456,7 +546,7 @@ class CodexSession {
   handleExit(detail, signal) {
     this.closed = true;
     clearTimeout(this.subagentTimer);
-    settleSubagents(this.state, this.cancelRequested ? "cancelled" : "failed").forEach(event => this.emit(event));
+    settleSubagents(this.state, this.cancelRequested ? "cancelled" : "failed").forEach((event) => this.emit(event));
     void this.finishTurn([this.cancelRequested ? { type: "turn-cancelled" } : failedWith(crashMessage("codex", detail, { signal }))]);
   }
 
@@ -504,7 +594,7 @@ class CodexSession {
 
   async close() {
     clearTimeout(this.subagentTimer);
-    settleSubagents(this.state, "cancelled").forEach(event => this.emit(event));
+    settleSubagents(this.state, "cancelled").forEach((event) => this.emit(event));
     this.permissions.cancelAll();
     this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
@@ -515,8 +605,8 @@ class CodexSession {
 
 // Reopening an idle chat need not start or resume an agent. Only its saved unknown children
 // are checked, and history items are never replayed as new output or fresh communications.
-async function recoverCodexSubagents({ cwd, command, env, agents, clientVersion = "0.0.0", createRpc = options => new CodexRpc(options) }) {
-  const unknown = (agents ?? []).filter(agent => agent.status === "unknown" && !agent.archived);
+async function recoverCodexSubagents({ cwd, command, env, agents, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
+  const unknown = (agents ?? []).filter((agent) => agent.status === "unknown" && !agent.archived);
   if (!command || !unknown.length) return [];
   let rpc;
   try {
@@ -524,7 +614,7 @@ async function recoverCodexSubagents({ cwd, command, env, agents, clientVersion 
     rpc.start();
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: 5000 });
     rpc.notify("initialized");
-    const reads = await Promise.allSettled(unknown.map(agent => readLatestChildTurn(rpc, agent.id)));
+    const reads = await Promise.allSettled(unknown.map((agent) => readLatestChildTurn(rpc, agent.id)));
     return reads.flatMap((read, index) => {
       if (read.status !== "fulfilled" || read.value?.status?.type === "active") return [];
       const last = read.value?.turns?.at(-1);
@@ -532,13 +622,20 @@ async function recoverCodexSubagents({ cwd, command, env, agents, clientVersion 
       if (!status) return [];
       const agent = unknown[index];
       const time = Math.max(Date.now(), agent.updatedAt);
-      return [{ type: "subagent-update", agent: {
-        ...agent,
-        status,
-        updatedAt: time,
-        endedAt: agent.endedAt ?? time,
-        ...(agent.latestActivity?.startsWith("Session disconnected.") ? { latestActivity: { completed: "Finished", failed: "Failed", cancelled: "Cancelled" }[status] } : {}),
-      } }];
+      return [
+        {
+          type: "subagent-update",
+          agent: {
+            ...agent,
+            status,
+            updatedAt: time,
+            endedAt: agent.endedAt ?? time,
+            ...(agent.latestActivity?.startsWith("Session disconnected.")
+              ? { latestActivity: { completed: "Finished", failed: "Failed", cancelled: "Cancelled" }[status] }
+              : {}),
+          },
+        },
+      ];
     });
   } catch {
     // A missing provider or unreadable history supplies no new evidence about these children.

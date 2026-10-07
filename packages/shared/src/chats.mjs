@@ -4,7 +4,11 @@
 export function chatTitle(session, messages) {
   if (session.title?.trim()) return session.title.trim();
   if (session.generatedTitle?.trim()) return session.generatedTitle.trim();
-  const line = messages.find((message) => message.role !== "assistant" && message.body.trim())?.body.trim().split("\n")[0] ?? "";
+  const line =
+    messages
+      .find((message) => message.role !== "assistant" && message.body.trim())
+      ?.body.trim()
+      .split("\n")[0] ?? "";
   if (!line) return session.agent_name;
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
@@ -27,7 +31,8 @@ export function comparePins(a, b) {
 
 /** The `pin_order` that puts a chat at `index` among pinned chats whose orders are `orders`, lowest first. */
 export function pinOrderAt(orders, index) {
-  const before = orders[index - 1], after = orders[index];
+  const before = orders[index - 1],
+    after = orders[index];
   if (before === undefined && after === undefined) return 0;
   if (before === undefined) return after - 1;
   if (after === undefined) return before + 1;
@@ -39,26 +44,60 @@ let nextPreviewId = -2;
 /** A local message preview. It is never written into the Project's persisted state. */
 export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider }) {
   const id = nextPreviewId--;
-  const session = state.sessions[sessionId] ?? { id, worktree_id: worktreeId, agent_name: state.worktrees[worktreeId]?.name || 'New Chat', status: 'Created', provider };
-  const message = { id, session_id: session.id, body, role: 'user', context: null, images, files, model, clientMessageId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${-id}` };
-  const messages = state.messages.filter(item => item.session_id === session.id);
-  return { session: { ...session, title: chatTitle(session, [...messages, message]) }, message, startedAt: Date.now(), sortId: state.next_id, targetSessionId: sessionId };
+  const session = state.sessions[sessionId] ?? {
+    id,
+    worktree_id: worktreeId,
+    agent_name: state.worktrees[worktreeId]?.name || "New Chat",
+    status: "Created",
+    provider,
+  };
+  const message = {
+    id,
+    session_id: session.id,
+    body,
+    role: "user",
+    context: null,
+    images,
+    files,
+    model,
+    clientMessageId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${-id}`,
+  };
+  const messages = state.messages.filter((item) => item.session_id === session.id);
+  return {
+    session: { ...session, title: chatTitle(session, [...messages, message]) },
+    message,
+    startedAt: Date.now(),
+    sortId: state.next_id,
+    targetSessionId: sessionId,
+  };
 }
 
 /** The saved Chat may arrive over the live connection before the send response does. */
 export function pendingChatSessionId(state, pending) {
   if (!pending) return null;
-  const canonical = state.messages.find(message => message.clientMessageId === pending.message.clientMessageId);
+  const canonical = state.messages.find((message) => message.clientMessageId === pending.message.clientMessageId);
   if (canonical) return canonical.session_id;
   // Older hosts omit clientMessageId. Only use their persisted input after the send response
   // confirms its target; existing inputs and messages tagged by another client cannot match.
   if (pending.acceptedSessionId == null) return null;
-  return state.messages.find(message => !message.clientMessageId && message.session_id === pending.acceptedSessionId
-    && message.id >= pending.sortId && message.role === 'user' && message.body === pending.message.body)?.session_id ?? null;
+  return (
+    state.messages.find(
+      (message) =>
+        !message.clientMessageId &&
+        message.session_id === pending.acceptedSessionId &&
+        message.id >= pending.sortId &&
+        message.role === "user" &&
+        message.body === pending.message.body,
+    )?.session_id ?? null
+  );
 }
 
 /** A display projection shared by desktop's sidebar and the phone's drawer; canonical input replaces its preview. */
 export function withPendingChat(state, pending) {
   if (!pending || pendingChatSessionId(state, pending) !== null) return state;
-  return { ...state, sessions: { ...state.sessions, [pending.session.id]: pending.session }, messages: [...state.messages, { ...pending.message, id: pending.sortId }] };
+  return {
+    ...state,
+    sessions: { ...state.sessions, [pending.session.id]: pending.session },
+    messages: [...state.messages, { ...pending.message, id: pending.sortId }],
+  };
 }

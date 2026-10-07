@@ -62,19 +62,21 @@ function createRecentProjects(file, { now = () => new Date() } = {}) {
   }
 
   function save(change) {
-    const next = queue.catch(() => {}).then(async () => {
-      const entries = change(await read({ strict: true })).slice(0, MAX_RECENT);
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      const temporary = `${file}.${process.pid}.${++counter}.tmp`;
-      try {
-        await fs.writeFile(temporary, JSON.stringify(entries, null, 2));
-        await fs.rename(temporary, file);
-      } catch (error) {
-        await fs.rm(temporary, { force: true });
-        throw error;
-      }
-      return entries;
-    });
+    const next = queue
+      .catch(() => {})
+      .then(async () => {
+        const entries = change(await read({ strict: true })).slice(0, MAX_RECENT);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        const temporary = `${file}.${process.pid}.${++counter}.tmp`;
+        try {
+          await fs.writeFile(temporary, JSON.stringify(entries, null, 2));
+          await fs.rename(temporary, file);
+        } catch (error) {
+          await fs.rm(temporary, { force: true });
+          throw error;
+        }
+        return entries;
+      });
     queue = next;
     return next;
   }
@@ -132,9 +134,22 @@ async function switchTarget(store, requested, { checkRoot = requireWorktreeRoot 
  * else the most recent project that still is one. A Dock, Finder or update relaunch starts in "/", which is neither.
  */
 async function launchProject(store, cwd, { topLevel = gitTopLevel } = {}) {
-  if (cwd !== "/" && await topLevel(cwd).then(() => true, () => false)) return cwd;
+  if (
+    cwd !== "/" &&
+    (await topLevel(cwd).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return cwd;
   for (const entry of await store.list()) {
-    if (await topLevel(entry.path).then(() => true, () => false)) return entry.path;
+    if (
+      await topLevel(entry.path).then(
+        () => true,
+        () => false,
+      )
+    )
+      return entry.path;
   }
   return cwd;
 }

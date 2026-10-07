@@ -81,18 +81,18 @@ Regras principais:
 
 Os nomes devem ser semânticos, não específicos de componentes.
 
-| Token | Valor aproximado | Uso |
-|---|---:|---|
-| `background` | `#F8FBF9` | fundo geral |
-| `surface` | `#FFFFFF` | cards e painéis |
-| `surface-muted` | `#F1F4F2` | campos e itens secundários |
-| `foreground` | `#123C3A` | texto principal |
-| `muted-foreground` | `#71817F` | texto auxiliar |
-| `border` | `#E2E8E5` | divisores e contornos |
-| `primary` | `#0D921C` | ação principal, seleção e status positivo |
-| `primary-soft` | `#E6F5E8` | fundo de seleção e destaque |
-| `accent-yellow` | `#F4F000` | agente, atenção ou inteligência |
-| `danger` | `#D85B5B` | bloqueios e erros |
+| Token              | Valor aproximado | Uso                                       |
+| ------------------ | ---------------: | ----------------------------------------- |
+| `background`       |        `#F8FBF9` | fundo geral                               |
+| `surface`          |        `#FFFFFF` | cards e painéis                           |
+| `surface-muted`    |        `#F1F4F2` | campos e itens secundários                |
+| `foreground`       |        `#123C3A` | texto principal                           |
+| `muted-foreground` |        `#71817F` | texto auxiliar                            |
+| `border`           |        `#E2E8E5` | divisores e contornos                     |
+| `primary`          |        `#0D921C` | ação principal, seleção e status positivo |
+| `primary-soft`     |        `#E6F5E8` | fundo de seleção e destaque               |
+| `accent-yellow`    |        `#F4F000` | agente, atenção ou inteligência           |
+| `danger`           |        `#D85B5B` | bloqueios e erros                         |
 
 O verde deve ser usado com parcimônia. A maior parte da tela permanece neutra; o verde indica ação ou estado, não decoração.
 

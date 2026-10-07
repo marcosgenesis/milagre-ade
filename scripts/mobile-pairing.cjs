@@ -1,13 +1,21 @@
 // computerName and pairingLink live with the daemon, which builds the same link for the Phone setting.
-const { computerName, pairingLink } = require('../apps/daemon/src/mobile-pairing.cjs');
+const { computerName, pairingLink } = require("../apps/daemon/src/mobile-pairing.cjs");
 
 // Prints the scan-to-pair block. The QR and the link both carry the token.
-function printPairing({ address, token, access, name = computerName(), qr = true, log = console.log, renderQr = (text, done) => require('qrcode-terminal').generate(text, { small: true }, done) }) {
+function printPairing({
+  address,
+  token,
+  access,
+  name = computerName(),
+  qr = true,
+  log = console.log,
+  renderQr = (text, done) => require("qrcode-terminal").generate(text, { small: true }, done),
+}) {
   const link = pairingLink({ address, token, name, access });
-  log('\nScan with the Milagre app to pair:');
-  if (qr) renderQr(link, code => log(code));
+  log("\nScan with the Milagre app to pair:");
+  if (qr) renderQr(link, (code) => log(code));
   log(`Pairing link: ${link}`);
-  log('Warning: this QR code and link grant access to your agents. Do not share or screenshot them.\n');
+  log("Warning: this QR code and link grant access to your agents. Do not share or screenshot them.\n");
   return link;
 }
 

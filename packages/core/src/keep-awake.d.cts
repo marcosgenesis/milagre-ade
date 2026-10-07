@@ -1,6 +1,6 @@
-import type { AgentEvent } from '@milagre/shared/model';
+import type { AgentEvent } from "@milagre/shared/model";
 export interface PowerSaveBlocker {
-  start(type: 'prevent-app-suspension'): number;
+  start(type: "prevent-app-suspension"): number;
   isStarted(id: number): boolean;
   stop(id: number): void;
 }

@@ -9,7 +9,8 @@ const { CANCELLED_MESSAGE } = require("./permissions.cjs");
 // or are null to dismiss the question. A question ends "answered", "dismissed", or "cancelled"
 // when its turn stops first.
 
-const DISMISSED_MESSAGE = "The user closed the question without picking an answer. If they sent a message instead, follow it; otherwise carry on without the answer, or ask in your reply if you can't.";
+const DISMISSED_MESSAGE =
+  "The user closed the question without picking an answer. If they sent a message instead, follow it; otherwise carry on without the answer, or ask in your reply if you can't.";
 const UNSHOWN_MESSAGE = "Milagre couldn't show this question. Ask it in your reply instead.";
 const MAX_QUESTIONS = 10;
 const MAX_VALUES = 20;
@@ -45,7 +46,9 @@ function claudeQuestionRequest(input, options = {}) {
 // dialog sends them: keyed by question text, several picks joined with ", ".
 function claudeQuestionResult(outcome, input, answers = {}) {
   if (outcome === "answered") {
-    const given = list(input.questions).flatMap((question, index) => (answers[String(index)]?.length ? [[question.question, answers[String(index)].join(", ")]] : []));
+    const given = list(input.questions).flatMap((question, index) =>
+      answers[String(index)]?.length ? [[question.question, answers[String(index)].join(", ")]] : [],
+    );
     return { behavior: "allow", updatedInput: { ...input, answers: Object.fromEntries(given) } };
   }
   if (outcome === "cancelled") return { behavior: "deny", message: CANCELLED_MESSAGE, interrupt: true };
@@ -61,7 +64,17 @@ function codexQuestionRequest(id, params = {}) {
     const question = text(raw?.question);
     if (!questionId || !question) return [];
     const options = list(raw.options).flatMap(option);
-    return [{ id: questionId, header: text(raw.header), question, options, multiSelect: false, allowOther: raw.isOther === true || !options.length, secret: raw.isSecret === true }];
+    return [
+      {
+        id: questionId,
+        header: text(raw.header),
+        question,
+        options,
+        multiSelect: false,
+        allowOther: raw.isOther === true || !options.length,
+        secret: raw.isSecret === true,
+      },
+    ];
   });
   return questions.length ? { requestId: String(id), questions } : null;
 }
@@ -78,7 +91,12 @@ function validAnswers(answers) {
   if (answers === null) return true;
   if (typeof answers !== "object" || Array.isArray(answers)) return false;
   const entries = Object.values(answers);
-  return entries.length <= MAX_QUESTIONS && entries.every((values) => Array.isArray(values) && values.length <= MAX_VALUES && values.every((value) => typeof value === "string" && value.length <= MAX_ANSWER));
+  return (
+    entries.length <= MAX_QUESTIONS &&
+    entries.every(
+      (values) => Array.isArray(values) && values.length <= MAX_VALUES && values.every((value) => typeof value === "string" && value.length <= MAX_ANSWER),
+    )
+  );
 }
 
 // The questions a session is waiting on. Each is settled exactly once: answered or dismissed by the

@@ -18,7 +18,6 @@ const SYSTEM = [
   "with these sections: Goal, Decisions (with the reason for each), Files touched, Current state, Next steps.",
 ].join(" ");
 
-
 function stepLine(step) {
   const notes = [step.status === "failed" ? "failed" : null, step.note, step.file].filter(Boolean);
   return `- ${step.title}${notes.length ? ` (${notes.join(", ")})` : ""}`;
@@ -29,7 +28,10 @@ function renderTranscript(state, sessionId) {
   const session = state.sessions[sessionId];
   const messages = state.messages.filter((message) => message.session_id === sessionId);
   const worktree = state.worktrees[session.worktree_id];
-  const parts = [`# Chat transcript: ${chatTitle(session, messages)}`, `Provider: ${providerName(session.provider)} · Worktree: ${worktree?.path ?? "unknown"}`];
+  const parts = [
+    `# Chat transcript: ${chatTitle(session, messages)}`,
+    `Provider: ${providerName(session.provider)} · Worktree: ${worktree?.path ?? "unknown"}`,
+  ];
   for (const message of messages) {
     if (message.role === "assistant") {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
@@ -58,7 +60,11 @@ const pointer = (file) => `Full transcript of the previous chat: ${file}. Read i
 
 function parseBrief(reply) {
   try {
-    const value = JSON.parse(String(reply ?? "").trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
+    const value = JSON.parse(
+      String(reply ?? "")
+        .trim()
+        .replace(/^```(?:json)?\s*|\s*```$/g, ""),
+    );
     return typeof value?.brief === "string" && value.brief.trim() ? value.brief.trim() : null;
   } catch {
     return null;
@@ -71,7 +77,12 @@ async function ask(call, input, timeoutMs) {
   try {
     return await Promise.race([
       call({ ...input, signal: controller.signal }),
-      new Promise((resolve) => { timer = setTimeout(() => { controller.abort(); resolve(null); }, timeoutMs); }),
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, timeoutMs);
+      }),
     ]);
   } finally {
     clearTimeout(timer);
@@ -81,9 +92,10 @@ async function ask(call, input, timeoutMs) {
 /** The new chat's first message. Never throws: when the model can't answer, a minimal brief takes its place. */
 async function generateBrief({ transcript, transcriptPath: file, provider, lastUserMessage, changedFiles }, { models = {}, timeoutMs = TIMEOUT_MS } = {}) {
   const opening = `You're taking over a chat that ran on ${providerName(provider)}.`;
-  const shown = transcript.length > TRANSCRIPT_LIMIT
-    ? `[Earlier messages are cut off; read the transcript file for them.]\n${transcript.slice(-TRANSCRIPT_LIMIT)}`
-    : transcript;
+  const shown =
+    transcript.length > TRANSCRIPT_LIMIT
+      ? `[Earlier messages are cut off; read the transcript file for them.]\n${transcript.slice(-TRANSCRIPT_LIMIT)}`
+      : transcript;
   const brief = models[provider]
     ? await ask(models[provider], { system: SYSTEM, prompt: `<transcript>\n${shown}\n</transcript>` }, timeoutMs).then(parseBrief, () => null)
     : null;

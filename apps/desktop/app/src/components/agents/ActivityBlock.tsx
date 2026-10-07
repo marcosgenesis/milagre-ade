@@ -17,9 +17,17 @@ function Icon({ icon, size = 14 }: { icon: IconData; size?: number }) {
 function Title({ title, shimmer }: { title: string; shimmer: boolean }) {
   return (
     <>
-      {titleSpans(title).map((span, index) => (span.code
-        ? <code key={index} className={`rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink ${shimmer ? "step-shimmer" : ""}`}>{span.text}</code>
-        : <span key={index} className={shimmer ? "step-shimmer" : undefined}>{span.text}</span>))}
+      {titleSpans(title).map((span, index) =>
+        span.code ? (
+          <code key={index} className={`rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink ${shimmer ? "step-shimmer" : ""}`}>
+            {span.text}
+          </code>
+        ) : (
+          <span key={index} className={shimmer ? "step-shimmer" : undefined}>
+            {span.text}
+          </span>
+        ),
+      )}
     </>
   );
 }
@@ -29,7 +37,15 @@ function Title({ title, shimmer }: { title: string; shimmer: boolean }) {
  * works the line shows what it is doing now; once done it sums up the activity. It opens to show
  * every entry in order. A single step needs no fold and shows as its own row.
  */
-export function ActivityBlock({ entries, streaming = false, waitingStepIds = [] }: { entries: ActivityEntry[]; streaming?: boolean; waitingStepIds?: string[] }) {
+export function ActivityBlock({
+  entries,
+  streaming = false,
+  waitingStepIds = [],
+}: {
+  entries: ActivityEntry[];
+  streaming?: boolean;
+  waitingStepIds?: string[];
+}) {
   const [open, setOpen] = useState(false);
   if (!entries.length) return null;
   if (entries.length === 1 && entries[0].type === "step") return <StepRow step={entries[0].step} waiting={waitingStepIds.includes(entries[0].step.id)} />;
@@ -55,9 +71,14 @@ export function ActivityBlock({ entries, streaming = false, waitingStepIds = [] 
         </span>
         {waiting && <span className="shrink-0 text-[11.5px] text-ink-3">Waiting for approval</span>}
         {!current && summary.failed > 0 && (
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] text-red"><Icon icon={Alert02Icon} size={13} />{summary.failed} failed</span>
+          <span className="flex shrink-0 items-center gap-1 text-[11.5px] text-red">
+            <Icon icon={Alert02Icon} size={13} />
+            {summary.failed} failed
+          </span>
         )}
-        <span aria-hidden className={`shrink-0 text-ink-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`}><Icon icon={ArrowDown01Icon} size={12} /></span>
+        <span aria-hidden className={`shrink-0 text-ink-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
+          <Icon icon={ArrowDown01Icon} size={12} />
+        </span>
       </button>
 
       <div
@@ -67,9 +88,15 @@ export function ActivityBlock({ entries, streaming = false, waitingStepIds = [] 
       >
         <div className="min-w-0 overflow-hidden">
           <div className="relative mt-0.5 ml-[12px] border-l border-line pl-2">
-            {entries.map((entry, index) => (entry.type === "step"
-              ? <StepRow key={entry.step.id} step={entry.step} waiting={waitingStepIds.includes(entry.step.id)} />
-              : <div key={`text-${index}`} className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2"><Markdown text={entry.text} /></div>))}
+            {entries.map((entry, index) =>
+              entry.type === "step" ? (
+                <StepRow key={entry.step.id} step={entry.step} waiting={waitingStepIds.includes(entry.step.id)} />
+              ) : (
+                <div key={`text-${index}`} className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2">
+                  <Markdown text={entry.text} />
+                </div>
+              ),
+            )}
           </div>
         </div>
       </div>

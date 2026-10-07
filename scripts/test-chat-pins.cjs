@@ -49,10 +49,14 @@ async function browserChecks() {
   await app.whenReady();
   const window = new BrowserWindow({ width: 1200, height: 560, show: false, webPreferences: { backgroundThrottling: false, partition: "chat-pins-check" } });
   window.webContents.on("did-finish-load", () => window.webContents.setZoomFactor(1));
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   // Moves carry leftButtonDown, or Chromium reads them as the button already released.
-  const mouse = (type, x, y) => window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
-  const key = keyCode => { window.webContents.sendInputEvent({ type: "keyDown", keyCode }); window.webContents.sendInputEvent({ type: "keyUp", keyCode }); };
+  const mouse = (type, x, y) =>
+    window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
+  const key = (keyCode) => {
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode });
+    window.webContents.sendInputEvent({ type: "keyUp", keyCode });
+  };
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -60,20 +64,30 @@ async function browserChecks() {
     }
     throw new Error(`Timed out: ${source}`);
   }
-  const box = (selector) => evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + 60), top: r.top, bottom: r.bottom, y: Math.round(r.top + r.height / 2) }; })()`);
-  const row = id => box(`[data-chat-id="${id}"]`);
-  const order = () => evaluate('[...document.querySelectorAll("[data-chat-id]")].map(n => n.dataset.chatId + (n.closest("[data-pinned-chats]") ? "*" : "")).join(" ")');
+  const box = (selector) =>
+    evaluate(
+      `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + 60), top: r.top, bottom: r.bottom, y: Math.round(r.top + r.height / 2) }; })()`,
+    );
+  const row = (id) => box(`[data-chat-id="${id}"]`);
+  const order = () =>
+    evaluate('[...document.querySelectorAll("[data-chat-id]")].map(n => n.dataset.chatId + (n.closest("[data-pinned-chats]") ? "*" : "")).join(" ")');
   const calls = () => evaluate("window.calls");
   // Presses on a row, moves in steps past the 4px threshold, and holds over the point before letting go.
   async function drag(from, to, { release = true } = {}) {
     mouse("mouseDown", from.x, from.y);
-    for (let i = 1; i <= 6; i++) { mouse("mouseMove", from.x, Math.round(from.y + ((to.y - from.y) * i) / 6)); await delay(30); }
+    for (let i = 1; i <= 6; i++) {
+      mouse("mouseMove", from.x, Math.round(from.y + ((to.y - from.y) * i) / 6));
+      await delay(30);
+    }
     await delay(120);
     mouse("mouseMove", to.x, to.y);
     await delay(120);
-    if (release) { mouse("mouseUp", to.x, to.y); await delay(250); }
+    if (release) {
+      mouse("mouseUp", to.x, to.y);
+      await delay(250);
+    }
   }
-  const screenshot = async name => {
+  const screenshot = async (name) => {
     const dir = process.env.MILAGRE_SCREENSHOT_DIR;
     if (!dir) return;
     fs.mkdirSync(dir, { recursive: true });
@@ -88,7 +102,8 @@ async function browserChecks() {
 
     // A click with no movement opens the chat.
     const three = await row(3);
-    mouse("mouseDown", three.x, three.y); mouse("mouseUp", three.x, three.y);
+    mouse("mouseDown", three.x, three.y);
+    mouse("mouseUp", three.x, three.y);
     await delay(150);
     assert.deepEqual((await calls()).picks, ["3"], "a click opens the chat");
 
@@ -113,10 +128,18 @@ async function browserChecks() {
     assert.equal(await order(), "4 3 2 1", "Undo unpins it");
 
     // Pin 3 again, then 1 on the line below it, then move 1 above 3.
-    await drag(await row(3), await evaluate('(() => { const r = document.querySelector("[data-chat-id=\\"3\\"]").getBoundingClientRect(); return { x: Math.round(r.left + 60), y: Math.round(r.top - 30) }; })()'), { release: false });
+    await drag(
+      await row(3),
+      await evaluate(
+        '(() => { const r = document.querySelector("[data-chat-id=\\"3\\"]").getBoundingClientRect(); return { x: Math.round(r.left + 60), y: Math.round(r.top - 30) }; })()',
+      ),
+      { release: false },
+    );
     const pinZone = await box("[data-pin-zone]");
-    mouse("mouseMove", pinZone.x, pinZone.y); await delay(120);
-    mouse("mouseUp", pinZone.x, pinZone.y); await delay(250);
+    mouse("mouseMove", pinZone.x, pinZone.y);
+    await delay(120);
+    mouse("mouseUp", pinZone.x, pinZone.y);
+    await delay(250);
     assert.equal(await order(), "3* 4 2 1");
     const pinnedThree = await row(3);
     await drag(await row(1), { x: pinnedThree.x, y: Math.round(pinnedThree.bottom - 3) });
@@ -151,7 +174,12 @@ async function browserChecks() {
     await screenshot("link-popover");
     await evaluate('document.querySelector("[data-link-confirm]").click()');
     await waitFor('/Link created/.test(document.querySelector("[data-chat-toast]")?.textContent ?? "")');
-    assert.deepEqual((await calls()).added, [[{ project_id: "p1", worktree_path: "/repo/.w/charlie" }, { project_id: "p1", worktree_path: "/repo/.w/bravo" }]]);
+    assert.deepEqual((await calls()).added, [
+      [
+        { project_id: "p1", worktree_path: "/repo/.w/charlie" },
+        { project_id: "p1", worktree_path: "/repo/.w/bravo" },
+      ],
+    ]);
     // Already linked: the same drop now explains instead of offering a Link.
     await drag(await row(4), await row(2), { release: false });
     await waitFor('/Already linked/.test(document.querySelector("[data-drop-target]")?.textContent ?? "")');
@@ -204,19 +232,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "chat-pins-fixture",
-      resolveId(id) { if (id === "/__chat_pins_fixture.tsx") return id; },
-      load(id) { if (id === "/__chat_pins_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__chat_pins__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_pins_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "chat-pins-fixture",
+        resolveId(id) {
+          if (id === "/__chat_pins_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__chat_pins_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__chat_pins__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__chat_pins_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -225,13 +262,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__chat_pins__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

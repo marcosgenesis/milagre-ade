@@ -61,10 +61,7 @@ test("runCliUpdate: claude falls back to install.sh latest", async () => {
   const result = await runCliUpdate("claude", { execImpl, inspect, linkVersion });
   assert.equal(result.ok, true);
   assert.equal(result.version, "2.1.287");
-  assert.deepEqual(executed, [
-    "claude install --force latest",
-    "curl -fsSL https://claude.ai/install.sh | bash -s latest",
-  ]);
+  assert.deepEqual(executed, ["claude install --force latest", "curl -fsSL https://claude.ai/install.sh | bash -s latest"]);
 });
 
 test("runCliUpdate: codex update succeeds", async () => {

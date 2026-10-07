@@ -1,0 +1,20 @@
+name: PR title
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  pull-requests: read
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a Conventional Commit title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          node -e '
+            const title = process.env.TITLE
+            const ok = /^(feat|fix|perf|docs|refactor|chore|ci|test|style|build|revert)(\([a-z0-9-]+\))?!?: \S/.test(title)
+            if (!ok) { console.error("PR title must look like `fix: short summary` (feat, fix, perf, docs, refactor, chore, ci, test, style, build, revert). Got: " + title); process.exit(1) }
+          '

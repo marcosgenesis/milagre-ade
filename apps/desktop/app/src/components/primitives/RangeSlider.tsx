@@ -36,10 +36,12 @@ export function RangeSlider({ showTicks = true, className = "", ...options }: Ra
 
   // One spring-smoothed position drives the handle and the fill.
   const target = useMotionValue(percent);
-  useEffect(() => { target.set(percent); }, [percent, target]);
+  useEffect(() => {
+    target.set(percent);
+  }, [percent, target]);
   const smooth = useSpring(target, SPRING_GLIDE);
   const position = reduce ? target : smooth;
-  const handleX = useTransform(position, (p) => HANDLE_INSET + Math.max(0, trackWidth - HANDLE_INSET * 2 - 4) * p / 100);
+  const handleX = useTransform(position, (p) => HANDLE_INSET + (Math.max(0, trackWidth - HANDLE_INSET * 2 - 4) * p) / 100);
   // The rounded fill ends at the handle; translating a full-size fill inside the clip keeps its corner round.
   const fillX = useTransform(position, (p) => (p >= 100 ? "0%" : `calc(${p - 100}% + ${14 - 0.16 * p}px)`));
 
@@ -57,7 +59,11 @@ export function RangeSlider({ showTicks = true, className = "", ...options }: Ra
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-y-0" style={{ left: HANDLE_INSET + 2, right: HANDLE_INSET + 2 }}>
         {ticks.map((tick) => (
-          <span key={tick} className="absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink/25" style={{ left: `${((tick - min) / (max - min)) * 100}%` }} />
+          <span
+            key={tick}
+            className="absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink/25"
+            style={{ left: `${((tick - min) / (max - min)) * 100}%` }}
+          />
         ))}
       </div>
       <motion.div

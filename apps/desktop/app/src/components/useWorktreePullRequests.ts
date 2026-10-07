@@ -18,13 +18,18 @@ const FOCUS_GAP_MS = 5000;
 function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
   const active = () => document.visibilityState === "visible" && document.hasFocus();
   let interval: number | undefined;
-  const stop = () => { window.clearInterval(interval); interval = undefined; };
+  const stop = () => {
+    window.clearInterval(interval);
+    interval = undefined;
+  };
   const resume = () => {
     if (!active()) return;
     if (Date.now() - lastRefresh() >= FOCUS_GAP_MS) refresh();
     interval ??= window.setInterval(refresh, POLL_MS);
   };
-  const pause = () => { if (!active()) stop(); };
+  const pause = () => {
+    if (!active()) stop();
+  };
   const onVisibility = () => (active() ? resume() : stop());
   if (active()) interval = window.setInterval(refresh, POLL_MS);
   window.addEventListener("focus", resume);
@@ -44,20 +49,33 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(DISMISSED_BLOCKERS) ?? "[]");
       return Array.isArray(saved) ? saved.filter((url): url is string => typeof url === "string") : [];
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   });
   useEffect(() => {
-    try { localStorage.setItem(DISMISSED_BLOCKERS, JSON.stringify(dismissedBlockers)); } catch { /* Keep working in memory. */ }
+    try {
+      localStorage.setItem(DISMISSED_BLOCKERS, JSON.stringify(dismissedBlockers));
+    } catch {
+      /* Keep working in memory. */
+    }
   }, [dismissedBlockers]);
-  const dismissBlockerAction = (pr: PullRequest, blocker: PullRequestBlocker) => setDismissedBlockers((current) => updateBlockerDismissals(current, pr, blocker));
+  const dismissBlockerAction = (pr: PullRequest, blocker: PullRequestBlocker) =>
+    setDismissedBlockers((current) => updateBlockerDismissals(current, pr, blocker));
   const stateRef = useRef(state);
   stateRef.current = state;
   const [snapshot, setSnapshot] = useState<{ projectPath: string; prs: Record<string, PullRequest | null> }>({ projectPath: "", prs: {} });
-  const pathsKey = JSON.stringify([...new Set(state?.messages.flatMap((message) => {
-    const session = state.sessions[message.session_id];
-    const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
-    return worktree ? [worktree.path] : [];
-  }) ?? [])].sort());
+  const pathsKey = JSON.stringify(
+    [
+      ...new Set(
+        state?.messages.flatMap((message) => {
+          const session = state.sessions[message.session_id];
+          const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
+          return worktree ? [worktree.path] : [];
+        }) ?? [],
+      ),
+    ].sort(),
+  );
 
   useEffect(() => {
     if (!projectPath) return;
@@ -67,25 +85,30 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     const pending = new Set<string>();
     const refresh = async (selected = paths) => {
       lastRefresh = Date.now();
-      await Promise.all(selected.map(async (path) => {
-        if (pending.has(path)) return;
-        pending.add(path);
-        try {
-          const pr = await window.milagre.readPullRequest(path).catch(() => null);
-          if (!disposed) {
-            setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
-            setSnapshot((current) => ({
-              projectPath,
-              prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
-            }));
+      await Promise.all(
+        selected.map(async (path) => {
+          if (pending.has(path)) return;
+          pending.add(path);
+          try {
+            const pr = await window.milagre.readPullRequest(path).catch(() => null);
+            if (!disposed) {
+              setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
+              setSnapshot((current) => ({
+                projectPath,
+                prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
+              }));
+            }
+          } finally {
+            pending.delete(path);
           }
-        } finally {
-          pending.delete(path);
-        }
-      }));
+        }),
+      );
     };
     void refresh();
-    const stopPolling = pollWhileActive(() => void refresh(), () => lastRefresh);
+    const stopPolling = pollWhileActive(
+      () => void refresh(),
+      () => lastRefresh,
+    );
     const unsubscribe = window.milagre.onAgentEvent(({ chatId, event }) => {
       if (!chatInProject(projectPath, chatId) || !isTurnEnd(event)) return;
       const current = stateRef.current;
@@ -110,9 +133,13 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       if (refs.length) byPath[worktree.path] = [...new Set([...(byPath[worktree.path] ?? []), ...refs])];
     }
     return byPath;
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state?.sessions, state?.worktrees and state!.messages, all listed; the compiler infers the whole state object from the non-null assertion
   }, [state?.messages, state?.sessions, state?.worktrees]);
   const chatRefsKey = JSON.stringify(Object.entries(chatRefs).sort(([a], [b]) => a.localeCompare(b)));
-  const [chatSnapshot, setChatSnapshot] = useState<{ projectPath: string; prs: Record<string, Record<PullRequestRef, PullRequest | null>> }>({ projectPath: "", prs: {} });
+  const [chatSnapshot, setChatSnapshot] = useState<{ projectPath: string; prs: Record<string, Record<PullRequestRef, PullRequest | null>> }>({
+    projectPath: "",
+    prs: {},
+  });
   const chatSnapshotRef = useRef(chatSnapshot);
   chatSnapshotRef.current = chatSnapshot;
 
@@ -126,20 +153,25 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     const refresh = async () => {
       lastRefresh = Date.now();
       const known = chatSnapshotRef.current.projectPath === projectPath ? chatSnapshotRef.current.prs : {};
-      await Promise.all(entries.map(async ([path, refs]) => {
-        const selected = refs.filter((ref) => known[path]?.[ref]?.state !== "MERGED");
-        if (!selected.length) return;
-        const prs = await window.milagre.readPullRequests(path, selected).catch(() => selected.map(() => null));
-        if (disposed) return;
-        setChatSnapshot((current) => {
-          const previous = current.projectPath === projectPath ? current.prs : {};
-          const read = Object.fromEntries(selected.map((ref, index) => [ref, prs[index] ?? null]));
-          return { projectPath, prs: { ...previous, [path]: { ...previous[path], ...read } } };
-        });
-      }));
+      await Promise.all(
+        entries.map(async ([path, refs]) => {
+          const selected = refs.filter((ref) => known[path]?.[ref]?.state !== "MERGED");
+          if (!selected.length) return;
+          const prs = await window.milagre.readPullRequests(path, selected).catch(() => selected.map(() => null));
+          if (disposed) return;
+          setChatSnapshot((current) => {
+            const previous = current.projectPath === projectPath ? current.prs : {};
+            const read = Object.fromEntries(selected.map((ref, index) => [ref, prs[index] ?? null]));
+            return { projectPath, prs: { ...previous, [path]: { ...previous[path], ...read } } };
+          });
+        }),
+      );
     };
     void refresh();
-    const stopPolling = pollWhileActive(() => void refresh(), () => lastRefresh);
+    const stopPolling = pollWhileActive(
+      () => void refresh(),
+      () => lastRefresh,
+    );
     return () => {
       disposed = true;
       stopPolling();

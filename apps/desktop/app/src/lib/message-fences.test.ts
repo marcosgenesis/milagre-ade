@@ -16,7 +16,11 @@ test("keeps an unclosed fence and inline backticks as text", () => {
 });
 
 test("reads diff rows only when every line has a marker and one changes", () => {
-  assert.deepEqual(diffRows("+a\n b\n-c"), [{ kind: "add", text: "a" }, { kind: "context", text: "b" }, { kind: "remove", text: "c" }]);
+  assert.deepEqual(diffRows("+a\n b\n-c"), [
+    { kind: "add", text: "a" },
+    { kind: "context", text: "b" },
+    { kind: "remove", text: "c" },
+  ]);
   assert.equal(diffRows(" a\n b"), null);
   assert.equal(diffRows("+a\nb"), null);
 });

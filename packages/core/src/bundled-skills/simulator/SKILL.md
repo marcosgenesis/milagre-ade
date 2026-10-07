@@ -1,0 +1,15 @@
+---
+name: simulator
+description: Attach or detach an iOS simulator or Android emulator to the current Milagre Chat so the user can view it on desktop or phone. Use when choosing a device for mobile app work or changing which device the Chat uses.
+---
+
+# Chat simulators
+
+1. Call Milagre's `simulator_list`. `devices` contains running devices attached to this Chat, `attached` also includes stopped attachments, and `available` contains other running devices on this Mac.
+2. Choose the exact device you will use. Call `simulator_attach` with its `deviceId` before interacting with it. The tool supplies the current Chat identity; do not pass a Chat id or edit association files.
+3. Use your existing device automation tools with that same device id. Attaching makes the device available in this Chat's Simulators pill on desktop and phone. It does not boot, stream, install or launch an app.
+4. Keep the device attached when finishing work so the user can inspect it. Call `simulator_detach` with its `deviceId` when the user asks to remove it or you replace it. Detach closes this Chat's viewers, preserves other Chats' attachments and leaves the device running.
+
+If no suitable device is running, use the available iOS/Android setup tools, list again and attach the chosen device. Do not attach every discovered device or infer ownership from its name, a device listing, or the fact it is running. Never stop another Chat's device to clean up this Chat.
+
+The same device may be explicitly attached to multiple Chats. Attachment is an association, not an exclusive control lease. Use the viewer's takeover controls for human control; external automation tools have their own control behavior.

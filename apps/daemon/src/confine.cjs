@@ -1,25 +1,35 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { projectOfKey } = require('@milagre/shared/agent-runs');
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { projectOfKey } = require("@milagre/shared/agent-runs");
 
-const REFUSED = 'This demo computer only opens its demo project.';
-const NOTIFICATIONS_OFF = 'Notifications are off on the demo computer.';
-const TOO_LONG = 'Messages to the demo computer are limited to 64 KB.';
+const REFUSED = "This demo computer only opens its demo project.";
+const NOTIFICATIONS_OFF = "Notifications are off on the demo computer.";
+const TOO_LONG = "Messages to the demo computer are limited to 64 KB.";
 // A message body, in UTF-8 bytes.
 const MAX_BODY = 64 * 1024;
 // What daemon:status says about the Mac itself, left out for a confined phone.
-const HIDDEN_STATUS = ['dataDir', 'socketPath', 'pid', 'uid', 'methods'];
+const HIDDEN_STATUS = ["dataDir", "socketPath", "pid", "uid", "methods"];
 const failure = (status, message) => Object.assign(new Error(message), { status });
 const refused = () => failure(403, REFUSED);
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
-const realOrNull = async file => { try { return await fs.realpath(file); } catch { return null; } };
+const realOrNull = async (file) => {
+  try {
+    return await fs.realpath(file);
+  } catch {
+    return null;
+  }
+};
 
-const chatProject = chatId => (typeof chatId === 'string' ? projectOfKey(chatId) : null);
+const chatProject = (chatId) => (typeof chatId === "string" ? projectOfKey(chatId) : null);
 // A file the phone attached: inside the folder, or one it uploaded itself.
-const attached = file => ({ file });
+const attached = (file) => ({ file });
 const none = () => [];
-const denySimulator = () => { throw refused(); };
-const denied = () => { throw refused(); };
+const denySimulator = () => {
+  throw refused();
+};
+const denied = () => {
+  throw refused();
+};
 
 /**
  * The paths in each command the phone may call, by argument shape (see core's runtime). A command missing here is
@@ -27,62 +37,68 @@ const denied = () => { throw refused(); };
  */
 const PATHS = Object.freeze({
   // Simulators are machine-wide. A demo Project never grants access to the host's devices.
-  'simulator:list': denySimulator,
-  'simulator:open': denySimulator,
-  'simulator:offer': denySimulator,
-  'simulator:status': denySimulator,
-  'simulator:control': denySimulator,
-  'simulator:input': denySimulator,
-  'simulator:close': denySimulator,
-  'push:register': none,
-  'push:unregister': none,
-  'push:focus': ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),
-  'daemon:status': none,
-  'project:recent': none,
+  "simulator:list": denySimulator,
+  "simulator:attach": denySimulator,
+  "simulator:detach": denySimulator,
+  "simulator:open": denySimulator,
+  "simulator:offer": denySimulator,
+  "simulator:status": denySimulator,
+  "simulator:control": denySimulator,
+  "simulator:input": denySimulator,
+  "simulator:close": denySimulator,
+  "push:register": none,
+  "push:unregister": none,
+  "push:focus": ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),
+  "daemon:status": none,
+  "project:recent": none,
   // Named Links span Projects. The single-folder demo must never expose them.
-  'project:registry': denied,
-  'link:list': denied,
-  'link:create': denied,
-  'link:open': denied,
-  'link:send': denied,
-  'project:open': ([projectPath]) => [projectPath],
+  "project:registry": denied,
+  "link:list": denied,
+  "link:create": denied,
+  "link:open": denied,
+  "link:send": denied,
+  "project:open": ([projectPath]) => [projectPath],
   // Takes a Project off the recent list; its folder is never touched.
-  'project:forget': ([projectPath]) => [projectPath],
+  "project:forget": ([projectPath]) => [projectPath],
   // The search names no path; its results are cut down to the folder (filterResult).
-  'project:find': none,
-  'project:image': ([projectPath]) => [projectPath],
-  'chat:runs': none,
-  'chat:send': ([request]) => [request?.projectPath, ...(request?.cwd === undefined ? [] : [request.cwd]), ...(Array.isArray(request?.files) ? request.files.map(attached) : [])],
-  'chat:resume': ([projectPath]) => [projectPath],
-  'agent:interrupt': ([chatId]) => [chatProject(chatId)],
-  'agent:respond-permission': ([value]) => [chatProject(value?.chatId)],
-  'accounts:list': none,
-  'accounts:add': none,
-  'accounts:select': none,
-  'accounts:login': none,
-  'accounts:cancel': none,
-  'accounts:remove': none,
-  'usage:read': none,
-  'usage:cached': none,
-  'agent:answer-question': ([value]) => [chatProject(value?.chatId)],
-  'agent:set-permission-mode': ([value]) => [chatProject(value?.chatId)],
-  'agent:models': none,
-  'agent:cli-status': none,
-  'chat:patch': ([projectPath]) => [projectPath],
-  'chat:archive-subagent': ([projectPath]) => [projectPath],
-  'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
-  'worktree:pull-request': ([worktreePath]) => [worktreePath],
-  'project:branches': ([projectPath]) => [projectPath],
-  'attachment:preview': ([file]) => [attached(file)],
-  'skills:list': ([projectPath]) => [projectPath],
-  'worktree:create': ([value]) => [value?.projectPath],
-  'git:diff-files': ([value]) => [value?.cwd],
-  'git:diff-file': ([value]) => [value?.cwd],
+  "project:find": none,
+  "project:image": ([projectPath]) => [projectPath],
+  "chat:runs": none,
+  "chat:send": ([request]) => [
+    request?.projectPath,
+    ...(request?.cwd === undefined ? [] : [request.cwd]),
+    ...(Array.isArray(request?.files) ? request.files.map(attached) : []),
+  ],
+  "chat:resume": ([projectPath]) => [projectPath],
+  "agent:interrupt": ([chatId]) => [chatProject(chatId)],
+  "agent:respond-permission": ([value]) => [chatProject(value?.chatId)],
+  "accounts:list": none,
+  "accounts:add": none,
+  "accounts:select": none,
+  "accounts:login": none,
+  "accounts:cancel": none,
+  "accounts:remove": none,
+  "usage:read": none,
+  "usage:cached": none,
+  "agent:answer-question": ([value]) => [chatProject(value?.chatId)],
+  "agent:set-permission-mode": ([value]) => [chatProject(value?.chatId)],
+  "agent:models": none,
+  "agent:cli-status": none,
+  "chat:patch": ([projectPath]) => [projectPath],
+  "chat:archive-subagent": ([projectPath]) => [projectPath],
+  "chat:archive-finished-subagents": ([projectPath]) => [projectPath],
+  "worktree:pull-request": ([worktreePath]) => [worktreePath],
+  "project:branches": ([projectPath]) => [projectPath],
+  "attachment:preview": ([file]) => [attached(file)],
+  "skills:list": ([projectPath]) => [projectPath],
+  "worktree:create": ([value]) => [value?.projectPath],
+  "git:diff-files": ([value]) => [value?.cwd],
+  "git:diff-file": ([value]) => [value?.cwd],
   // The roots name no path the phone sent; the answer is cut down to the folder (filterResult).
-  'worktree:roots': none,
-  'worktree:status': ([worktreePath]) => [worktreePath],
+  "worktree:roots": none,
+  "worktree:status": ([worktreePath]) => [worktreePath],
   // The worktree, its project, and the Chat whose agent the daemon closes before it looks again.
-  'worktree:remove': ([worktreePath, options]) => [worktreePath, options?.projectPath, ...(options?.chatId === undefined ? [] : [chatProject(options.chatId)])],
+  "worktree:remove": ([worktreePath, options]) => [worktreePath, options?.projectPath, ...(options?.chatId === undefined ? [] : [chatProject(options.chatId)])],
 });
 
 /**
@@ -91,16 +107,18 @@ const PATHS = Object.freeze({
  * uploaded itself (`uploadsDir`) may also be attached and shown. Anything else is a 403.
  */
 function createConfinement({ allowedRoot, uploadsDir }) {
-  if (typeof allowedRoot !== 'string' || !path.isAbsolute(allowedRoot)) throw new Error('allowedRoot must be an absolute path');
+  if (typeof allowedRoot !== "string" || !path.isAbsolute(allowedRoot)) throw new Error("allowedRoot must be an absolute path");
   let root;
   const realRoot = async () => {
-    root ??= await fs.realpath(allowedRoot).catch(() => { throw new Error(`allowedRoot does not exist: ${allowedRoot}`); });
+    root ??= await fs.realpath(allowedRoot).catch(() => {
+      throw new Error(`allowedRoot does not exist: ${allowedRoot}`);
+    });
     return root;
   };
 
   /** Whether `target` resolves inside the folder (or, with `uploads`, inside the phone's own uploads). */
   async function allows(target, { uploads = false } = {}) {
-    if (typeof target !== 'string' || !path.isAbsolute(target) || target.includes('\0')) return false;
+    if (typeof target !== "string" || !path.isAbsolute(target) || target.includes("\0")) return false;
     const real = await realOrNull(target);
     if (!real || real !== target) return false;
     if (inside(await realRoot(), real)) return true;
@@ -121,14 +139,14 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     const paths = PATHS[method];
     if (!paths || !Array.isArray(args)) throw refused();
     // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
-    if (method === 'accounts:list') return { result: { providers: [] } };
-    if (method.startsWith('accounts:')) throw failure(403, 'Accounts cannot be changed on this demo computer.');
-    if (method === 'push:register') throw failure(403, NOTIFICATIONS_OFF);
-    if (method === 'push:unregister') return { result: { registered: false } };
-    if (method === 'push:focus') return { result: null };
-    if (method === 'chat:send') args = [sendRequest(args[0])];
+    if (method === "accounts:list") return { result: { providers: [] } };
+    if (method.startsWith("accounts:")) throw failure(403, "Accounts cannot be changed on this demo computer.");
+    if (method === "push:register") throw failure(403, NOTIFICATIONS_OFF);
+    if (method === "push:unregister") return { result: { registered: false } };
+    if (method === "push:focus") return { result: null };
+    if (method === "chat:send") args = [sendRequest(args[0])];
     for (const item of paths(args)) {
-      if (item && typeof item === 'object' && 'file' in item) await check(item.file, { uploads: true });
+      if (item && typeof item === "object" && "file" in item) await check(item.file, { uploads: true });
       else await check(item);
     }
     return { args };
@@ -139,25 +157,28 @@ function createConfinement({ allowedRoot, uploadsDir }) {
    * outside it and what the daemon says about the Mac. A project:open that landed outside the folder (a subfolder of a bigger repository) is refused.
    */
   async function filterResult(method, result) {
-    if (method === 'skills:list' && result && Array.isArray(result.skills)) {
-      const kept = await Promise.all(result.skills.map(skill => skill.scope === 'bundled' || (skill.scope === 'workspace' && allows(skill.path))));
-      return { skills: result.skills.filter((_skill, index) => kept[index]).map(skill => skill.scope === 'bundled' ? { ...skill, path: '' } : skill), warnings: [] };
+    if (method === "skills:list" && result && Array.isArray(result.skills)) {
+      const kept = await Promise.all(result.skills.map((skill) => skill.scope === "bundled" || (skill.scope === "workspace" && allows(skill.path))));
+      return {
+        skills: result.skills.filter((_skill, index) => kept[index]).map((skill) => (skill.scope === "bundled" ? { ...skill, path: "" } : skill)),
+        warnings: [],
+      };
     }
-    if (method === 'daemon:status' && result && typeof result === 'object') {
+    if (method === "daemon:status" && result && typeof result === "object") {
       const kept = { ...result };
       for (const key of HIDDEN_STATUS) delete kept[key];
       return kept;
     }
-    if (method === 'project:open' && !(await allows(result?.path))) throw refused();
-    if (method === 'worktree:roots' && Array.isArray(result)) {
-      const kept = await Promise.all(result.map(root => allows(root)));
+    if (method === "project:open" && !(await allows(result?.path))) throw refused();
+    if (method === "worktree:roots" && Array.isArray(result)) {
+      const kept = await Promise.all(result.map((root) => allows(root)));
       return result.filter((_root, index) => kept[index]);
     }
-    if ((method === 'project:recent' || method === 'project:find') && Array.isArray(result)) {
-      const kept = await Promise.all(result.map(entry => allows(entry?.path)));
+    if ((method === "project:recent" || method === "project:find") && Array.isArray(result)) {
+      const kept = await Promise.all(result.map((entry) => allows(entry?.path)));
       return result.filter((_entry, index) => kept[index]);
     }
-    if (method === 'chat:runs' && result && typeof result === 'object' && result.runs && typeof result.runs === 'object') {
+    if (method === "chat:runs" && result && typeof result === "object" && result.runs && typeof result.runs === "object") {
       const entries = Object.entries(result.runs);
       const kept = await Promise.all(entries.map(([chatId]) => allows(chatProject(chatId))));
       return { ...result, runs: Object.fromEntries(entries.filter((_entry, index) => kept[index])) };
@@ -170,12 +191,12 @@ function createConfinement({ allowedRoot, uploadsDir }) {
 
 /** A chat:send request with a bounded body, a list of files, and images that carry their bytes but no Mac path. */
 function sendRequest(request) {
-  if (!request || typeof request !== 'object' || Array.isArray(request)) throw refused();
-  if (typeof request.body === 'string' && Buffer.byteLength(request.body) > MAX_BODY) throw failure(413, TOO_LONG);
-  if (request.files !== undefined && !Array.isArray(request.files)) throw failure(400, 'Attached files must be a list of paths.');
-  if (request.images !== undefined && !Array.isArray(request.images)) throw failure(400, 'Attached images must be a list.');
-  const images = request.images?.map(image => {
-    if (!image || typeof image !== 'object') return image;
+  if (!request || typeof request !== "object" || Array.isArray(request)) throw refused();
+  if (typeof request.body === "string" && Buffer.byteLength(request.body) > MAX_BODY) throw failure(413, TOO_LONG);
+  if (request.files !== undefined && !Array.isArray(request.files)) throw failure(400, "Attached files must be a list of paths.");
+  if (request.images !== undefined && !Array.isArray(request.images)) throw failure(400, "Attached images must be a list.");
+  const images = request.images?.map((image) => {
+    if (!image || typeof image !== "object") return image;
     const { path: _path, sourcePath: _sourcePath, ...rest } = image;
     return rest;
   });

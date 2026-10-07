@@ -71,7 +71,9 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-delegation-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 900, height: 720, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
@@ -103,7 +105,11 @@ async function browserChecks() {
     await evaluate('window.setFixture("receiver")');
     await waitFor('!!document.querySelector("[data-linked=delegation]")');
     assert.match(await text("[data-linked=delegation]"), /^Delegation from api \/ main \/ Health check · Negotiation round 1/);
-    assert.equal(await evaluate('document.querySelector("[data-linked=delegation]").classList.contains("items-end")'), false, "a Delegation isn't drawn as the user's own message");
+    assert.equal(
+      await evaluate('document.querySelector("[data-linked=delegation]").classList.contains("items-end")'),
+      false,
+      "a Delegation isn't drawn as the user's own message",
+    );
     assert.match(await text("[data-linked=linked-notice]"), /was cancelled before delivery/);
     await screenshot("receiver");
     await evaluate('document.querySelector("[data-linked-from]").click()');
@@ -135,19 +141,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "delegation-fixture",
-      resolveId(id) { if (id === "/__delegation_fixture.tsx") return id; },
-      load(id) { if (id === "/__delegation_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__delegation__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__delegation_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "delegation-fixture",
+        resolveId(id) {
+          if (id === "/__delegation_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__delegation_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__delegation__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__delegation_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -156,14 +171,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__delegation__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

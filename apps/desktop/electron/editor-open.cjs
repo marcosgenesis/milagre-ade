@@ -8,11 +8,16 @@ function createEditorOpener({ editors, open, checkRoot }) {
   return async (request) => {
     try {
       if (!request || typeof request.root !== "string") return failure("File not found");
-      const message = await open({ root: request.root, path: request.path, line: request.line, editor: request.editor }, { editors: await editors(), ...(checkRoot ? { checkRoot } : {}) });
+      const message = await open(
+        { root: request.root, path: request.path, line: request.line, editor: request.editor },
+        { editors: await editors(), ...(checkRoot ? { checkRoot } : {}) },
+      );
       return message ? failure(message) : { ok: true, value: null };
-    } catch (error) { return failure(ipcErrorMessage(error)); }
+    } catch (error) {
+      return failure(ipcErrorMessage(error));
+    }
   };
 }
 /** @param {string} message @returns {{ok: false; error: { code: string; message: string }}} */
-const failure = message => ({ ok: false, error: { code: "EDITOR_OPEN", message } });
+const failure = (message) => ({ ok: false, error: { code: "EDITOR_OPEN", message } });
 module.exports = { createEditorOpener };

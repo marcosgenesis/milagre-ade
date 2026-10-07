@@ -1,11 +1,11 @@
 import { forwardRef, useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { motion, useMotionValue, useMotionValueEvent, useReducedMotion, animate } from "motion/react";
+import { motion, useMotionValue, useMotionValueEvent, usePresence, useReducedMotion, animate } from "motion/react";
 import { EASE_OUT, SPRING_LAYOUT } from "../../lib/ease";
 
 /**
  * A panel docked at the window's right, entering the way the git changes panel does: its width springs open from
  * zero, the chat making room as it grows (through `reserve`, the CSS variable the chat panes read), and its content
- * slides in from the right as it fades in. Closing (under AnimatePresence) runs it backwards. `width` null lays it out
+ * slides in from the right as it fades in. Closing (under AnimatePresence) runs it backwards, from wherever it is. `width` null lays it out
  * by its own `style` instead (a panel filling the workspace), which only fades.
  */
 export const DockSlide = forwardRef<
@@ -29,20 +29,38 @@ export const DockSlide = forwardRef<
   useMotionValueEvent(shown, "change", (value) => {
     if (width !== null) document.documentElement.style.setProperty(reserve, `${value > 0.5 ? value + 12 : 0}px`);
   });
+  // Opening and closing are one spring of the width, to the panel's width or to zero: closed again while it opens, or
+  // opened again while it closes, it turns around from where it is. Closing ends by letting AnimatePresence remove it.
+  const [isPresent, safeToRemove] = usePresence();
   useEffect(() => {
+    const done = () => {
+      if (isPresent) return;
+      document.documentElement.style.removeProperty(reserve);
+      safeToRemove?.();
+    };
     if (width === null) {
       document.documentElement.style.removeProperty(reserve);
-      return;
+      if (isPresent) return;
+      // Filling the workspace, it only fades (the content's exit), then goes.
+      const timer = window.setTimeout(done, reduced ? 0 : 180);
+      return () => window.clearTimeout(timer);
     }
     if (reduced) {
-      shown.set(width);
-      document.documentElement.style.setProperty(reserve, `${width + 12}px`);
-    } else {
-      setSliding(true);
-      const controls = animate(shown, width, { ...SPRING_LAYOUT, onComplete: () => setSliding(false) });
-      return () => controls.stop();
+      shown.set(isPresent ? width : 0);
+      if (isPresent) document.documentElement.style.setProperty(reserve, `${width + 12}px`);
+      done();
+      return;
     }
-  }, [width, reduced, reserve, shown]);
+    setSliding(true);
+    const controls = animate(shown, isPresent ? width : 0, {
+      ...SPRING_LAYOUT,
+      onComplete: () => {
+        setSliding(false);
+        done();
+      },
+    });
+    return () => controls.stop();
+  }, [width, reduced, reserve, shown, isPresent, safeToRemove]);
   useEffect(
     () => () => {
       document.documentElement.style.removeProperty(reserve);
@@ -59,16 +77,6 @@ export const DockSlide = forwardRef<
       // An invisible slot, like the changes panel's: as it narrows, its left edge moves right over the card, which keeps
       // its width and so slides out to the window's edge instead of shrinking. Clipped only while the width moves.
       className={`${className} flex ${sliding ? "overflow-hidden" : ""}`}
-      exit={
-        reduced
-          ? { opacity: 0, transition: { duration: 0 } }
-          : width === null
-            ? { opacity: 0, transition: { duration: 0.18 } }
-            : { width: 0, transition: SPRING_LAYOUT }
-      }
-      onAnimationComplete={(definition: unknown) => {
-        if (definition && typeof definition === "object" && "width" in definition) document.documentElement.style.removeProperty(reserve);
-      }}
     >
       <motion.div
         className={`flex min-h-0 flex-1 flex-col ${panelClassName}`}

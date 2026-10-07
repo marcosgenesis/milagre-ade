@@ -332,6 +332,17 @@ async function browserChecks() {
     );
     await screenshot("corner-hints");
     window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Meta" });
+    // Closed and opened again before it finishes closing, the panel turns around and opens whole, not stuck at nothing.
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!!${dock} && Math.round(${dock}.getBoundingClientRect().width) === 560`);
+    await evaluate(`${toggle}.click()`);
+    await delay(80);
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!!${dock} && Math.round(${dock}.getBoundingClientRect().width) === 560`);
+    await waitFor('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock").trim() === "572px"');
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!${dock}`);
+
     // ⌘⇧E does the same as the button, also while typing in the composer.
     await evaluate('document.querySelector("textarea").focus()');
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });

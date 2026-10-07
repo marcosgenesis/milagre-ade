@@ -46,7 +46,7 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} contextUsage={{ used: 196000, size: 258400 }} streamingText="" streamingSteps={[{ id: "c-1", kind: "other", title: "Compacting context", status: "running", offset: 0 }]} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -95,6 +95,16 @@ async function browserChecks() {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("[data-slot=task-track]")');
     assert.equal(await evaluate(`document.querySelector("${pill}").textContent`), "2/7");
+    // The context ring sits beside Send, on the same row.
+    assert.equal(
+      await evaluate('document.querySelector("[role=img][aria-label^=Context]").getAttribute("aria-label")'),
+      "Context: 76% used (196k of 258k tokens)",
+    );
+    assert.ok(
+      await evaluate(
+        '(() => {const r=document.querySelector("[role=img][aria-label^=Context]").getBoundingClientRect(), s=document.querySelector("button[aria-label=Send]").getBoundingClientRect();return r.right<=s.left && Math.abs(r.top-s.top)<1})()',
+      ),
+    );
     assert.ok(await evaluate(`document.querySelector("${pill}").getBoundingClientRect().height <= 24`));
     // The pill sits right next to Subagents, on the same row.
     const gap = await evaluate(

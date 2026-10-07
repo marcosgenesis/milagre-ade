@@ -42,6 +42,7 @@ import { ArchiveProgress } from "../archive-progress";
 import { useOpenProject } from "../use-open-project";
 import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
 import { PromptField } from "../prompt-field";
+import { ContextRing } from "../context-ring";
 import { archiveFromPhone } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
@@ -265,6 +266,7 @@ export default function ChatScreen() {
   const attachments = composer.attachments[chatId] || [];
   const attachmentDisabled = busy || picking || attachments.length >= 4;
   const run = chat ? runs.runs[chatId] : undefined;
+  const contextUsage = run?.contextUsage ?? chat?.contextUsage;
   const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ""), session.models);
@@ -964,6 +966,7 @@ export default function ChatScreen() {
                     onPress={() => router.push({ pathname: "/permission-sheet", params: { chatId, ...(run ? { busy: "1" } : {}) } })}
                   />
                   <View style={{ flex: 1 }} />
+                  {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
                   {run && !draft.trim() && !attachments.length && (
                     <IconButton
                       label="Stop"

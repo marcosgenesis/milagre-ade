@@ -119,6 +119,14 @@ export interface AgentSession {
   handoverDraft?: string;
   /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
   resumeTurn?: { stoppedAt?: number };
+  /** How full the agent's context window was when its last turn ended. */
+  contextUsage?: ContextUsage;
+}
+
+/** Tokens in the agent's context window, out of the model's window size. */
+export interface ContextUsage {
+  used: number;
+  size: number;
 }
 
 /** A named Link owns one conversation across an isolated Worktree in each member Project. */
@@ -381,6 +389,7 @@ export type AgentEvent =
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
+  | ({ type: "context-usage" } & ContextUsage)
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   /** `continues`: the turn whose steering message arrived as it ended, which this turn the agent started by itself takes. */

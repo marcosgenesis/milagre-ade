@@ -899,7 +899,7 @@ git commit -m "feat(core): stop a preparing handoff and drop the handover IPC"
 - Consumes: `HandoffContext`, `isHandoff` (Task 1).
 - Produces: `HandoffDivider({ context, models })` component; `handoffLabel(context, models): { from: string; to: string; restored: boolean }` in `lib/handover.ts`.
 
-- [ ] **Step 1: Write the failing test** — replace `apps/desktop/app/src/lib/handover.test.ts` with:
+- [ ] **Step 1: Write the failing test**: replace `apps/desktop/app/src/lib/handover.test.ts` with:
 
 ```ts
 import assert from "node:assert/strict";

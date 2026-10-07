@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const net = require("node:net");
 const { once } = require("node:events");
+const { spawn } = require("node:child_process");
 const { socketPath, prepareSocketDirectory } = require("./paths.cjs");
 const { ensureDaemon } = require("./bootstrap.cjs");
 
@@ -69,6 +70,29 @@ test("a host that crashed is started again over its lock and socket", async (t) 
   const status = await again.call("daemon:status");
   assert.notEqual(status.pid, pid);
   assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, "runtime.lock/owner.json"), "utf8")).pid, status.pid);
+});
+
+test("a host that is still exiting when the start begins is started again once it has", async (t) => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-bootstrap-exiting-")));
+  const clients = [];
+  t.after(async () => {
+    for (const client of clients) {
+      try {
+        await client.call("daemon:stop");
+      } catch {}
+      client.close();
+    }
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+  // Stands in for a crashed host the kernel hasn't finished with: its lock still names a live process, for a moment.
+  const exiting = spawn(process.execPath, ["-e", "setTimeout(() => {}, 500)"], { stdio: "ignore" });
+  await once(exiting, "spawn");
+  await fs.mkdir(path.join(dataDir, "runtime.lock"));
+  const record = { pid: exiting.pid, token: "exiting", startedAt: new Date().toISOString() };
+  await fs.writeFile(path.join(dataDir, "runtime.lock/owner.json"), JSON.stringify(record));
+  const again = await ensureDaemon({ dataDir, version: "1", cwd: dataDir });
+  clients.push(again);
+  assert.notEqual((await again.call("daemon:status")).pid, exiting.pid);
 });
 
 test("a reachable older daemon is rejected without starting a competing runtime", async (t) => {

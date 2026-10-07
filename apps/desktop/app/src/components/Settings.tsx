@@ -25,7 +25,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { pairedPhonesLine, pairingWindow, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
@@ -441,6 +441,17 @@ function PhoneSettings() {
             }}
           />
         </Row>
+        {status?.enabled && status.lan && (
+          <Row label="Allow on local network" description={phoneLanLine(status) ?? ""}>
+            <Switch
+              label="Allow on local network"
+              checked={status.lan.enabled}
+              onChange={(enabled) => {
+                if (!busy) run(() => window.milagre.setPhoneLan(enabled));
+              }}
+            />
+          </Row>
+        )}
         {status?.state === "on" && status.remote === "none" && (
           <p data-phone-local-only className="px-4 py-3 text-[12px] text-ink-3">
             Only a phone simulator on this Mac can connect. Set up a Cloudflare tunnel with npm run mobile:cloudflare to reach this Mac from any network.

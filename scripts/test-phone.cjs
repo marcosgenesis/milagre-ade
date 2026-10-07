@@ -28,6 +28,7 @@ window.milagre = new Proxy({
   getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
   setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
+  setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   onPhoneStatus: (callback) => {
@@ -58,7 +59,7 @@ async function browserChecks() {
   const daemon = await startDaemon({
     dataDir,
     version: "test",
-    phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", startRelay },
+    phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", addresses: () => ["192.168.1.20"], startRelay },
     runtimeOptions: {
       cwd: dataDir,
       environmentReady: Promise.resolve(),
@@ -78,7 +79,7 @@ async function browserChecks() {
     show: false,
     webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false },
   });
-  for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"])
+  for (const method of ["phone:status", "phone:set-enabled", "phone:set-lan", "phone:reset", "phone:open-pairing"])
     ipcMain.handle(method, (_event, ...args) => host.call(method, args));
   host.on("event", ({ channel, payload }) => {
     if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -144,6 +145,20 @@ async function browserChecks() {
     assert.match(first, /^[a-f0-9]{64}$/);
     await screenshot("phone-on");
     console.log("PASS: turning it on shows the QR code, the relay status, the pairing window and the warning");
+
+    // Local network: on by default with phone access, switchable on its own, and it says where a phone on the same network dials.
+    const lanToggle = `document.querySelector('[role="switch"][aria-label="Allow on local network"]')`;
+    await waitFor(`!!${lanToggle} && document.body.textContent.includes('Reachable at 192.168.1.20')`);
+    assert.equal(await evaluate(`${lanToggle}.getAttribute('aria-checked')`), "true");
+    await screenshot("lan-on");
+    await evaluate(`${lanToggle}.click()`);
+    await waitFor(`${lanToggle}.getAttribute('aria-checked') === 'false' && !document.body.textContent.includes('Reachable at 192.168.1.20')`);
+    assert.equal((await host.call("phone:status")).lan.enabled, false);
+    await screenshot("lan-off");
+    await evaluate(`${lanToggle}.click()`);
+    await waitFor(`${lanToggle}.getAttribute('aria-checked') === 'true' && document.body.textContent.includes('Reachable at 192.168.1.20')`);
+    assert.equal((await host.call("phone:status")).lan.enabled, true);
+    console.log("PASS: the local network switch shows the Mac's address, turns off and back on");
 
     // Copy: the pairing link lands on the clipboard.
     window.webContents.focus();

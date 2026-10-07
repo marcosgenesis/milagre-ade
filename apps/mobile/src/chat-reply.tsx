@@ -11,7 +11,8 @@ import { Markdown } from "./markdown";
 import { Icon } from "./icons";
 import { ActivityTitle } from "./activity-item";
 import { ToolRow } from "./tool-row";
-import { ArtifactCards } from "./artifact";
+import { ArtifactCards, DesignFeedbackCard } from "./artifact";
+import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
 import { colors, styles } from "./ui";
@@ -205,6 +206,8 @@ export const ChatReply = memo(function ChatReply({
   const reply = replyActivity(text, steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);
   const answer = reply.answer || (!run ? unspokenThought(reply.activity, reply.answer) : "");
+  // Feedback sent from the design sheet or canvas shows as a card, not as the text the agent reads.
+  const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
   if (message?.role === "user")
     return (
       <View style={{ alignSelf: "flex-end", alignItems: "flex-end", gap: 6, maxWidth: "88%" }}>
@@ -214,12 +217,16 @@ export const ChatReply = memo(function ChatReply({
           .map((file) => (
             <FileChip key={file} path={file} />
           ))}
-        {!!text && (
-          <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: "continuous", paddingVertical: 10, paddingHorizontal: 14 }}>
-            <Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 22 }}>
-              {text}
-            </Text>
-          </View>
+        {feedback ? (
+          <DesignFeedbackCard feedback={feedback} />
+        ) : (
+          !!text && (
+            <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: "continuous", paddingVertical: 10, paddingHorizontal: 14 }}>
+              <Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 22 }}>
+                {text}
+              </Text>
+            </View>
+          )
         )}
       </View>
     );

@@ -93,7 +93,11 @@ async function browserChecks() {
   window.webContents.on("console-message", (details) => {
     if (details.level === "error" && !/Content Security Policy|example\.com/.test(details.message)) console.error(details.message);
   });
-  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  // A failing script names itself: Electron's own error says only that one failed.
+  const evaluate = (source) =>
+    window.webContents.executeJavaScript(source).catch((error) => {
+      throw new Error(`${error.message}\n  in: ${source.slice(0, 300)}`);
+    });
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
     await delay(900);
@@ -257,7 +261,35 @@ async function browserChecks() {
       /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger/,
     );
     await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]") && !${dock}.querySelector("[data-slot=artifact-send]")`);
-    assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "sent comments leave the canvas");
+    assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "nothing is left waiting to send");
+    // A sent comment stays where it was left, to read back.
+    await waitFor(`${frame("login")}.querySelectorAll("[data-slot=artifact-sent-pin]").length === 1`);
+    // In the chat the feedback is a card, not the text the agent reads: the choice, and the comment beside its spot.
+    const card = 'document.querySelector("[data-slot=design-feedback]")';
+    await waitFor(`!!${card}?.querySelector("[data-slot=design-feedback-comment] iframe")`);
+    assert.match(await evaluate(`${card}.querySelector("[data-slot=design-feedback-choice]").textContent`), /Chose Home/);
+    assert.match(
+      await evaluate(`${card}.querySelector("[data-slot=design-feedback-comment]").textContent`),
+      /Make the button bigger.*Login screen, warmer · v2/,
+    );
+    assert.equal(
+      await evaluate(`/Revise them with artifact_show/.test(${card}.closest("[data-slot=message]").textContent)`),
+      false,
+      "the agent's instructions stay out of sight",
+    );
+    await evaluate(`${card}.scrollIntoView()`);
+    await screenshot("feedback-card");
+    // The card's comment opens the canvas on it, its bubble open; the choice is only a record.
+    assert.equal(await evaluate(`${card}.querySelector("[data-slot=design-feedback-choice]").tagName`), "DIV");
+    await evaluate(`${dock}.querySelector("[aria-label='Close designs']").click()`);
+    await waitFor(`!${dock}`);
+    await evaluate(`${card}.querySelector("[data-slot=design-feedback-comment]").click()`);
+    await waitFor(`!!${dock} && /Make the button bigger/.test(${frame("login")}?.querySelector("[data-slot=artifact-comment-bubble]")?.textContent ?? "")`);
+    assert.match(await evaluate(`${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]").textContent`), /Sent to the agent/);
+    assert.equal(await evaluate(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble] textarea")`), false, "a sent comment can't change");
+    await screenshot("sent-comment");
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    await waitFor(`!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]") && !!${dock}`);
 
     // The corner button shows while the Chat has designs, and closes and reopens the canvas.
     const toggle = 'document.querySelector("[data-panel-toggle=designs]")';
@@ -265,6 +297,11 @@ async function browserChecks() {
     assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no simulator button without a simulator");
     await evaluate(`${toggle}.click()`);
     await waitFor(`!${dock} && ${toggle}.getAttribute("aria-pressed") === "false"`);
+    // ⌘⇧E does the same as the button.
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });
+    await waitFor(`!!${dock} && ${dock}.querySelectorAll("[data-slot=artifact-frame]").length === 2`);
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });
+    await waitFor(`!${dock}`);
     await evaluate(`${toggle}.click()`);
     await waitFor(`!!${dock} && ${dock}.querySelectorAll("[data-slot=artifact-frame]").length === 2`);
 

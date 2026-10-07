@@ -3934,3 +3934,22 @@ test("on the design sheet, choosing and commenting wait for Send, which hands on
   assert.equal(backs, 1);
   h.cleanup();
 });
+
+test("feedback from the designs shows as a card of the choice and each comment", () => {
+  const h = artifactHost({ url: "mac" });
+  const { parseDesignFeedback, designFeedbackMessage } = require("../packages/shared/src/artifact.ts");
+  const home = { id: "home", version: 2, title: "Home" };
+  const feedback = parseDesignFeedback(designFeedbackMessage({ choice: home, comments: [{ design: home, x: 0.5, y: 0.2, text: "Bigger title" }] }));
+  const tree = h.render("DesignFeedbackCard", { feedback });
+  const texts = [];
+  const walk = (node) => {
+    if (typeof node === "string" || typeof node === "number") texts.push(String(node));
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node?.props) walk(node.props.children);
+  };
+  walk(tree);
+  const all = texts.join("|");
+  assert.match(all, /Chose \|?Home/);
+  assert.match(all, /Bigger title/);
+  assert.doesNotMatch(all, /artifact_show/, "the agent's instructions stay out of sight");
+});

@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { PaintBoardIcon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import Tooltip from "../primitives/Tooltip";
+import { isModalOpen } from "../../lib/modal";
 
 /** A side panel the open Chat can show: whether it is open, and what shows or hides it. */
 export type SidePanel = { open: boolean; toggle: () => void };
@@ -38,9 +39,10 @@ export function useSidePanels() {
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-const BUTTONS: { name: PanelName; label: string; icon: typeof PaintBoardIcon }[] = [
-  { name: "designs", label: "designs", icon: PaintBoardIcon },
-  { name: "simulator", label: "simulator", icon: SmartphoneIcon },
+// ⌘⇧D is the changes panel's, ⌘⇧T the theme's and ⌘⇧L the canvas's (App handles those).
+const BUTTONS: { name: PanelName; label: string; icon: typeof PaintBoardIcon; shortcut: string; key: string }[] = [
+  { name: "designs", label: "designs", icon: PaintBoardIcon, shortcut: "⌘⇧E", key: "e" },
+  { name: "simulator", label: "simulator", icon: SmartphoneIcon, shortcut: "⌘⇧S", key: "s" },
 ];
 
 /** How many buttons PanelToggles shows, for what sits left of them. */
@@ -52,15 +54,29 @@ export const sidePanelCount = (shown: Partial<Record<PanelName, SidePanel>>) => 
  */
 export function PanelToggles({ right }: { right: number }) {
   const shown = useSidePanels();
+  // Each button's shortcut, while its button shows.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || isModalOpen()) return;
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+      const button = BUTTONS.find(({ key }) => key === event.key.toLowerCase());
+      const panel = button && panels[button.name];
+      if (!panel) return;
+      event.preventDefault();
+      panel.toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const buttons = BUTTONS.filter(({ name }) => shown[name]);
   if (!buttons.length) return null;
   return (
     // Same line as the traffic lights and the changes toggle (top 14px, 32px tall).
     <div data-slot="panel-toggles" className="fixed top-[14px] z-[60] flex gap-1 [-webkit-app-region:no-drag]" style={{ right }}>
-      {buttons.map(({ name, label, icon }) => {
+      {buttons.map(({ name, label, icon, shortcut }) => {
         const panel = shown[name]!;
         return (
-          <Tooltip key={name} label={panel.open ? `Hide ${label}` : `Show ${label}`} side="bottom" align="end">
+          <Tooltip key={name} label={panel.open ? `Hide ${label}` : `Show ${label}`} shortcut={shortcut} side="bottom" align="end">
             <button
               type="button"
               aria-label={`Toggle ${label} panel`}

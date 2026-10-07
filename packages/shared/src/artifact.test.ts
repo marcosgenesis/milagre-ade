@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ARTIFACT_CSP, artifactDocument, chosenDesign, designFeedbackMessage } from "./artifact.ts";
+import { ARTIFACT_CSP, artifactDocument, chosenDesign, designFeedbackMessage, parseDesignFeedback } from "./artifact.ts";
 import { replyActivity } from "./reply-parts.ts";
 
 const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
@@ -85,4 +85,17 @@ test("a reply shows each design once, at the newest version it made", () => {
       ["alt-c", 1],
     ],
   );
+});
+
+test("feedback reads back from its message, and nothing else does", () => {
+  const choice = { id: "home", version: 2, title: 'Home "B"' };
+  const comments = [
+    { design: { id: "login", version: 1, title: "Login" }, x: 0.55, y: 0.38, text: "I don't like this yellow" },
+    { design: choice, text: "More air: here" },
+  ];
+  assert.deepEqual(parseDesignFeedback(designFeedbackMessage({ choice, comments })), { choice, comments });
+  assert.deepEqual(parseDesignFeedback(designFeedbackMessage({ choice, comments: [] })), { choice, comments: [] });
+  assert.deepEqual(parseDesignFeedback(designFeedbackMessage({ comments: [comments[0]!] })), { choice: null, comments: [comments[0]] });
+  assert.equal(parseDesignFeedback("make it warmer"), null);
+  assert.equal(parseDesignFeedback(`${designFeedbackMessage({ comments })}\n\nAnd one more thing`), null);
 });

@@ -7,13 +7,14 @@ import {
   ArrowExpand01Icon,
   ArrowShrink01Icon,
   Cancel01Icon,
+  CheckmarkCircle02Icon,
   Comment01Icon,
   FitToScreenIcon,
   MinusSignIcon,
   Add01Icon,
   PaintBoardIcon,
 } from "@hugeicons/core-free-icons";
-import { chosenDesign, designFeedbackMessage } from "@milagre/shared/artifact";
+import { chosenDesign, designFeedbackMessage, parseDesignFeedback, type DesignComment } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 import { DESIGNS_EXPANDED, useDockArea } from "./dock-area";
@@ -46,8 +47,10 @@ type ArtifactsValue = {
   open: (ref: ArtifactRef) => void;
   /** Opens the canvas framing these designs together. */
   openAll: (refs: ArtifactRef[]) => void;
+  /** Opens the canvas on a sent comment, its bubble open: `key` is "<message id>:<comment index>". */
+  openComment: (key: string) => void;
 };
-const Artifacts = createContext<ArtifactsValue>({ chatId: null, latest: new Map(), open: () => {}, openAll: () => {} });
+const Artifacts = createContext<ArtifactsValue>({ chatId: null, latest: new Map(), open: () => {}, openAll: () => {}, openComment: () => {} });
 
 /** The newest version of each design among a Chat's steps, in the order they were first shown. */
 export function latestArtifacts(steps: ChatStep[]): Map<string, ArtifactRef> {
@@ -62,7 +65,20 @@ export function latestArtifacts(steps: ChatStep[]): Map<string, ArtifactRef> {
  * A design at the screen size it was made for, scaled to fit its box whole and centered: a laptop screen fills the
  * card's width, a phone screen its height. A host from before screen sizes sends none; it gets the default.
  */
-function ScaledPreview({ html, title, width = 1280, height = 800 }: { html: string; title: string; width?: number; height?: number }) {
+function ScaledPreview({
+  html,
+  title,
+  width = 1280,
+  height = 800,
+  pin,
+}: {
+  html: string;
+  title: string;
+  width?: number;
+  height?: number;
+  /** A comment's spot on the design, as fractions of its screen, marked over the preview. */
+  pin?: { x: number; y: number; label: string };
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -77,10 +93,19 @@ function ScaledPreview({ html, title, width = 1280, height = 800 }: { html: stri
     <div ref={box} className="absolute inset-0 bg-canvas">
       {scale > 0 && (
         <div
-          className="absolute top-0 left-0 origin-top-left overflow-hidden"
+          className="absolute top-0 left-0 origin-top-left"
           style={{ width, height, transform: `translate(${(size.width - width * scale) / 2}px, ${(size.height - height * scale) / 2}px) scale(${scale})` }}
         >
           <ArtifactFrame html={html} title={title} preview />
+          {pin && (
+            <span
+              aria-hidden
+              className="absolute grid size-5 place-items-center rounded-full rounded-bl-none bg-accent text-[10px] font-medium text-white shadow-raised"
+              style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, transform: `translateY(-100%) scale(${1 / scale})`, transformOrigin: "bottom left" }}
+            >
+              {pin.label}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -125,6 +150,77 @@ export const ArtifactCard = memo(function ArtifactCard({ step }: { step: ChatSte
     </div>
   );
 });
+
+/**
+ * Feedback the user sent from the canvas, shown as what it was instead of the text the agent reads: the design they
+ * chose, and each comment beside the spot it was pinned on. A pinned comment opens the canvas on it.
+ */
+export function DesignFeedbackCard({
+  feedback,
+  messageId,
+}: {
+  feedback: { choice: ArtifactRef | null; comments: DesignComment[] };
+  messageId: number | string;
+}) {
+  const { chatId, openComment } = useContext(Artifacts);
+  return (
+    <div data-slot="design-feedback" className="w-full max-w-md overflow-hidden rounded-xl border border-line bg-surface text-[13px]">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-[12px] text-ink-2">
+        <HugeiconsIcon icon={PaintBoardIcon} size={14} aria-hidden />
+        Feedback on the designs
+      </div>
+      {feedback.choice && (
+        <div data-slot="design-feedback-choice" className="flex w-full items-center gap-2 px-3 py-2">
+          <HugeiconsIcon icon={CheckmarkCircle02Icon} size={16} className="shrink-0 text-accent" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            Chose <span className="font-medium">{feedback.choice.title}</span>
+          </span>
+          <span className="text-[11px] text-ink-3">v{feedback.choice.version}</span>
+        </div>
+      )}
+      {feedback.comments.map((comment, index) => (
+        <FeedbackComment
+          key={index}
+          comment={comment}
+          number={index + 1}
+          // A pinned comment opens on the canvas, where it was left; one without a spot has nowhere to go.
+          onOpen={chatId && comment.x !== undefined ? () => openComment(`${messageId}:${index}`) : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FeedbackComment({ comment, number, onOpen }: { comment: DesignComment; number: number; onOpen?: () => void }) {
+  const { chatId } = useContext(Artifacts);
+  const { artifact } = useArtifact(chatId, comment.design.id, comment.design.version);
+  const Row = onOpen ? "button" : "div";
+  return (
+    <Row
+      data-slot="design-feedback-comment"
+      {...(onOpen ? { type: "button" as const, onClick: onOpen, "aria-label": `Show comment ${number} on ${comment.design.title}` } : {})}
+      className={`flex w-full items-start gap-3 border-t border-line px-3 py-2 text-left first:border-t-0 ${onOpen ? "hover:bg-hover" : ""}`}
+    >
+      <span className="relative block h-16 w-24 shrink-0 overflow-hidden rounded-[6px] border border-line">
+        {artifact && (
+          <ScaledPreview
+            html={artifact.html}
+            title={`Preview of ${comment.design.title}`}
+            width={artifact.width}
+            height={artifact.height}
+            pin={comment.x === undefined || comment.y === undefined ? undefined : { x: comment.x, y: comment.y, label: String(number) }}
+          />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-ink">{comment.text}</span>
+        <span className="block truncate text-[11px] text-ink-3">
+          {comment.design.title} · v{comment.design.version}
+        </span>
+      </span>
+    </Row>
+  );
+}
 
 /** The designs one reply showed: a card for one, a strip of thumbnails for several. */
 export function ArtifactCards({ steps }: { steps: (ChatStep & { artifact: ArtifactRef })[] }) {
@@ -182,27 +278,45 @@ function GroupThumb({ design }: { design: ArtifactRef }) {
   );
 }
 
-type Opened = { chatId: string | null; focus: { id: string | null; nonce: number }; versions: Record<string, number | null> };
+type Opened = {
+  chatId: string | null;
+  focus: { id: string | null; nonce: number };
+  versions: Record<string, number | null>;
+  /** A sent comment to open on the canvas. */
+  comment?: string;
+};
 
 /**
- * The designs of one Chat: cards in its replies and the canvas docked beside it. `bodies` are the Chat's user messages,
- * where the last design the user chose is read back; `onSend` sends a comment or a choice to the agent.
+ * The designs of one Chat: cards in its replies and the canvas docked beside it. `userMessages` are the Chat's user
+ * messages, where the last design the user chose and the comments already sent are read back; `onSend` sends feedback.
  */
 export function ArtifactsProvider({
   chatId,
   steps,
-  bodies,
+  userMessages,
   onSend,
   children,
 }: {
   chatId: string | null;
   steps: ChatStep[];
-  bodies: string[];
+  userMessages: { id: number | string; body: string }[];
   onSend?: (text: string) => Promise<boolean>;
   children: React.ReactNode;
 }) {
   const latest = useMemo(() => latestArtifacts(steps), [steps]);
-  const chosen = useMemo(() => chosenDesign(bodies), [bodies]);
+  const chosen = useMemo(() => chosenDesign(userMessages.map((message) => message.body)), [userMessages]);
+  // Comments already sent stay on the canvas, where the user left them.
+  const sent = useMemo<DesignPin[]>(
+    () =>
+      userMessages.flatMap((message) =>
+        (parseDesignFeedback(message.body)?.comments ?? []).flatMap((comment, index) =>
+          comment.x === undefined || comment.y === undefined
+            ? []
+            : [{ key: `${message.id}:${index}`, design: comment.design, x: comment.x, y: comment.y, text: comment.text }],
+        ),
+      ),
+    [userMessages],
+  );
   // What is open belongs to the Chat it opened in: switching Chats closes it.
   const [openedIn, setOpenedIn] = useState<Opened | null>(null);
   const opened = openedIn?.chatId === chatId ? openedIn : null;
@@ -217,6 +331,19 @@ export function ArtifactsProvider({
           focus: { id: ref.id, nonce: (current?.focus.nonce ?? 0) + 1 },
           versions: { ...(current?.chatId === chatId ? current.versions : {}), [ref.id]: latest.get(ref.id)?.version === ref.version ? null : ref.version },
         })),
+      openComment: (key) => {
+        const pin = sent.find((item) => item.key === key);
+        if (!pin) return;
+        setOpenedIn((current) => ({
+          chatId,
+          focus: { id: pin.design.id, nonce: (current?.focus.nonce ?? 0) + 1 },
+          versions: {
+            ...(current?.chatId === chatId ? current.versions : {}),
+            [pin.design.id]: latest.get(pin.design.id)?.version === pin.design.version ? null : pin.design.version,
+          },
+          comment: key,
+        }));
+      },
       openAll: (refs) =>
         setOpenedIn((current) => ({
           chatId,
@@ -227,7 +354,7 @@ export function ArtifactsProvider({
           },
         })),
     }),
-    [chatId, latest],
+    [chatId, latest, sent],
   );
   // The window's top-right corner offers the designs too, while this Chat has any.
   const toggleDesigns = useCallback(() => (opened ? setOpenedIn(null) : value.openAll([...latest.values()])), [opened, value, latest]);
@@ -248,6 +375,8 @@ export function ArtifactsProvider({
             versions={opened.versions}
             onVersion={(id, version) => setOpenedIn({ ...opened, versions: { ...opened.versions, [id]: version } })}
             chosen={chosen}
+            sent={sent}
+            openComment={opened.comment}
             onSend={onSend}
             onClose={() => setOpenedIn(null)}
           />
@@ -264,6 +393,8 @@ function ArtifactDock({
   versions,
   onVersion,
   chosen,
+  sent,
+  openComment,
   onSend,
   onClose,
 }: {
@@ -273,12 +404,16 @@ function ArtifactDock({
   versions: Record<string, number | null>;
   onVersion: (id: string, version: number | null) => void;
   chosen: { id: string; version: number } | null;
+  sent: DesignPin[];
+  openComment?: string;
   onSend?: (text: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const area = useDockArea();
   const reduced = useReducedMotion();
+  // The designs' frames mount once the panel has slid in: building them while it moves is what makes it stutter.
+  const [entered, setEntered] = useState(!!reduced);
   const cramped = !!area && area.width - DOCK_WIDTH - 12 < MIN_CHAT_WIDTH;
   const full = expanded || cramped;
   const canvas = useRef<CanvasHandle>(null);
@@ -286,7 +421,11 @@ function ArtifactDock({
   const [commenting, setCommenting] = useState(false);
   // Feedback waits here until Send: comments pinned on designs, and the design the user chose.
   const [pins, setPins] = useState<DesignPin[]>([]);
-  const [openPin, setOpenPin] = useState<string | null>(null);
+  const [openPin, setOpenPin] = useState<string | null>(openComment ?? null);
+  // A sent comment opened from the chat opens its bubble, also when the canvas is open already.
+  useEffect(() => {
+    if (openComment) setOpenPin(openComment);
+  }, [openComment, focus.nonce]);
   const [choice, setChoice] = useState<ArtifactRef | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -328,6 +467,7 @@ function ArtifactDock({
   };
   const comments: PinControls = {
     pins,
+    sent,
     open: openPin,
     onPin: (design, x, y) => {
       const key = `${Date.now()}-${pins.length}`;
@@ -349,7 +489,8 @@ function ArtifactDock({
       initial={reduced ? false : { opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, x: 24 }}
-      transition={{ duration: 0.24, ease: EASE_OUT }}
+      transition={{ duration: 0.18, ease: EASE_OUT }}
+      onAnimationComplete={() => setEntered(true)}
       role="dialog"
       aria-label="Designs"
       aria-modal="false"
@@ -440,22 +581,26 @@ function ArtifactDock({
           </button>
         </Tooltip>
       </header>
-      <ArtifactCanvas
-        ref={canvas}
-        chatId={chatId}
-        designs={designs}
-        versions={versions}
-        onVersion={onVersion}
-        focus={focus}
-        commenting={commenting}
-        comments={comments}
-        choice={{
-          sent: chosen,
-          pending: choice,
-          onChoose: onSend ? (design) => setChoice((current) => (current?.id === design.id && current.version === design.version ? null : design)) : null,
-        }}
-        onView={setView}
-      />
+      {entered ? (
+        <ArtifactCanvas
+          ref={canvas}
+          chatId={chatId}
+          designs={designs}
+          versions={versions}
+          onVersion={onVersion}
+          focus={focus}
+          commenting={commenting}
+          comments={comments}
+          choice={{
+            sent: chosen,
+            pending: choice,
+            onChoose: onSend ? (design) => setChoice((current) => (current?.id === design.id && current.version === design.version ? null : design)) : null,
+          }}
+          onView={setView}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 bg-canvas" />
+      )}
     </motion.div>,
     document.body,
   );

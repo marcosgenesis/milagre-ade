@@ -13,6 +13,73 @@ import { useSession } from "./session";
 import { Icon } from "./icons";
 import { CircleButton, PillButton, colors, styles } from "./ui";
 
+/** Feedback the user sent on the designs, as what it was: the design they chose, then each comment and its design. */
+export function DesignFeedbackCard({ feedback }: { feedback: { choice: ArtifactRef | null; comments: DesignComment[] } }) {
+  return (
+    <View
+      accessibilityLabel="Feedback on the designs"
+      style={{
+        minWidth: 240,
+        borderRadius: 18,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: colors.line,
+        backgroundColor: colors.surface,
+        overflow: "hidden",
+      }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          borderBottomWidth: 1,
+          borderColor: colors.line,
+        }}
+      >
+        <Icon icon={PaintBoardIcon} tone="ink2" size={14} />
+        <Text style={{ color: colors.ink2, fontSize: 12 }}>Feedback on the designs</Text>
+      </View>
+      {feedback.choice && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 }}>
+          <Icon icon={CheckmarkCircle02Icon} tone="accent" size={16} />
+          <Text style={{ flex: 1, color: colors.ink, fontSize: 15 }} numberOfLines={1}>
+            Chose {feedback.choice.title}
+          </Text>
+          <Text style={{ color: colors.ink3, fontSize: 12 }}>v{feedback.choice.version}</Text>
+        </View>
+      )}
+      {feedback.comments.map((comment, index) => (
+        <View key={index} style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderColor: colors.line }}>
+          <View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 10,
+              borderBottomLeftRadius: 0,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: colors.accent,
+            }}
+          >
+            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>{index + 1}</Text>
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 21 }}>
+              {comment.text}
+            </Text>
+            <Text numberOfLines={1} style={{ color: colors.ink3, fontSize: 12 }}>
+              {comment.design.title} · v{comment.design.version}
+            </Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 /** The designs one reply showed: a card for one, one card naming them all for several, which opens at the first. */
 export function ArtifactCards({ steps, chatId, chosen }: { steps: ArtifactStep[]; chatId?: string; chosen?: string }) {
   const { client } = useSession();

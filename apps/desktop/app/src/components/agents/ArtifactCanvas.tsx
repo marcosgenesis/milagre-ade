@@ -10,6 +10,8 @@ export type DesignPin = { key: string; design: ArtifactRef; x: number; y: number
 /** The comments pinned on the canvas, the one whose bubble is open, and what changes them. */
 export type PinControls = {
   pins: DesignPin[];
+  /** Comments already sent: shown where they were left, to read, not to change. */
+  sent: DesignPin[];
   open: string | null;
   onPin: (design: ArtifactRef, x: number, y: number) => void;
   onOpen: (key: string | null) => void;
@@ -295,6 +297,7 @@ function DesignFrame({
   const sentHere = !choice.pending && choice.sent?.id === design.id && choice.sent.version === shown.version;
   const isChosen = pendingHere || sentHere;
   const framePins = comments.pins.filter((pin) => pin.design.id === design.id && pin.design.version === shown.version);
+  const sentPins = comments.sent.filter((pin) => pin.design.id === design.id && pin.design.version === shown.version);
   const go = (next: number) => onVersion(next >= last ? null : next);
   // Too narrow on screen for the title and its controls on one row, the controls go under the title.
   const narrow = width * scale < 300;
@@ -373,7 +376,7 @@ function DesignFrame({
           // Over a design that doesn't have the mouse: wheel and drag reach the canvas, and a click (see endDrag) hands it the mouse.
           <div data-slot="artifact-shield" aria-label={`Interact with ${shown.title}`} className="absolute inset-0 cursor-grab" />
         )}
-        {(commenting || framePins.length > 0) && (
+        {(commenting || framePins.length > 0 || sentPins.length > 0) && (
           // Over the design, so a click pins a comment instead of reaching the design. Outside its clipping, so a
           // comment's bubble near an edge stays whole.
           <div
@@ -387,6 +390,17 @@ function DesignFrame({
               comments.onPin(shown, (event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
             }}
           >
+            {sentPins.map((pin) => (
+              <CommentPin
+                key={pin.key}
+                pin={pin}
+                number={Number(pin.key.split(":").at(-1)) + 1}
+                open={comments.open === pin.key}
+                scale={scale}
+                comments={comments}
+                sent
+              />
+            ))}
             {framePins.map((pin) => (
               <CommentPin key={pin.key} pin={pin} number={comments.pins.indexOf(pin) + 1} open={comments.open === pin.key} scale={scale} comments={comments} />
             ))}
@@ -402,11 +416,37 @@ function DesignFrame({
  * elsewhere closes the bubble, keeping the comment for Send; one closed empty is removed. Both stay the same size on
  * screen however far the canvas zooms.
  */
-function CommentPin({ pin, number, open, scale, comments }: { pin: DesignPin; number: number; open: boolean; scale: number; comments: PinControls }) {
+function CommentPin({
+  pin,
+  number,
+  open,
+  scale,
+  comments,
+  sent = false,
+}: {
+  pin: DesignPin;
+  number: number;
+  open: boolean;
+  scale: number;
+  comments: PinControls;
+  /** A comment already sent: its bubble reads it back, and it can't change. */
+  sent?: boolean;
+}) {
   const close = () => {
-    if (!pin.text.trim()) comments.onRemove(pin.key);
+    if (!sent && !pin.text.trim()) comments.onRemove(pin.key);
     comments.onOpen(null);
   };
+  // Escape closes a sent comment's bubble before it reaches the canvas (a draft's textarea handles its own).
+  useEffect(() => {
+    if (!open || !sent) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      comments.onOpen(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, sent, comments]);
   return (
     <div
       // Above the frames beside it, so an open bubble that reaches past its design stays whole.
@@ -415,11 +455,11 @@ function CommentPin({ pin, number, open, scale, comments }: { pin: DesignPin; nu
     >
       <button
         type="button"
-        data-slot="artifact-pin"
+        data-slot={sent ? "artifact-sent-pin" : "artifact-pin"}
         aria-label={`Comment ${number}${pin.text.trim() ? `: ${pin.text.trim()}` : ""}`}
         aria-expanded={open}
         onClick={() => (open ? close() : comments.onOpen(pin.key))}
-        className="grid size-6 cursor-pointer place-items-center rounded-full rounded-bl-none bg-accent text-[11px] font-medium text-white shadow-raised"
+        className={`grid size-6 cursor-pointer place-items-center rounded-full rounded-bl-none text-[11px] font-medium shadow-raised ${sent ? "bg-ink text-surface" : "bg-accent text-white"}`}
       >
         {number}
       </button>
@@ -429,32 +469,41 @@ function CommentPin({ pin, number, open, scale, comments }: { pin: DesignPin; nu
           className="absolute top-0 left-8 flex w-64 cursor-default flex-col gap-2 rounded-[10px] border border-line bg-surface p-2 text-ink shadow-raised"
           onClick={(event) => event.stopPropagation()}
         >
-          <textarea
-            // oxlint-disable-next-line jsx-a11y/no-autofocus -- the bubble opens to be written in, like Figma's
-            autoFocus
-            aria-label={`Comment ${number} on ${pin.design.title}`}
-            rows={2}
-            value={pin.text}
-            placeholder="Add a comment"
-            onChange={(event) => comments.onText(pin.key, event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                close();
-              } else if (event.key === "Escape") {
-                // Closes the bubble, not the canvas.
-                event.preventDefault();
-                close();
-              }
-            }}
-            className="w-full resize-none rounded-[6px] bg-transparent px-1 text-[13px] focus:outline-none"
-          />
-          <div className="flex items-center justify-between text-[11px] text-ink-3">
-            <button type="button" onClick={() => comments.onRemove(pin.key)} className="rounded px-1 py-0.5 hover:bg-hover hover:text-ink">
-              Delete
-            </button>
-            <span>Enter to keep · sent with Send</span>
-          </div>
+          {sent ? (
+            <>
+              <p className="px-1 text-[13px] whitespace-pre-wrap">{pin.text}</p>
+              <span className="px-1 text-[11px] text-ink-3">Sent to the agent</span>
+            </>
+          ) : (
+            <>
+              <textarea
+                // oxlint-disable-next-line jsx-a11y/no-autofocus -- the bubble opens to be written in, like Figma's
+                autoFocus
+                aria-label={`Comment ${number} on ${pin.design.title}`}
+                rows={2}
+                value={pin.text}
+                placeholder="Add a comment"
+                onChange={(event) => comments.onText(pin.key, event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    close();
+                  } else if (event.key === "Escape") {
+                    // Closes the bubble, not the canvas.
+                    event.preventDefault();
+                    close();
+                  }
+                }}
+                className="w-full resize-none rounded-[6px] bg-transparent px-1 text-[13px] focus:outline-none"
+              />
+              <div className="flex items-center justify-between text-[11px] text-ink-3">
+                <button type="button" onClick={() => comments.onRemove(pin.key)} className="rounded px-1 py-0.5 hover:bg-hover hover:text-ink">
+                  Delete
+                </button>
+                <span>Enter to keep · sent with Send</span>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

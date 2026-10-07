@@ -1,7 +1,8 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
-import { ArtifactCards, ArtifactsProvider } from "./agents/ArtifactCard";
+import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
+import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, ContextUsage, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
@@ -139,7 +140,9 @@ const MessageSection = memo(function MessageSection({
 }) {
   const linked = linkedContext(message);
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
-  const bubble = isUser && !linked;
+  // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
+  const feedback = isUser && !linked ? parseDesignFeedback(message.body) : null;
+  const bubble = isUser && !linked && !feedback;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -152,19 +155,21 @@ const MessageSection = memo(function MessageSection({
       data-from={isUser ? "user" : "assistant"}
       data-linked={linked?.kind}
       data-streaming={streaming || undefined}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble ? "items-end pl-12" : ""}`}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div
-        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
+        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
       >
         <Attachments
           images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)}
           files={message.files}
           leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />}
         />
-        {isUser ? (
+        {feedback ? (
+          <DesignFeedbackCard feedback={feedback} messageId={message.id} />
+        ) : isUser ? (
           message.body.trim() ? (
             <UserBody body={message.body} />
           ) : null
@@ -668,7 +673,7 @@ export function ChatComposer({
   // Designs are read through the Chat's key, which a new Chat and a shared Link Chat don't have here.
   const artifactChat = typeof chatId === "number" && chatId > 0 && projectPath && scopeKind !== "link" ? `${projectPath}#${chatId}` : null;
   const artifactSteps = useMemo(() => [...messages.flatMap((message) => message.steps ?? []), ...(streamingSteps ?? [])], [messages, streamingSteps]);
-  const userBodies = useMemo(() => messages.filter((message) => message.role === "user").map((message) => message.body), [messages]);
+  const userMessages = useMemo(() => messages.filter((message) => message.role === "user").map(({ id, body }) => ({ id, body })), [messages]);
 
   function handleFileDrop(event: DragEvent<HTMLDivElement>) {
     const files = Array.from(event.dataTransfer.files);
@@ -679,7 +684,7 @@ export function ChatComposer({
   }
 
   return (
-    <ArtifactsProvider chatId={artifactChat} steps={artifactSteps} bodies={userBodies} onSend={onSendDesignMessage}>
+    <ArtifactsProvider chatId={artifactChat} steps={artifactSteps} userMessages={userMessages} onSend={onSendDesignMessage}>
       <div
         ref={root}
         className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}

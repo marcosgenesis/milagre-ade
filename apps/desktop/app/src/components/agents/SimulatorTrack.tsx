@@ -150,7 +150,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
               initial={reduced ? false : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
               animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
               exit={reduced ? { opacity: 0, transition: { duration: 0 } } : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
-              transition={{ duration: 0.24, ease: EASE_OUT }}
+              transition={{ duration: 0.18, ease: EASE_OUT }}
               ref={panel}
               id={panelId}
               role="dialog"

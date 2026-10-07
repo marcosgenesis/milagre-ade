@@ -38,6 +38,38 @@ export function designFeedbackMessage({ choice, comments }: { choice?: ArtifactR
   return parts.join("\n\n");
 }
 
+const COMMENT = /^(\d+)\. On the design "(.*)" \(([a-z0-9-]+), version (\d+)\)(?:, (\d+)% across and (\d+)% down)?: (.*)$/;
+
+/**
+ * The feedback a message designFeedbackMessage wrote carries, read back to show it as a card instead of its text; null
+ * for any other message. Only the exact shape it writes reads back, so a message the user typed stays text.
+ */
+export function parseDesignFeedback(body: string): { choice: ArtifactRef | null; comments: DesignComment[] } | null {
+  const blocks = body.split("\n\n");
+  let choice: ArtifactRef | null = null;
+  const chose = /^I chose the design "(.*)" \(([a-z0-9-]+), version (\d+)\)\. Continue from this one\.$/.exec(blocks[0] ?? "");
+  if (chose) {
+    choice = { title: chose[1]!, id: chose[2]!, version: Number(chose[3]) };
+    blocks.shift();
+  }
+  if (!blocks.length) return choice ? { choice, comments: [] } : null;
+  const [heading, list, closing, ...rest] = blocks;
+  if (rest.length || !/^(A comment|Comments) on the designs:$/.test(heading ?? "") || closing !== "Revise them with artifact_show and keep their ids.")
+    return null;
+  const comments: DesignComment[] = [];
+  for (const line of (list ?? "").split("\n")) {
+    const match = COMMENT.exec(line);
+    if (!match) return null;
+    const [, , title, id, version, x, y, text] = match;
+    comments.push({
+      design: { id: id!, version: Number(version), title: title! },
+      ...(x === undefined || y === undefined ? {} : { x: Number(x) / 100, y: Number(y) / 100 }),
+      text: text!,
+    });
+  }
+  return { choice, comments };
+}
+
 /** The design the user last chose in these messages, read back from the message designFeedbackMessage wrote. */
 export function chosenDesign(bodies: string[]): { id: string; version: number } | null {
   for (const body of [...bodies].reverse()) {

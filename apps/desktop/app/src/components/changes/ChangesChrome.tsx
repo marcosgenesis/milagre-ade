@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowLeft02Icon, ArrowRight02Icon, SidebarRight01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft02Icon, ArrowRight02Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Tooltip from "../primitives/Tooltip";
@@ -112,7 +112,7 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
           onClick={onToggle}
           className={`flex size-8 items-center justify-center rounded-control transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-3"}`}
         >
-          <HugeiconsIcon icon={SidebarRight01Icon} size={18} strokeWidth={1.8} color="currentColor" />
+          <HugeiconsIcon icon={GitBranchIcon} size={18} strokeWidth={1.8} color="currentColor" />
         </button>
       </Tooltip>
     </div>

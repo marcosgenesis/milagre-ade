@@ -94,7 +94,9 @@ const PATHS = Object.freeze({
   "worktree:pull-request": ([worktreePath]) => [worktreePath],
   "project:branches": ([projectPath]) => [projectPath],
   "attachment:preview": ([file]) => [attached(file)],
+  // A null Project (user skills only) is refused: confined, the phone sees no user skills.
   "skills:list": ([projectPath]) => [projectPath],
+  "skills:read": ([projectPath, file]) => [projectPath, file],
   "worktree:create": ([value]) => [value?.projectPath],
   "git:diff-files": ([value]) => [value?.cwd],
   "git:diff-file": ([value]) => [value?.cwd],
@@ -166,6 +168,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
       const kept = await Promise.all(result.skills.map((skill) => skill.scope === "bundled" || (skill.scope === "workspace" && allows(skill.path))));
       return {
         skills: result.skills.filter((_skill, index) => kept[index]).map((skill) => (skill.scope === "bundled" ? { ...skill, path: "" } : skill)),
+        shadowed: [],
         warnings: [],
       };
     }

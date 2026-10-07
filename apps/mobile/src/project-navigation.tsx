@@ -126,17 +126,19 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     },
     [previewProject],
   );
+  // A Project hidden in its settings stays out of the list, searches included; Links are always listed.
+  const listed = useMemo(() => session.recent.filter((item) => !item.hidden), [session.recent]);
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== "all";
   useEffect(() => {
-    const paths = session.recent.filter((item) => searching || expanded.has(item.path)).map((item) => item.path);
+    const paths = listed.filter((item) => searching || expanded.has(item.path)).map((item) => item.path);
     // One slow Project must not hold up the other expanded groups.
     void Promise.all(paths.map(load));
-  }, [expanded, searching, session.recent, load]);
+  }, [expanded, searching, listed, load]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
-    for (const project of session.recent) {
+    for (const project of listed) {
       const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
       const previews = Object.values(pendingChats).filter((item) => item.hostId === session.client?.url && item.projectPath === project.path);
       const projected = saved && previews.reduce((state, item) => withPendingChat(state, item.preview), saved.project.state);
@@ -176,7 +178,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       const section = project.link ? "Links" : "Projects";
-      if (session.recent.some((item) => item.link) && !result.some((row) => row.kind === "section" && row.name === section))
+      if (listed.some((item) => item.link) && !result.some((row) => row.kind === "section" && row.name === section))
         result.push({ key: `section:${section}`, path: "", kind: "section", name: section });
       result.push({ key: project.path, path: project.path, kind: "project", name, expanded: open, members: project.projects });
       if (!open) continue;
@@ -208,7 +210,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
-  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
+  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, listed, session.snapshot, session.client?.url, pendingChats]);
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.

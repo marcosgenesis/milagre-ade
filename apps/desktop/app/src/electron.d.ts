@@ -181,10 +181,16 @@ declare global {
       openProject: () => Promise<OpenProject | null>;
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
+      /** Keeps a recent project out of the all-Projects sidebar and the phone's list, or shows it again; resolves to the list. */
+      setProjectHidden: (projectPath: string, hidden: boolean) => Promise<RecentProject[]>;
+      /** Loads a recent project's chats without opening it; later changes arrive through onProjectState. */
+      readProject: (projectPath: string) => Promise<OpenProject>;
       /** Every opened Project, seeded once from existing coordination files. */
       listNamedLinks: () => Promise<NamedProjectLink[]>;
       createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
       openNamedLink: (id: string) => Promise<OpenLink>;
+      /** A Link's chats as saved, without opening it or preparing its worktrees. */
+      readLink: (id: string) => Promise<{ link: NamedProjectLink; state: LinkState }>;
       sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
       onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;

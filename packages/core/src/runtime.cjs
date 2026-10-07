@@ -988,7 +988,22 @@ function createRuntime(options) {
     if (!(await projectRegistry().list()).some((project) => project.path === requested)) throw new Error("Project is not in the registry.");
     return openProject(requested);
   });
-  commands.handle("project:recent", () => recentProjects().list());
+  // Each recent Project says whether the user hid it from the sidebar and the phone's list.
+  async function withHidden(list) {
+    const hidden = await projectSettings().hiddenPaths();
+    return list.map((project) => (hidden.has(project.path) ? { ...project, hidden: true } : project));
+  }
+  commands.handle("project:recent", async () => withHidden(await recentProjects().list()));
+  commands.handle("project:set-hidden", async (_event, projectPath, hidden) => {
+    await knownFolder(projectPath);
+    await projectSettings().setHidden(projectPath, hidden === true);
+    return withHidden(await recentProjects().list());
+  });
+  // Reads a recent Project's chats for the all-Projects sidebar without making it the open one or reordering the list.
+  commands.handle("project:read", async (_event, projectPath) => {
+    if (!(await recentProjects().list()).some((item) => item.path === projectPath)) throw new Error("Open this project in Milagre first.");
+    return readProject(projectPath);
+  });
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
@@ -1000,7 +1015,7 @@ function createRuntime(options) {
     return Object.values((await states.get(projectPath)).worktrees ?? {}).map((worktree) => worktree.path);
   });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
-  commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
+  commands.handle("project:forget", async (_event, projectPath) => withHidden(await recentProjects().forget(projectPath)));
   // The phone's project search: Git repositories under the home folder, matched by name (see project-finder.cjs).
   const projectFinder = createProjectFinder(options.projectSearchRoot || require("node:os").homedir());
   commands.handle("project:find", (_event, query) => projectFinder.search(typeof query === "string" ? query.slice(0, 200) : ""));

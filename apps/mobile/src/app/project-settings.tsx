@@ -5,7 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useSession } from "../session";
 import { ProjectIcon, setProjectImage } from "../project-icon";
-import { ErrorNotice, PageScroll, PillButton, styles } from "../ui";
+import { ErrorNotice, PageScroll, PillButton, Toggle, styles } from "../ui";
 
 // Same size as desktop's: the icon is shown small everywhere, and the computer keeps it under 450 KB.
 async function pickIcon() {
@@ -29,6 +29,20 @@ export default function ProjectSettingsScreen() {
   const [error, setError] = useState("");
   const client = session.client;
   if (!client || !path) return <Redirect href="/" />;
+  const hidden = !!session.recent.find((project) => project.path === path)?.hidden;
+  async function setHidden(next: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      await client!.call("project:set-hidden", [path, next]);
+      await session.reloadProjects();
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : "Could not change this setting.";
+      setError(/not available from mobile|unknown command/i.test(message) ? "Update Milagre on your Mac to hide Projects from your phone." : message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function save(icon: () => Promise<string | null | undefined>) {
     setBusy(true);
     setError("");
@@ -55,6 +69,11 @@ export default function ProjectSettingsScreen() {
             <PillButton title="Choose photo" loading={busy} onPress={() => void save(pickIcon)} />
             <PillButton title="Reset" secondary disabled={busy} onPress={() => void save(async () => null)} />
           </View>
+        </View>
+        <Text style={[styles.label, { marginTop: 16 }]}>Projects list</Text>
+        <View style={[styles.card, { gap: 4 }]}>
+          <Toggle title="Show in Projects list" selected={!hidden} disabled={busy} onPress={() => void setHidden(!hidden)} />
+          <Text style={styles.caption}>Hide a Project you only use through a Link. It also leaves the sidebar on your Mac when that shows every Project.</Text>
         </View>
         {error ? <ErrorNotice message={error} /> : null}
       </PageScroll>

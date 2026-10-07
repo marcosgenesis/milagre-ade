@@ -69,6 +69,7 @@ import { usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
 import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
+import { runKeys } from "./lib/sidebar-scopes";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
@@ -1382,6 +1383,8 @@ function App() {
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
   const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
+  const sidebarRunKeys = runKeys(agentRuns.runs);
+  const openScopeChat = useEvent((scopeKey: string, id: string) => void openCanvasChat(scopeKey, Number(id)));
   const openSettings = useEvent(() => setView("settings"));
   const openCanvas = useEvent(() => {
     changes.closeDiff();
@@ -1778,6 +1781,10 @@ function App() {
               attentionPaths={attentionPaths}
               onOpenProjectSettings={openProjectSettings}
               usage={sidebarUsage}
+              runningKeys={sidebarRunKeys.running}
+              waitingKeys={sidebarRunKeys.waiting}
+              askingKeys={sidebarRunKeys.asking}
+              onOpenScopeChat={openScopeChat}
             />
           </div>
           {view === "settings" && (

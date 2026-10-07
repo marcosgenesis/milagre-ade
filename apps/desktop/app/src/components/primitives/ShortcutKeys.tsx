@@ -31,11 +31,14 @@ const paths: Record<string, string> = {
 export function ShortcutKeys({
   shortcut,
   plain = false,
+  compact = false,
   className = "",
   ...props
 }: {
   shortcut: string;
   plain?: boolean;
+  /** Smaller keys, for a hint under one of a row of close icon buttons. */
+  compact?: boolean;
 } & ComponentPropsWithRef<"kbd">) {
   const keys = shortcut.match(/Control|Ctrl|Shift|Alt|Meta|Enter|Escape|Esc|[^\s+]/gi) ?? [];
   return (
@@ -43,20 +46,29 @@ export function ShortcutKeys({
       {...props}
       data-shortcut-hint
       aria-label={keys.map((key) => names[key.toLowerCase()] ?? key).join(" + ")}
-      className={`inline-flex shrink-0 items-center justify-center gap-[3px] whitespace-nowrap font-sans text-[12px] font-semibold leading-none tracking-normal tabular-nums ${plain ? "" : "h-[22px] rounded-[5px] border border-line bg-surface px-1.5 text-ink-2 shadow-[0_1px_2px_rgb(0_0_0/0.08)]"} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap font-sans font-semibold leading-none tracking-normal tabular-nums ${compact ? "gap-px text-[10px]" : "gap-[3px] text-[12px]"} ${plain ? "" : `rounded-[5px] border border-line bg-surface text-ink-2 shadow-[0_1px_2px_rgb(0_0_0/0.08)] ${compact ? "h-[18px] px-[3px]" : "h-[22px] px-1.5"}`} ${className}`}
     >
       {keys.map((key, index) => {
         const name = names[key.toLowerCase()] ?? key;
         return (
           <span key={index} aria-hidden="true" className="inline-flex min-w-[7px] items-center justify-center">
             {name === "Command" ? (
-              <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.8} />
+              <HugeiconsIcon icon={CommandIcon} size={compact ? 10 : 14} strokeWidth={1.8} />
             ) : paths[name] && (isMac || name !== "Shift") ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width={compact ? 10 : 14}
+                height={compact ? 10 : 14}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.25"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d={paths[name]} />
               </svg>
             ) : name === "Alt" && isMac ? (
-              <HugeiconsIcon icon={OptionIcon} size={14} strokeWidth={1.8} />
+              <HugeiconsIcon icon={OptionIcon} size={compact ? 10 : 14} strokeWidth={1.8} />
             ) : (
               <span>{name === "Control" ? "Ctrl" : name === "Escape" ? "Esc" : name === "Shift" || name === "Alt" ? name : key}</span>
             )}

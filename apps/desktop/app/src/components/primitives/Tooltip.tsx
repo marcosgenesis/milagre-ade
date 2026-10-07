@@ -57,10 +57,7 @@ export default function Tooltip({
   side?: "top" | "bottom";
   /** Lets a long label break onto more lines instead of running past the window. */
   wrap?: boolean;
-  /**
-   * For a row of icon buttons too close for full hints: the hint drops the ⌘ the user is holding to see it, and sits
-   * just under its button instead of over it.
-   */
+  /** For a row of icon buttons too close for full hints: smaller keys, just under its button instead of over it. */
   compactHint?: boolean;
   /** Extra classes for the trigger wrapper, e.g. to position it. */
   className?: string;
@@ -72,7 +69,7 @@ export default function Tooltip({
   const showHints = useShortcutHints();
   const [hintRect, setHintRect] = useState<DOMRect | null>(null);
   const hintRef = useRef<HTMLElement>(null);
-  const hint = compactHint ? shortcut?.replace("⌘", "") : shortcut?.replace("⌘", shortcutModifier);
+  const hint = shortcut?.replace("⌘", shortcutModifier);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
     const modal = openModal();
@@ -122,6 +119,7 @@ export default function Tooltip({
           <ShortcutKeys
             ref={hintRef}
             shortcut={hint!}
+            compact={compactHint}
             aria-hidden="true"
             className="pointer-events-none fixed z-[70]"
             style={{

@@ -312,7 +312,8 @@ async function browserChecks() {
     );
     await screenshot("corner-hints");
     window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Meta" });
-    // ⌘⇧E does the same as the button.
+    // ⌘⇧E does the same as the button, also while typing in the composer.
+    await evaluate('document.querySelector("textarea").focus()');
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });
     await waitFor(`!!${dock} && ${dock}.querySelectorAll("[data-slot=artifact-frame]").length === 2`);
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });

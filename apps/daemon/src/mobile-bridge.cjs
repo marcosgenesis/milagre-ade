@@ -26,6 +26,8 @@ const METHODS = new Set([
   "project:find",
   "project:image",
   "chat:runs",
+  "chat:ports",
+  "agent:stop-port",
   "simulator:list",
   "simulator:attach",
   "simulator:detach",

@@ -61,11 +61,12 @@ function useSimulators(client: Client | null, chatId?: string) {
 export function SimulatorChip({ chatId }: { chatId: string }) {
   const { client } = useSession();
   const { list } = useSimulators(client, chatId);
-  if (!client || !chatId || list?.supported === false) return null;
+  const attachedCount = list?.attached?.length ?? 0;
+  if (!client || !chatId || list?.supported === false || !attachedCount) return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Simulators, ${list?.devices.length ?? 0} running in this Chat`}
+      accessibilityLabel={`Simulators, ${attachedCount} attached to this Chat`}
       onPress={() => router.push({ pathname: "/simulator-sheet", params: { hostId: client.url, chatId } })}
       hitSlop={8}
       style={({ pressed }) => ({
@@ -82,7 +83,7 @@ export function SimulatorChip({ chatId }: { chatId: string }) {
       })}
     >
       <Icon icon={SmartphoneIcon} tone="ink2" size={12} />
-      <Text style={{ color: colors.ink2, fontSize: 11 }}>Simulators {list?.devices.length ?? 0}</Text>
+      <Text style={{ color: colors.ink2, fontSize: 11 }}>Simulators {attachedCount}</Text>
     </Pressable>
   );
 }

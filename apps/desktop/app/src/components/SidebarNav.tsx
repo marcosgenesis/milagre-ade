@@ -573,7 +573,7 @@ export default memo(function SidebarNav({
     void window.milagre
       ?.listNamedLinks?.()
       .then((links) => {
-        if (live) setNamedLinks(links);
+        if (live) setNamedLinks(Array.isArray(links) ? links : []);
       })
       .catch(() => {});
     void window.milagre

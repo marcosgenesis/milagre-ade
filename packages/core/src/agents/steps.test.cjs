@@ -364,3 +364,23 @@ test("Milagre's artifact_show is a design card, from either agent", () => {
     artifact: { id: "a1b2", version: 2, title: "Login screen" },
   });
 });
+
+test("resolving a design comment reads as that, with the agent's note", () => {
+  const call = { id: "t1", name: "mcp__milagre__artifact_resolve_comment", input: { id: "0a1b2c3d", note: "Bigger title" } };
+  assert.deepEqual(claudeStepResult(call, ok('{"id":"0a1b2c3d"}')), { id: "t1", status: "done", detail: "Bigger title" });
+  assert.deepEqual(claudeStep("t1", "mcp__milagre__artifact_resolve_comment", { id: "0a1b2c3d", note: "Bigger title" }), {
+    id: "t1",
+    kind: "other",
+    title: "Resolved a design comment",
+    detail: "Bigger title",
+  });
+  assert.deepEqual(
+    codexStep({ type: "mcpToolCall", id: "e1", server: "milagre", tool: "artifact_resolve_comment", status: "inProgress", arguments: { note: "Done" } }),
+    {
+      id: "e1",
+      kind: "other",
+      title: "Resolved a design comment",
+      detail: "Done",
+    },
+  );
+});

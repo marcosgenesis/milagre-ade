@@ -70,3 +70,33 @@ test("a design keeps the screen size it was shown at until a revision names anot
     ],
   );
 });
+
+test("the agent resolves the user's comments with a note, and lists the open ones", async (t) => {
+  const { api, tools } = await fixture(t);
+  JSON.parse(await tools.artifact_show.run({ id: "home", title: "Home", html: "<p>1</p>" }));
+  const design = { id: "home", version: 1, title: "Home" };
+  const added = await api.addComments({
+    chatId: CHAT,
+    comments: [
+      { design, x: 0.5, y: 0.2, text: " Bigger title " },
+      { design, text: "Too busy" },
+    ],
+  });
+  assert.equal(added.length, 2);
+  assert.match(added[0].id, /^[a-f0-9]{8}$/);
+  assert.deepEqual([added[0].text, added[0].x, added[1].x], ["Bigger title", 0.5, undefined]);
+  const resolved = JSON.parse(await tools.artifact_resolve_comment.run({ id: added[0].id, note: "Title is 32px now" }));
+  assert.equal(resolved.resolved.note, "Title is 32px now");
+  assert.deepEqual(
+    JSON.parse(await tools.artifact_comments.run({})).map((comment) => comment.text),
+    ["Too busy"],
+  );
+  assert.equal(JSON.parse(await tools.artifact_comments.run({ all: true })).length, 2);
+  await assert.rejects(tools.artifact_resolve_comment.run({ id: "ffffffff", note: "x" }), /No comment ffffffff/);
+  // The comments file is no design.
+  assert.deepEqual(
+    (await api.list({ chatId: CHAT })).map((item) => item.id),
+    ["home"],
+  );
+  await assert.rejects(api.comments({ chatId: "/other#1" }), /existing Chat/);
+});

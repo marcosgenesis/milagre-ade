@@ -137,6 +137,8 @@ function createRuntime(options) {
   const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
   commands.handle("artifact:get", (_context, request) => artifacts.get(request));
   commands.handle("artifact:list", (_context, request) => artifacts.list(request));
+  commands.handle("artifact:add-comments", (_context, request) => artifacts.addComments(request));
+  commands.handle("artifact:comments", (_context, request) => artifacts.comments(request));
   for (const method of ["list", "attach", "detach"])
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");

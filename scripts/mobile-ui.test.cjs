@@ -3904,10 +3904,12 @@ test("on the design sheet, choosing and commenting wait for Send, which hands on
   let backs = 0;
   const client = {
     url: "mac",
-    call: async (method) =>
+    call: async (method, args) =>
       method === "artifact:list"
         ? [{ id: "home", version: 1, title: "Home", versions: 1, width: 390, height: 844 }]
-        : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" },
+        : method === "artifact:add-comments"
+          ? args[0].comments.map((comment) => ({ ...comment, id: "c0ffee01", createdAt: 1 }))
+          : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" },
   };
   const h = artifactHost(client, [], { back: () => backs++ });
   const props = { hostId: "mac", chatId: "/p#7", id: "home", version: "1" };
@@ -3926,9 +3928,10 @@ test("on the design sheet, choosing and commenting wait for Send, which hands on
   find(tree, (node) => node.props?.title === "Done").props.onPress();
   tree = h.render("ArtifactSheet", props);
   find(tree, (node) => node.props?.title === "Send 2").props.onPress();
+  await settle();
   assert.equal(
     outbox.takeDesignMessage("mac|/p#7"),
-    'I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids.',
+    'I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. (comment c0ffee01) On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids. Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.',
   );
   assert.equal(outbox.takeDesignMessage("mac|/p#7"), null, "a message is sent once");
   assert.equal(backs, 1);

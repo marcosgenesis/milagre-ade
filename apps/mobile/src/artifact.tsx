@@ -5,7 +5,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView } from "@expo/dom-webview";
 import { File, Paths } from "expo-file-system";
 import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, CheckmarkCircle02Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
-import { artifactDocument, designFeedbackMessage, type Artifact, type ArtifactSummary, type DesignComment } from "@milagre/shared/artifact";
+import {
+  artifactDocument,
+  designFeedbackMessage,
+  type Artifact,
+  type ArtifactComment,
+  type ArtifactSummary,
+  type DesignComment,
+} from "@milagre/shared/artifact";
 import type { ArtifactRef } from "@milagre/shared/model";
 import type { ArtifactStep } from "@milagre/shared/reply-parts";
 import { postDesignMessage } from "./design-outbox";
@@ -14,7 +21,33 @@ import { Icon } from "./icons";
 import { CircleButton, PillButton, colors, styles } from "./ui";
 
 /** Feedback the user sent on the designs, as what it was: the design they chose, then each comment and its design. */
-export function DesignFeedbackCard({ feedback }: { feedback: { choice: ArtifactRef | null; comments: DesignComment[] } }) {
+export function DesignFeedbackCard({
+  feedback,
+  chatId,
+  moved = 0,
+}: {
+  feedback: { choice: ArtifactRef | null; comments: DesignComment[] };
+  chatId?: string;
+  /** Changes as the Chat moves on, to read the agent's resolutions again. */
+  moved?: number;
+}) {
+  const { client } = useSession();
+  // The agent's notes on the comments it resolved, by comment id.
+  const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
+  const ids = feedback.comments.some((comment) => comment.id);
+  useEffect(() => {
+    if (!client || !chatId || !ids) return;
+    let live = true;
+    client
+      .call<ArtifactComment[]>("artifact:comments", [{ chatId }])
+      .then(
+        (comments) => live && setResolutions(new Map(comments.flatMap((comment) => (comment.resolved ? [[comment.id, comment.resolved.note] as const] : [])))),
+      )
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [client, chatId, ids, moved]);
   return (
     <View
       accessibilityLabel="Feedback on the designs"
@@ -51,31 +84,50 @@ export function DesignFeedbackCard({ feedback }: { feedback: { choice: ArtifactR
           <Text style={{ color: colors.ink3, fontSize: 12 }}>v{feedback.choice.version}</Text>
         </View>
       )}
-      {feedback.comments.map((comment, index) => (
-        <View key={index} style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderColor: colors.line }}>
-          <View
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              borderBottomLeftRadius: 0,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: colors.accent,
-            }}
-          >
-            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>{index + 1}</Text>
+      {feedback.comments.map((comment, index) => {
+        const resolved = comment.id ? resolutions.get(comment.id) : undefined;
+        return (
+          <View key={index} style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderColor: colors.line }}>
+            <View
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 10,
+                borderBottomLeftRadius: 0,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: resolved === undefined ? colors.accent : colors.green,
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>{index + 1}</Text>
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                selectable
+                style={{
+                  color: resolved === undefined ? colors.ink : colors.ink3,
+                  fontSize: 15,
+                  lineHeight: 21,
+                  textDecorationLine: resolved === undefined ? "none" : "line-through",
+                }}
+              >
+                {comment.text}
+              </Text>
+              {resolved !== undefined && (
+                <View accessibilityLabel={`Resolved: ${resolved}`} style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
+                  <Icon icon={CheckmarkCircle02Icon} tone="green" size={14} />
+                  <Text selectable style={{ flex: 1, color: colors.green, fontSize: 13 }}>
+                    {resolved}
+                  </Text>
+                </View>
+              )}
+              <Text numberOfLines={1} style={{ color: colors.ink3, fontSize: 12 }}>
+                {comment.design.title} · v{comment.design.version}
+              </Text>
+            </View>
           </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text selectable style={{ color: colors.ink, fontSize: 15, lineHeight: 21 }}>
-              {comment.text}
-            </Text>
-            <Text numberOfLines={1} style={{ color: colors.ink3, fontSize: 12 }}>
-              {comment.design.title} · v{comment.design.version}
-            </Text>
-          </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -226,9 +278,13 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
   const sentHere = !choice && chosen === key;
   const written = Object.values(notes).filter((note) => note.text.trim());
   const feedback = written.length + (choice ? 1 : 0);
-  const send = () => {
-    if (!hostId || !chatId || !feedback) return;
-    postDesignMessage(`${hostId}|${chatId}`, designFeedbackMessage({ choice, comments: written }));
+  const send = async () => {
+    if (!hostId || !chatId || !feedback || !source) return;
+    // Kept by the host, the comments get ids the agent resolves them by; a host from before that sends them without.
+    const comments = written.length
+      ? await source.call<DesignComment[]>("artifact:add-comments", [{ chatId, comments: written }]).catch(() => written)
+      : written;
+    postDesignMessage(`${hostId}|${chatId}`, designFeedbackMessage({ choice, comments }));
     router.back();
   };
   const ref = (design: Artifact): ArtifactRef => ({ id: design.id, version: design.version, title: design.title });

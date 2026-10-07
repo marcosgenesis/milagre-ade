@@ -49,8 +49,40 @@ type ArtifactsValue = {
   openAll: (refs: ArtifactRef[]) => void;
   /** Opens the canvas on a sent comment, its bubble open: `key` is "<message id>:<comment index>". */
   openComment: (key: string) => void;
+  /** The agent's notes on the comments it resolved, by comment id. */
+  resolutions: Map<string, string>;
 };
-const Artifacts = createContext<ArtifactsValue>({ chatId: null, latest: new Map(), open: () => {}, openAll: () => {}, openComment: () => {} });
+const Artifacts = createContext<ArtifactsValue>({
+  chatId: null,
+  latest: new Map(),
+  open: () => {},
+  openAll: () => {},
+  openComment: () => {},
+  resolutions: new Map(),
+});
+
+/**
+ * The agent's notes on the comments it resolved, by comment id, read again as the Chat moves on (each new step or
+ * message): the agent resolves comments with a tool call, which the transcript shows as a step.
+ */
+function useResolutions(chatId: string | null, moved: number) {
+  const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => {
+    const comments = window.milagre?.artifacts?.comments;
+    if (!chatId || !comments) return;
+    let live = true;
+    comments({ chatId })
+      .then((comments) => {
+        if (live) setResolutions(new Map(comments.flatMap((comment) => (comment.resolved ? [[comment.id, comment.resolved.note] as const] : []))));
+      })
+      // A host from before comments were kept has none to resolve.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [chatId, moved]);
+  return resolutions;
+}
 
 /** The newest version of each design among a Chat's steps, in the order they were first shown. */
 export function latestArtifacts(steps: ChatStep[]): Map<string, ArtifactRef> {
@@ -77,7 +109,7 @@ function ScaledPreview({
   width?: number;
   height?: number;
   /** A comment's spot on the design, as fractions of its screen, marked over the preview. */
-  pin?: { x: number; y: number; label: string };
+  pin?: { x: number; y: number; label: string; resolved?: boolean };
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -100,7 +132,7 @@ function ScaledPreview({
           {pin && (
             <span
               aria-hidden
-              className="absolute grid size-5 place-items-center rounded-full rounded-bl-none bg-accent text-[10px] font-medium text-white shadow-raised"
+              className={`absolute grid size-5 place-items-center rounded-full rounded-bl-none text-[10px] font-medium text-white shadow-raised ${pin.resolved ? "bg-green" : "bg-accent"}`}
               style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, transform: `translateY(-100%) scale(${1 / scale})`, transformOrigin: "bottom left" }}
             >
               {pin.label}
@@ -192,7 +224,8 @@ export function DesignFeedbackCard({
 }
 
 function FeedbackComment({ comment, number, onOpen }: { comment: DesignComment; number: number; onOpen?: () => void }) {
-  const { chatId } = useContext(Artifacts);
+  const { chatId, resolutions } = useContext(Artifacts);
+  const resolved = comment.id ? resolutions.get(comment.id) : undefined;
   const { artifact } = useArtifact(chatId, comment.design.id, comment.design.version);
   const Row = onOpen ? "button" : "div";
   return (
@@ -208,12 +241,22 @@ function FeedbackComment({ comment, number, onOpen }: { comment: DesignComment; 
             title={`Preview of ${comment.design.title}`}
             width={artifact.width}
             height={artifact.height}
-            pin={comment.x === undefined || comment.y === undefined ? undefined : { x: comment.x, y: comment.y, label: String(number) }}
+            pin={
+              comment.x === undefined || comment.y === undefined
+                ? undefined
+                : { x: comment.x, y: comment.y, label: String(number), resolved: resolved !== undefined }
+            }
           />
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-ink">{comment.text}</span>
+        <span className={`block ${resolved === undefined ? "text-ink" : "text-ink-3 line-through"}`}>{comment.text}</span>
+        {resolved !== undefined && (
+          <span data-slot="design-feedback-resolved" className="mt-0.5 flex items-start gap-1 text-[12px] text-green">
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} size={13} className="mt-px shrink-0" aria-hidden />
+            <span>{resolved}</span>
+          </span>
+        )}
         <span className="block truncate text-[11px] text-ink-3">
           {comment.design.title} · v{comment.design.version}
         </span>
@@ -305,17 +348,27 @@ export function ArtifactsProvider({
 }) {
   const latest = useMemo(() => latestArtifacts(steps), [steps]);
   const chosen = useMemo(() => chosenDesign(userMessages.map((message) => message.body)), [userMessages]);
-  // Comments already sent stay on the canvas, where the user left them.
+  const resolutions = useResolutions(chatId, steps.length + userMessages.length);
+  // Comments already sent stay on the canvas, where the user left them, resolved once the agent has addressed them.
   const sent = useMemo<DesignPin[]>(
     () =>
       userMessages.flatMap((message) =>
-        (parseDesignFeedback(message.body)?.comments ?? []).flatMap((comment, index) =>
-          comment.x === undefined || comment.y === undefined
-            ? []
-            : [{ key: `${message.id}:${index}`, design: comment.design, x: comment.x, y: comment.y, text: comment.text }],
-        ),
+        (parseDesignFeedback(message.body)?.comments ?? []).flatMap((comment, index) => {
+          if (comment.x === undefined || comment.y === undefined) return [];
+          const resolved = comment.id ? resolutions.get(comment.id) : undefined;
+          return [
+            {
+              key: `${message.id}:${index}`,
+              design: comment.design,
+              x: comment.x,
+              y: comment.y,
+              text: comment.text,
+              ...(resolved === undefined ? {} : { resolved }),
+            },
+          ];
+        }),
       ),
-    [userMessages],
+    [userMessages, resolutions],
   );
   // What is open belongs to the Chat it opened in: switching Chats closes it.
   const [openedIn, setOpenedIn] = useState<Opened | null>(null);
@@ -344,6 +397,7 @@ export function ArtifactsProvider({
           comment: key,
         }));
       },
+      resolutions,
       openAll: (refs) =>
         setOpenedIn((current) => ({
           chatId,
@@ -354,7 +408,7 @@ export function ArtifactsProvider({
           },
         })),
     }),
-    [chatId, latest, sent],
+    [chatId, latest, sent, resolutions],
   );
   // The window's top-right corner offers the designs too, while this Chat has any.
   const toggleDesigns = useCallback(() => (opened ? setOpenedIn(null) : value.openAll([...latest.values()])), [opened, value, latest]);
@@ -446,7 +500,11 @@ function ArtifactDock({
     setSending(true);
     setError("");
     try {
-      if (await onSend(designFeedbackMessage({ choice, comments: written.map(({ design, x, y, text }) => ({ design, x, y, text })) }))) {
+      let comments: DesignComment[] = written.map(({ design, x, y, text }) => ({ design, x, y, text }));
+      // Kept by the host, the comments get ids the agent resolves them by; a host from before that sends them without.
+      if (comments.length && window.milagre.artifacts.addComments)
+        comments = await window.milagre.artifacts.addComments({ chatId, comments }).catch(() => comments);
+      if (await onSend(designFeedbackMessage({ choice, comments }))) {
         setPins([]);
         setOpenPin(null);
         setChoice(null);

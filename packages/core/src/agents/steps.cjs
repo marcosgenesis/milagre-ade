@@ -56,6 +56,8 @@ function blocksText(content) {
 // Milagre's own artifact_show tool is a design the Chat shows as a card, not a generic tool row.
 const isArtifactTool = (server, tool) => server === "milagre" && tool === "artifact_show";
 const artifactStep = (step, title) => step("artifact", `Showed ${code(title || "a design")}`);
+// Resolving a comment the user left on a design reads as that, not as a tool call.
+const isResolveTool = (server, tool) => server === "milagre" && tool === "artifact_resolve_comment";
 
 // The artifact a finished artifact_show made, from its result text.
 function artifactRef(text) {
@@ -99,6 +101,7 @@ function claudeStep(id, name, input = {}) {
   if (name === "TodoWrite") return step("other", "Updated the to-do list");
   const mcp = /^mcp__(.+?)__(.+)$/.exec(String(name));
   if (mcp && isArtifactTool(mcp[1], mcp[2])) return artifactStep(step, input.title);
+  if (mcp && isResolveTool(mcp[1], mcp[2])) return step("other", "Resolved a design comment", input.note);
   if (mcp) return step("other", `Used ${code(mcp[2])} from ${mcp[1]}`);
   return step("other", `Used ${name}`);
 }
@@ -125,6 +128,7 @@ function claudeStepResult(call, block, structured) {
   if (failed) return end({ detail: text ? capText(text) : undefined });
   if (name === "Read") return end();
   if (name === "mcp__milagre__artifact_show") return end({ artifact: artifactRef(text) });
+  if (name === "mcp__milagre__artifact_resolve_comment") return end({ detail: input.note });
   if (CLAUDE_EDIT_TOOLS.has(name) || name === "Write") return end({ detail: patchDiff(structured) ?? claudeEditDiff(name, input) });
   if (CLAUDE_AGENT_TOOLS.has(name) && structured?.status === "async_launched") return end({ title: `Started an agent: ${input.description || "a subtask"}` });
   if (CLAUDE_AGENT_TOOLS.has(name) && Array.isArray(structured?.content)) return end({ detail: capText(blocksText(structured.content)) || undefined });
@@ -183,6 +187,7 @@ function codexStep(item) {
       return step("edit", changeTitle(item.changes ?? []), undefined, item.changes?.length === 1 ? item.changes[0].path : undefined);
     case "mcpToolCall":
       if (isArtifactTool(item.server, item.tool)) return artifactStep(step, item.arguments?.title);
+      if (isResolveTool(item.server, item.tool)) return step("other", "Resolved a design comment", item.arguments?.note);
       return step("other", `Used ${code(item.tool)} from ${item.server}`);
     case "dynamicToolCall":
       return step("other", `Used ${code(item.tool)}`);
@@ -224,6 +229,7 @@ function codexStepResult(item) {
       const done = item.status === "completed" && !item.error;
       const text = blocksText(item.result?.content);
       if (done && isArtifactTool(item.server, item.tool)) return compact({ id, status: "done", artifact: artifactRef(text) });
+      if (done && isResolveTool(item.server, item.tool)) return compact({ id, status: "done", detail: item.arguments?.note });
       return compact({
         id,
         status: item.status === "completed" ? "done" : "failed",

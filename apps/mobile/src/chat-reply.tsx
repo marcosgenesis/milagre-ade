@@ -188,6 +188,7 @@ export const ChatReply = memo(function ChatReply({
   basePath,
   chatId,
   designChoice,
+  designsMoved,
 }: {
   message?: ChatMessage;
   run?: AgentRun;
@@ -198,6 +199,8 @@ export const ChatReply = memo(function ChatReply({
   chatId?: string;
   /** The design the user last chose, as "id:version". */
   designChoice?: string;
+  /** How far the Chat has come (its message count), to read the agent's resolutions of comments again. */
+  designsMoved?: number;
 }) {
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");
@@ -218,7 +221,7 @@ export const ChatReply = memo(function ChatReply({
             <FileChip key={file} path={file} />
           ))}
         {feedback ? (
-          <DesignFeedbackCard feedback={feedback} />
+          <DesignFeedbackCard feedback={feedback} chatId={chatId} moved={designsMoved} />
         ) : (
           !!text && (
             <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: "continuous", paddingVertical: 10, paddingHorizontal: 14 }}>

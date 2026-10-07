@@ -6,7 +6,7 @@ import type { ArtifactRef } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 
 /** A comment the user pinned on a design and hasn't sent yet. */
-export type DesignPin = { key: string; design: ArtifactRef; x: number; y: number; text: string };
+export type DesignPin = { key: string; design: ArtifactRef; x: number; y: number; text: string; resolved?: string };
 /** The comments pinned on the canvas, the one whose bubble is open, and what changes them. */
 export type PinControls = {
   pins: DesignPin[];
@@ -456,10 +456,10 @@ function CommentPin({
       <button
         type="button"
         data-slot={sent ? "artifact-sent-pin" : "artifact-pin"}
-        aria-label={`Comment ${number}${pin.text.trim() ? `: ${pin.text.trim()}` : ""}`}
+        aria-label={`Comment ${number}${pin.resolved !== undefined ? ", resolved" : ""}${pin.text.trim() ? `: ${pin.text.trim()}` : ""}`}
         aria-expanded={open}
         onClick={() => (open ? close() : comments.onOpen(pin.key))}
-        className={`grid size-6 cursor-pointer place-items-center rounded-full rounded-bl-none text-[11px] font-medium shadow-raised ${sent ? "bg-ink text-surface" : "bg-accent text-white"}`}
+        className={`grid size-6 cursor-pointer place-items-center rounded-full rounded-bl-none text-[11px] font-medium shadow-raised ${pin.resolved !== undefined ? "bg-green text-white" : sent ? "bg-ink text-surface" : "bg-accent text-white"}`}
       >
         {number}
       </button>
@@ -472,7 +472,14 @@ function CommentPin({
           {sent ? (
             <>
               <p className="px-1 text-[13px] whitespace-pre-wrap">{pin.text}</p>
-              <span className="px-1 text-[11px] text-ink-3">Sent to the agent</span>
+              {pin.resolved === undefined ? (
+                <span className="px-1 text-[11px] text-ink-3">Sent to the agent</span>
+              ) : (
+                <span data-slot="artifact-comment-resolved" className="flex items-start gap-1 px-1 text-[12px] text-green">
+                  <HugeiconsIcon icon={CheckmarkCircle02Icon} size={13} className="mt-px shrink-0" aria-hidden />
+                  <span>{pin.resolved}</span>
+                </span>
+              )}
             </>
           ) : (
             <>

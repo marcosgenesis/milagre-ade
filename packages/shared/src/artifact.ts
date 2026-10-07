@@ -9,10 +9,16 @@ export type Artifact = ArtifactSummary & { latest: number; html: string };
 export interface ArtifactApi {
   get(request: { chatId: string; id: string; version?: number }): Promise<Artifact>;
   list(request: { chatId: string }): Promise<ArtifactSummary[]>;
+  /** Records comments the user is sending; returns them with their ids. */
+  addComments(request: { chatId: string; comments: DesignComment[] }): Promise<ArtifactComment[]>;
+  comments(request: { chatId: string }): Promise<ArtifactComment[]>;
 }
 
 /** A comment on a design: where on it (fractions of its screen) when it was pinned, and what the user wrote. */
-export type DesignComment = { design: ArtifactRef; x?: number; y?: number; text: string };
+export type DesignComment = { design: ArtifactRef; x?: number; y?: number; text: string; id?: string };
+
+/** A comment as the host keeps it: with its id, and, once the agent has addressed it, its note on what it did. */
+export type ArtifactComment = DesignComment & { id: string; createdAt: number; resolved?: { note: string; at: number } };
 
 // Plain text: the message shows in the user's bubble as typed, without markdown.
 const designName = (design: ArtifactRef) => `the design "${design.title}" (${design.id}, version ${design.version})`;
@@ -29,16 +35,19 @@ export function designFeedbackMessage({ choice, comments }: { choice?: ArtifactR
   if (comments.length) {
     const lines = comments.map((comment, index) => {
       const at = comment.x === undefined || comment.y === undefined ? "" : `, ${Math.round(comment.x * 100)}% across and ${Math.round(comment.y * 100)}% down`;
-      return `${index + 1}. On ${designName(comment.design)}${at}: ${comment.text.trim()}`;
+      // The id lets the agent resolve the comment; a message from before ids has none.
+      return `${index + 1}. ${comment.id ? `(comment ${comment.id}) ` : ""}On ${designName(comment.design)}${at}: ${comment.text.trim()}`;
     });
     parts.push(
-      `${comments.length === 1 ? "A comment" : "Comments"} on the designs:\n\n${lines.join("\n")}\n\nRevise them with artifact_show and keep their ids.`,
+      `${comments.length === 1 ? "A comment" : "Comments"} on the designs:\n\n${lines.join("\n")}\n\n${comments.some((comment) => comment.id) ? RESOLVE : REVISE}`,
     );
   }
   return parts.join("\n\n");
 }
 
-const COMMENT = /^(\d+)\. On the design "(.*)" \(([a-z0-9-]+), version (\d+)\)(?:, (\d+)% across and (\d+)% down)?: (.*)$/;
+const REVISE = "Revise them with artifact_show and keep their ids.";
+const RESOLVE = `${REVISE} Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.`;
+const COMMENT = /^(\d+)\. (?:\(comment ([a-f0-9]{8})\) )?On the design "(.*)" \(([a-z0-9-]+), version (\d+)\)(?:, (\d+)% across and (\d+)% down)?: (.*)$/;
 
 /**
  * The feedback a message designFeedbackMessage wrote carries, read back to show it as a card instead of its text; null
@@ -54,17 +63,17 @@ export function parseDesignFeedback(body: string): { choice: ArtifactRef | null;
   }
   if (!blocks.length) return choice ? { choice, comments: [] } : null;
   const [heading, list, closing, ...rest] = blocks;
-  if (rest.length || !/^(A comment|Comments) on the designs:$/.test(heading ?? "") || closing !== "Revise them with artifact_show and keep their ids.")
-    return null;
+  if (rest.length || !/^(A comment|Comments) on the designs:$/.test(heading ?? "") || (closing !== REVISE && closing !== RESOLVE)) return null;
   const comments: DesignComment[] = [];
   for (const line of (list ?? "").split("\n")) {
     const match = COMMENT.exec(line);
     if (!match) return null;
-    const [, , title, id, version, x, y, text] = match;
+    const [, , commentId, title, id, version, x, y, text] = match;
     comments.push({
       design: { id: id!, version: Number(version), title: title! },
       ...(x === undefined || y === undefined ? {} : { x: Number(x) / 100, y: Number(y) / 100 }),
       text: text!,
+      ...(commentId ? { id: commentId } : {}),
     });
   }
   return { choice, comments };

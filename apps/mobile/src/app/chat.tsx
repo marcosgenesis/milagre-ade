@@ -626,6 +626,7 @@ export default function ChatScreen() {
       basePath={worktree?.path || project.path}
       chatId={chatId}
       designChoice={designChoice}
+      designsMoved={messages.length}
       onActivity={openActivity}
     />
   ) : null;
@@ -720,6 +721,7 @@ export default function ChatScreen() {
                 basePath={worktree?.path || project.path}
                 chatId={chatId}
                 designChoice={designChoice}
+                designsMoved={messages.length}
                 onActivity={openActivity}
               />
             </View>,

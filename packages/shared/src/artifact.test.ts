@@ -99,3 +99,14 @@ test("feedback reads back from its message, and nothing else does", () => {
   assert.equal(parseDesignFeedback("make it warmer"), null);
   assert.equal(parseDesignFeedback(`${designFeedbackMessage({ comments })}\n\nAnd one more thing`), null);
 });
+
+test("comments with ids tell the agent how to resolve them, and read back with their ids", () => {
+  const design = { id: "login", version: 2, title: "Login" };
+  const message = designFeedbackMessage({ comments: [{ design, x: 0.5, y: 0.25, text: "Bigger button", id: "0a1b2c3d" }] });
+  assert.match(
+    message,
+    /^A comment on the designs:\n\n1\. \(comment 0a1b2c3d\) On the design "Login" \(login, version 2\), 50% across and 25% down: Bigger button\n\n/,
+  );
+  assert.match(message, /resolve it with artifact_resolve_comment and its comment id\.$/);
+  assert.deepEqual(parseDesignFeedback(message)?.comments, [{ design, x: 0.5, y: 0.25, text: "Bigger button", id: "0a1b2c3d" }]);
+});

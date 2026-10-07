@@ -40,6 +40,12 @@ window.addEventListener("message", (event) => event.data?.request && window.requ
 window.milagre = {
   listEditors: async () => [],
   artifacts: {
+    addComments: async ({ comments }) => {
+      const added = comments.map((comment, index) => ({ ...comment, id: "c0ffee0" + index, createdAt: 1 }));
+      window.kept = [...(window.kept ?? []), ...added];
+      return added;
+    },
+    comments: async () => window.kept ?? [],
     get: async ({ chatId, id, version }) => {
       window.calls.push([chatId, id, version ?? null]);
       if (id === "home") return { id, version: 1, title: "Home", versions: 1, latest: 1, width: 390, height: 844, html: home };
@@ -60,6 +66,9 @@ function Fixture() {
   window.setDiff = setDiff;
   window.revise = () => { window.latest = 3; setRevised(true); };
   const [said, setSaid] = useState([]);
+  const [resolvedReply, setResolvedReply] = useState(false);
+  // The agent resolves the comment, then replies: the Chat moving on is what reads the comments again.
+  window.agentResolves = (note) => { window.kept = window.kept.map((comment) => ({ ...comment, resolved: { note, at: 2 } })); setResolvedReply(true); };
   const onSendDesignMessage = async (text) => { window.sent.push(text); setSaid((current) => [...current, text]); return true; };
   const messages = [
     { id: 1, session_id: 1, context: null, role: "user", body: "design a login screen" },
@@ -68,6 +77,7 @@ function Fixture() {
     { id: 4, session_id: 1, context: null, role: "assistant", body: "Warmer greens, and the home screen.", steps: [step(2, 0), { id: "h1", kind: "artifact", title: "Showed \`Home\`", status: "done", offset: 0, artifact: { id: "home", version: 1, title: "Home" } }] },
     ...(revised ? [{ id: 5, session_id: 1, context: null, role: "assistant", body: "Orange accent.", steps: [step(3, 0)] }] : []),
     ...said.map((body, index) => ({ id: 10 + index, session_id: 1, context: null, role: "user", body })),
+    ...(resolvedReply ? [{ id: 30, session_id: 1, context: null, role: "assistant", body: "Made it bigger.", steps: [{ id: "r1", kind: "other", title: "Resolved a design comment", status: "done", offset: 0 }] }] : []),
   ];
   // The app's layout: the chat pane inside the workspace, beside a 260px sidebar.
   return <div style={{ display: "flex", height: "100%" }}><div style={{ width: 260, flexShrink: 0, padding: "56px 12px 12px", boxSizing: "border-box" }}><aside aria-label="Workspace navigation" style={{ height: "100%" }} /></div><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane className={diff ? "hidden" : undefined} style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
@@ -260,7 +270,7 @@ async function browserChecks() {
     await waitFor("window.sent.length === 1");
     assert.match(
       await evaluate("window.sent[0]"),
-      /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger/,
+      /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. \(comment c0ffee00\) On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger\n\n.*artifact_resolve_comment/s,
     );
     await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]") && !${dock}.querySelector("[data-slot=artifact-send]")`);
     assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "nothing is left waiting to send");
@@ -290,6 +300,16 @@ async function browserChecks() {
     assert.match(await evaluate(`${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]").textContent`), /Sent to the agent/);
     assert.equal(await evaluate(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble] textarea")`), false, "a sent comment can't change");
     await screenshot("sent-comment");
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    await waitFor(`!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]") && !!${dock}`);
+
+    // The agent resolves the comment with a note: the pin turns green and its bubble and the chat's card show the note.
+    await evaluate('window.agentResolves("Sign in button is 48px tall now")');
+    await waitFor(`/resolved/.test(${frame("login")}.querySelector("[data-slot=artifact-sent-pin]").getAttribute("aria-label"))`);
+    assert.match(await evaluate(`${card}.querySelector("[data-slot=design-feedback-resolved]").textContent`), /Sign in button is 48px tall now/);
+    await evaluate(`${frame("login")}.querySelector("[data-slot=artifact-sent-pin]").click()`);
+    await waitFor(`/48px tall/.test(${frame("login")}.querySelector("[data-slot=artifact-comment-resolved]")?.textContent ?? "")`);
+    await screenshot("resolved-comment");
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor(`!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]") && !!${dock}`);
 

@@ -10,6 +10,11 @@ const MAX_VERSIONS = 50;
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // The screen a design is laid out on when the agent names none: a laptop window.
 const VIEWPORT = { width: 1280, height: 800 };
+// The comments the user sent on a Chat's designs, one file beside the designs; no .json extension, so the design list
+// never reads it as a design. Each: { id, design: { id, version, title }, x?, y?, text, createdAt, resolved? }.
+const COMMENTS = "comments";
+const MAX_COMMENTS = 2000;
+const COMMENT_ID = /^[a-f0-9]{8}$/;
 const size = (value, fallback) => (Number.isInteger(value) && value >= 240 && value <= 3840 ? value : fallback);
 
 function fileOf(folder, id) {
@@ -99,8 +104,67 @@ function createChatArtifacts({ directory, validateChat }) {
         .sort((a, b) => a.versions[0].createdAt - b.versions[0].createdAt)
         .map((artifact) => summary(artifact, artifact.versions.at(-1)));
     },
+    /** Records the comments the user is sending, and returns them with their ids for the message to name. */
+    addComments: (request) =>
+      serial(async () => {
+        const folder = await chat(request?.chatId);
+        const incoming = Array.isArray(request?.comments) ? request.comments : [];
+        if (!incoming.length || incoming.length > 50) throw Error("Send between 1 and 50 comments at once.");
+        const added = incoming.map((comment) => {
+          const design = comment?.design;
+          if (!design || typeof design.id !== "string" || !ID.test(design.id) || !Number.isInteger(design.version)) throw Error("A comment names its design.");
+          const text = typeof comment.text === "string" ? comment.text.trim().slice(0, 4000) : "";
+          if (!text) throw Error("A comment needs its text.");
+          const at = (value) => (typeof value === "number" && value >= 0 && value <= 1 ? value : undefined);
+          return {
+            id: randomUUID().replace(/-/g, "").slice(0, 8),
+            design: { id: design.id, version: design.version, title: String(design.title ?? design.id).slice(0, 120) },
+            ...(at(comment.x) === undefined || at(comment.y) === undefined ? {} : { x: at(comment.x), y: at(comment.y) }),
+            text,
+            createdAt: Date.now(),
+          };
+        });
+        await writeComments(folder, [...(await readComments(folder)), ...added].slice(-MAX_COMMENTS));
+        return added;
+      }),
+    async comments(request) {
+      return readComments(await chat(request?.chatId));
+    },
+    /** Marks a comment resolved, with the agent's note on what it did about it. */
+    resolveComment: (request) =>
+      serial(async () => {
+        const folder = await chat(request?.chatId);
+        const note = typeof request?.note === "string" ? request.note.trim().slice(0, 2000) : "";
+        if (!note) throw Error("Say how the comment was resolved.");
+        const all = await readComments(folder);
+        const comment = all.find((item) => item.id === request?.id);
+        if (!comment) throw Error(`No comment ${request?.id} in this Chat. List them with artifact_comments.`);
+        comment.resolved = { note, at: Date.now() };
+        await writeComments(folder, all);
+        return comment;
+      }),
     close: () => queue,
   };
+  async function readComments(folder) {
+    try {
+      const saved = JSON.parse(await fs.readFile(path.join(folder, COMMENTS), "utf8"));
+      return Array.isArray(saved) ? saved : [];
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+  async function writeComments(folder, comments) {
+    await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+    const file = path.join(folder, COMMENTS);
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, JSON.stringify(comments), { mode: 0o600 });
+      await fs.rename(temporary, file);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
+  }
 }
 
 function artifactToolDefinitions(chatId, api) {
@@ -125,6 +189,22 @@ function artifactToolDefinitions(chatId, api) {
       input: { id: z.string().regex(ID), version: z.number().int().positive().optional() },
       readOnly: true,
       run: async (args) => JSON.stringify(await api.get({ chatId, ...args })),
+    },
+    {
+      name: "artifact_comments",
+      description:
+        "List the comments the user left on this Chat's designs, the open ones unless you ask for all. Each has an id, its design and version, where on it the user pinned it (x and y as fractions of the design's screen) and its text.",
+      input: { all: z.boolean().optional() },
+      readOnly: true,
+      run: async ({ all }) => JSON.stringify((await api.comments({ chatId })).filter((comment) => all || !comment.resolved)),
+    },
+    {
+      name: "artifact_resolve_comment",
+      description:
+        "Mark one of the user's comments on a design resolved once you have addressed it (usually after showing a revised version), with a short note on what you changed. The user sees the comment resolved, with your note, in the chat and on the canvas. The comment's id is in the user's message, or from artifact_comments.",
+      input: { id: z.string().regex(COMMENT_ID), note: z.string().min(1).max(2000) },
+      readOnly: false,
+      run: async (args) => JSON.stringify(await api.resolveComment({ chatId, ...args })),
     },
   ];
 }

@@ -42,6 +42,8 @@ const METHODS = new Set([
   "simulator:close",
   "artifact:get",
   "artifact:list",
+  "artifact:add-comments",
+  "artifact:comments",
   "project:registry",
   "link:list",
   "link:create",

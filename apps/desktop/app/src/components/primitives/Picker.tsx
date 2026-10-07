@@ -95,6 +95,7 @@ export function PickerRow({
   selected,
   onClick,
   option = false,
+  disabled = false,
 }: {
   icon?: ReactNode;
   label: string;
@@ -102,15 +103,18 @@ export function PickerRow({
   selected: boolean;
   onClick: () => void;
   option?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
       data-picker-row
       role={option ? "option" : undefined}
       aria-selected={option ? selected : undefined}
       onClick={onClick}
-      className={`relative z-10 flex w-full items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors focus-visible:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 focus-visible:-outline-offset-2 ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}
+      className={`relative z-10 flex w-full disabled:opacity-40 disabled:cursor-default items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors focus-visible:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 focus-visible:-outline-offset-2 ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}
     >
       {icon}
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">

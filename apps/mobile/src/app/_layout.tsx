@@ -55,6 +55,8 @@ export default function Layout() {
                     }}
                   >
                     <Stack.Screen name="index" options={{ title: "Computers" }} />
+                    <Stack.Screen name="project-accounts" options={{ title: "Project Accounts" }} />
+                    <Stack.Screen name="accounts" options={{ title: "Accounts" }} />
                     <Stack.Screen name="settings" options={{ title: "Settings" }} />
                     <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="confirm-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />

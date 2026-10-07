@@ -1,3 +1,4 @@
+import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
@@ -40,11 +41,12 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "accounts" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
+  { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
@@ -59,7 +61,9 @@ export function SettingsNav({
   onSelect,
   onSelectProject,
   onBack,
+  showProjectSettings = true,
 }: {
+  showProjectSettings?: boolean;
   section: SettingsSection;
   project?: SettingsProject;
   current?: SettingsProject;
@@ -89,24 +93,28 @@ export function SettingsNav({
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
       </GlideGroup>
-      <div className="mx-2 mt-2 flex h-8 shrink-0 items-center px-2 text-[12.5px] font-medium text-ink-3">Projects</div>
-      <ScrollArea className="min-h-0 flex-1 pb-2">
-        <GlideGroup>
-          {rows.map((row) => (
-            <RailButton
-              key={row.path}
-              icon={
-                <span className="flex size-[18px] items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface">
-                  <WorkspaceIcon src={imageOf(row.path)} fallback={row.initial} />
-                </span>
-              }
-              label={row.name}
-              active={section === "project" && project?.path === row.path}
-              onClick={() => onSelectProject({ path: row.path, name: row.name })}
-            />
-          ))}
-        </GlideGroup>
-      </ScrollArea>
+      {showProjectSettings && (
+        <>
+          <div className="mx-2 mt-2 flex h-8 shrink-0 items-center px-2 text-[12.5px] font-medium text-ink-3">Projects</div>
+          <ScrollArea className="min-h-0 flex-1 pb-2">
+            <GlideGroup>
+              {rows.map((row) => (
+                <RailButton
+                  key={row.path}
+                  icon={
+                    <span className="flex size-[18px] items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface">
+                      <WorkspaceIcon src={imageOf(row.path)} fallback={row.initial} />
+                    </span>
+                  }
+                  label={row.name}
+                  active={section === "project" && project?.path === row.path}
+                  onClick={() => onSelectProject({ path: row.path, name: row.name })}
+                />
+              ))}
+            </GlideGroup>
+          </ScrollArea>
+        </>
+      )}
     </aside>
   );
 }
@@ -968,7 +976,11 @@ export function SettingsPanel({
   project,
   models,
   update,
+  onSectionChange,
+  accountScope,
 }: {
+  onSectionChange?: (section: SettingsSection) => void;
+  accountScope?: string;
   section: SettingsSection;
   project?: SettingsProject;
   models: ModelOption[];
@@ -981,6 +993,9 @@ export function SettingsPanel({
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "accounts" && <AccountsSettings />}
+        {section === "project-accounts" && (
+          <ProjectAccountsSettings projectPath={accountScope ?? project?.path} onManageAccounts={() => onSectionChange?.("accounts")} />
+        )}
         {section === "appearance" && <AppearanceSettings />}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}

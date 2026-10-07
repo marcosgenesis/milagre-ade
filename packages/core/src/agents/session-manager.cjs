@@ -80,6 +80,8 @@ class SessionManager {
       cwd,
       tldrEnabled,
       accountId,
+      command: request.command,
+      env: request.env,
       workspaceRoots,
       workspaceInstructions: request.workspaceInstructions,
       session: null,
@@ -187,6 +189,12 @@ class SessionManager {
 
   permissionMode(chatId) {
     return this.sessions.get(chatId)?.session.permissions?.mode ?? "ask";
+  }
+
+  activeAccount(chatId, provider) {
+    const entry = this.sessions.get(chatId);
+    if (!entry || (provider && entry.provider !== provider) || entry.session.closed || (!entry.session.turnActive && !entry.activeChildren?.size)) return null;
+    return { accountId: entry.accountId, command: entry.command, env: entry.env };
   }
 
   isTurnActive(chatId) {

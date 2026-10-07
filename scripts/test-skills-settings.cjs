@@ -27,7 +27,7 @@ window.milagre = {
   openSkill: async request => { window.calls.open.push(request); return { ok: true, value: null }; },
   revealSkill: async (_root, file) => { window.calls.reveal.push(file); },
 };
-createRoot(document.getElementById('root')).render(<div style={{ height: '100vh' }}><SettingsPanel section="skills" projectPath="/work/app" models={[]} update={null} /></div>);
+createRoot(document.getElementById('root')).render(<div style={{ height: '100vh' }}><SettingsPanel section="skills" project={{ path: "/work/app", name: "app" }} models={[]} update={null} /></div>);
 `;
 
 async function browserChecks() {

@@ -25,6 +25,7 @@ const METHODS = new Set([
   "project:forget",
   "project:find",
   "project:image",
+  "project:set-icon",
   "chat:runs",
   "simulator:list",
   "simulator:attach",
@@ -565,7 +566,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };
             // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
-            if (request.method === "project:image" && typeof result === "string" && result.length > MAX_PROJECT_IMAGE) result = null;
+            if (
+              (request.method === "project:image" || request.method === "project:set-icon") &&
+              typeof result === "string" &&
+              result.length > MAX_PROJECT_IMAGE
+            )
+              result = null;
           }
         } else throw failure(404, "Unknown endpoint");
         reply(200, { result: result ?? null });

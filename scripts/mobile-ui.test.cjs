@@ -686,6 +686,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     Alert: { alert },
     Linking: {},
     StyleSheet: { absoluteFill: {} },
+    useColorScheme: () => "light",
   };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = {
@@ -699,6 +700,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    "@sbaiahmed1/react-native-blur": { LiquidGlassView: "LiquidGlassView" },
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
     "../attention": { AttentionPill: () => null },
@@ -713,6 +715,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../message-navigation": { MessageNavigation: "MessageNavigation" },
     "../prompt-field": { PromptField: "PromptField" },
     "../context-ring": { ContextRing: "ContextRing" },
+    "../theme": { hex: () => ({ surface: "#ffffff" }) },
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../ports": { PortsChip: "PortsChip" },
     react,

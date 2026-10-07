@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { setTimeout: delay } = require('node:timers/promises');
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { setTimeout: delay } = require("node:timers/promises");
 const fixture = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -31,46 +31,104 @@ document.documentElement.classList.add('dark');
 createRoot(document.getElementById('root')).render(<div style={{display:'flex',height:'100vh',padding:16,gap:16}}><SettingsNav section="accounts" onSelect={()=>{}} onBack={()=>{}} /><main style={{flex:1}}><SettingsPanel section="accounts" models={[]} /></main></div>);
 `;
 async function browserChecks() {
- const {app, BrowserWindow} = require('electron'); app.setPath('userData', fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'milagre-accounts-ui-'))); await app.whenReady();
- const win = new BrowserWindow({width:1120,height:850,show:false,webPreferences:{backgroundThrottling:false}});
- const evaluate = source => win.webContents.executeJavaScript(source);
- const waitFor = async source => { for(let i=0;i<160;i++){if(await evaluate(source))return;await delay(50);}throw new Error('Timed out: '+source); };
- const click = label => evaluate(`([...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)})).click()`);
- const shot = async name => {const dir=process.env.MILAGRE_SCREENSHOT_DIR;if(dir){fs.mkdirSync(dir,{recursive:true});await delay(250);fs.writeFileSync(path.join(dir,name+'.png'),(await win.webContents.capturePage()).toPNG());}};
- try {
-  await win.loadURL(process.argv[2]);
-  await waitFor(`document.body.textContent.includes('personal@example.test')`);
-  await shot('accounts');
-  assert.equal(await evaluate(`!!document.querySelector('[role=radio][aria-label="work@example.test"]')`), true, 'Account row is directly selectable');
-  await evaluate(`document.querySelector('[role=radio][aria-label="work@example.test"]').click()`);
-  await waitFor(`window.calls.some(c=>c.action==='select' && c.provider==='claude' && c.value==='work')`);
-  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Team account"]').length`), 2);
-  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Business account"]').length`), 2);
-  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Personal account"]').length`), 2);
-  assert.equal(await evaluate(`document.body.textContent.includes('self_serve_business_polite')`), false);
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('[role=radio][aria-label="work@example.test"]')).cursor`), 'pointer');
-  await shot('selected-account');
-  await click('Re-authenticate');
-  await waitFor(`window.calls.some(c=>c.action==='login' && c.value==='work')`);
-  assert.equal(await evaluate(`window.calls.filter(c=>c.action==='select').length`), 1);
-  await click('Cancel');
-  await click('Remove');
-  await waitFor(`document.querySelectorAll('[role=radio][aria-label="work@example.test"]').length===1`);
-  await click('Add account');
-  await evaluate(`(()=>{const input=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Second account');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-  await shot('add-account');
-  await click('Continue to sign in');
-  await waitFor(`document.body.textContent.includes('Finish signing in')`);
-  await shot('signing-in');
-  await click('Cancel');
-  await waitFor(`document.body.textContent.includes('Not signed in')`);
-  assert.deepEqual(await evaluate('window.calls.map(c=>c.action)'),['select','login','cancel','remove','add','cancel']);
-  console.log('PASS: Account rows switch directly; re-authenticate, remove, add and cancel work without selecting incidentally.'); app.exit(0);
- } catch(error){ console.error(error); app.exit(1); }
+  const { app, BrowserWindow } = require("electron");
+  app.setPath("userData", fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-accounts-ui-")));
+  await app.whenReady();
+  const win = new BrowserWindow({ width: 1120, height: 850, show: false, webPreferences: { backgroundThrottling: false } });
+  const evaluate = (source) => win.webContents.executeJavaScript(source);
+  const waitFor = async (source) => {
+    for (let i = 0; i < 160; i++) {
+      if (await evaluate(source)) return;
+      await delay(50);
+    }
+    throw new Error("Timed out: " + source);
+  };
+  const click = (label) => evaluate(`([...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)})).click()`);
+  const shot = async (name) => {
+    const dir = process.env.MILAGRE_SCREENSHOT_DIR;
+    if (dir) {
+      fs.mkdirSync(dir, { recursive: true });
+      await delay(250);
+      fs.writeFileSync(path.join(dir, name + ".png"), (await win.webContents.capturePage()).toPNG());
+    }
+  };
+  try {
+    await win.loadURL(process.argv[2]);
+    await waitFor(`document.body.textContent.includes('personal@example.test')`);
+    await shot("accounts");
+    assert.equal(await evaluate(`!!document.querySelector('[role=radio][aria-label="work@example.test"]')`), true, "Account row is directly selectable");
+    await evaluate(`document.querySelector('[role=radio][aria-label="work@example.test"]').click()`);
+    await waitFor(`window.calls.some(c=>c.action==='select' && c.provider==='claude' && c.value==='work')`);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Team account"]').length`), 2);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Business account"]').length`), 2);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Personal account"]').length`), 2);
+    assert.equal(await evaluate(`document.body.textContent.includes('self_serve_business_polite')`), false);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('[role=radio][aria-label="work@example.test"]')).cursor`), "pointer");
+    await shot("selected-account");
+    await click("Re-authenticate");
+    await waitFor(`window.calls.some(c=>c.action==='login' && c.value==='work')`);
+    assert.equal(await evaluate(`window.calls.filter(c=>c.action==='select').length`), 1);
+    await click("Cancel");
+    await click("Remove");
+    await waitFor(`document.querySelectorAll('[role=radio][aria-label="work@example.test"]').length===1`);
+    await click("Add account");
+    await evaluate(
+      `(()=>{const input=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Second account');input.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+    );
+    await shot("add-account");
+    await click("Continue to sign in");
+    await waitFor(`document.body.textContent.includes('Finish signing in')`);
+    await shot("signing-in");
+    await click("Cancel");
+    await waitFor(`document.body.textContent.includes('Not signed in')`);
+    assert.deepEqual(await evaluate("window.calls.map(c=>c.action)"), ["select", "login", "cancel", "remove", "add", "cancel"]);
+    console.log("PASS: Account rows switch directly; re-authenticate, remove, add and cancel work without selecting incidentally.");
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
 }
-async function main(){
- const {createServer}=await import('vite');const {spawn}=require('node:child_process');
- const server=await createServer({server:{host:'127.0.0.1',port:0},plugins:[{name:'accounts-fixture',resolveId:id=>id==='/__accounts.tsx'?id:null,load:id=>id==='/__accounts.tsx'?fixture:null,configureServer(server){server.middlewares.use(async(req,res,next)=>{if(req.url!=='/__accounts__')return next();res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/__accounts.tsx"></script></body></html>'));});}}]});
- try{await server.listen();const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn(require('electron'),[__filename,server.resolvedUrls.local[0]+'__accounts__','-ApplePersistenceIgnoreState','YES'],{env,stdio:'inherit'});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>resolve(code??1));});}finally{await server.close();}
+async function main() {
+  const { createServer } = await import("vite");
+  const { spawn } = require("node:child_process");
+  const server = await createServer({
+    configFile: path.resolve(__dirname, "../apps/desktop/vite.config.ts"),
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [
+      {
+        name: "accounts-fixture",
+        resolveId: (id) => (id === "/__accounts.tsx" ? id : null),
+        load: (id) => (id === "/__accounts.tsx" ? fixture : null),
+        configureServer(server) {
+          server.middlewares.use(async (req, res, next) => {
+            if (req.url !== "/__accounts__") return next();
+            res.setHeader("Content-Type", "text/html");
+            res.end(
+              await server.transformIndexHtml(req.url, '<html><body><div id="root"></div><script type="module" src="/__accounts.tsx"></script></body></html>'),
+            );
+          });
+        },
+      },
+    ],
+  });
+  try {
+    await server.listen();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(require("electron"), [__filename, server.resolvedUrls.local[0] + "__accounts__", "-ApplePersistenceIgnoreState", "YES"], {
+      env,
+      stdio: "inherit",
+    });
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
 }
-(process.versions.electron?browserChecks():main()).catch(error=>{console.error(error);process.exitCode=1;});
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

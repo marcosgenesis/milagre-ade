@@ -7,7 +7,10 @@ const path = require("node:path");
 
 function normalizeFilesToCopy(value) {
   if (!Array.isArray(value)) return [];
-  return value.filter((line) => typeof line === "string").map((line) => line.trim()).filter(Boolean);
+  return value
+    .filter((line) => typeof line === "string")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function normalizeSetupCommand(value) {
@@ -39,18 +42,20 @@ function createProjectSettings(file) {
 
   // Saves run one at a time. `change` edits the project's entry; an entry left empty is removed.
   function update(projectPath, change) {
-    const save = queue.catch(() => {}).then(async () => {
-      const data = await read({ strict: true });
-      const key = path.resolve(projectPath);
-      const entry = { ...(data.projects[key] ?? {}) };
-      change(entry);
-      if (Object.keys(entry).length > 0) data.projects[key] = entry;
-      else delete data.projects[key];
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      const temporary = `${file}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, JSON.stringify(data, null, 2));
-      await fs.rename(temporary, file);
-    });
+    const save = queue
+      .catch(() => {})
+      .then(async () => {
+        const data = await read({ strict: true });
+        const key = path.resolve(projectPath);
+        const entry = { ...data.projects[key] };
+        change(entry);
+        if (Object.keys(entry).length > 0) data.projects[key] = entry;
+        else delete data.projects[key];
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        const temporary = `${file}.${process.pid}.tmp`;
+        await fs.writeFile(temporary, JSON.stringify(data, null, 2));
+        await fs.rename(temporary, file);
+      });
     queue = save;
     return save;
   }

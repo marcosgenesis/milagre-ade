@@ -25,14 +25,17 @@ function metadata(content, file) {
   let data = {};
   if (match) {
     // Provider-specific fields (such as argument-hint) are not catalog metadata.
-    const fields = match[1].split(/\r?\n(?=[^\s#])/).filter((field) => /^(name|description):/.test(field)).join("\n");
+    const fields = match[1]
+      .split(/\r?\n(?=[^\s#])/)
+      .filter((field) => /^(name|description):/.test(field))
+      .join("\n");
     try {
       data = parse(fields, { maxAliasCount: 0 });
     } catch {
       // Common hand-written skills use unquoted colons in a one-line description.
       // Keep full YAML support, but treat that field as text on this retry.
       const repaired = fields.replace(/^description:[ \t]+([^\r\n]+)$/m, (line, value) => {
-        if (/^["'|>\[{]/.test(value.trim())) return line;
+        if (/^["'|>[{]/.test(value.trim())) return line;
         return `description: ${JSON.stringify(value.trim())}`;
       });
       data = parse(repaired, { maxAliasCount: 0 });
@@ -86,7 +89,10 @@ async function discoverSkills(projectPath, { home = os.homedir(), bundledDirecto
     }
   }
 
-  for (const [base, scope] of [[projectPath, "workspace"], [home, "user"]]) {
+  for (const [base, scope] of [
+    [projectPath, "workspace"],
+    [home, "user"],
+  ]) {
     for (const directory of SKILL_DIRECTORIES) await walk(path.join(base, directory, "skills"), scope, directory.slice(1));
   }
   if (bundledDirectory) await walk(bundledDirectory, "bundled", "milagre");
@@ -94,14 +100,21 @@ async function discoverSkills(projectPath, { home = os.homedir(), bundledDirecto
 }
 
 function skillCommands(prompt) {
-  return new Set(promptSkillTokens(prompt).map(token => token.name.toLowerCase()));
+  return new Set(promptSkillTokens(prompt).map((token) => token.name.toLowerCase()));
 }
 
 async function expandSkillPrompt(projectPath, prompt, options) {
   const commands = skillCommands(prompt);
   if (!commands.size) return prompt;
   const { skills } = await discoverSkills(projectPath, options);
-  const invoked = new Set(promptSkillParts(prompt, skills.map(skill => skill.name)).filter(part => part.skill).map(part => part.text.slice(1).toLowerCase()));
+  const invoked = new Set(
+    promptSkillParts(
+      prompt,
+      skills.map((skill) => skill.name),
+    )
+      .filter((part) => part.skill)
+      .map((part) => part.text.slice(1).toLowerCase()),
+  );
   const selected = skills.filter((skill) => invoked.has(skill.name.toLowerCase()));
   if (!selected.length) return prompt;
   const sections = [];

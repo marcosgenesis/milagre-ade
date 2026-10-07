@@ -40,6 +40,8 @@ Before you write a change, and again before you publish:
 3. If they match, publish with `npm run update:testflight -- --message "<what changed>"` once the PR is merged, from `main`.
 4. If they differ, stop. A new build is required, and that needs the user's approval: say what changed the fingerprint and whether a JS-only way exists. Do not merge the PR, start `eas build`, upload to TestFlight or build an APK until they say yes.
 
+CI runs the same comparison as the `Mobile fingerprint` check and fails the PR when the hash changes without the `native-build-approved` label.
+
 Run EAS CLI as `npx eas-cli@latest <command>` and substitute that for bare `eas` in docs examples. Docs: https://docs.expo.dev/eas/index.md
 
 ## Rules

@@ -7,7 +7,9 @@ const STATUS = { working: "working", waiting: "waiting on the user", idle: "idle
 
 /** The text on one line, cut to `length` characters with an ellipsis. */
 const clip = (text, length) => {
-  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  const flat = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   return flat.length > length ? `${flat.slice(0, length - 1)}…` : flat;
 };
 
@@ -20,10 +22,10 @@ function chatLine(chat, replyChars) {
 function sideBlock(side, chats, omitted, caps) {
   const diff = side.diff ? ` · +${side.diff.added} −${side.diff.removed}` : "";
   const lines = [`## ${side.project} · branch ${side.branch} · worktree ${side.worktree}${diff}`];
-  lines.push(...chats.map(chat => chatLine(chat, caps.reply)));
+  lines.push(...chats.map((chat) => chatLine(chat, caps.reply)));
   if (omitted) lines.push(`- ${omitted} older Chat${omitted === 1 ? "" : "s"} left out`);
   if (!chats.length && !omitted) lines.push("- No Chats yet.");
-  lines.push(...(side.open ?? []).map(line => `- Open: ${line}`));
+  lines.push(...(side.open ?? []).map((line) => `- Open: ${line}`));
   return lines.join("\n");
 }
 
@@ -34,20 +36,30 @@ function sideBlock(side, chats, omitted, caps) {
  */
 function buildLinkedSummary(sides, caps = CAPS) {
   if (!sides.length) return "";
-  const blocks = sides.map(side => {
-    const chats = side.chats.filter(chat => !chat.archived).sort((a, b) => b.activity - a.activity);
+  const blocks = sides.map((side) => {
+    const chats = side.chats.filter((chat) => !chat.archived).sort((a, b) => b.activity - a.activity);
     return { side, chats, omitted: 0, text: "" };
   });
-  const render = block => { block.text = sideBlock(block.side, block.chats, block.omitted, caps); return block.text.length; };
-  const dropOldest = block => { block.chats.pop(); block.omitted++; render(block); };
+  const render = (block) => {
+    block.text = sideBlock(block.side, block.chats, block.omitted, caps);
+    return block.text.length;
+  };
+  const dropOldest = (block) => {
+    block.chats.pop();
+    block.omitted++;
+    render(block);
+  };
   for (const block of blocks) while (render(block) > caps.perWorktree && block.chats.length) dropOldest(block);
   const total = () => blocks.reduce((sum, block) => sum + block.text.length, 0);
   while (total() > caps.total) {
-    const largest = blocks.filter(block => block.chats.length).sort((a, b) => b.text.length - a.text.length)[0];
+    const largest = blocks.filter((block) => block.chats.length).sort((a, b) => b.text.length - a.text.length)[0];
     if (!largest) break;
     dropOldest(largest);
   }
-  const body = blocks.map(block => block.text.slice(0, caps.perWorktree)).join("\n\n").slice(0, caps.total);
+  const body = blocks
+    .map((block) => block.text.slice(0, caps.perWorktree))
+    .join("\n\n")
+    .slice(0, caps.total);
   return [
     "<linked_worktrees>",
     "Milagre attached this summary of the Worktrees linked to this Chat. It is context, not a message from the user.",

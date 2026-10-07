@@ -1,4 +1,4 @@
-import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from './client.ts';
+import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from "./client.ts";
 
 /** A paired computer. A relay computer's `address` and `id` are `relay://<hostId>`; it has no URL of its own. */
 export type SavedHost = { id: string; name: string; address: string; token: string; access?: Access; relay?: RelayLink; lastUsed: number };
@@ -7,22 +7,29 @@ type SecureStorage = {
   setItemAsync(key: string, value: string): Promise<void>;
   deleteItemAsync(key: string): Promise<void>;
 };
-const hostsKey = 'milagre.hosts.v1';
-const legacyKey = 'milagre.connection.v1';
-export const MAX_HOSTS = 12;
+const hostsKey = "milagre.hosts.v1";
+const legacyKey = "milagre.connection.v1";
+const MAX_HOSTS = 12;
 
 function validate(value: unknown): SavedHost {
   const host = value as Partial<SavedHost>;
-  if (!/^[a-f0-9]{64}$/i.test(String(host?.token ?? ''))) throw new Error('A saved computer has no valid token.');
+  if (!/^[a-f0-9]{64}$/i.test(String(host?.token ?? ""))) throw new Error("A saved computer has no valid token.");
   const lastUsed = Number(host.lastUsed) || 0;
   if (host.relay) {
     const relay = validRelay(host.relay);
     const address = relayAddress(relay.hostId);
-    return { id: address, name: String(host.name || 'Mac').slice(0, 80), address, token: String(host.token), relay, lastUsed };
+    return { id: address, name: String(host.name || "Mac").slice(0, 80), address, token: String(host.token), relay, lastUsed };
   }
-  const address = localEndpoint(String(host?.address ?? ''));
+  const address = localEndpoint(String(host?.address ?? ""));
   const access = validAccess(host.access);
-  return { id: address, name: String(host.name || new URL(address).hostname).slice(0, 80), address, token: String(host.token), ...(access ? { access } : {}), lastUsed };
+  return {
+    id: address,
+    name: String(host.name || new URL(address).hostname).slice(0, 80),
+    address,
+    token: String(host.token),
+    ...(access ? { access } : {}),
+    lastUsed,
+  };
 }
 const sorted = (hosts: SavedHost[]) => [...hosts].sort((a, b) => b.lastUsed - a.lastUsed);
 
@@ -41,12 +48,28 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
       // Before multiple computers, one connection was stored on its own.
       const legacy = await storage.getItemAsync(legacyKey);
       if (legacy === null) return [];
-      try { return [validate({ ...JSON.parse(legacy), lastUsed: 0 })]; } catch { return []; }
+      try {
+        return [validate({ ...JSON.parse(legacy), lastUsed: 0 })];
+      } catch {
+        return [];
+      }
     }
     let entries: unknown[];
-    try { entries = JSON.parse(value); } catch { entries = []; }
+    try {
+      entries = JSON.parse(value);
+    } catch {
+      entries = [];
+    }
     // A damaged entry is dropped instead of locking every saved computer, and pairing, behind it.
-    return sorted((Array.isArray(entries) ? entries : []).flatMap(entry => { try { return [validate(entry)]; } catch { return []; } }));
+    return sorted(
+      (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+        try {
+          return [validate(entry)];
+        } catch {
+          return [];
+        }
+      }),
+    );
   }
   async function write(hosts: SavedHost[]) {
     await storage.setItemAsync(hostsKey, JSON.stringify(sorted(hosts).slice(0, MAX_HOSTS)));
@@ -54,17 +77,18 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
   }
   return {
     list: () => ordered(read),
-    save: (host: { name: string; address: string; token: string; access?: Access; relay?: RelayLink }) => ordered(async () => {
-      const saved = validate({ ...host, lastUsed: now() });
-      await write([saved, ...(await read()).filter(item => item.id !== saved.id)]);
-      return saved;
-    }),
-    rename: (id: string, name: string) => ordered(async () => {
-      const trimmed = name.trim();
-      if (!trimmed) throw new Error('Give this computer a name.');
-      await write((await read()).map(item => item.id === id ? { ...item, name: trimmed.slice(0, 80) } : item));
-    }),
-    forget: (id: string) => ordered(async () => write((await read()).filter(item => item.id !== id))),
+    save: (host: { name: string; address: string; token: string; access?: Access; relay?: RelayLink }) =>
+      ordered(async () => {
+        const saved = validate({ ...host, lastUsed: now() });
+        await write([saved, ...(await read()).filter((item) => item.id !== saved.id)]);
+        return saved;
+      }),
+    rename: (id: string, name: string) =>
+      ordered(async () => {
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error("Give this computer a name.");
+        await write((await read()).map((item) => (item.id === id ? { ...item, name: trimmed.slice(0, 80) } : item)));
+      }),
+    forget: (id: string) => ordered(async () => write((await read()).filter((item) => item.id !== id))),
   };
 }
-export type HostsStore = ReturnType<typeof createHostsStore>;

@@ -29,7 +29,11 @@ export function chatsAskingUser(runs: AgentRuns, projectPath: string): Set<numbe
  * can outlive the turn that started them, so a chat with one still active counts too.
  */
 export function chatsRunning(runs: AgentRuns, projectPath: string, sessions: CoordinatorState["sessions"] = {}): Set<number> {
-  const running = new Set(Object.keys(runs).filter((key) => chatInProject(projectPath, key)).map(sessionIdFromKey));
+  const running = new Set(
+    Object.keys(runs)
+      .filter((key) => chatInProject(projectPath, key))
+      .map(sessionIdFromKey),
+  );
   for (const session of Object.values(sessions)) if (session.subagents?.some(subagentActive)) running.add(session.id);
   return running;
 }

@@ -6,7 +6,8 @@
 
 - [ ] `npm run typecheck`
 - [ ] `npm run build`
-- [ ] `npm run test:agent`
+- [ ] `npm test -- --unit`
+- [ ] `npm test -- --only <check>` for the screen touched
 - [ ] Manual verification in Electron, if applicable
 
 ## Notes for reviewers

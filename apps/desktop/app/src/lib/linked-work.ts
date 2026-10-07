@@ -9,9 +9,18 @@ export function useLinkedWork(): LinkedWork {
   const [work, setWork] = useState<LinkedWork>(NO_LINKED_WORK);
   useEffect(() => {
     let live = true;
-    window.milagre.getLinkedWork().then((next) => { if (live) setWork(next); }, () => {});
+    window.milagre.getLinkedWork().then(
+      (next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+        if (live) setWork(next);
+      },
+      () => {},
+    );
     const off = window.milagre.onLinkedWork(setWork);
-    return () => { live = false; off(); };
+    return () => {
+      live = false;
+      off();
+    };
   }, []);
   return work;
 }

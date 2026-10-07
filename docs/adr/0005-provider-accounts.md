@@ -14,7 +14,6 @@ Remove removes a profile from the chooser, leaving its private directory and pro
 
 Desktop account rows switch in one click and show Re-authenticate and Remove actions. Mobile uses compact tappable rows with a selection checkmark and a three-dot menu for those actions. Its Accounts screen does not offer Add account.
 
-
 ## Project Accounts settings
 
 Accounts manages saved sign-ins and computer defaults. Project Accounts is a separate tab with a Project/Link selector, Project photos and stacked member photos for Links. Each provider offers Use computer default and the ready saved Accounts. Inherited selections show the resolved identity. Unavailable accounts cannot be selected; existing unavailable assignments stay visible rather than silently falling back. Mobile uses its native navigation header and back button, with a photo-based Project selector and native account menus.

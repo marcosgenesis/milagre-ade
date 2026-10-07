@@ -1,8 +1,8 @@
-import { LinkWorkspace } from './components/LinkWorkspace';
-import { LinkProjectDialog } from './components/LinkProjectDialog';
-import { createScopeDrafts } from './lib/link-scope';
-import type { LinkState, OpenLink } from '@milagre/shared/model';
-import { scopeKey, isLinkScopeKey, scopeFromKey } from '@milagre/shared/chat-scopes';
+import { LinkWorkspace } from "./components/LinkWorkspace";
+import { LinkProjectDialog } from "./components/LinkProjectDialog";
+import { createScopeDrafts } from "./lib/link-scope";
+import type { LinkState, OpenLink } from "@milagre/shared/model";
+import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { reportChatAction } from "./lib/chat-action";
@@ -32,7 +32,19 @@ import {
 } from "./model";
 import { useAgentRuns } from "./components/useAgentRuns";
 import { useAgentPorts } from "./lib/ports";
-import { chatInProject, chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, lastUserModel, modelForChat, projectOfKey, sentDecision, sentReply, sessionIdFromKey } from "./lib/agent-runs";
+import {
+  chatInProject,
+  chatKey,
+  chatsAskingUser,
+  chatsRunning,
+  chatsWaitingForUser,
+  lastUserModel,
+  modelForChat,
+  projectOfKey,
+  sentDecision,
+  sentReply,
+  sessionIdFromKey,
+} from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
@@ -96,9 +108,11 @@ const LAZY_VIEWS = [DiffView, GitActionsDialog, SettingsNav, CommandPalette, Med
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
-  return state.messages
-    .filter((message) => !state.sessions[message.session_id]?.archived)
-    .reduce<ChatMessage | null>((latest, message) => (!latest || message.id > latest.id ? message : latest), null)?.session_id ?? null;
+  return (
+    state.messages
+      .filter((message) => !state.sessions[message.session_id]?.archived)
+      .reduce<ChatMessage | null>((latest, message) => (!latest || message.id > latest.id ? message : latest), null)?.session_id ?? null
+  );
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
@@ -118,15 +132,18 @@ function App() {
   // The latest state of every project the main process has sent this window; it's their only writer
   // (see ADR-0001). The ref leads, so callbacks read a state that arrived since the last render.
   const [selectedLink, setSelectedLink] = useState<OpenLink | null>(null);
-  const selectedLinkRef = useRef(selectedLink); selectedLinkRef.current = selectedLink;
+  const selectedLinkRef = useRef(selectedLink);
+  selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
-  const linkStatesRef = useRef(linkStates); linkStatesRef.current = linkStates;
+  const linkStatesRef = useRef(linkStates);
+  linkStatesRef.current = linkStates;
   const [states, setStates] = useState<Record<string, CoordinatorState>>({});
   const statesRef = useRef(states);
-  const state = project ? states[project.path] ?? null : null;
+  const state = project ? (states[project.path] ?? null) : null;
   /** The open project's latest state. */
   const openState = () => (projectRef.current ? statesRef.current[projectRef.current.path] : undefined);
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
@@ -134,18 +151,31 @@ function App() {
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const draftStore = useMemo(createDraftStore, []);
   const setDraft = draftStore.set;
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(() =>
+    resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)),
+  );
   const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
-  const setEffort = (level: EffortLevel) => { setEffortState(level); localStorage.setItem("milagre.effort", level); };
+  const setEffort = (level: EffortLevel) => {
+    setEffortState(level);
+    localStorage.setItem("milagre.effort", level);
+  };
   const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
-  const setUltracode = (on: boolean) => { setUltracodeState(on); localStorage.setItem("milagre.ultracode", on ? "on" : "off"); };
+  const setUltracode = (on: boolean) => {
+    setUltracodeState(on);
+    localStorage.setItem("milagre.ultracode", on ? "on" : "off");
+  };
   const [fastMode, setFastModeState] = useState(() => localStorage.getItem("milagre.fastMode") === "on");
-  const setFastMode = (on: boolean) => { setFastModeState(on); localStorage.setItem("milagre.fastMode", on ? "on" : "off"); };
+  const setFastMode = (on: boolean) => {
+    setFastModeState(on);
+    localStorage.setItem("milagre.fastMode", on ? "on" : "off");
+  };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const accountScope = selectedLink ? `milagre-link:${selectedLink.link.id}` : project?.path;
-  const accountScopeRef = useRef(accountScope); accountScopeRef.current = accountScope;
+  const accountScopeRef = useRef(accountScope);
+  accountScopeRef.current = accountScope;
   const accountGeneration = useRef(0);
   const [loadedAccountScope, setLoadedAccountScope] = useState<string | undefined>(undefined);
   const [rawReported, setReported] = useState<AgentModels | null>(null);
@@ -162,14 +192,37 @@ function App() {
     const live = () => generation === accountGeneration.current && accountScopeRef.current === accountScope;
     // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
     // re-apply anything that depends on the lists.
-    void window.milagre.getCliStatus(accountScope).then((next) => { if (live()) { setLoadedAccountScope(accountScope); setCliStatus((previous) => keepIfSame(previous, next)); } }).catch(() => undefined);
-    void window.milagre.getModels(accountScope).then((next) => { if (live()) { setLoadedAccountScope(accountScope); setReported((previous) => keepIfSame(previous, next)); } }).catch(() => undefined);
+    void window.milagre
+      .getCliStatus(accountScope)
+      .then((next) => {
+        if (live()) {
+          setLoadedAccountScope(accountScope);
+          setCliStatus((previous) => keepIfSame(previous, next));
+        }
+      })
+      .catch(() => undefined);
+    void window.milagre
+      .getModels(accountScope)
+      .then((next) => {
+        if (live()) {
+          setLoadedAccountScope(accountScope);
+          setReported((previous) => keepIfSame(previous, next));
+        }
+      })
+      .catch(() => undefined);
   };
   useEffect(() => {
-    const reset = () => { setReported(null); setCliStatus(null); refreshCliStatus(); };
+    const reset = () => {
+      setReported(null);
+      setCliStatus(null);
+      refreshCliStatus();
+    };
     reset();
     const off = window.milagre.onAccountsChanged?.(reset);
-    return () => { accountGeneration.current++; off?.(); };
+    return () => {
+      accountGeneration.current++;
+      off?.();
+    };
   }, [accountScope]);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
@@ -181,9 +234,15 @@ function App() {
   useEffect(() => {
     const applyDefault = reported !== null && !appliedDefault.current && !pickedModel.current;
     if (reported !== null) appliedDefault.current = true;
-    setSelectedModel((current) => nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }));
+    setSelectedModel((current) =>
+      nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }),
+    );
   }, [models]);
-  const chooseModel = (model: ModelOption) => { pickedModel.current = true; setSelectedModel(model); updateSettings({ defaultModelId: model.id }); };
+  const chooseModel = (model: ModelOption) => {
+    pickedModel.current = true;
+    setSelectedModel(model);
+    updateSettings({ defaultModelId: model.id });
+  };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
   const [view, setView] = useState<"chat" | "canvas" | "settings">("chat");
@@ -192,10 +251,17 @@ function App() {
   useEffect(() => {
     if (!commandPaletteOpen) return;
     let cancelled = false;
-    window.milagre.listRecentProjects().then((projects) => {
-      if (!cancelled) setRecentProjects(projects);
-    }).catch(() => { if (!cancelled) setRecentProjects([]); });
-    return () => { cancelled = true; };
+    window.milagre
+      .listRecentProjects()
+      .then((projects) => {
+        if (!cancelled) setRecentProjects(projects);
+      })
+      .catch(() => {
+        if (!cancelled) setRecentProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [commandPaletteOpen]);
   const [isolation, setIsolation] = useState<Isolation>(() => loadChatPreferences(localStorage, "").isolation);
   const [branches, setBranches] = useState<string[]>([]);
@@ -260,49 +326,80 @@ function App() {
   const [restartingHost, setRestartingHost] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
-  const [gitDialog, setGitDialog] = useState<{ sessionId: number; worktreeId: number; cwd: string; base?: string; provider?: ModelProvider; chat: GitChatContext } | null>(null);
+  const [gitDialog, setGitDialog] = useState<{
+    sessionId: number;
+    worktreeId: number;
+    cwd: string;
+    base?: string;
+    provider?: ModelProvider;
+    chat: GitChatContext;
+  } | null>(null);
   useApplyTheme();
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 1000));
-    idle(() => { for (const view of LAZY_VIEWS) view.preload(); });
+    idle(() => {
+      for (const view of LAZY_VIEWS) view.preload();
+    });
   }, []);
 
   useEffect(() => {
     const projectPath = project?.path;
     if (!projectPath) return;
     let cancelled = false;
-    window.milagre.getProjectImage(projectPath).then((src) => {
-      if (!cancelled) setProjectImage({ path: projectPath, src });
-    }).catch(() => {
-      if (!cancelled) setProjectImage({ path: projectPath, src: null });
-    });
-    return () => { cancelled = true; };
+    window.milagre
+      .getProjectImage(projectPath)
+      .then((src) => {
+        if (!cancelled) setProjectImage({ path: projectPath, src });
+      })
+      .catch(() => {
+        if (!cancelled) setProjectImage({ path: projectPath, src: null });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [project?.path]);
 
   async function loadInitialProject() {
     setLoading(true);
     setStartupError(null);
-    try { adoptProject(await window.milagre.getCurrentProject()); }
-    catch (error) { setStartupError(ipcErrorMessage(error)); }
-    finally { setLoading(false); }
+    try {
+      // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
+      adoptProject(await window.milagre.getCurrentProject());
+    } catch (error) {
+      setStartupError(ipcErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { void loadInitialProject(); }, []);
-  useEffect(() => window.milagre.onLinkState?.(update => setLinkStates(previous => ({ ...previous, [update.linkId]: update.state }))), []);
+  useEffect(() => {
+    void loadInitialProject();
+  }, []);
+  useEffect(() => window.milagre.onLinkState?.((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
     let updated = false;
-    const off = window.milagre.onRuntimeConnection?.(state => {
+    const off = window.milagre.onRuntimeConnection?.((state) => {
       updated = true;
       setHostConnection(state);
       if (state.notice) setNotice(state.notice);
     });
-    void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
-    const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
+    void window.milagre
+      .getRuntimeConnection?.()
+      .then((state) => {
+        if (!updated) setHostConnection(state);
+      })
+      .catch(() => {});
+    const snapshotOff = window.milagre.onRuntimeSnapshot?.((snapshot) => {
+      // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
       for (const next of snapshot.projects) receiveState(next.path, next.state);
-      for (const next of snapshot.links ?? []) setLinkStates(previous => ({ ...previous, [next.linkId]: next.state }));
+      for (const next of snapshot.links ?? []) setLinkStates((previous) => ({ ...previous, [next.linkId]: next.state }));
     });
-    return () => { updated = true; off?.(); snapshotOff?.(); };
+    return () => {
+      updated = true;
+      off?.();
+      snapshotOff?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -319,7 +416,11 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
-  const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
+  const subagents = useMemo(
+    () => selectedSession?.subagents?.filter((agent) => agent.id !== selectedSession.native_session_id),
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads selectedSession.subagents and selectedSession.native_session_id, both listed; the compiler infers the whole selectedSession object from the property access
+    [selectedSession?.subagents, selectedSession?.native_session_id],
+  );
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
   const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`);
@@ -328,7 +429,10 @@ function App() {
     imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
     setRestoringSend(null);
   }, [restoringSend]);
-  const messages = useMemo(() => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES), [state?.messages, selectedSession?.id]);
+  const messages = useMemo(
+    () => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES),
+    [state?.messages, selectedSession?.id],
+  );
   const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
   const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
   // A large Project's state can reach the window after the send's reply; dropping the preview then would hide the new chat until it does.
@@ -339,13 +443,20 @@ function App() {
   }, [pendingSend, states]);
   const sidebarState = useMemo(() => {
     if (!state) return state;
-    const recovered = failedSends.filter(send => send.projectPath === project?.path).reduce((current, send) => withPendingChat(current, send), state);
+    const recovered = failedSends.filter((send) => send.projectPath === project?.path).reduce((current, send) => withPendingChat(current, send), state);
     return pendingSend?.projectPath === project?.path ? withPendingChat(recovered, pendingSend) : recovered;
   }, [state, pendingSend, failedSends, project?.path]);
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
-  const displayedMessages = useMemo(() => pendingHere && pendingSend
-    ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : [...messages, pendingSend.message]
-    : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
+  const displayedMessages = useMemo(
+    () =>
+      pendingHere && pendingSend
+        ? pendingCanonicalId !== null
+          ? state!.messages.filter((message) => message.session_id === pendingCanonicalId)
+          : [...messages, pendingSend.message]
+        : messages,
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
+    [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages],
+  );
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
   lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
@@ -374,11 +485,12 @@ function App() {
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
     : undefined;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
-  const waitingStepIds = useMemo(() => run?.approvals.flatMap(request => request.stepId ? [request.stepId] : []), [run?.approvals]);
+  const waitingStepIds = useMemo(() => run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : [])), [run?.approvals]);
   const agentPorts = useAgentPorts();
   const isSending = preparingHere || Boolean(run);
   const usage = useUsage(accountScope);
-  const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
+  const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } =
+    useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
   useEffect(() => {
@@ -387,8 +499,7 @@ function App() {
     setPermissionMode(defaultPermissionMode);
   }, [selectedSessionId, defaultModelId, defaultPermissionMode, models]);
 
-  const effectiveBaseBranch = baseBranch && branches.includes(baseBranch)
-    ? baseBranch : selectedWorktree?.name ?? branches[0] ?? "";
+  const effectiveBaseBranch = baseBranch && branches.includes(baseBranch) ? baseBranch : (selectedWorktree?.name ?? branches[0] ?? "");
 
   function restoreProjectChoices(nextState: CoordinatorState, path: string) {
     const saved = loadChatPreferences(localStorage, path);
@@ -434,8 +545,14 @@ function App() {
   }, [selectedSession?.id, selectedSession?.provider]);
 
   function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
-    if (isLinkScopeKey(projectPath)) { setLinkStates(previous => ({ ...previous, [scopeFromKey(projectPath).kind === 'link' ? projectPath.slice('milagre-link:'.length) : projectPath]: next as LinkState })); return; }
-    if (!('worktrees' in next)) return;
+    if (isLinkScopeKey(projectPath)) {
+      setLinkStates((previous) => ({
+        ...previous,
+        [scopeFromKey(projectPath).kind === "link" ? projectPath.slice("milagre-link:".length) : projectPath]: next as LinkState,
+      }));
+      return;
+    }
+    if (!("worktrees" in next)) return;
     statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
   }
@@ -446,7 +563,9 @@ function App() {
   // The sets are rebuilt on every streamed batch; keeping the old one while its members hold keeps the sidebar rows still.
   const waiting = useStableSet(useMemo(() => chatsWaitingForUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
   const asking = useStableSet(useMemo(() => chatsAskingUser(agentRuns.runs, project?.path ?? ""), [agentRuns.runs, project?.path]));
-  const running = useStableSet(useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]));
+  const running = useStableSet(
+    useMemo(() => chatsRunning(agentRuns.runs, project?.path ?? "", state?.sessions), [agentRuns.runs, project?.path, state?.sessions]),
+  );
   const linkedWork = useLinkedWork();
   const delegated = useStableSet(useMemo(() => delegatedChats(linkedWork, project?.path ?? ""), [linkedWork, project?.path]));
   const messagesBySession = useMemo(() => {
@@ -458,6 +577,7 @@ function App() {
     }
     return grouped;
   }, [sidebarState?.messages]);
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
   const chats = useMemo(() => {
@@ -467,32 +587,58 @@ function App() {
       .filter((session) => !session.archived)
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
       .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
-    const rows = orderChats(withMessages, chatOrder)
-      .map(({ session, sessionMessages }) => {
-        const worktree = state.worktrees[session.worktree_id];
-        const failed = failedSends.find(send => send.projectPath === project?.path && session.id === send.session.id);
-        const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
-        // The commit dialog's notes aren't replies: they don't hide a failed turn.
-        const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
-        return {
-          id: String(session.id),
-          label: chatTitle(session, sessionMessages),
-          pending: pending || Boolean(failed),
-          mark: chatMark({ asking: asking.has(session.id), waiting: waiting.has(session.id), delegated: delegated.has(session.id), running: running.has(session.id) || pending, unread: Boolean(session.unread) }),
+    const rows = orderChats(withMessages, chatOrder).map(({ session, sessionMessages }) => {
+      const worktree = state.worktrees[session.worktree_id];
+      const failed = failedSends.find((send) => send.projectPath === project?.path && session.id === send.session.id);
+      const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
+      // The commit dialog's notes aren't replies: they don't hide a failed turn.
+      const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
+      return {
+        id: String(session.id),
+        label: chatTitle(session, sessionMessages),
+        pending: pending || Boolean(failed),
+        mark: chatMark({
+          asking: asking.has(session.id),
+          waiting: waiting.has(session.id),
+          delegated: delegated.has(session.id),
+          running: running.has(session.id) || pending,
           unread: Boolean(session.unread),
-          details: {
-            branch: worktree?.name,
-            path: worktree?.path,
-            diff: worktree?.diff,
-            pullRequests: worktree ? chatPullRequests(readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages), chatPrs[worktree.path] ?? {}, pullRequests[worktree.path] ?? undefined) : [],
-            failed: Boolean(failed) || lastReply?.outcome === "failed",
-            ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
-          },
-        };
-      });
+        }),
+        unread: Boolean(session.unread),
+        details: {
+          branch: worktree?.name,
+          path: worktree?.path,
+          diff: worktree?.diff,
+          pullRequests: worktree
+            ? chatPullRequests(
+                readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
+                chatPrs[worktree.path] ?? {},
+                pullRequests[worktree.path] ?? undefined,
+              )
+            : [],
+          failed: Boolean(failed) || lastReply?.outcome === "failed",
+          ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
+        },
+      };
+    });
     // Rows that came out the same stay the same objects, so only a changed chat's row renders.
-    return previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows);
-  }, [sidebarState, pendingSend, failedSends, pendingCanonicalId, messagesBySession, chatOrder, asking, waiting, delegated, running, pullRequests, chatPrs, agentPorts, project]);
+    return (previousChats.current = reuseRows<SidebarRecent>(previousChats.current, rows));
+  }, [
+    sidebarState,
+    pendingSend,
+    failedSends,
+    pendingCanonicalId,
+    messagesBySession,
+    chatOrder,
+    asking,
+    waiting,
+    delegated,
+    running,
+    pullRequests,
+    chatPrs,
+    agentPorts,
+    project,
+  ]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
@@ -504,17 +650,19 @@ function App() {
   function archiveChild(id: string, archived: boolean) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (current && parentId !== null) void reportChatAction(window.milagre.archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
+    if (current && parentId !== null)
+      void reportChatAction(window.milagre.archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
   }
 
   function archiveFinishedChildren() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
-    if (current && parentId !== null) void reportChatAction(window.milagre.archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
+    if (current && parentId !== null)
+      void reportChatAction(window.milagre.archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
   }
 
   function openChat(sessionId: number) {
-    const failed = failedSends.find(send => send.projectPath === projectRef.current?.path && send.session.id === sessionId);
+    const failed = failedSends.find((send) => send.projectPath === projectRef.current?.path && send.session.id === sessionId);
     if (failed) {
       chatView.current = failed.view;
       setChatView(failed.view);
@@ -525,7 +673,7 @@ function App() {
       setNewChatError(failed.error);
       preparedTarget.current = failed.target;
       setRestoringSend(failed);
-      setFailedSends(current => current.filter(send => send !== failed));
+      setFailedSends((current) => current.filter((send) => send !== failed));
       return;
     }
     if (pendingSend && pendingSend.projectPath === projectRef.current?.path && (sessionId === pendingSend.session.id || sessionId === pendingCanonicalId)) {
@@ -545,7 +693,7 @@ function App() {
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
   // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
   useEffect(() => {
-  if (selectedLink) return;
+    if (selectedLink) return;
     void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
   }, [selectedSessionId, view, project?.path, selectedLink?.link.id]);
 
@@ -556,32 +704,41 @@ function App() {
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
     const wasOpen = selectedSessionId === sessionId;
-    return runArchive({
-      projectPath,
-      chatId: key,
-      getState: () => openState() ?? null,
-      currentProjectPath: () => projectRef.current?.path,
-      stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
-      hide: () => {
-        patchChat(sessionId, { archived: true, unread: false });
-        if (selectedSessionId === sessionId) startNewChat();
+    return runArchive(
+      {
+        projectPath,
+        chatId: key,
+        getState: () => openState() ?? null,
+        currentProjectPath: () => projectRef.current?.path,
+        stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
+        hide: async () => {
+          await window.milagre.patchChat(projectPath, sessionId, { archived: true, unread: false });
+          if (projectRef.current?.path === projectPath && selectedSessionRef.current === sessionId) startNewChat();
+        },
+        // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
+        restore: () => {
+          patchChat(sessionId, { archived: false });
+          if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
+        },
+        remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
+        // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
+        // worktree moves the selection on.
+        applyRemoval: (removed) => {
+          if (removed.sessionIds.includes(selectedSessionRef.current ?? -1) || removed.worktreeId === selectedWorktree?.id) advanceChatView();
+          setSelectedSessionId((current) => (current !== null && removed.sessionIds.includes(current) ? null : current));
+          setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
+        },
+        refreshBranches: () =>
+          void window.milagre
+            .listBranches(projectPath)
+            .then(setBranches)
+            .catch(() => {}),
+        notify: setNotice,
       },
-      // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
-      restore: () => {
-        patchChat(sessionId, { archived: false });
-        if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
-      },
-      remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
-      // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
-      // worktree moves the selection on.
-      applyRemoval: (removed) => {
-        if (removed.sessionIds.includes(selectedSessionRef.current ?? -1) || removed.worktreeId === selectedWorktree?.id) advanceChatView();
-        setSelectedSessionId((current) => (current !== null && removed.sessionIds.includes(current) ? null : current));
-        setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
-      },
-      refreshBranches: () => void window.milagre.listBranches(projectPath).then(setBranches).catch(() => {}),
-      notify: setNotice,
-    }, sessionId, mode, plan);
+      sessionId,
+      mode,
+      plan,
+    ).catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -602,7 +759,14 @@ function App() {
     if (!latest || !session || !worktree) return;
     const sessionMessages = latest.messages.filter((message) => message.session_id === sessionId);
     openChat(sessionId);
-    setGitDialog({ sessionId, worktreeId: worktree.id, cwd: worktree.path, base: worktree.base, provider: session.provider, chat: gitChatContext(chatTitle(session, sessionMessages), sessionMessages) });
+    setGitDialog({
+      sessionId,
+      worktreeId: worktree.id,
+      cwd: worktree.path,
+      base: worktree.base,
+      provider: session.provider,
+      chat: gitChatContext(chatTitle(session, sessionMessages), sessionMessages),
+    });
   }
 
   // What the dialog did goes on record as a short line in the chat; the main process holds it back while the
@@ -624,15 +788,30 @@ function App() {
   }
 
   // The main process keeps the Mac awake while a turn runs, if the setting says so.
-  useEffect(() => { void window.milagre.setKeepAwake(keepAwake).catch(() => {}); }, [keepAwake]);
+  useEffect(() => {
+    void window.milagre.setKeepAwake(keepAwake).catch(() => {});
+  }, [keepAwake]);
 
   const unreadChatIds = useMemo(
-    () => (state && project ? Object.values(state.sessions).filter(session => session.unread && !session.archived).map(session => chatKey(project.path, session.id)) : []),
+    () =>
+      state && project
+        ? Object.values(state.sessions)
+            .filter((session) => session.unread && !session.archived)
+            .map((session) => chatKey(project.path, session.id))
+        : [],
     [state?.sessions, project?.path],
   );
   useEffect(() => {
     if (!project || selectedLink) return;
-    void window.milagre.syncNotifications({ projectPath: project.path, activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null, unread: unreadChatIds, notifyOnCompletion, showDockBadge }).catch(() => {});
+    void window.milagre
+      .syncNotifications({
+        projectPath: project.path,
+        activeChatId: view === "chat" && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null,
+        unread: unreadChatIds,
+        notifyOnCompletion,
+        showDockBadge,
+      })
+      .catch(() => {});
   }, [selectedLink?.link.id, project?.path, view, selectedSessionId, unreadChatIds.join("\n"), notifyOnCompletion, showDockBadge]);
 
   // The main process notifies about a chat that waits on the user while Milagre is in the background.
@@ -641,52 +820,102 @@ function App() {
   }, [notifyWhenWaiting]);
 
   // A turn that ends in the open project while Milagre is in the background gets a completion alert.
-  useEffect(() => window.milagre.onAgentEvent(({ chatId, event }) => {
-    if (event.type === "subagent-update") {
-      const path = projectOfKey(chatId);
-      const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
-      if (linkId) setLinkStates(previous => { const cached = previous[linkId]; return cached ? { ...previous, [linkId]: applyAgentEvent(cached, {}, path, chatId, event).state } : previous; });
-      const cached = statesRef.current[path];
-      if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
-    }
-    const link = selectedLinkRef.current;
-    if (link && chatInProject(scopeKey({ kind: "link", linkId: link.link.id }), chatId)) {
-      const latest = linkStatesRef.current[link.link.id] ?? link.state;
-      const session = latest.sessions[sessionIdFromKey(chatId)];
-      if (session && !session.archived && (event.type === "turn-completed" || event.type === "turn-failed")) void window.milagre.notifyCompletion({ chatId, title: link.link.name, subtitle: chatTitle(session, latest.messages.filter(message => message.session_id === session.id)) }).catch(() => {});
-      return;
-    }
-    const current = projectRef.current;
-    const latest = openState();
-    if (!current || !latest || !chatInProject(current.path, chatId)) return;
-    const session = latest.sessions[sessionIdFromKey(chatId)];
-    if (!session || session.archived) return;
-    if (event.type === "turn-completed" || event.type === "turn-failed") {
-      void window.milagre.notifyCompletion({ chatId, title: current.name, subtitle: chatTitle(session, latest.messages.filter((message) => message.session_id === session.id)) }).catch(() => {});
-    }
-  }), []);
+  useEffect(
+    () =>
+      window.milagre.onAgentEvent(({ chatId, event }) => {
+        if (event.type === "subagent-update") {
+          const path = projectOfKey(chatId);
+          const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
+          if (linkId)
+            setLinkStates((previous) => {
+              const cached = previous[linkId];
+              return cached ? { ...previous, [linkId]: applyAgentEvent(cached, {}, path, chatId, event).state } : previous;
+            });
+          const cached = statesRef.current[path];
+          if (cached) receiveState(path, applyAgentEvent(cached, {}, path, chatId, event).state);
+        }
+        const link = selectedLinkRef.current;
+        if (link && chatInProject(scopeKey({ kind: "link", linkId: link.link.id }), chatId)) {
+          const latest = linkStatesRef.current[link.link.id] ?? link.state;
+          const session = latest.sessions[sessionIdFromKey(chatId)];
+          if (session && !session.archived && (event.type === "turn-completed" || event.type === "turn-failed"))
+            void window.milagre
+              .notifyCompletion({
+                chatId,
+                title: link.link.name,
+                subtitle: chatTitle(
+                  session,
+                  latest.messages.filter((message) => message.session_id === session.id),
+                ),
+              })
+              .catch(() => {});
+          return;
+        }
+        const current = projectRef.current;
+        const latest = openState();
+        if (!current || !latest || !chatInProject(current.path, chatId)) return;
+        const session = latest.sessions[sessionIdFromKey(chatId)];
+        if (!session || session.archived) return;
+        if (event.type === "turn-completed" || event.type === "turn-failed") {
+          void window.milagre
+            .notifyCompletion({
+              chatId,
+              title: current.name,
+              subtitle: chatTitle(
+                session,
+                latest.messages.filter((message) => message.session_id === session.id),
+              ),
+            })
+            .catch(() => {});
+        }
+      }),
+    [],
+  );
 
   // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; the main process saves the new name.
-  useEffect(() => window.milagre.onWorktreeRenamed((rename) => {
-    if (projectRef.current?.path === rename.projectPath) void window.milagre.listBranches(rename.projectPath).then(setBranches);
-  }), []);
+  useEffect(
+    () =>
+      window.milagre.onWorktreeRenamed((rename) => {
+        if (projectRef.current?.path === rename.projectPath) void window.milagre.listBranches(rename.projectPath).then(setBranches);
+      }),
+    [],
+  );
 
   const pendingNotificationChat = useRef<string | null>(null);
   // Clicking a notification opens its chat, in another project too.
-  useEffect(() => window.milagre.onOpenChat((chatId) => {
-    const owner = projectOfKey(chatId);
-    if (isLinkScopeKey(owner)) { void selectLink(owner.slice('milagre-link:'.length), sessionIdFromKey(chatId)); return; }
-    const current = projectRef.current;
-    const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
-    if (session) { openChat(session.id); return; }
-    const separator = chatId.lastIndexOf("#");
-    if (separator <= 0) return;
-    pendingNotificationChat.current = chatId;
-    void switchProject(chatId.slice(0, separator));
-  }), []);
+  useEffect(
+    () =>
+      window.milagre.onOpenChat((chatId) => {
+        const owner = projectOfKey(chatId);
+        if (isLinkScopeKey(owner)) {
+          // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
+          void selectLink(owner.slice("milagre-link:".length), sessionIdFromKey(chatId));
+          return;
+        }
+        const current = projectRef.current;
+        const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
+        if (session) {
+          openChat(session.id);
+          return;
+        }
+        const separator = chatId.lastIndexOf("#");
+        if (separator <= 0) return;
+        pendingNotificationChat.current = chatId;
+        // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
+        void switchProject(chatId.slice(0, separator));
+      }),
+    [],
+  );
 
   // Clicking the "phone paired" notification opens Settings → Phone, where access can be reset.
-  useEffect(() => window.milagre.onOpenPhoneSettings(() => { setSettingsSection("phone"); setView("settings"); }), []);
+  useEffect(
+    () =>
+      window.milagre.onOpenPhoneSettings(() => {
+        setSettingsSection("phone");
+        setView("settings");
+      }),
+    [],
+  );
 
   function startNewChat() {
     advanceChatView();
@@ -712,7 +941,8 @@ function App() {
 
   // Switching projects leaves the other project's turns running; their marks come back with it.
   function adoptProject(nextProject: OpenProject) {
-    if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
+    if (!selectedLinkRef.current && projectRef.current)
+      scopeDrafts.save({ kind: "project", projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
     setSelectedLink(null);
     projectsSeen.current.set(nextProject.path, { path: nextProject.path, name: nextProject.name });
     advanceChatView();
@@ -725,7 +955,7 @@ function App() {
     flushSync(() => {
       setProject(nextProject);
       selectInitialChat(nextProject.state, nextProject.path);
-      const remembered = scopeDrafts.read({ kind: 'project', projectPath: nextProject.path });
+      const remembered = scopeDrafts.read({ kind: "project", projectPath: nextProject.path });
       if (remembered.sessionId !== null && nextProject.state.sessions[remembered.sessionId]) setSelectedSessionId(remembered.sessionId);
       setDraft(remembered.text);
       setGitDialog(null);
@@ -768,14 +998,27 @@ function App() {
     try {
       const next = await window.milagre.openNamedLink(id);
       if (navigation !== projectNavigation.current) return;
-      if (!selectedLinkRef.current && projectRef.current) scopeDrafts.save({ kind: 'project', projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
+      if (!selectedLinkRef.current && projectRef.current)
+        scopeDrafts.save({ kind: "project", projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
       advanceChatView();
-      setLinkStates(previous => ({ ...previous, [id]: next.state })); setLinkInitialSession(sessionId); setSelectedLink(next); setView('chat'); setNewChatError(null);
-    } catch (error) { setNotice(ipcErrorMessage(error)); }
+      setLinkStates((previous) => ({ ...previous, [id]: next.state }));
+      setLinkInitialSession(sessionId);
+      setSelectedLink(next);
+      setView("chat");
+      setNewChatError(null);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
   }
   async function openCanvasChat(projectPath: string, sessionId: number) {
-    if (isLinkScopeKey(projectPath)) { await selectLink(projectPath.slice('milagre-link:'.length), sessionId); return; }
-    if (!selectedLinkRef.current && projectRef.current?.path === projectPath) { openChat(sessionId); return; }
+    if (isLinkScopeKey(projectPath)) {
+      await selectLink(projectPath.slice("milagre-link:".length), sessionId);
+      return;
+    }
+    if (!selectedLinkRef.current && projectRef.current?.path === projectPath) {
+      openChat(sessionId);
+      return;
+    }
     const navigation = ++projectNavigation.current;
     try {
       if (projectRef.current?.path !== projectPath || selectedLinkRef.current) {
@@ -784,7 +1027,9 @@ function App() {
         adoptProject(next);
       }
       openChat(sessionId);
-    } catch (error) { if (navigation === projectNavigation.current) setNotice(ipcErrorMessage(error)); }
+    } catch (error) {
+      if (navigation === projectNavigation.current) setNotice(ipcErrorMessage(error));
+    }
   }
 
   // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
@@ -801,17 +1046,27 @@ function App() {
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
-    void window.milagre.listBranches(project.path).then(next => {
-      if (projectRef.current?.path === project.path) setBranches(next);
-    }).catch(() => {});
+    void window.milagre
+      .listBranches(project.path)
+      .then((next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+        if (projectRef.current?.path === project.path) setBranches(next);
+      })
+      .catch(() => {});
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
   }
 
-
-  async function executeSend(body: string, mode: PermissionMode, images: ImageAttachment[] = imageDraft.images, files: string[] = imageDraft.files, preserveComposer = false): Promise<boolean> {
+  async function executeSend(
+    body: string,
+    mode: PermissionMode,
+    images: ImageAttachment[] = imageDraft.images,
+    files: string[] = imageDraft.files,
+    preserveComposer = false,
+  ): Promise<boolean> {
     // The brief is sent with the main process's copy of the draft, so the message may be empty.
     const briefAttached = handoverDraft !== undefined;
-    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
+    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading)
+      return false;
     sendInFlight.current = true;
     const view = chatView.current;
     const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
@@ -823,8 +1078,22 @@ function App() {
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
     const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
     const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || isolation === "local" ? selectedWorktree.id : NO_WORKTREE);
-    const preview = createPendingChat({ state, sessionId: selectedSession?.id, worktreeId: previewWorktreeId, body, images, files, model: model.id, provider: model.provider });
-    setPendingSend({ ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
+    const preview = createPendingChat({
+      state,
+      sessionId: selectedSession?.id,
+      worktreeId: previewWorktreeId,
+      body,
+      images,
+      files,
+      model: model.id,
+      provider: model.provider,
+    });
+    setPendingSend({
+      ...preview,
+      view,
+      projectPath: project.path,
+      originSessionId: selectedSession?.id ?? null,
+      originWorktreeId: selectedWorktree.id,
       message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
     });
     if (!preserveComposer) {
@@ -848,7 +1117,9 @@ function App() {
       target = await resolveSendTarget(body);
       if (!target) return false;
       if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
-      setPendingSend(pending => pending ? { ...pending, targetSessionId: target!.sessionId, session: { ...pending.session, worktree_id: target!.worktreeId } } : pending);
+      setPendingSend((pending) =>
+        pending ? { ...pending, targetSessionId: target!.sessionId, session: { ...pending.session, worktree_id: target!.worktreeId } } : pending,
+      );
       // The main process saves the message, then starts the Chat's turn, even if the user has navigated away.
       const { sessionId } = await agentRuns.send({
         projectPath: project.path,
@@ -864,8 +1135,11 @@ function App() {
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
       sent = true;
-      setPendingSend(pending => pending && pending.message.clientMessageId === preview.message.clientMessageId
-        ? { ...pending, sent: true, originSessionId: sessionId, originWorktreeId: target!.worktreeId } : pending);
+      setPendingSend((pending) =>
+        pending && pending.message.clientMessageId === preview.message.clientMessageId
+          ? { ...pending, sent: true, originSessionId: sessionId, originWorktreeId: target!.worktreeId }
+          : pending,
+      );
       if (stillHere()) {
         setSelectedSessionId(sessionId);
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
@@ -881,10 +1155,21 @@ function App() {
           imageDraft.restore(images, files);
         }
       } else {
-        if (!preserveComposer) setFailedSends(current => [...current, { ...preview, view, projectPath: project.path, originSessionId: selectedSession?.id ?? null, originWorktreeId: selectedWorktree.id,
-          draft: submittedDraft || body, error: message, target: target ? { ...target, view, projectPath: project.path } : null,
-          message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
-        }]);
+        if (!preserveComposer)
+          setFailedSends((current) => [
+            ...current,
+            {
+              ...preview,
+              view,
+              projectPath: project.path,
+              originSessionId: selectedSession?.id ?? null,
+              originWorktreeId: selectedWorktree.id,
+              draft: submittedDraft || body,
+              error: message,
+              target: target ? { ...target, view, projectPath: project.path } : null,
+              message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
+            },
+          ]);
         setNotice(message);
       }
       return false;
@@ -902,12 +1187,21 @@ function App() {
     const base = changes.list.state === "ready" && changes.list.isRepo ? changes.list.base : null;
     // Back to the chat first, so the message shows up as it lands.
     changes.closeDiff();
-    if (await executeSend(formatCommentsMessage(sent, { mode: changes.mode, base }), permissionMode, [], [], true)) diffComments.removeMany(sent.map((comment) => comment.id));
+    if (await executeSend(formatCommentsMessage(sent, { mode: changes.mode, base }), permissionMode, [], [], true))
+      diffComments.removeMany(sent.map((comment) => comment.id));
   }
 
   async function sendMessage() {
     const body = draftStore.get().trim();
-    if ((!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
+    if (
+      (!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) ||
+      !state ||
+      !selectedWorktree ||
+      !project ||
+      preparing ||
+      imageDraft.loading
+    )
+      return;
     await executeSend(body, permissionMode);
   }
 
@@ -941,7 +1235,9 @@ function App() {
   // Keep finished message cards out of the typing render path. Recommendations still use
   // the current model and permission mode when clicked.
   const recommendationRef = useRef<(option: string) => void>(() => {});
-  recommendationRef.current = (option) => { void executeSend(option, permissionMode); };
+  recommendationRef.current = (option) => {
+    void executeSend(option, permissionMode);
+  };
   const sendRecommendation = useCallback((option: string) => recommendationRef.current(option), []);
 
   // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
@@ -1046,21 +1342,30 @@ function App() {
   // The sidebar is memo()'d: these keep one identity across renders (each runs the latest closure) so a streamed
   // batch or another pane's state change doesn't re-render it.
   const pickChat = useEvent((id: string) => openChat(Number(id)));
-  const chatActions = useMemo<ChatRowActions>(() => ({
-    onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
-    onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
-    onReveal: (id) => latest.current.revealChat(Number(id)),
-    onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
-    onCommit: (id) => latest.current.openGitDialog(Number(id)),
-    onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-    onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
-  }), []);
+  const chatActions = useMemo<ChatRowActions>(
+    () => ({
+      onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
+      onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
+      onReveal: (id) => latest.current.revealChat(Number(id)),
+      onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
+      onCommit: (id) => latest.current.openGitDialog(Number(id)),
+      onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
+      onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+    }),
+    [],
+  );
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
   const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
   const openSettings = useEvent(() => setView("settings"));
-  const openCanvas = useEvent(() => { changes.closeDiff(); setView("canvas"); });
-  const openProjectSettings = useEvent(() => { setSettingsSection("project"); setView("settings"); });
+  const openCanvas = useEvent(() => {
+    changes.closeDiff();
+    setView("canvas");
+  });
+  const openProjectSettings = useEvent(() => {
+    setSettingsSection("project");
+    setView("settings");
+  });
   const openCommandPalette = useEvent(() => setCommandPaletteOpen(true));
   // Saved message cards also receive this callback: keep their memoization during sends and streamed updates.
   const openLinkedChat = useEvent((key: string) => void openCanvasChat(projectOfKey(key), sessionIdFromKey(key)));
@@ -1068,34 +1373,127 @@ function App() {
     () => (showUsageInSidebar && usage.snapshot && visibleProviders(usage.snapshot).length > 0 ? <SidebarUsage usage={usage} /> : undefined),
     [showUsageInSidebar, usage.snapshot, usage.loading],
   );
-  const composerWorktrees = useMemo(() => worktrees.filter(worktree => !worktree.sharedChat).map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })), [worktrees]);
+  const composerWorktrees = useMemo(
+    () => worktrees.filter((worktree) => !worktree.sharedChat).map((worktree) => ({ id: worktree.id, name: worktree.name, path: worktree.path })),
+    [worktrees],
+  );
 
   // Fast loads would cut the startup animation off at the bare legs, so the splash stays until the logo is whole,
   // then fades out over the app while the panes slide in. Same key in both trees keeps the logo from restarting.
   const [splash, setSplash] = useState<"intro" | "done" | "gone">("intro");
   const [appEntered, setAppEntered] = useState(false);
-  const splashOverlay = (leaving: boolean) => splash === "gone" ? null : (
-    <StartupSplash key="startup-splash" leaving={leaving} onIntroEnd={() => setSplash((current) => (current === "intro" ? "done" : current))} onLeft={() => setSplash("gone")} />
-  );
+  const splashOverlay = (leaving: boolean) =>
+    splash === "gone" ? null : (
+      <StartupSplash
+        key="startup-splash"
+        leaving={leaving}
+        onIntroEnd={() => setSplash((current) => (current === "intro" ? "done" : current))}
+        onLeft={() => setSplash("gone")}
+      />
+    );
 
   if (startupError) {
     return (
       <main data-startup-error className="flex min-h-screen items-center justify-center p-8 text-ink">
         <section className="w-full max-w-xl rounded-2xl border border-line bg-surface p-6 shadow-overlay" aria-labelledby="startup-error-title">
-          <h1 id="startup-error-title" className="text-lg font-semibold">Project could not open</h1>
-          <p role="alert" className="mt-3 break-words text-sm leading-relaxed text-ink-2">{startupError}</p>
+          <h1 id="startup-error-title" className="text-lg font-semibold">
+            Project could not open
+          </h1>
+          <p role="alert" className="mt-3 break-words text-sm leading-relaxed text-ink-2">
+            {startupError}
+          </p>
           <div className="mt-6 flex gap-3">
-            <button type="button" className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-surface focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => void loadInitialProject()}>Retry</button>
-            <button type="button" className="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => void openProject()}>Open another project</button>
+            <button
+              type="button"
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-surface focus-visible:outline-2 focus-visible:outline-offset-2"
+              onClick={() => void loadInitialProject()}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-line px-4 py-2 text-sm font-medium hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2"
+              onClick={() => void openProject()}
+            >
+              Open another project
+            </button>
           </div>
         </section>
       </main>
     );
   }
 
-  const linkDialog = linkDialogOpen ? <LinkProjectDialog onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
-    if (selectedLink && view === "settings") return <DotBackground><div className="flex h-screen gap-3 p-3 pt-10"><SettingsNav showProjectSettings={false} section={settingsSection} projectName={selectedLink.link.name} onSelect={setSettingsSection} onBack={() => setView("chat")} /><main className="min-w-0 flex-1"><SettingsPanel section={settingsSection} projectPath={accountScope} models={models} update={update} onSectionChange={setSettingsSection} /></main></div></DotBackground>;
-  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSettingsSection('project-accounts'); setView('settings'); }} linkedWork={linkedWork} onCanvasChat={(path, id) => void openCanvasChat(path, id)} usage={sidebarUsage} />{linkDialog}</>;
+  const linkDialog = linkDialogOpen ? (
+    <LinkProjectDialog
+      onClose={() => setLinkDialogOpen(false)}
+      onCreated={(link) => {
+        setLinkDialogOpen(false);
+        void selectLink(link.id);
+      }}
+    />
+  ) : null;
+  if (selectedLink && view === "settings")
+    return (
+      <DotBackground>
+        <div className="flex h-screen gap-3 p-3 pt-10">
+          <SettingsNav
+            showProjectSettings={false}
+            section={settingsSection}
+            projectName={selectedLink.link.name}
+            onSelect={setSettingsSection}
+            onBack={() => setView("chat")}
+          />
+          <main className="min-w-0 flex-1">
+            <SettingsPanel section={settingsSection} projectPath={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
+          </main>
+        </div>
+      </DotBackground>
+    );
+  if (selectedLink)
+    return (
+      <>
+        <LinkWorkspace
+          key={selectedLink.link.id}
+          opened={selectedLink}
+          state={linkStates[selectedLink.link.id] ?? selectedLink.state}
+          hostConnection={hostConnection}
+          ports={agentPorts}
+          agents={agentRuns}
+          drafts={scopeDrafts}
+          initialSessionId={linkInitialSession}
+          preferences={{
+            models,
+            selectedModel,
+            onModelChange: chooseModel,
+            cliStatus,
+            onModelPickerOpen: refreshCliStatus,
+            onUpdateCli: handleUpdateCli,
+            updatingCli,
+            capability: selectedCapability,
+            effort: effortFor(selectedCapability, effort),
+            onEffortChange: setEffort,
+            ultracode,
+            onUltracodeChange: setUltracode,
+            fastMode,
+            onFastModeChange: setFastMode,
+            permissionMode,
+            onPermissionModeChange: setPermissionMode,
+          }}
+          onSwitchProject={(path) => void switchProject(path)}
+          onSwitchLink={(id) => void selectLink(id)}
+          onLinkProject={() => setLinkDialogOpen(true)}
+          onOpenProject={() => void openProject()}
+          onSettings={() => {
+            setSettingsSection("project-accounts");
+            setView("settings");
+          }}
+          linkedWork={linkedWork}
+          onCanvasChat={(path, id) => void openCanvasChat(path, id)}
+          usage={sidebarUsage}
+        />
+        {linkDialog}
+      </>
+    );
 
   if (loading || !project || !state || splash === "intro") {
     return <>{splashOverlay(false)}</>;
@@ -1106,258 +1504,482 @@ function App() {
     const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
     const commands: Command[] = [
       { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
-      { id: "open-project", label: "Open project…", group: "Actions", icon: "folder", shortcut: `${modifier}O`, keywords: "add repository workspace folder", run: () => openProject() },
-      { id: "canvas", label: "Projects and Links", group: "Actions", icon: "git", shortcut: `${modifier}⇧L`, keywords: "canvas linked worktrees", run: openCanvas },
-      { id: "settings", label: "Settings", group: "Actions", icon: "settings", shortcut: `${modifier},`, keywords: "preferences model permissions", run: () => { setSettingsSection("general"); setView("settings"); } },
-      { id: "appearance", label: "Appearance settings", group: "Actions", icon: "settings", keywords: "theme preferences", run: () => { setSettingsSection("appearance"); setView("settings"); } },
-      { id: "toggle-theme", label: "Toggle theme", group: "Actions", icon: "settings", shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T", keywords: "appearance switch color mode", run: toggleTheme },
-      { id: "project-settings", label: "Project settings", group: "Actions", icon: "settings", detail: current.name, keywords: "worktree setup files", run: () => { setSettingsSection("project"); setView("settings"); } },
+      {
+        id: "open-project",
+        label: "Open project…",
+        group: "Actions",
+        icon: "folder",
+        shortcut: `${modifier}O`,
+        keywords: "add repository workspace folder",
+        run: () => openProject(),
+      },
+      {
+        id: "canvas",
+        label: "Projects and Links",
+        group: "Actions",
+        icon: "git",
+        shortcut: `${modifier}⇧L`,
+        keywords: "canvas linked worktrees",
+        run: openCanvas,
+      },
+      {
+        id: "settings",
+        label: "Settings",
+        group: "Actions",
+        icon: "settings",
+        shortcut: `${modifier},`,
+        keywords: "preferences model permissions",
+        run: () => {
+          setSettingsSection("general");
+          setView("settings");
+        },
+      },
+      {
+        id: "appearance",
+        label: "Appearance settings",
+        group: "Actions",
+        icon: "settings",
+        keywords: "theme preferences",
+        run: () => {
+          setSettingsSection("appearance");
+          setView("settings");
+        },
+      },
+      {
+        id: "toggle-theme",
+        label: "Toggle theme",
+        group: "Actions",
+        icon: "settings",
+        shortcut: modifier === "⌘" ? "⌘⇧T" : "Ctrl+Shift+T",
+        keywords: "appearance switch color mode",
+        run: toggleTheme,
+      },
+      {
+        id: "project-settings",
+        label: "Project settings",
+        group: "Actions",
+        icon: "settings",
+        detail: current.name,
+        keywords: "worktree setup files",
+        run: () => {
+          setSettingsSection("project");
+          setView("settings");
+        },
+      },
     ];
     if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
     commands.push(...settingsCommands(getSettings(), updateSettings));
     if (selectedSession && view === "chat") {
       const sessionId = selectedSession.id;
       commands.unshift(
-        { id: "git", label: "Commit and open PR…", group: "Current chat", icon: "git", keywords: "git changes pull request push", run: () => openGitDialog(sessionId) },
-        { id: "editor", label: "Open in editor", group: "Current chat", icon: "editor", keywords: "code vscode cursor", run: () => openChatInEditor(sessionId) },
+        {
+          id: "git",
+          label: "Commit and open PR…",
+          group: "Current chat",
+          icon: "git",
+          keywords: "git changes pull request push",
+          run: () => openGitDialog(sessionId),
+        },
+        {
+          id: "editor",
+          label: "Open in editor",
+          group: "Current chat",
+          icon: "editor",
+          keywords: "code vscode cursor",
+          run: () => openChatInEditor(sessionId),
+        },
         { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
-        ...(messages.length ? [{ id: "find", label: "Find in chat", group: "Current chat", icon: "search" as const, shortcut: `${modifier}F`, keywords: "search text messages", run: openFind }] : []),
-        { id: "unread", label: selectedSession.unread ? "Mark as read" : "Mark as unread", group: "Current chat", icon: "unread", run: () => patchChat(sessionId, { unread: !selectedSession.unread }) },
+        ...(messages.length
+          ? [
+              {
+                id: "find",
+                label: "Find in chat",
+                group: "Current chat",
+                icon: "search" as const,
+                shortcut: `${modifier}F`,
+                keywords: "search text messages",
+                run: openFind,
+              },
+            ]
+          : []),
+        {
+          id: "unread",
+          label: selectedSession.unread ? "Mark as read" : "Mark as unread",
+          group: "Current chat",
+          icon: "unread",
+          run: () => patchChat(sessionId, { unread: !selectedSession.unread }),
+        },
       );
-      if (selectedWorktree) commands.splice(3, 0, { id: "copy-path", label: "Copy worktree path", group: "Current chat", icon: "copy", run: () => navigator.clipboard.writeText(selectedWorktree.path) });
+      if (selectedWorktree)
+        commands.splice(3, 0, {
+          id: "copy-path",
+          label: "Copy worktree path",
+          group: "Current chat",
+          icon: "copy",
+          run: () => navigator.clipboard.writeText(selectedWorktree.path),
+        });
     }
-    commands.push(...chats.map((chat): Command => ({
-      id: `chat:${chat.id}`, label: chat.label, group: "Chats", icon: "chat",
-      detail: [chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "", chat.details?.branch].filter(Boolean).join(" · "),
-      keywords: [chat.details?.path, ...(chat.details?.pullRequests ?? []).flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
-      run: () => openChat(Number(chat.id)),
-    })));
-    commands.push(...recentProjects.filter((recent) => recent.path !== current.path).map((recent): Command => ({
-      id: `project:${recent.path}`, label: recent.name, group: "Projects", icon: "folder", detail: recent.path,
-      run: () => switchProject(recent.path),
-    })));
+    commands.push(
+      ...chats.map((chat): Command => ({
+        id: `chat:${chat.id}`,
+        label: chat.label,
+        group: "Chats",
+        icon: "chat",
+        detail: [
+          chat.mark === "waiting" || chat.mark === "question" ? "Needs you" : chat.mark === "running" ? "Working" : chat.unread ? "Unread" : "",
+          chat.details?.branch,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        keywords: [chat.details?.path, ...(chat.details?.pullRequests ?? []).flatMap((pr) => [pr.title, `#${pr.number}`])].filter(Boolean).join(" "),
+        run: () => openChat(Number(chat.id)),
+      })),
+    );
+    commands.push(
+      ...recentProjects
+        .filter((recent) => recent.path !== current.path)
+        .map((recent): Command => ({
+          id: `project:${recent.path}`,
+          label: recent.name,
+          group: "Projects",
+          icon: "folder",
+          detail: recent.path,
+          run: () => switchProject(recent.path),
+        })),
+    );
     return commands;
   }
 
   return (
     <>
-    <DotBackground key="app">
-      {hostConnection.connected && hostConnection.hostOutdated && <div role="status" data-host-outdated className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]">
-        <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
-        <button type="button" disabled={restartingHost} onClick={() => {
-          setRestartingHost(true);
-          void window.milagre.restartHost().catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`)).finally(() => setRestartingHost(false));
-        }} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">{restartingHost ? "Restarting…" : "Restart host"}</button>
-      </div>}
-      {!hostConnection.connected && <div role="status" data-host-disconnected className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]">
-        {hostConnection.failed ? <>
-          <p className="font-medium">Couldn't restart Milagre's background host</p>
-          <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
-        </> : <>
-          <p className="font-medium">Reconnecting to your computer</p>
-          <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
-        </>}
-      </div>}
-      <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
-      {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
-      {update?.status === "downloaded" && (
-        <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-          <span>Milagre {update.version} is ready to update.</span>
-          <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-            Update and restart
-          </button>
-        </div>
-      )}
-      <div
-        className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
-        onAnimationEnd={(event) => { if (event.animationName === "app-enter-main") setAppEntered(true); }}
-      >
-      <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
-      <SidebarNav
-        key={project.path}
-        fill
-        workspaceName={project.name}
-        workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
-        onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)}
-        onOpenProject={openProjectFromSidebar}
-        recents={chats}
-        activeId={view === "chat" ? pendingHere && pendingSend ? String(pendingCanonicalId ?? pendingSend.session.id) : selectedSession ? String(selectedSession.id) : null : null}
-        onPick={pickChat}
-        chatActions={chatActions}
-        onNewChat={startNewChatFromSidebar}
-        onOpenSettings={openSettings}
-        onOpenCanvas={openCanvas}
-        canvasActive={view === "canvas"}
-        onOpenCommands={openCommandPalette}
-        hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
-        projectPath={project.path}
-        onSwitchProject={switchProjectFromSidebar}
-        onOpenProjectSettings={openProjectSettings}
-        usage={sidebarUsage}
-      />
-      </div>
-      {view === "settings" && (
-        <div className="flex shrink-0 py-3 pl-3">
-          <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
-        </div>
-      )}
-
-      <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-        <DiffBar open={diffShowing} onBack={changes.closeDiff} send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }} trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />} />
-        <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
-          {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
-        </AnimatePresence>
-        {view === "settings" && (
-          <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-            {notice && <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>{notice}</NoticeCard>}
-            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} onSectionChange={setSettingsSection} />
+      <DotBackground key="app">
+        {hostConnection.connected && hostConnection.hostOutdated && (
+          <div
+            role="status"
+            data-host-outdated
+            className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]"
+          >
+            <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
+            <button
+              type="button"
+              disabled={restartingHost}
+              onClick={() => {
+                setRestartingHost(true);
+                void window.milagre
+                  .restartHost()
+                  .catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`))
+                  .finally(() => setRestartingHost(false));
+              }}
+              className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+            >
+              {restartingHost ? "Restarting…" : "Restart host"}
+            </button>
           </div>
         )}
-        {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} linkedWork={linkedWork} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}
-        {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
-        <div data-chat-pane className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`} style={{ animation: "fade-in 160ms ease-out" }}>
-          <EditorLinks root={selectedWorktree?.path ?? project.path}>
-          <DraftChatComposer
-            key={project.path}
-            store={draftStore}
-            messages={displayedMessages}
-            pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
-            imageDraft={imageDraft}
-            projectPath={selectedWorktree?.path ?? project.path}
-            onSend={() => void sendMessage()}
-            onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
-            pullRequestAction={selectedSession && selectedPullRequest && pullRequestBlocker
-              ? {
-                label: BLOCKERS[pullRequestBlocker].action,
-                tone: BLOCKERS[pullRequestBlocker].tone,
-                onRun: () => {
-                  dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
-                  void executeSend(blockerPrompt(pullRequestBlocker, selectedPullRequest), permissionMode, [], [], true);
-                },
+        {!hostConnection.connected && (
+          <div
+            role="status"
+            data-host-disconnected
+            className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
+          >
+            {hostConnection.failed ? (
+              <>
+                <p className="font-medium">Couldn't restart Milagre's background host</p>
+                <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">Reconnecting to your computer</p>
+                <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+              </>
+            )}
+          </div>
+        )}
+        <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
+        {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+        {update?.status === "downloaded" && (
+          <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
+            <span>Milagre {update.version} is ready to update.</span>
+            <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
+              Update and restart
+            </button>
+          </div>
+        )}
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
+          onAnimationEnd={(event) => {
+            if (event.animationName === "app-enter-main") setAppEntered(true);
+          }}
+        >
+          <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
+            <SidebarNav
+              key={project.path}
+              fill
+              workspaceName={project.name}
+              workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
+              onSwitchLink={(id) => void selectLink(id)}
+              onLinkProject={() => setLinkDialogOpen(true)}
+              onOpenProject={openProjectFromSidebar}
+              recents={chats}
+              activeId={
+                view === "chat"
+                  ? pendingHere && pendingSend
+                    ? String(pendingCanonicalId ?? pendingSend.session.id)
+                    : selectedSession
+                      ? String(selectedSession.id)
+                      : null
+                  : null
               }
-              : undefined}
-            isSending={isSending}
-            sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
-            runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
-            streamingText={run?.text}
-            streamingSteps={run?.steps}
-            subagents={subagents}
-            onArchiveFinishedSubagents={archiveFinishedChildren}
-            onArchiveSubagent={archiveChild}
-            waitingForSubagents={run?.waitingForSubagents}
-            tasks={run?.tasks}
-            ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
-            onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
-            waitingStepIds={waitingStepIds}
-            asking={Boolean(run?.questions.length)}
-            runModelName={run ? models.find((model) => model.id === run.model)?.name ?? run.model : undefined}
-            lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
-            onHandover={(provider) => void handover(provider)}
-            canHandover={messages.length > 0}
-            handoverBrief={project && selectedSession && handoverDraft !== undefined ? {
-              chatId: chatKey(project.path, selectedSession.id),
-              brief: handoverDraft,
-              onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
-            } : undefined}
-            resume={project && selectedSession?.resumeTurn ? { onContinue: () => void window.milagre.resumeChat(project.path, selectedSession.id).catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)) } : undefined}
-            onOpenLinkedChat={openLinkedChat}
-            handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
-            models={models}
-            cliStatus={cliStatus}
-            onModelPickerOpen={refreshCliStatus}
-            onUpdateCli={handleUpdateCli}
-            updatingCli={updatingCli}
-            selectedModel={selectedModel}
-            onModelChange={chooseModel}
-            capability={selectedCapability}
-            effort={effortFor(selectedCapability, effort)}
-            onEffortChange={setEffort}
-            ultracode={selectedCapability.ultracode && ultracode}
-            onUltracodeChange={setUltracode}
-            fastMode={fastMode}
-            onFastModeChange={setFastMode}
-            permissionMode={permissionMode}
-            onPermissionModeChange={changePermissionMode}
-            onRecommendationSelect={sendRecommendation}
-            worktrees={composerWorktrees}
-            selectedWorktreeId={selectedWorktree?.id}
-            onWorktreeChange={(id) => {
-              advanceChatView();
-              setSelectedWorktreeId(id);
-              saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
-            }}
-            isolation={isolation}
-            onIsolationChange={(next) => { preparedTarget.current = null; setIsolation(next); saveChatPreferences(localStorage, project.path, { isolation: next }); setNewChatError(null); }}
-            branches={branches}
-            baseBranch={effectiveBaseBranch}
-            onBaseBranchChange={(branch) => { preparedTarget.current = null; setBaseBranch(branch); saveChatPreferences(localStorage, project.path, { baseBranch: branch }); }}
-            newChatError={newChatError}
-            findOpen={findOpen}
-            findSignal={findSignal}
-            onFindClose={() => setFindOpen(false)}
-            notice={notice}
-            onDismissNotice={() => setNotice(null)}
-            approval={pendingApproval ? (
-              <PermissionCard
-                key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
-                request={pendingApproval}
-                waiting={(run?.approvals.length ?? 1) - 1}
-                answering={sentDecision(run, pendingApproval.requestId)}
-                onAnswer={answerApproval}
+              onPick={pickChat}
+              chatActions={chatActions}
+              onNewChat={startNewChatFromSidebar}
+              onOpenSettings={openSettings}
+              onOpenCanvas={openCanvas}
+              canvasActive={view === "canvas"}
+              onOpenCommands={openCommandPalette}
+              hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
+              projectPath={project.path}
+              onSwitchProject={switchProjectFromSidebar}
+              onOpenProjectSettings={openProjectSettings}
+              usage={sidebarUsage}
+            />
+          </div>
+          {view === "settings" && (
+            <div className="flex shrink-0 py-3 pl-3">
+              <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
+            </div>
+          )}
+
+          <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+            <DiffBar
+              open={diffShowing}
+              onBack={changes.closeDiff}
+              send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }}
+              trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />}
+            />
+            <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+              {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
+            </AnimatePresence>
+            {view === "settings" && (
+              <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+                {notice && (
+                  <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>
+                    {notice}
+                  </NoticeCard>
+                )}
+                <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} onSectionChange={setSettingsSection} />
+              </div>
+            )}
+            {view === "canvas" && (
+              <CanvasView
+                states={states}
+                runs={agentRuns.runs}
+                linkedWork={linkedWork}
+                onOpenChat={(path, id) => void openCanvasChat(path, id)}
+                onBack={() => setView("chat")}
               />
-            ) : pendingQuestion ? (
-              <QuestionCard
-                key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
-                request={pendingQuestion}
-                waiting={(run?.questions.length ?? 1) - 1}
-                answering={sentReply(run, pendingQuestion.requestId)}
-                onAnswer={answerQuestion}
-              />
-            ) : undefined}
-          />
-          </EditorLinks>
+            )}
+            {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+            <div
+              data-chat-pane
+              className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`}
+              style={{ animation: "fade-in 160ms ease-out" }}
+            >
+              <EditorLinks root={selectedWorktree?.path ?? project.path}>
+                <DraftChatComposer
+                  key={project.path}
+                  store={draftStore}
+                  messages={displayedMessages}
+                  pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
+                  imageDraft={imageDraft}
+                  projectPath={selectedWorktree?.path ?? project.path}
+                  onSend={() => void sendMessage()}
+                  onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
+                  pullRequestAction={
+                    selectedSession && selectedPullRequest && pullRequestBlocker
+                      ? {
+                          label: BLOCKERS[pullRequestBlocker].action,
+                          tone: BLOCKERS[pullRequestBlocker].tone,
+                          onRun: () => {
+                            dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
+                            void executeSend(blockerPrompt(pullRequestBlocker, selectedPullRequest), permissionMode, [], [], true);
+                          },
+                        }
+                      : undefined
+                  }
+                  isSending={isSending}
+                  sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
+                  runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
+                  streamingText={run?.text}
+                  streamingSteps={run?.steps}
+                  subagents={subagents}
+                  onArchiveFinishedSubagents={archiveFinishedChildren}
+                  onArchiveSubagent={archiveChild}
+                  waitingForSubagents={run?.waitingForSubagents}
+                  tasks={run?.tasks}
+                  ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+                  onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
+                  waitingStepIds={waitingStepIds}
+                  asking={Boolean(run?.questions.length)}
+                  runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
+                  lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
+                  onHandover={(provider) => void handover(provider)}
+                  canHandover={messages.length > 0}
+                  handoverBrief={
+                    project && selectedSession && handoverDraft !== undefined
+                      ? {
+                          chatId: chatKey(project.path, selectedSession.id),
+                          brief: handoverDraft,
+                          onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
+                        }
+                      : undefined
+                  }
+                  resume={
+                    project && selectedSession?.resumeTurn
+                      ? {
+                          onContinue: () =>
+                            void window.milagre
+                              .resumeChat(project.path, selectedSession.id)
+                              .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
+                        }
+                      : undefined
+                  }
+                  onOpenLinkedChat={openLinkedChat}
+                  handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
+                  models={models}
+                  cliStatus={cliStatus}
+                  onModelPickerOpen={refreshCliStatus}
+                  onUpdateCli={handleUpdateCli}
+                  updatingCli={updatingCli}
+                  selectedModel={selectedModel}
+                  onModelChange={chooseModel}
+                  capability={selectedCapability}
+                  effort={effortFor(selectedCapability, effort)}
+                  onEffortChange={setEffort}
+                  ultracode={selectedCapability.ultracode && ultracode}
+                  onUltracodeChange={setUltracode}
+                  fastMode={fastMode}
+                  onFastModeChange={setFastMode}
+                  permissionMode={permissionMode}
+                  onPermissionModeChange={changePermissionMode}
+                  onRecommendationSelect={sendRecommendation}
+                  worktrees={composerWorktrees}
+                  selectedWorktreeId={selectedWorktree?.id}
+                  onWorktreeChange={(id) => {
+                    advanceChatView();
+                    setSelectedWorktreeId(id);
+                    saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
+                  }}
+                  isolation={isolation}
+                  onIsolationChange={(next) => {
+                    preparedTarget.current = null;
+                    setIsolation(next);
+                    saveChatPreferences(localStorage, project.path, { isolation: next });
+                    setNewChatError(null);
+                  }}
+                  branches={branches}
+                  baseBranch={effectiveBaseBranch}
+                  onBaseBranchChange={(branch) => {
+                    preparedTarget.current = null;
+                    setBaseBranch(branch);
+                    saveChatPreferences(localStorage, project.path, { baseBranch: branch });
+                  }}
+                  newChatError={newChatError}
+                  findOpen={findOpen}
+                  findSignal={findSignal}
+                  onFindClose={() => setFindOpen(false)}
+                  notice={notice}
+                  onDismissNotice={() => setNotice(null)}
+                  approval={
+                    pendingApproval ? (
+                      <PermissionCard
+                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
+                        request={pendingApproval}
+                        waiting={(run?.approvals.length ?? 1) - 1}
+                        answering={sentDecision(run, pendingApproval.requestId)}
+                        onAnswer={answerApproval}
+                      />
+                    ) : pendingQuestion ? (
+                      <QuestionCard
+                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
+                        request={pendingQuestion}
+                        waiting={(run?.questions.length ?? 1) - 1}
+                        answering={sentReply(run, pendingQuestion.requestId)}
+                        onAnswer={answerQuestion}
+                      />
+                    ) : undefined
+                  }
+                />
+              </EditorLinks>
+            </div>
+          </main>
+          <ChangesPanelSlot open={changes.open}>
+            <ChangesPanel
+              list={changes.list}
+              mode={changes.mode}
+              onModeChange={changes.setMode}
+              onRefresh={() => void changes.refresh()}
+              onSelectFile={changes.selectFile}
+              activePath={changes.activePath}
+              commentCounts={diffComments.counts}
+            />
+          </ChangesPanelSlot>
         </div>
-      </main>
-      <ChangesPanelSlot open={changes.open}>
-        <ChangesPanel list={changes.list} mode={changes.mode} onModeChange={changes.setMode} onRefresh={() => void changes.refresh()} onSelectFile={changes.selectFile} activePath={changes.activePath} commentCounts={diffComments.counts} />
-      </ChangesPanelSlot>
-      </div>
-      {linkDialog}
-      {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
-      {gitDialog && (
-        <GitActionsDialog
-          key={gitDialog.sessionId}
-          cwd={gitDialog.cwd}
-          base={gitDialog.base}
-          provider={gitDialog.provider}
-          chat={gitDialog.chat}
-          turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
-          onClose={() => setGitDialog(null)}
-          // The dialog's chat is the open one; a message sent while its turn runs steers it.
-          onSendToAgent={(text) => {
-            if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
-            else {
-              openChat(gitDialog.sessionId);
-              setDraft(text);
-            }
+        {linkDialog}
+        {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
+        {gitDialog && (
+          <GitActionsDialog
+            key={gitDialog.sessionId}
+            cwd={gitDialog.cwd}
+            base={gitDialog.base}
+            provider={gitDialog.provider}
+            chat={gitDialog.chat}
+            turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
+            onClose={() => setGitDialog(null)}
+            // The dialog's chat is the open one; a message sent while its turn runs steers it.
+            onSendToAgent={(text) => {
+              if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
+              else {
+                openChat(gitDialog.sessionId);
+                setDraft(text);
+              }
+            }}
+            onRan={(note) => {
+              recordGitNote(gitDialog.sessionId, note);
+              void window.milagre.refreshDiffs(project.path, [gitDialog.worktreeId]).catch(() => {});
+            }}
+          />
+        )}
+        <Notice />
+      </DotBackground>
+      {splashOverlay(true)}
+      {quitError && (
+        <dialog
+          ref={(element) => {
+            if (element && !element.open) element.showModal();
           }}
-          onRan={(note) => {
-            recordGitNote(gitDialog.sessionId, note);
-            void window.milagre.refreshDiffs(project.path, [gitDialog.worktreeId]).catch(() => {});
-          }}
-        />
+          onCancel={(event) => event.preventDefault()}
+          className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="save-failure-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
+            <h2 id="save-failure-title" className="text-lg font-semibold">
+              Chats could not be saved
+            </h2>
+            <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
+            <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
+            <button
+              autoFocus
+              className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface"
+              onClick={() => void window.milagre.retryQuit().catch((error) => setQuitError(ipcErrorMessage(error)))}
+            >
+              Retry saving and quit
+            </button>
+          </div>
+        </dialog>
       )}
-      <Notice />
-    </DotBackground>
-    {splashOverlay(true)}
-    {quitError && <dialog ref={element => { if (element && !element.open) element.showModal(); }} onCancel={event => event.preventDefault()} className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex" role="alertdialog" aria-modal="true" aria-labelledby="save-failure-title">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
-        <h2 id="save-failure-title" className="text-lg font-semibold">Chats could not be saved</h2>
-        <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
-        <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
-        <button autoFocus className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface" onClick={() => void window.milagre.retryQuit().catch(error => setQuitError(ipcErrorMessage(error)))}>Retry saving and quit</button>
-      </div>
-    </dialog>}
     </>
   );
 }

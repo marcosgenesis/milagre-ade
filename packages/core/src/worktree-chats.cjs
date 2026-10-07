@@ -22,7 +22,10 @@ function messagesBySession(messages) {
 
 // A chat copied by hand keeps every message as it was, even when it lost its provider id. Two chats that only start
 // the same way ("/review", then different replies) are different chats.
-const fingerprint = (worktreePath, messages) => createHash("sha256").update(JSON.stringify([worktreePath, messages.map((message) => message.body ?? "")])).digest("hex");
+const fingerprint = (worktreePath, messages) =>
+  createHash("sha256")
+    .update(JSON.stringify([worktreePath, messages.map((message) => message.body ?? "")]))
+    .digest("hex");
 
 // The id after every id in use; a loop, since spreading hundreds of thousands of ids into Math.max overflows the stack.
 function firstFreeId(state) {
@@ -51,7 +54,11 @@ function mergeWorktreeChats(main, old, { listed } = {}) {
   const take = () => nextId++;
 
   const worktreePathById = new Map(mainWorktrees.map((worktree) => [worktree.id, worktree.path]));
-  const knownNative = new Set(values(main.sessions).map((session) => session.native_session_id).filter(Boolean));
+  const knownNative = new Set(
+    values(main.sessions)
+      .map((session) => session.native_session_id)
+      .filter(Boolean),
+  );
   const knownCopies = new Map();
   const remember = (key, nativeId) => knownCopies.set(key, [...(knownCopies.get(key) ?? []), nativeId]);
   const mainMessages = messagesBySession(main.messages);
@@ -65,12 +72,21 @@ function mergeWorktreeChats(main, old, { listed } = {}) {
   const chosen = [];
   for (const session of values(old.sessions)) {
     const messages = oldMessages.get(session.id);
-    if (!messages?.length) { counts.empty++; continue; }
+    if (!messages?.length) {
+      counts.empty++;
+      continue;
+    }
     const worktree = oldWorktrees.get(session.worktree_id);
-    if (!worktree || (listed && !listed.has(worktree.path))) { counts.gone++; continue; }
+    if (!worktree || (listed && !listed.has(worktree.path))) {
+      counts.gone++;
+      continue;
+    }
     const key = fingerprint(worktree.path, messages);
     const nativeId = session.native_session_id;
-    if ((nativeId && knownNative.has(nativeId)) || (knownCopies.get(key) ?? []).some((other) => !other || !nativeId)) { counts.duplicates++; continue; }
+    if ((nativeId && knownNative.has(nativeId)) || (knownCopies.get(key) ?? []).some((other) => !other || !nativeId)) {
+      counts.duplicates++;
+      continue;
+    }
     if (nativeId) knownNative.add(nativeId);
     remember(key, nativeId);
     chosen.push({ session, worktree, messages });
@@ -130,8 +146,12 @@ function mergeWorktreeChats(main, old, { listed } = {}) {
 /** Parses a linked worktree's old file, with any subagent transcript sidecars it points at; null when there is none. */
 async function readOldChats(worktreePath) {
   let text;
-  try { text = await fs.readFile(oldChatsFile(worktreePath), "utf8"); }
-  catch (error) { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error; }
+  try {
+    text = await fs.readFile(oldChatsFile(worktreePath), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+    throw error;
+  }
   const state = JSON.parse(text);
   if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("not a coordination state");
   return hydrateSubagents(worktreePath, state);
@@ -179,7 +199,10 @@ async function migrateWorktreeChats({ projectPath, state, linkedWorktrees, liste
     try {
       await fs.rename(file, renamed);
       await syncDirectory(path.dirname(file));
-      if (gone) warn(`Milagre left ${gone} ${gone === 1 ? "chat" : "chats"} in ${renamed}: ${gone === 1 ? "its worktree is" : "their worktrees are"} no longer listed by git, or the folder is missing.`);
+      if (gone)
+        warn(
+          `Milagre left ${gone} ${gone === 1 ? "chat" : "chats"} in ${renamed}: ${gone === 1 ? "its worktree is" : "their worktrees are"} no longer listed by git, or the folder is missing.`,
+        );
     } catch (error) {
       // The file is read again on the next open; the duplicate check then skips what this merge already saved.
       warn(`Milagre brought back the chats in ${file} but couldn't rename it: ${error.message}`);

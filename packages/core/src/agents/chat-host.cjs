@@ -9,7 +9,8 @@ const { renderTranscript, providerName } = require("./handover.cjs");
 // A chat stopped longer ago than this waits for the user instead of continuing by itself.
 const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RESUME_BODY = "Milagre restarted. Continue where you left off.";
-const RESUME_PROMPT = "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
+const RESUME_PROMPT =
+  "Milagre, the app running you, closed while you were working and has just opened again, so your last turn was cut off. Continue where you left off. Check what is already done before repeating any of it.";
 
 // Saves every chat's turns, in whatever project, whether or not the window shows it. Agent events
 // are folded into the chat's project state (see ProjectStates), and each one is published to the
@@ -25,7 +26,13 @@ const withoutDraft = ({ handoverDraft, resumeTurn, ...rest }) => rest;
 // A new chat in a worktree takes its chat that has no messages yet, if there is one (not a handover still
 // waiting for its brief or holding it as a draft); otherwise one is made. Resolves the state with it.
 function starterChat(latest, worktree) {
-  const existing = Object.values(latest.sessions).find((item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !latest.messages.some((message) => message.session_id === item.id));
+  const existing = Object.values(latest.sessions).find(
+    (item) =>
+      item.worktree_id === worktree.id &&
+      !item.handoverPending &&
+      item.handoverDraft === undefined &&
+      !latest.messages.some((message) => message.session_id === item.id),
+  );
   if (existing) return { state: latest, session: existing };
   const session = { id: latest.next_id, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
   return { state: { ...latest, next_id: latest.next_id + 1, sessions: { ...latest.sessions, [session.id]: session } }, session };
@@ -39,7 +46,18 @@ class ChatHost {
    * them of a change no agent event made. `isFocused()` says whether a Milagre
    * window has focus: a turn that ends in the open chat while it hasn't leaves the chat unread too.
    */
-  constructor({ states, startTurn, publish, broadcast, isFocused = () => true, isChatFocused, nameChat = async () => {}, readSubagents = async () => [], handoverTools, now = Date.now }) {
+  constructor({
+    states,
+    startTurn,
+    publish,
+    broadcast,
+    isFocused = () => true,
+    isChatFocused,
+    nameChat = async () => {},
+    readSubagents = async () => [],
+    handoverTools,
+    now = Date.now,
+  }) {
     Object.assign(this, { states, startTurn, publish, broadcast, isFocused, isChatFocused, nameChat, readSubagents, handoverTools, now });
     this.pendingHandovers = new Map();
     this.subagentRecoveries = new Map();
@@ -96,19 +114,29 @@ class ChatHost {
       const session = saved.sessions[sessionId];
       const cwd = session?.workspacePath ?? saved.worktrees?.[session?.worktree_id]?.path;
       if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
-      const unknown = (session.subagents ?? []).filter(agent => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
+      const unknown = (session.subagents ?? []).filter((agent) => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
       if (!unknown.length) return;
       const events = await this.readSubagents({ cwd, agents: unknown, projectPath });
       if (!events.length) return;
       const { state, changed } = await this.states.update(projectPath, (latest) => {
         const current = latest.sessions[sessionId];
-        if (this.quitting || this.runs[chatId] || !current || current.archived || current.provider !== session.provider || current.native_session_id !== session.native_session_id || current.worktree_id !== session.worktree_id || (current.workspacePath ?? latest.worktrees?.[current.worktree_id]?.path) !== cwd) return latest;
+        if (
+          this.quitting ||
+          this.runs[chatId] ||
+          !current ||
+          current.archived ||
+          current.provider !== session.provider ||
+          current.native_session_id !== session.native_session_id ||
+          current.worktree_id !== session.worktree_id ||
+          (current.workspacePath ?? latest.worktrees?.[current.worktree_id]?.path) !== cwd
+        )
+          return latest;
         let next = latest;
         for (const event of events) {
           if (event.type !== "subagent-update" || !["completed", "failed", "cancelled"].includes(event.agent?.status)) continue;
-          const previous = unknown.find(agent => agent.id === event.agent.id);
+          const previous = unknown.find((agent) => agent.id === event.agent.id);
           // A new live event or an archive while history loads takes precedence over this snapshot.
-          if (!previous || current.subagents?.find(agent => agent.id === previous.id) !== previous) continue;
+          if (!previous || current.subagents?.find((agent) => agent.id === previous.id) !== previous) continue;
           next = applyAgentEvent(next, this.runs, projectPath, chatId, event).state;
         }
         return next;
@@ -127,28 +155,41 @@ class ChatHost {
     const sessionId = sessionIdFromKey(chatId);
     let seq;
     let added = [];
-    return this.states.update(projectPath, (state) => {
-      const result = applyAgentEvent(state, this.runs, projectPath, chatId, event);
-      this.runs = result.runs;
-      seq = ++this.seq;
-      if (!result.changed) return state;
-      const visible = this.isChatFocused ? this.isChatFocused(chatId) : chatId === this.openChat && this.isFocused();
-      const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
-      const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
-      const recorded = isTurnEnd(event) ? this.withNotes(next, chatId) : next;
-      const previousIds = new Set(state.messages.map(message => message.id));
-      added = recorded.messages.filter(message => !previousIds.has(message.id) && message.role === 'assistant');
-      return recorded;
-    }, { persist: event.type !== "subagent-update" }).then(
-      async ({ state, changed }) => {
-        this.publish(chatId, event.type === "subagent-update" && changed ? { ...event, agent: state.sessions[sessionId].subagents.find(agent => agent.id === event.agent.id) } : event, changed && event.type !== "subagent-update" ? state : undefined, seq);
-        await this.captureImages(projectPath, state, added);
-      },
-      (error) => {
-        console.warn(`Milagre couldn't record an agent event for ${chatId}:`, error.message);
-        this.publish(chatId, event);
-      },
-    );
+    return this.states
+      .update(
+        projectPath,
+        (state) => {
+          const result = applyAgentEvent(state, this.runs, projectPath, chatId, event);
+          this.runs = result.runs;
+          seq = ++this.seq;
+          if (!result.changed) return state;
+          const visible = this.isChatFocused ? this.isChatFocused(chatId) : chatId === this.openChat && this.isFocused();
+          const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
+          const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
+          const recorded = isTurnEnd(event) ? this.withNotes(next, chatId) : next;
+          const previousIds = new Set(state.messages.map((message) => message.id));
+          added = recorded.messages.filter((message) => !previousIds.has(message.id) && message.role === "assistant");
+          return recorded;
+        },
+        { persist: event.type !== "subagent-update" },
+      )
+      .then(
+        async ({ state, changed }) => {
+          this.publish(
+            chatId,
+            event.type === "subagent-update" && changed
+              ? { ...event, agent: state.sessions[sessionId].subagents.find((agent) => agent.id === event.agent.id) }
+              : event,
+            changed && event.type !== "subagent-update" ? state : undefined,
+            seq,
+          );
+          await this.captureImages(projectPath, state, added);
+        },
+        (error) => {
+          console.warn(`Milagre couldn't record an agent event for ${chatId}:`, error.message);
+          this.publish(chatId, event);
+        },
+      );
   }
 
   /** Capture newly saved replies after publication, outside the state mutation queue. */
@@ -156,11 +197,13 @@ class ChatHost {
     for (const message of messages) {
       const captured = await this.images.capture(projectPath, state, message);
       if (captured === message) continue;
-      const saved = await this.states.update(projectPath, latest => {
-        const current = latest.messages.find(item => item.id === message.id);
-        if (current !== message) return latest;
-        return { ...latest, messages: latest.messages.map(item => item === message ? captured : item) };
-      }).catch(() => null);
+      const saved = await this.states
+        .update(projectPath, (latest) => {
+          const current = latest.messages.find((item) => item.id === message.id);
+          if (current !== message) return latest;
+          return { ...latest, messages: latest.messages.map((item) => (item === message ? captured : item)) };
+        })
+        .catch(() => null);
       if (saved?.changed) this.broadcast(projectPath, saved.state);
     }
   }
@@ -172,30 +215,38 @@ class ChatHost {
   async recordAnswers(chatId, body) {
     const projectPath = projectOfKey(chatId);
     let pendingId = null;
-    await this.states.update(projectPath, latest => {
+    await this.states.update(projectPath, (latest) => {
       const sessionId = sessionIdFromKey(chatId);
       const run = this.runs[chatId];
       if (!latest.sessions[sessionId] || !run || !body) return latest;
       pendingId = latest.next_id;
-      return { ...latest, next_id: pendingId + 1, messages: [...latest.messages, { id: pendingId, session_id: sessionId, body, role: 'user', context: null, model: run.model }] };
+      return {
+        ...latest,
+        next_id: pendingId + 1,
+        messages: [...latest.messages, { id: pendingId, session_id: sessionId, body, role: "user", context: null, model: run.model }],
+      };
     });
     if (pendingId === null) return null;
-    try { await this.states.flush(projectPath); }
-    catch (error) { await this.takeBack(chatId, pendingId); throw error; }
+    try {
+      await this.states.flush(projectPath);
+    } catch (error) {
+      await this.takeBack(chatId, pendingId);
+      throw error;
+    }
     let messageId = null;
     let seq;
     let added = [];
-    const { state } = await this.states.update(projectPath, latest => {
-      const withoutPending = { ...latest, messages: latest.messages.filter(message => message.id !== pendingId) };
+    const { state } = await this.states.update(projectPath, (latest) => {
+      const withoutPending = { ...latest, messages: latest.messages.filter((message) => message.id !== pendingId) };
       const result = recordAnswers(withoutPending, this.runs, projectPath, chatId, body);
-      added = result.state.messages.slice(withoutPending.messages.length).filter(message => message.role === 'assistant');
+      added = result.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
       this.runs = result.runs;
       messageId = result.messageId;
       seq = ++this.seq;
       return result.state;
     });
     // No disk await between the current mutation and publication.
-    this.publish(chatId, { type: 'answers-sent' }, state, seq);
+    this.publish(chatId, { type: "answers-sent" }, state, seq);
     await this.captureImages(projectPath, state, added);
     return messageId;
   }
@@ -203,7 +254,11 @@ class ChatHost {
   /** Removes a message again, such as answers that never reached the agent. */
   async takeBack(chatId, messageId) {
     const projectPath = projectOfKey(chatId);
-    const { state, changed } = await this.states.update(projectPath, (latest) => (latest.messages.some((message) => message.id === messageId) ? { ...latest, messages: latest.messages.filter((message) => message.id !== messageId) } : latest));
+    const { state, changed } = await this.states.update(projectPath, (latest) =>
+      latest.messages.some((message) => message.id === messageId)
+        ? { ...latest, messages: latest.messages.filter((message) => message.id !== messageId) }
+        : latest,
+    );
     if (changed) this.broadcast(projectPath, state);
   }
 
@@ -221,7 +276,13 @@ class ChatHost {
     const sessionId = sessionIdFromKey(chatId);
     this.notes.delete(chatId);
     if (!notes || !state.sessions[sessionId]) return state;
-    const messages = notes.map((note, index) => ({ id: state.next_id + index, session_id: sessionId, body: note.body, context: note.context, role: "assistant" }));
+    const messages = notes.map((note, index) => ({
+      id: state.next_id + index,
+      session_id: sessionId,
+      body: note.body,
+      context: note.context,
+      role: "assistant",
+    }));
     return { ...state, next_id: state.next_id + messages.length, messages: [...state.messages, ...messages] };
   }
 
@@ -249,7 +310,7 @@ class ChatHost {
       if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
       const started = session ? { state: latest, session } : starterChat(latest, worktree);
       session = started.session;
-      const firstMessage = !latest.messages.some(message => message.session_id === session.id);
+      const firstMessage = !latest.messages.some((message) => message.session_id === session.id);
       // A handed-over chat's first message carries its brief; the body is only what the user typed.
       brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
@@ -259,10 +320,25 @@ class ChatHost {
       const next = withSession;
       originalSession = session;
       // `context` marks a message no person typed, such as a Delegation from another Chat.
-      const message = { id: next.next_id, session_id: session.id, body, images: storedImages, ...(files.length ? { files } : {}), ...(brief !== undefined ? { handoverBrief: brief } : {}), context: request.context ?? null, ...(request.operationId ? { operationId: request.operationId } : {}), role: "user", model };
+      const message = {
+        id: next.next_id,
+        session_id: session.id,
+        body,
+        images: storedImages,
+        ...(files.length ? { files } : {}),
+        ...(brief !== undefined ? { handoverBrief: brief } : {}),
+        context: request.context ?? null,
+        ...(request.operationId ? { operationId: request.operationId } : {}),
+        role: "user",
+        model,
+      };
       pendingId = message.id;
-      if (typeof request.clientMessageId === 'string') message.clientMessageId = request.clientMessageId;
-      stagedSession = { ...withoutDraft(session), provider, ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}) };
+      if (typeof request.clientMessageId === "string") message.clientMessageId = request.clientMessageId;
+      stagedSession = {
+        ...withoutDraft(session),
+        provider,
+        ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}),
+      };
       target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: session.native_session_id };
       return {
         ...next,
@@ -271,27 +347,32 @@ class ChatHost {
         messages: [...next.messages, message],
       };
     });
-    try { await this.states.flush(projectPath); }
-    catch (error) {
-      const { state } = await this.states.update(projectPath, latest => {
+    try {
+      await this.states.flush(projectPath);
+    } catch (error) {
+      const { state } = await this.states.update(projectPath, (latest) => {
         const session = { ...latest.sessions[target.sessionId] };
-        for (const field of ['provider', 'titlePending', 'handoverDraft', 'resumeTurn']) {
+        for (const field of ["provider", "titlePending", "handoverDraft", "resumeTurn"]) {
           if (session[field] !== stagedSession[field]) continue;
           if (Object.hasOwn(originalSession, field)) session[field] = originalSession[field];
           else delete session[field];
         }
-        return { ...latest, sessions: { ...latest.sessions, [target.sessionId]: session }, messages: latest.messages.filter(message => message.id !== pendingId) };
+        return {
+          ...latest,
+          sessions: { ...latest.sessions, [target.sessionId]: session },
+          messages: latest.messages.filter((message) => message.id !== pendingId),
+        };
       });
       this.broadcast(projectPath, state);
       throw error;
     }
     let seq;
     let added = [];
-    const { state } = await this.states.update(projectPath, latest => {
-      const message = latest.messages.find(item => item.id === pendingId);
-      const withoutPending = { ...latest, messages: latest.messages.filter(item => item.id !== pendingId) };
-      const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: 'message-sent', model });
-      added = sent.state.messages.slice(withoutPending.messages.length).filter(message => message.role === 'assistant');
+    const { state } = await this.states.update(projectPath, (latest) => {
+      const message = latest.messages.find((item) => item.id === pendingId);
+      const withoutPending = { ...latest, messages: latest.messages.filter((item) => item.id !== pendingId) };
+      const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: "message-sent", model });
+      added = sent.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
       this.runs = sent.runs;
       seq = ++this.seq;
       return { ...sent.state, messages: [...sent.state.messages, message] };
@@ -307,7 +388,10 @@ class ChatHost {
       fastMode: request.fastMode,
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
-      prompt: brief !== undefined ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n") : request.prompt || body || "Describe the attached images.",
+      prompt:
+        brief !== undefined
+          ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n")
+          : request.prompt || body || "Describe the attached images.",
     };
     this.turns.set(target.chatId, turn);
     const started = this.startTurn({ ...turn, ...execution, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId }).catch((error) => {
@@ -343,7 +427,19 @@ class ChatHost {
         sessions: {
           ...latest.sessions,
           [sessionId]: { ...source, handedOverTo: target },
-          [target]: { id: target, ...(source.workspacePath ? { workspacePath: source.workspacePath, worktrees: source.worktrees } : { worktree_id: source.worktree_id }), agent_name: source.agent_name, status: "Created", provider, handedOverFrom: sessionId, handoverPending: true, generatedTitle: `${providerName(provider)} · ${chatTitle(source, latest.messages.filter((item) => item.session_id === sessionId))}` },
+          [target]: {
+            id: target,
+            ...(source.workspacePath ? { workspacePath: source.workspacePath, worktrees: source.worktrees } : { worktree_id: source.worktree_id }),
+            agent_name: source.agent_name,
+            status: "Created",
+            provider,
+            handedOverFrom: sessionId,
+            handoverPending: true,
+            generatedTitle: `${providerName(provider)} · ${chatTitle(
+              source,
+              latest.messages.filter((item) => item.session_id === sessionId),
+            )}`,
+          },
         },
       };
     });
@@ -363,12 +459,24 @@ class ChatHost {
       const source = state.sessions[sessionId];
       const transcript = renderTranscript(state, sessionId);
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
-      const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
-      const body = await this.handoverTools.brief({ projectPath, transcript, transcriptPath, provider: source.provider, lastUserMessage, worktrees: source.worktrees, cwd: source.workspacePath ?? state.worktrees[source.worktree_id].path });
+      const lastUserMessage =
+        state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
+      const body = await this.handoverTools.brief({
+        projectPath,
+        transcript,
+        transcriptPath,
+        provider: source.provider,
+        lastUserMessage,
+        worktrees: source.worktrees,
+        cwd: source.workspacePath ?? state.worktrees[source.worktree_id].path,
+      });
       await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);
-      await this.addNote(chatKey(projectPath, target), { body: `Couldn't hand over: ${ipcErrorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`, context: "handover" });
+      await this.addNote(chatKey(projectPath, target), {
+        body: `Couldn't hand over: ${ipcErrorMessage(error).replace(/\.$/, "")}.${transcriptPath ? ` The transcript is at ${transcriptPath}.` : ""}`,
+        context: "handover",
+      });
     }
   }
 
@@ -409,15 +517,21 @@ class ChatHost {
       if (!turn) continue;
       byProject.set(projectOfKey(chatId), [...(byProject.get(projectOfKey(chatId)) ?? []), [sessionIdFromKey(chatId), turn]]);
     }
-    await Promise.all([...byProject].map(([projectPath, chats]) => this.states.update(projectPath, (latest) => {
-      let sessions = latest.sessions;
-      for (const [sessionId, { prompt, ...turn }] of chats) {
-        const session = sessions[sessionId];
-        if (!session) continue;
-        sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, stoppedAt, ...(session.native_session_id ? {} : { prompt }) } } };
-      }
-      return sessions === latest.sessions ? latest : { ...latest, sessions };
-    }).catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message))));
+    await Promise.all(
+      [...byProject].map(([projectPath, chats]) =>
+        this.states
+          .update(projectPath, (latest) => {
+            let sessions = latest.sessions;
+            for (const [sessionId, { prompt, ...turn }] of chats) {
+              const session = sessions[sessionId];
+              if (!session) continue;
+              sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, stoppedAt, ...(session.native_session_id ? {} : { prompt }) } } };
+            }
+            return sessions === latest.sessions ? latest : { ...latest, sessions };
+          })
+          .catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message)),
+      ),
+    );
   }
 
   /**
@@ -457,7 +571,10 @@ class ChatHost {
       if (!session.handoverPending || this.pendingHandovers.has(chatKey(projectPath, session.id))) continue;
       // The state passed in can be stale: a handover that finished since has nothing left to recover.
       if (!(await this.settleHandover(projectPath, session.id))) continue;
-      await this.addNote(chatKey(projectPath, session.id), { body: "Milagre closed before this handover finished. Hand over again from the original chat.", context: "handover" });
+      await this.addNote(chatKey(projectPath, session.id), {
+        body: "Milagre closed before this handover finished. Hand over again from the original chat.",
+        context: "handover",
+      });
     }
   }
 }

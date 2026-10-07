@@ -14,11 +14,11 @@ Useful checks:
 ```bash
 npm run typecheck
 npm run build
-npm run test:agent
+npm test -- --unit
 npm run release:dry
 ```
 
-The repo uses npm workspaces with one root lockfile. Run the existing commands from the repository root; `npm ci` installs every workspace. `npm run test:monorepo` checks package resolution and desktop packaging metadata. After building, `npm run test:desktop` opens the real app against temporary saved Chats and settings. On macOS, add `-- --packaged release/mac-arm64/Milagre.app` to check a local installer build too (use `release/mac/Milagre.app` for Intel).
+The repo uses npm workspaces with one root lockfile. Run the existing commands from the repository root; `npm ci` installs every workspace. `npm test -- --only monorepo` checks package resolution and desktop packaging metadata. After building, `npm test -- --only test-desktop` opens the real app against temporary saved Chats and settings. On macOS, run `node scripts/test-desktop.cjs --packaged release/mac-arm64/Milagre.app` to check a local installer build too (use `release/mac/Milagre.app` for Intel).
 
 `npm run dev` starts Vite and opens the Electron shell. The renderer is served locally at port 5180 during development. Its production build is in `apps/desktop/dist/`; installers remain in the root `release/` directory. The desktop package keeps its existing app identity and data paths, so saved Chats and settings need no migration.
 

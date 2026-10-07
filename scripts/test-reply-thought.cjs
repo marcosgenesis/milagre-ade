@@ -46,7 +46,9 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-reply-thought-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
@@ -66,7 +68,9 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("[data-slot=message-thought]")');
-    assert.deepEqual(await evaluate(thoughts), ["So the answer is no: the Subagents button only shows child agents, not the agent's own to-do list. #44 is still open."]);
+    assert.deepEqual(await evaluate(thoughts), [
+      "So the answer is no: the Subagents button only shows child agents, not the agent's own to-do list. #44 is still open.",
+    ]);
     await screenshot("asking");
     await evaluate('window.setFixture("working")');
     await waitFor('!document.querySelector("[data-slot=message-thought]")');
@@ -88,19 +92,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "reply-thought-fixture",
-      resolveId(id) { if (id === "/__reply_thought_fixture.tsx") return id; },
-      load(id) { if (id === "/__reply_thought_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__reply_thought__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__reply_thought_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "reply-thought-fixture",
+        resolveId(id) {
+          if (id === "/__reply_thought_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__reply_thought_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__reply_thought__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__reply_thought_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -109,14 +122,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__reply_thought__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

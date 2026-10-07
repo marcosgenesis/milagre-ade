@@ -30,18 +30,18 @@ brew install --cask the-ptf/tap/milagre
 
 Native installer checks pass on all three platforms. Public distribution is at different stages:
 
-| Platform | Packages | Availability |
-| --- | --- | --- |
-| macOS, Apple Silicon and Intel | DMG, ZIP, Homebrew cask | Signed releases and Homebrew are live |
-| Windows, x64 | Per-user NSIS installer, WinGet manifest | Native checks pass; signed public release and WinGet listing pending |
-| Linux, x64 | AppImage, DEB, RPM, signed APT/RPM repositories | Native checks pass; public release and repository deployment pending |
+| Platform                       | Packages                                        | Availability                                                         |
+| ------------------------------ | ----------------------------------------------- | -------------------------------------------------------------------- |
+| macOS, Apple Silicon and Intel | DMG, ZIP, Homebrew cask                         | Signed releases and Homebrew are live                                |
+| Windows, x64                   | Per-user NSIS installer, WinGet manifest        | Native checks pass; signed public release and WinGet listing pending |
+| Linux, x64                     | AppImage, DEB, RPM, signed APT/RPM repositories | Native checks pass; public release and repository deployment pending |
 
 You need at least one local agent CLI, installed and logged in:
 
-| Agent | Minimum version | Sign in |
-| --- | --- | --- |
-| Claude Code | 2.1.288 | `claude auth login` |
-| Codex CLI | 0.160.0 | `codex login` |
+| Agent       | Minimum version | Sign in             |
+| ----------- | --------------- | ------------------- |
+| Claude Code | 2.1.288         | `claude auth login` |
+| Codex CLI   | 0.160.0         | `codex login`       |
 
 Milagre uses your existing agent login. It does not provide model credentials or hosted inference. It reads your login shell's environment, so agents can find `node`, `git`, `gh` and your other tools even when you open the app from Finder.
 
@@ -53,9 +53,9 @@ For the phone companion, start with [pairing and mobile setup](docs/mobile-local
 
 Apple and Linux signing credentials and the Cloudflare account ID are configured. Public Windows/Linux distribution still needs these GitHub repository secrets:
 
-| Purpose | Missing secrets |
-| --- | --- |
-| Windows signing | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` |
+| Purpose                     | Missing secrets                                                           |
+| --------------------------- | ------------------------------------------------------------------------- |
+| Windows signing             | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`                                    |
 | Linux repository deployment | `CLOUDFLARE_PACKAGES_API_TOKEN` (a dedicated Cloudflare deployment token) |
 
 After adding the secrets:
@@ -80,7 +80,7 @@ This starts Vite at `http://127.0.0.1:5180` and opens Electron.
 ```sh
 npm run typecheck
 npm run build
-npm run test:agent
+npm test -- --unit
 ```
 
 To try mobile without a provider account:
@@ -93,13 +93,13 @@ The demo uses an isolated temporary Project and a deterministic demo agent. See 
 
 ## Read more
 
-| Guide | Covers |
-| --- | --- |
-| [Desktop guide](docs/desktop-guide.md) | Attachments, file mentions, notifications, Project images, slash skills and permission modes |
-| [Mobile setup](docs/mobile-local.md) | Pairing, simulators, remote access and phone notifications |
-| [Local daemon](docs/local-daemon.md) | The shared desktop/mobile host, ownership and recovery |
-| [Development and releases](docs/development.md) | Checks, packaging, automatic updates and signed macOS releases |
-| [Domain glossary](GLOSSARY.md) | Projects, Worktrees, Chats, Links, Delegation and Negotiation |
+| Guide                                           | Covers                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [Desktop guide](docs/desktop-guide.md)          | Attachments, file mentions, notifications, Project images, slash skills and permission modes |
+| [Mobile setup](docs/mobile-local.md)            | Pairing, simulators, remote access and phone notifications                                   |
+| [Local daemon](docs/local-daemon.md)            | The shared desktop/mobile host, ownership and recovery                                       |
+| [Development and releases](docs/development.md) | Checks, packaging, automatic updates and signed macOS releases                               |
+| [Domain glossary](GLOSSARY.md)                  | Projects, Worktrees, Chats, Links, Delegation and Negotiation                                |
 
 Unfinished audit work is recorded in [maintenance follow-ups](docs/maintenance.md). Feature requests live in [GitHub Issues](https://github.com/the-ptf/milagre-ade/issues).
 

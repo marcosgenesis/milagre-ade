@@ -8,15 +8,15 @@ No product implementation, native compilation, EAS build, OTA publication, deplo
 
 ## Environment and method
 
-| Item | Tested value |
-| --- | --- |
-| Mac | arm64, macOS 27.0, build `26A428` |
-| Xcode | 27.0 |
-| Host helper | `expo-device-hub@0.15.1`, installed only in the temporary probe directory |
-| Host runtimes | Installed Milagre Electron 44.5.1 / Node 24.21.0 with `ELECTRON_RUN_AS_NODE=1`; standalone Node 24.13.0 for comparison |
-| Source simulators | iPhone 17 Pro profiles on iOS 27.0 and a fresh iOS 26.2 simulator |
-| Desktop receiver | Headless installed Google Chrome, automated through Playwright 1.58.2; not Milagre's renderer |
-| Native receiver | Copied existing Milagre simulator binary, running on iOS 26.2; Expo 57.0.26, React Native 0.86.3, React 19.2.3, `@expo/dom-webview@57.0.1` JavaScript |
+| Item              | Tested value                                                                                                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mac               | arm64, macOS 27.0, build `26A428`                                                                                                                     |
+| Xcode             | 27.0                                                                                                                                                  |
+| Host helper       | `expo-device-hub@0.15.1`, installed only in the temporary probe directory                                                                             |
+| Host runtimes     | Installed Milagre Electron 44.5.1 / Node 24.21.0 with `ELECTRON_RUN_AS_NODE=1`; standalone Node 24.13.0 for comparison                                |
+| Source simulators | iPhone 17 Pro profiles on iOS 27.0 and a fresh iOS 26.2 simulator                                                                                     |
+| Desktop receiver  | Headless installed Google Chrome, automated through Playwright 1.58.2; not Milagre's renderer                                                         |
+| Native receiver   | Copied existing Milagre simulator binary, running on iOS 26.2; Expo 57.0.26, React Native 0.86.3, React 19.2.3, `@expo/dom-webview@57.0.1` JavaScript |
 
 The helper bound to `127.0.0.1:13470`. Initial capture settings were H.264, 30 fps, 1280 maximum dimension and 2 Mbps target. The upstream viewer can adjust stream settings: later samples included 45 fps and a smaller capture size. Configured bitrate and frame rate are not measurements.
 
@@ -24,21 +24,21 @@ The test page ran in simulator Safari and recorded pointer and text events to a 
 
 ## Results
 
-| Check | Result | Evidence and limit |
-| --- | --- | --- |
-| Native helper in installed Milagre's Node mode | PASS | Native addon loaded and streamed under the installed Electron executable. This does not test bundling the addon inside Milagre's signed distribution. |
-| Chrome WebRTC video | PASS | Initial sample: H.264, 588 x 1280, 30 fps, 130 decoded frames and zero dropped frames. Longer exploratory runs reported brief freezes, so the initial sample is not a sustained-performance claim. |
-| Existing Expo DOM WebView, HTTP page | PASS | First frame in 1,052 ms. Approximately 87 seconds of playback; the last sample reported 3,775 frames, 45 fps, zero dropped frames and zero freezes. |
-| Bundled `file://` page, direct HTTP signaling | FAIL | `RTCPeerConnection` was available in a secure context, but the offer fetch failed. The helper's preflight response for `Origin: null` omitted `Access-Control-Allow-Origin`. |
-| Bundled `file://` page, native signaling bridge | PASS | DOM posts the SDP offer to React Native; native `fetch` sends it to the helper and injects the answer. First frame in 628 ms. Last sample at 84.5 seconds: 588 x 1280, 2,526 decoded frames, 30 fps, zero dropped frames and zero freezes. No video crossed the native JavaScript bridge. |
-| Rapid taps, iOS 26.2 | MIXED | 9 of 10 attempts produced a detected color change. Successful attempts had a 51.9 ms median and 405 ms maximum; one exceeded the three-second detection window. Excluding the timeout must not hide the failed attempt. |
-| Spaced taps, iOS 27.0 after restart | PASS, with latency outlier | 10 of 10 changed the fixture. Median 63.9 ms; range 33.4 to 1,135.5 ms. The first attempt was the slowest. Only ten samples. |
-| Drag, held touch, two contacts | PARTIAL PASS | The iOS 26.2 fixture recorded move/end events and two distinct pointer contacts from the viewer's Alt-drag. Safari zoomed during gesture testing. No claim of accurate pinch scale or every native gesture is made. |
-| Typing | FAIL | An iOS 26.2 attempt to type `milagre123` produced `ilagre123`. An initial iOS 27 attempt was confounded by keyboard onboarding. After restarting, with the normal keyboard visibly open, both a browser attempt and a direct admitted HID socket sending `abc123` produced no fixture text events. Keyboard routing/native delivery remain unresolved. |
-| Rotation | PASS in upstream viewer | Screenshot review shows the source and upstream viewer rotated to landscape. The encoded video stayed 588 x 1280, so the width/height-swap assertion was invalid. The minimal phone receiver displayed the raw portrait buffer sideways because it does not consume orientation metadata. |
-| Scrolling | INCONCLUSIVE | A swipe produced no recorded scroll event while the keyboard/onboarding UI was involved. This does not establish a backend scrolling failure. |
-| Viewer reload | PASS | Reload produced video dimensions again in 738 ms. |
-| Helper stop and relaunch | PASS for upstream viewer | After terminating the Node helper and relaunching through Milagre's Electron executable, the viewer created a new connected peer. At the check about 31 seconds after termination it had decoded 802 frames with zero drops/freezes. This is a recovery upper bound, not a measured reconnection time. |
+| Check                                           | Result                     | Evidence and limit                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Native helper in installed Milagre's Node mode  | PASS                       | Native addon loaded and streamed under the installed Electron executable. This does not test bundling the addon inside Milagre's signed distribution.                                                                                                                                                                                                  |
+| Chrome WebRTC video                             | PASS                       | Initial sample: H.264, 588 x 1280, 30 fps, 130 decoded frames and zero dropped frames. Longer exploratory runs reported brief freezes, so the initial sample is not a sustained-performance claim.                                                                                                                                                     |
+| Existing Expo DOM WebView, HTTP page            | PASS                       | First frame in 1,052 ms. Approximately 87 seconds of playback; the last sample reported 3,775 frames, 45 fps, zero dropped frames and zero freezes.                                                                                                                                                                                                    |
+| Bundled `file://` page, direct HTTP signaling   | FAIL                       | `RTCPeerConnection` was available in a secure context, but the offer fetch failed. The helper's preflight response for `Origin: null` omitted `Access-Control-Allow-Origin`.                                                                                                                                                                           |
+| Bundled `file://` page, native signaling bridge | PASS                       | DOM posts the SDP offer to React Native; native `fetch` sends it to the helper and injects the answer. First frame in 628 ms. Last sample at 84.5 seconds: 588 x 1280, 2,526 decoded frames, 30 fps, zero dropped frames and zero freezes. No video crossed the native JavaScript bridge.                                                              |
+| Rapid taps, iOS 26.2                            | MIXED                      | 9 of 10 attempts produced a detected color change. Successful attempts had a 51.9 ms median and 405 ms maximum; one exceeded the three-second detection window. Excluding the timeout must not hide the failed attempt.                                                                                                                                |
+| Spaced taps, iOS 27.0 after restart             | PASS, with latency outlier | 10 of 10 changed the fixture. Median 63.9 ms; range 33.4 to 1,135.5 ms. The first attempt was the slowest. Only ten samples.                                                                                                                                                                                                                           |
+| Drag, held touch, two contacts                  | PARTIAL PASS               | The iOS 26.2 fixture recorded move/end events and two distinct pointer contacts from the viewer's Alt-drag. Safari zoomed during gesture testing. No claim of accurate pinch scale or every native gesture is made.                                                                                                                                    |
+| Typing                                          | FAIL                       | An iOS 26.2 attempt to type `milagre123` produced `ilagre123`. An initial iOS 27 attempt was confounded by keyboard onboarding. After restarting, with the normal keyboard visibly open, both a browser attempt and a direct admitted HID socket sending `abc123` produced no fixture text events. Keyboard routing/native delivery remain unresolved. |
+| Rotation                                        | PASS in upstream viewer    | Screenshot review shows the source and upstream viewer rotated to landscape. The encoded video stayed 588 x 1280, so the width/height-swap assertion was invalid. The minimal phone receiver displayed the raw portrait buffer sideways because it does not consume orientation metadata.                                                              |
+| Scrolling                                       | INCONCLUSIVE               | A swipe produced no recorded scroll event while the keyboard/onboarding UI was involved. This does not establish a backend scrolling failure.                                                                                                                                                                                                          |
+| Viewer reload                                   | PASS                       | Reload produced video dimensions again in 738 ms.                                                                                                                                                                                                                                                                                                      |
+| Helper stop and relaunch                        | PASS for upstream viewer   | After terminating the Node helper and relaunching through Milagre's Electron executable, the viewer created a new connected peer. At the check about 31 seconds after termination it had decoded 802 frames with zero drops/freezes. This is a recovery upper bound, not a measured reconnection time.                                                 |
 
 ### Startup input failure is not an established iOS 27 incompatibility
 
@@ -76,13 +76,13 @@ This copy has the older cached simulator runtime described in the research repor
 
 All paths below are within `/private/tmp/milagre-simulator-spike` and may be removed by operating-system cleanup.
 
-| Artifact | Purpose |
-| --- | --- |
-| `initial-stats.json`, `exercise-results.json`, `spaced-taps.json` | Peer statistics, input packets and color-response samples |
-| `fixture-events.json`, `ios27-input-retest.json`, `typing-retest.json`, `direct-hid-typing.json` | Delivered events and typing failure evidence |
-| `mobile-http-events.json`, `mobile-events.json` | Native WebView capability, first-frame and playback samples; `transport: "native-bridge"` identifies the final bundled-file experiment |
-| `reload-test.json`, `helper-restart.json` | Viewer and helper recovery observations |
-| `mobile-file-viewer.jpg`, `mobile-http-viewer.jpg`, `rotation-test.png`, `typing-audit-focused.png` | Real screenshots. `rotation-test.json` retains the invalid dimension-based assertion for comparison with the screenshot. |
+| Artifact                                                                                            | Purpose                                                                                                                                |
+| --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `initial-stats.json`, `exercise-results.json`, `spaced-taps.json`                                   | Peer statistics, input packets and color-response samples                                                                              |
+| `fixture-events.json`, `ios27-input-retest.json`, `typing-retest.json`, `direct-hid-typing.json`    | Delivered events and typing failure evidence                                                                                           |
+| `mobile-http-events.json`, `mobile-events.json`                                                     | Native WebView capability, first-frame and playback samples; `transport: "native-bridge"` identifies the final bundled-file experiment |
+| `reload-test.json`, `helper-restart.json`                                                           | Viewer and helper recovery observations                                                                                                |
+| `mobile-file-viewer.jpg`, `mobile-http-viewer.jpg`, `rotation-test.png`, `typing-audit-focused.png` | Real screenshots. `rotation-test.json` retains the invalid dimension-based assertion for comparison with the screenshot.               |
 
 Probe sources are `inspect.cjs`, `control.cjs`, `exercise.cjs`, `spaced.cjs`, `typing-audit.cjs`, `fixture-server.cjs`, `receiver.html`, and `mobile-probe/`. `MilagreDomProbe.app` is the temporary app copy. They are deliberately not product code or a production viewer.
 

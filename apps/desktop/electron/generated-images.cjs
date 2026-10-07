@@ -9,7 +9,9 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 // The bytes of a base64 image data URL, or null when `source` isn't one.
 function imageData(source) {
   const match = typeof source === "string" && /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(source);
-  return match ? { extension: match[1] === "jpeg" ? "jpg" : match[1], bytes: Buffer.from(match[2], "base64") } : null;
+  const kind = match ? match[1] : undefined;
+  const data = match ? match[2] : undefined;
+  return kind !== undefined && data !== undefined ? { extension: kind === "jpeg" ? "jpg" : kind, bytes: Buffer.from(data, "base64") } : null;
 }
 
 async function requireImage(file) {

@@ -1,10 +1,10 @@
-const { isLinkScopeKey, scopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
-const { ensureDaemon, compatibleClient } = require('@milagre/daemon/bootstrap');
-const { projectOfKey } = require('@milagre/shared/agent-runs');
+const { isLinkScopeKey, scopeKey } = require("@milagre/shared/chat-scopes");
+const { ensureDaemon, compatibleClient } = require("@milagre/daemon/bootstrap");
+const { projectOfKey } = require("@milagre/shared/agent-runs");
 
 // A host from before result pages still works; it only fails on very large Projects, as it always did. The window
 // offers to restart it (see restartHost).
-const RESULT_PAGES = 'result-pages-v1';
+const RESULT_PAGES = "result-pages-v1";
 const OUTDATED_HOST = "Restart Milagre's background host to load large projects.";
 // Events waiting behind one Project's state read. Past this the connection is dropped, and the reconnect re-reads every state.
 const MAX_HELD = 10_000;
@@ -12,18 +12,19 @@ const MAX_HELD = 10_000;
 // delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
 const START_ATTEMPTS = 3;
 // A connection that failed this way has no host behind it, rather than a slow or older one.
-const HOST_GONE = ['ENOENT', 'ECONNREFUSED'];
+const HOST_GONE = ["ENOENT", "ECONNREFUSED"];
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
 
 // The Project an event belongs to, when it names one.
 function projectOfEvent({ channel, payload }) {
-  if (!payload || typeof payload !== 'object') return null;
-  if (channel === 'link:state') return typeof payload.linkId === 'string' ? scopeKey({ kind: 'link', linkId: payload.linkId }) : null;
-  if (channel === 'project:state') return typeof payload.path === 'string' ? payload.path : null;
-  if (typeof payload.chatId === 'string') return projectOfKey(payload.chatId);
-  return typeof payload.projectPath === 'string' ? payload.projectPath : null;
+  if (!payload || typeof payload !== "object") return null;
+  if (channel === "link:state") return typeof payload.linkId === "string" ? scopeKey({ kind: "link", linkId: payload.linkId }) : null;
+  if (channel === "project:state") return typeof payload.path === "string" ? payload.path : null;
+  if (typeof payload.chatId === "string") return projectOfKey(payload.chatId);
+  return typeof payload.projectPath === "string" ? payload.projectPath : null;
 }
-const carriesState = payload => Boolean(payload && typeof payload === 'object' && (payload.stateTooLarge || (payload.state && typeof payload.state === 'object')));
+const carriesState = (payload) =>
+  Boolean(payload && typeof payload === "object" && (payload.stateTooLarge || (payload.state && typeof payload.state === "object")));
 
 async function connectDesktopRuntime(options) {
   const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
@@ -32,7 +33,7 @@ async function connectDesktopRuntime(options) {
   const startHost = options.startHost ?? ensureDaemon;
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
   let client = await startHost(options);
-  const status = client.status ?? await client.call('daemon:status');
+  const status = client.status ?? (await client.call("daemon:status"));
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
@@ -47,7 +48,9 @@ async function connectDesktopRuntime(options) {
   let bufferedBytes = 0;
   const projects = new Set();
 
-  function forward({ channel, payload }) { emit(channel, payload); }
+  function forward({ channel, payload }) {
+    emit(channel, payload);
+  }
   const connectedState = () => (hostOutdated ? { connected: true, hostOutdated: true, message: OUTDATED_HOST } : { connected: true });
   function adopt(next) {
     for (const method of next.methods ?? []) if (!methods.includes(method)) methods.push(method);
@@ -65,13 +68,22 @@ async function connectDesktopRuntime(options) {
     const hold = project ? holds.get(project) : undefined;
     if (hold && hold.connection === connection) {
       const chatId = event.payload?.chatId;
-      const sameChat = typeof chatId === 'string' && hold.queue.some(item => item.payload?.chatId === chatId);
-      if (!carriesState(event.payload) && !sameChat) { forward(event); return; }
-      if (hold.queue.length >= MAX_HELD) { connection.close(); return; }
+      const sameChat = typeof chatId === "string" && hold.queue.some((item) => item.payload?.chatId === chatId);
+      if (!carriesState(event.payload) && !sameChat) {
+        forward(event);
+        return;
+      }
+      if (hold.queue.length >= MAX_HELD) {
+        connection.close();
+        return;
+      }
       hold.queue.push(event);
       return;
     }
-    if (!project || !event.payload?.stateTooLarge) { forward(event); return; }
+    if (!project || !event.payload?.stateTooLarge) {
+      forward(event);
+      return;
+    }
     const created = { connection, queue: [event] };
     holds.set(project, created);
     // Events that arrived in the same read from the socket join the first state read.
@@ -80,20 +92,37 @@ async function connectDesktopRuntime(options) {
   async function release(project, hold) {
     const live = () => holds.get(project) === hold && client === hold.connection && !closed;
     while (live() && hold.queue.length) {
-      if (!carriesState(hold.queue[0].payload)) { forward(hold.queue.shift()); continue; }
+      if (!carriesState(hold.queue[0].payload)) {
+        forward(hold.queue.shift());
+        continue;
+      }
       const batch = hold.queue.splice(0);
       let state;
       let read = true;
-      try { state = /** @type {{ state: unknown }} */ (await hold.connection.call(isLinkScopeKey(project) ? 'link:snapshot' : 'project:snapshot', [isLinkScopeKey(project) ? project.slice('milagre-link:'.length) : project])).state; }
-      catch { read = false; }
+      try {
+        state = /** @type {{ state: unknown }} */ (
+            await hold.connection.call(isLinkScopeKey(project) ? "link:snapshot" : "project:snapshot", [
+              isLinkScopeKey(project) ? project.slice("milagre-link:".length) : project,
+            ])
+        ).state;
+      } catch {
+        read = false;
+      }
       if (!live()) return;
-      const last = batch.findLastIndex(item => ['project:state', 'link:state'].includes(item.channel));
+      const last = batch.findLastIndex((item) => ["project:state", "link:state"].includes(item.channel));
       batch.forEach((item, index) => {
-        if (!carriesState(item.payload)) { forward(item); return; }
+        if (!carriesState(item.payload)) {
+          forward(item);
+          return;
+        }
         const { stateTooLarge, state: _own, ...rest } = item.payload;
         // A failed read keeps the window's state; the event still moves the turn on screen.
-        if (!read) { if (!stateTooLarge) forward(item); else if (!['project:state', 'link:state'].includes(item.channel)) forward({ ...item, payload: rest }); return; }
-        if (['project:state', 'link:state'].includes(item.channel) && index !== last) return;
+        if (!read) {
+          if (!stateTooLarge) forward(item);
+          else if (!["project:state", "link:state"].includes(item.channel)) forward({ ...item, payload: rest });
+          return;
+        }
+        if (["project:state", "link:state"].includes(item.channel) && index !== last) return;
         forward({ ...item, payload: { ...rest, state } });
       });
     }
@@ -101,11 +130,17 @@ async function connectDesktopRuntime(options) {
   }
 
   function attach(connection) {
-    connection.on('event', event => {
+    connection.on("event", (event) => {
       if (client !== connection || closed) return;
       // The host was asked to stop (by this desktop or anyone else) and saved: it stays stopped.
-      if (event.channel === 'daemon:stopping') { hostStopped = true; return; }
-      if (!recovering) { deliver(connection, event); return; }
+      if (event.channel === "daemon:stopping") {
+        hostStopped = true;
+        return;
+      }
+      if (!recovering) {
+        deliver(connection, event);
+        return;
+      }
       if (!capturingSnapshot) return; // The later snapshot covers restoration events.
       bufferedBytes += Buffer.byteLength(JSON.stringify(event));
       // Recovery re-reads state instead of retaining an unbounded event stream.
@@ -115,11 +150,11 @@ async function connectDesktopRuntime(options) {
       }
       buffered.push(event);
     });
-    connection.once('close', () => {
+    connection.once("close", () => {
       if (client !== connection) return;
       client = null;
       if (closed || restarting) return;
-      emit('runtime:connection', { connected: false, message: 'Connection to the host was interrupted. Reconnecting…' });
+      emit("runtime:connection", { connected: false, message: "Connection to the host was interrupted. Reconnecting…" });
       if (!recovering) scheduleReconnect();
     });
   }
@@ -133,7 +168,13 @@ async function connectDesktopRuntime(options) {
   const mayStart = () => !hostStopped && starts < START_ATTEMPTS;
   function scheduleReconnect() {
     if (closed || timer) return;
-    timer = setTimeout(() => { timer = null; void reconnect(); }, mayStart() ? reconnectMs * 2 ** starts : reconnectMs);
+    timer = setTimeout(
+      () => {
+        timer = null;
+        void reconnect();
+      },
+      mayStart() ? reconnectMs * 2 ** starts : reconnectMs,
+    );
   }
   /** Resolves with the error when it couldn't connect (it then retries by itself), or nothing once connected. */
   async function reconnect() {
@@ -141,64 +182,85 @@ async function connectDesktopRuntime(options) {
     let started = false;
     try {
       if (mayStart()) {
-        try { connection = await compatibleClient(dataDir); }
-        catch (error) {
-          if (!(error instanceof Error) || !('code' in error) || !HOST_GONE.includes(String(error.code))) throw error;
-          starts++; started = true;
-          if (!restarting) emit('runtime:connection', { connected: false, message: "Milagre's background host stopped. Starting it again…" });
+        try {
+          connection = await compatibleClient(dataDir);
+        } catch (error) {
+          if (!(error instanceof Error) || !("code" in error) || !HOST_GONE.includes(String(error.code))) throw error;
+          starts++;
+          started = true;
+          if (!restarting) emit("runtime:connection", { connected: false, message: "Milagre's background host stopped. Starting it again…" });
           connection = await startHost(options);
         }
       } else connection = await compatibleClient(dataDir);
-      if (closed) { connection.close(); return undefined; }
-      adopt(connection.status ?? await connection.call('daemon:status'));
+      if (closed) {
+        connection.close();
+        return undefined;
+      }
+      adopt(connection.status ?? (await connection.call("daemon:status")));
       client = connection;
-      recovering = true; capturingSnapshot = false; buffered = []; bufferedBytes = 0;
+      recovering = true;
+      capturingSnapshot = false;
+      buffered = [];
+      bufferedBytes = 0;
       attach(connection);
       for (const projectPath of projects) {
-        try { await connection.call(isLinkScopeKey(projectPath) ? 'link:open' : 'project:open', [isLinkScopeKey(projectPath) ? projectPath.slice('milagre-link:'.length) : projectPath]); }
-        catch (error) {
+        try {
+          await connection.call(isLinkScopeKey(projectPath) ? "link:open" : "project:open", [
+            isLinkScopeKey(projectPath) ? projectPath.slice("milagre-link:".length) : projectPath,
+          ]);
+        } catch (error) {
           // A Project removed while the host was offline must not prevent the
           // remaining Projects, or the folder picker, from becoming usable.
-          if (!(error instanceof Error) || !('code' in error) || !['ENOENT', 'ENOTDIR'].includes(String(error.code))) throw error;
+          if (!(error instanceof Error) || !("code" in error) || !["ENOENT", "ENOTDIR"].includes(String(error.code))) throw error;
           projects.delete(projectPath);
-          if (currentProject === projectPath) { currentProject = null; currentChat = null; }
+          if (currentProject === projectPath) {
+            currentProject = null;
+            currentChat = null;
+          }
         }
       }
-      if (currentProject) await connection.call(isLinkScopeKey(currentProject) ? 'link:open' : 'project:open', [isLinkScopeKey(currentProject) ? currentProject.slice('milagre-link:'.length) : currentProject]);
-      await connection.call('chat:set-open', [currentChat]);
-      await connection.call('daemon:focus', [{ focused }]);
+      if (currentProject)
+        await connection.call(isLinkScopeKey(currentProject) ? "link:open" : "project:open", [
+          isLinkScopeKey(currentProject) ? currentProject.slice("milagre-link:".length) : currentProject,
+        ]);
+      await connection.call("chat:set-open", [currentChat]);
+      await connection.call("daemon:focus", [{ focused }]);
       capturingSnapshot = true;
-      const manifest = await connection.call('daemon:snapshot', [{ paged: true }]);
+      const manifest = await connection.call("daemon:snapshot", [{ paged: true }]);
       const pages = [];
       for (let index = 0; index < manifest.pageCount; index++) {
-        pages.push(await connection.call('daemon:snapshot-page', [manifest.snapshotId, index]));
+        pages.push(await connection.call("daemon:snapshot-page", [manifest.snapshotId, index]));
       }
-      const snapshot = JSON.parse(pages.join(''));
-      emit('runtime:snapshot', snapshot);
+      const snapshot = JSON.parse(pages.join(""));
+      emit("runtime:snapshot", snapshot);
       for (const event of buffered) if (event.seq > snapshot.eventSeq) deliver(connection, event);
-      buffered = []; recovering = false;
+      buffered = [];
+      recovering = false;
       // A restart the user asked for needs no notice; one that happened by itself does.
       const restarted = starts > 0 && !restarting;
-      hostStopped = false; starts = 0;
-      emit('runtime:connection', restarted ? { ...connectedState(), notice: RESTARTED_HOST } : connectedState());
+      hostStopped = false;
+      starts = 0;
+      emit("runtime:connection", restarted ? { ...connectedState(), notice: RESTARTED_HOST } : connectedState());
       return undefined;
     } catch (error) {
-      recovering = false; buffered = [];
+      recovering = false;
+      buffered = [];
       if (client === connection) client = null;
       connection?.close();
       if (!closed) {
         const reason = error instanceof Error ? error.message : String(error);
         // The last start failed too: say why, and keep that on screen while the retries only try to connect to a host
         // started some other way.
-        if (started && starts >= START_ATTEMPTS) emit('runtime:connection', { connected: false, failed: true, message: `Milagre's background host couldn't start again: ${reason}` });
-        else if (hostStopped || starts < START_ATTEMPTS) emit('runtime:connection', { connected: false, message: `Host unavailable: ${reason}` });
+        if (started && starts >= START_ATTEMPTS)
+          emit("runtime:connection", { connected: false, failed: true, message: `Milagre's background host couldn't start again: ${reason}` });
+        else if (hostStopped || starts < START_ATTEMPTS) emit("runtime:connection", { connected: false, message: `Host unavailable: ${reason}` });
         scheduleReconnect();
       }
       return error;
     }
   }
   attach(client);
-  if (hostOutdated) emit('runtime:connection', connectedState());
+  if (hostOutdated) emit("runtime:connection", connectedState());
 
   // Stops the host the way an update does (it saves and suspends running turns), then waits for the socket to close.
   async function stopHost(connection, message) {
@@ -206,21 +268,35 @@ async function connectDesktopRuntime(options) {
     let onClose;
     const stopped = new Promise((resolve, reject) => {
       onClose = resolve;
-      connection.once('close', onClose);
+      connection.once("close", onClose);
       deadline = setTimeout(() => reject(new Error(message)), 30000);
     });
-    try { await Promise.all([connection.call('daemon:stop'), stopped]); }
-    finally { clearTimeout(deadline); if (onClose) connection.off('close', onClose); }
+    try {
+      await Promise.all([connection.call("daemon:stop"), stopped]);
+    } finally {
+      clearTimeout(deadline);
+      if (onClose) connection.off("close", onClose);
+    }
   }
 
   async function invoke(method, args = []) {
-    if (closed || !client || recovering) throw new Error('Milagre host is disconnected. Your command was not sent.');
+    if (closed || !client || recovering) throw new Error("Milagre host is disconnected. Your command was not sent.");
     const result = /** @type {any} */ (await client.call(method, args));
-    if (['project:open', 'project:current', 'project:switch'].includes(method) && result && typeof result === 'object' && 'path' in result && typeof result.path === 'string') {
-      currentProject = result.path; projects.add(result.path);
+    if (
+      ["project:open", "project:current", "project:switch"].includes(method) &&
+      result &&
+      typeof result === "object" &&
+      "path" in result &&
+      typeof result.path === "string"
+    ) {
+      currentProject = result.path;
+      projects.add(result.path);
     }
-    if (method === 'link:open' && result?.link?.id) { currentProject = scopeKey({ kind: 'link', linkId: result.link.id }); projects.add(currentProject); }
-    if (method === 'chat:set-open') currentChat = args[0] ?? null;
+    if (method === "link:open" && result?.link?.id) {
+      currentProject = scopeKey({ kind: "link", linkId: result.link.id });
+      projects.add(currentProject);
+    }
+    if (method === "chat:set-open") currentChat = args[0] ?? null;
     return result;
   }
   return {
@@ -228,40 +304,51 @@ async function connectDesktopRuntime(options) {
     methods,
     environmentReady: Promise.resolve(),
     invoke,
-    openProject: projectPath => invoke('project:open', [projectPath, { takeNotice: true }]),
+    openProject: (projectPath) => invoke("project:open", [projectPath, { takeNotice: true }]),
     resumeRecentProjects: async () => {}, // The daemon resumes once, before it announces startup.
-    focused: () => invoke('daemon:focus', [{ focused: true }]),
-    setFocused(value) { focused = value === true; return invoke('daemon:focus', [{ focused }]); },
+    focused: () => invoke("daemon:focus", [{ focused: true }]),
+    setFocused(value) {
+      focused = value === true;
+      return invoke("daemon:focus", [{ focused }]);
+    },
     /** Replaces a running host with this desktop's own (an older one can't load large Projects). The window reconnects to it. */
     async restartHost() {
       if (closed || restarting) return;
-      if (!client || recovering) throw new Error('Reconnect to the host before restarting it.');
+      if (!client || recovering) throw new Error("Reconnect to the host before restarting it.");
       const connection = client;
       restarting = true;
       try {
-        emit('runtime:connection', { connected: false, message: 'Restarting the background host…' });
-        await stopHost(connection, 'The background host has not stopped. Try again.');
-        clearTimeout(timer); timer = null;
+        emit("runtime:connection", { connected: false, message: "Restarting the background host…" });
+        await stopHost(connection, "The background host has not stopped. Try again.");
+        clearTimeout(timer);
+        timer = null;
         // A new host that fails to start is reported to the window; the retries that follow start one again.
-        hostStopped = false; starts = 0;
+        hostStopped = false;
+        starts = 0;
         const failure = await reconnect();
         if (failure) throw failure;
       } catch (error) {
-        if (client === connection) emit('runtime:connection', connectedState());
+        if (client === connection) emit("runtime:connection", connectedState());
         throw error;
-      } finally { restarting = false; }
+      } finally {
+        restarting = false;
+      }
     },
     async close({ stopHost: stop = false } = {}) {
       if (closed) return;
       if (stop) {
-        if (!client || recovering) throw new Error('Reconnect to the host before installing an update.');
+        if (!client || recovering) throw new Error("Reconnect to the host before installing an update.");
         const connection = client;
         // A stop acknowledgement follows saving. Socket closure also confirms
         // host shutdown before the installer can replace its files.
         hostStopped = true;
-        try { await stopHost(connection, 'The host has not stopped. The update was not installed.'); }
-        catch (error) { if (client === connection) hostStopped = false; throw error; }
-      } else if (client && !recovering) await client.call('daemon:flush');
+        try {
+          await stopHost(connection, "The host has not stopped. The update was not installed.");
+        } catch (error) {
+          if (client === connection) hostStopped = false;
+          throw error;
+        }
+      } else if (client && !recovering) await client.call("daemon:flush");
       closed = true;
       clearTimeout(timer);
       client?.close();

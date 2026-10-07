@@ -22,7 +22,11 @@ function compact(object) {
   return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 }
 
-const prefixLines = (text, prefix) => String(text ?? "").split("\n").map((line) => `${prefix}${line}`).join("\n");
+const prefixLines = (text, prefix) =>
+  String(text ?? "")
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
 const replaced = (oldText, newText) => `${prefixLines(oldText, "-")}\n${prefixLines(newText, "+")}`;
 
 // Claude's edit tools carry the whole change in their input; show it as a minimal diff.
@@ -47,7 +51,13 @@ function claudeRequest(toolName, input, options = {}) {
   if (EDIT_TOOLS.has(toolName)) {
     const file = String(input.file_path ?? input.notebook_path ?? "");
     const verb = toolName === "Write" ? "Write" : "Edit";
-    return compact({ ...base, kind: "edit", title: options.title || `${verb} ${path.basename(file) || "a file"}?`, files: file ? [file] : [], diff: claudeEditDiff(toolName, input) });
+    return compact({
+      ...base,
+      kind: "edit",
+      title: options.title || `${verb} ${path.basename(file) || "a file"}?`,
+      files: file ? [file] : [],
+      diff: claudeEditDiff(toolName, input),
+    });
   }
   return compact({ ...base, kind: "other", title: options.title || `Use ${toolName}?`, detail: capText(JSON.stringify(input, null, 2)) });
 }
@@ -56,7 +66,8 @@ function claudeRequest(toolName, input, options = {}) {
 // so they never reach the user's settings files.
 function claudeResult(decision, input, suggestions = []) {
   if (decision === "allow") return { behavior: "allow", updatedInput: input };
-  if (decision === "allow-for-chat") return { behavior: "allow", updatedInput: input, updatedPermissions: suggestions.map((update) => ({ ...update, destination: "session" })) };
+  if (decision === "allow-for-chat")
+    return { behavior: "allow", updatedInput: input, updatedPermissions: suggestions.map((update) => ({ ...update, destination: "session" })) };
   if (decision === "cancelled") return { behavior: "deny", message: CANCELLED_MESSAGE, interrupt: true };
   return { behavior: "deny", message: DENIED_MESSAGE };
 }
@@ -112,7 +123,11 @@ function codexFileRequest(id, params, changes = []) {
   const files = changes.map((change) => change.path);
   const title = params.grantRoot
     ? `Allow writing to ${params.grantRoot}?`
-    : files.length === 1 ? `Edit ${path.basename(files[0])}?` : files.length ? `Edit ${files.length} files?` : "Edit files?";
+    : files.length === 1
+      ? `Edit ${path.basename(files[0])}?`
+      : files.length
+        ? `Edit ${files.length} files?`
+        : "Edit files?";
   return compact({
     requestId: String(id),
     kind: "edit",
@@ -145,23 +160,32 @@ function insideRoot(root, files) {
 
 // Resolve existing ancestors as well as new files, so an alias cannot escape an owned root.
 function insideWorkspace(roots, files, cwd = roots[0]) {
-  const { realpathSync } = require('node:fs');
-  const resolve = value => {
-    try { return realpathSync(value); }
-    catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+  const { realpathSync } = require("node:fs");
+  const resolve = (value) => {
+    try {
+      return realpathSync(value);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
       const parent = path.dirname(value);
       if (parent === value) throw error;
       return path.join(resolve(parent), path.basename(value));
     }
   };
   try {
-    const canonical = roots.map(root => realpathSync(root));
-    return files.length > 0 && files.every(file => {
-      const resolved = resolve(path.resolve(cwd, file));
-      return canonical.some(root => { const relative = path.relative(root, resolved); return relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); });
-    });
-  } catch { return false; }
+    const canonical = roots.map((root) => realpathSync(root));
+    return (
+      files.length > 0 &&
+      files.every((file) => {
+        const resolved = resolve(path.resolve(cwd, file));
+        return canonical.some((root) => {
+          const relative = path.relative(root, resolved);
+          return relative && relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+        });
+      })
+    );
+  } catch {
+    return false;
+  }
 }
 
 // The approval requests a session is waiting on. Each is answered exactly once: by the user, or as

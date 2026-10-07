@@ -12,22 +12,26 @@ const TLDR_INSTRUCTIONS = bundledWritingInstructions();
 const LINKS_INSTRUCTIONS = [
   "Links: the user can link this Chat's Worktree to Worktrees of other Projects on Milagre's canvas. When a turn's input starts with a <linked_worktrees> block, that is Milagre's summary of the linked side, not a message from the user.",
   "Read the linked side with the milagre tools: linked_overview, read_linked_chat, linked_git, read_linked_file and search_linked_files. They are read-only and need no approval.",
-  "Never edit a linked Worktree's files yourself. Ask for changes with delegate: the agent of the Chat you pick there carries them out, and its Delegation report comes back to this Chat later, so end your turn instead of waiting. A message that starts with \"Delegation from\" comes from another Chat, not the user; your final reply goes back to it as the report.",
+  'Never edit a linked Worktree\'s files yourself. Ask for changes with delegate: the agent of the Chat you pick there carries them out, and its Delegation report comes back to this Chat later, so end your turn instead of waiting. A message that starts with "Delegation from" comes from another Chat, not the user; your final reply goes back to it as the report.',
   "When both sides must agree on something first (an API shape, a contract), open a Negotiation with delegate(negotiation: true). Each report then starts the other side's next turn, for up to 10 rounds; call conclude_negotiation(summary) once you agree. A turn handling a Delegation can't delegate, except inside a Negotiation.",
 ].join(" ");
 
 function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
   return [
     "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
-    tldrEnabled ? TLDR_INSTRUCTIONS : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
+    tldrEnabled
+      ? TLDR_INSTRUCTIONS
+      : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
     "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
+    "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
     ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }
 const MILAGRE_INSTRUCTIONS = milagreInstructions();
-const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
+const RESUME_FAILED_MESSAGE =
+  "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 
 // What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
 const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
@@ -41,7 +45,14 @@ const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|E
 // The last non-empty line a CLI printed, without terminal colours and without a log line's timestamp, level
 // and module, and whether it was a log line.
 function readLastLine(text) {
-  const raw = String(text ?? "").replace(/\x1b\[[0-9;]*m/g, "").split("\n").map((item) => item.trim()).filter(Boolean).at(-1) ?? "";
+  const raw =
+    String(text ?? "")
+      // oxlint-disable-next-line no-control-regex -- strips ANSI colour escapes from provider output
+      .replace(/\x1b\[[0-9;]*m/g, "")
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .at(-1) ?? "";
   const logged = LOG_PREFIX.test(raw);
   const line = logged ? raw.replace(LOG_PREFIX, "") : raw;
   return { line: line.length > 300 ? `${line.slice(0, 299)}…` : line, logged };
@@ -95,7 +106,6 @@ function codexUnauthorized(error) {
   const info = error?.codexErrorInfo;
   return info === "unauthorized" || (Boolean(info) && typeof info === "object" && Object.values(info).some((detail) => detail?.httpStatusCode === 401));
 }
-
 
 // The mapper's clock; tests set state.now.
 const now = (state) => (state.now ?? Date.now)();
@@ -170,7 +180,11 @@ function mapClaudeMessage(message, state) {
   if (message.type === "result") {
     if (message.subtype === "success" && !message.is_error) events.push({ type: "turn-completed" });
     else if (state.authFailed) events.push(failedWith(loginMessage("claude"), { login: true }));
-    else events.push({ type: "turn-failed", message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn." });
+    else
+      events.push({
+        type: "turn-failed",
+        message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn.",
+      });
     state.authFailed = false;
   }
   return events;
@@ -200,11 +214,14 @@ function mapCodexNotification(method, params, state) {
     const started = state.steps.delete(step.id) ? [] : [{ type: "step-started", step }];
     return [...started, { type: "step-completed", ...codexStepResult(params.item) }];
   }
-  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   // A new summary part is a new paragraph.
-  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
+  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
   // The deltas are a preview: the first chunk can be missing, and item/completed carries the whole output.
-  if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   if (method === "item/agentMessage/delta" && params.delta) {
     // Late text from an earlier turn is not part of this reply, and must not take over turnId.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
@@ -227,7 +244,12 @@ function mapCodexNotification(method, params, state) {
     if (turn.status === "interrupted") return [{ type: "turn-cancelled" }];
     // A 401 means "log in" only where OpenAI auth is required (state.requiresOpenaiAuth, from account/read); on an
     // API key or a custom provider it is that provider's own error.
-    if (turn.status === "failed") return [codexUnauthorized(turn.error) && state.requiresOpenaiAuth === true ? failedWith(loginMessage("codex"), { login: true }) : { type: "turn-failed", message: codexErrorText(turn.error) }];
+    if (turn.status === "failed")
+      return [
+        codexUnauthorized(turn.error) && state.requiresOpenaiAuth === true
+          ? failedWith(loginMessage("codex"), { login: true })
+          : { type: "turn-failed", message: codexErrorText(turn.error) },
+      ];
     return [{ type: "turn-completed" }];
   }
   return [];
@@ -251,4 +273,18 @@ function codexReasoning(method, item, state) {
   return [...started, { type: "step-completed", ...thinkingEnd(id, startedAt === undefined ? undefined : now(state) - startedAt, summary) }];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, milagreInstructions, RESUME_FAILED_MESSAGE, cliBrokenMessage, failedWith, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+module.exports = {
+  MILAGRE_INSTRUCTIONS,
+  milagreInstructions,
+  RESUME_FAILED_MESSAGE,
+  cliBrokenMessage,
+  failedWith,
+  cliTooOldMessage,
+  crashMessage,
+  isTerminal,
+  lastLine,
+  loginMessage,
+  mapClaudeMessage,
+  mapCodexNotification,
+  missingCliMessage,
+};

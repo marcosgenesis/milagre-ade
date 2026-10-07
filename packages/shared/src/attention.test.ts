@@ -16,7 +16,15 @@ test("a question names the project, worktree and agent, and shows what it asks",
 });
 
 test("an approval shows the command's first line, or the request's title", () => {
-  const command: AgentEvent = { type: "permission-request", requestId: "p1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test\n--watch", allowForChat: true };
+  const command: AgentEvent = {
+    type: "permission-request",
+    requestId: "p1",
+    kind: "command",
+    tool: "Bash",
+    title: "Run this command?",
+    command: "npm test\n--watch",
+    allowForChat: true,
+  };
   assert.deepEqual(attentionNotice(command, { ...context, provider: "codex" }), {
     title: "rd-events / new-events-structure - Codex needs approval",
     subtitle: "Split the events table",
@@ -41,6 +49,11 @@ test("the context names a chat's worktree, title and agent, or only its project 
     sessions: { 2: { id: 2, worktree_id: 1, agent_name: "fix-login", status: "Created", provider: "codex" } },
     messages: [{ id: 3, session_id: 2, body: "Fix the login redirect\nand more", context: null, role: "user" }],
   } as unknown as CoordinatorState;
-  assert.deepEqual(attentionContext(state, "shop", 2), { projectName: "shop", worktreeName: "fix-login", chatTitle: "Fix the login redirect", provider: "codex" });
+  assert.deepEqual(attentionContext(state, "shop", 2), {
+    projectName: "shop",
+    worktreeName: "fix-login",
+    chatTitle: "Fix the login redirect",
+    provider: "codex",
+  });
   assert.deepEqual(attentionContext(state, "shop", 9), { projectName: "shop" });
 });

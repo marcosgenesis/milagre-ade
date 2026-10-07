@@ -27,9 +27,15 @@ function isAtLeast(version, minimum) {
 // `<command> --version`: { output }, or { error } with the last line it printed when it didn't run.
 function runVersion(command, { execFileImpl = execFile } = {}) {
   return new Promise((resolve) => {
-    execCommand(command, ["--version"], { encoding: "utf8", timeout: VERSION_TIMEOUT_MS }, (error, stdout, stderr) => {
-      resolve(error ? { error: lastLine(stderr) || lastLine(error.message) } : { output: String(stdout) });
-    }, execFileImpl);
+    execCommand(
+      command,
+      ["--version"],
+      { encoding: "utf8", timeout: VERSION_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        resolve(error ? { error: lastLine(stderr) || lastLine(error.message) } : { output: String(stdout) });
+      },
+      execFileImpl,
+    );
   });
 }
 
@@ -43,7 +49,9 @@ async function inspectCli(name, { resolve = resolveExecutable, version = runVers
   const parsed = parseVersion(result.output);
   if (!parsed) return { command, version: null };
   const text = parsed.join(".");
-  return isAtLeast(parsed, MIN_VERSIONS[name]) ? { command, version: text } : { command, version: text, problem: cliTooOldMessage(name, text, MIN_VERSIONS[name]) };
+  return isAtLeast(parsed, MIN_VERSIONS[name])
+    ? { command, version: text }
+    : { command, version: text, problem: cliTooOldMessage(name, text, MIN_VERSIONS[name]) };
 }
 
 // Each CLI is inspected once per app run, after `ready` (the login environment). One with a problem is
@@ -55,16 +63,25 @@ function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh
   const hadProblem = new Set();
   const check = (name) => {
     if (!cache.has(name)) {
-      const pending = Promise.resolve().then(ready).catch(() => {}).then(() => (hadProblem.has(name) ? refresh() : undefined)).catch(() => {}).then(() => inspect(name)).then((status) => {
-        if (status.problem) {
-          cache.delete(name);
-          hadProblem.add(name);
-        } else hadProblem.delete(name);
-        return status;
-      }, (error) => {
-        cache.delete(name);
-        throw error;
-      });
+      const pending = Promise.resolve()
+        .then(ready)
+        .catch(() => {})
+        .then(() => (hadProblem.has(name) ? refresh() : undefined))
+        .catch(() => {})
+        .then(() => inspect(name))
+        .then(
+          (status) => {
+            if (status.problem) {
+              cache.delete(name);
+              hadProblem.add(name);
+            } else hadProblem.delete(name);
+            return status;
+          },
+          (error) => {
+            cache.delete(name);
+            throw error;
+          },
+        );
       cache.set(name, pending);
     }
     return cache.get(name);

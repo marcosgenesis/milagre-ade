@@ -1,5 +1,5 @@
 /** What the bridge's live socket says: fetch the runs, or the whole Project, again. It never carries state. */
-export type LiveSignal = 'runs' | 'project' | 'accounts';
+export type LiveSignal = "runs" | "project" | "accounts";
 export type LiveSocket = {
   onopen: (() => void) | null;
   onmessage: ((event: { data?: unknown }) => void) | null;
@@ -19,18 +19,25 @@ export type LiveOptions = {
 export type Live = { close(): void };
 
 /** React Native's WebSocket always sends an Origin; the bridge accepts this one and refuses every web page's. */
-export const LIVE_ORIGIN = 'milagre-app://phone';
+export const LIVE_ORIGIN = "milagre-app://phone";
 const BACKOFF = [1000, 2000, 5000, 10000, 30000];
 // An older bridge answers the upgrade with a 404; there is nothing to gain from asking it every few seconds.
 const UNSUPPORTED = 5 * 60_000;
 // The bridge sends a ping every 25 s; a socket silent for longer than two is dead (a network change leaves no close).
 const SILENCE = 60_000;
-const defaultTimers: Timers = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) };
+const defaultTimers: Timers = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>) };
 // React Native's WebSocket takes headers as a third argument; a browser's does not.
-const nativeSocket = (url: string, headers: Record<string, string>) => new (WebSocket as unknown as new (url: string, protocols: undefined, options: { headers: Record<string, string> }) => LiveSocket)(url, undefined, { headers });
+const nativeSocket = (url: string, headers: Record<string, string>) =>
+  new (WebSocket as unknown as new (url: string, protocols: undefined, options: { headers: Record<string, string> }) => LiveSocket)(url, undefined, {
+    headers,
+  });
 
 /** A live socket that reconnects with backoff until closed. */
-export function openLive(url: string, headers: Record<string, string>, { onSignal, onStatus, create = nativeSocket, timers = defaultTimers, random = Math.random }: LiveOptions): Live {
+export function openLive(
+  url: string,
+  headers: Record<string, string>,
+  { onSignal, onStatus, create = nativeSocket, timers = defaultTimers, random = Math.random }: LiveOptions,
+): Live {
   let socket: LiveSocket | null = null;
   let retry: unknown;
   let silence: unknown;
@@ -40,13 +47,20 @@ export function openLive(url: string, headers: Record<string, string>, { onSigna
   let up = false;
   const quiet = () => {
     timers.clearTimeout(silence);
-    silence = timers.setTimeout(() => { const dead = socket; dead?.close(); if (dead) lost(dead); }, SILENCE);
+    silence = timers.setTimeout(() => {
+      const dead = socket;
+      dead?.close();
+      if (dead) lost(dead);
+    }, SILENCE);
   };
   function lost(from: LiveSocket) {
     if (from !== socket || closed) return;
     socket = null;
     timers.clearTimeout(silence);
-    if (up) { up = false; onStatus(false); }
+    if (up) {
+      up = false;
+      onStatus(false);
+    }
     const wait = unsupported ? UNSUPPORTED : BACKOFF[Math.min(failures, BACKOFF.length - 1)];
     failures++;
     unsupported = false;
@@ -56,18 +70,37 @@ export function openLive(url: string, headers: Record<string, string>, { onSigna
   function connect() {
     if (closed) return;
     let next: LiveSocket;
-    try { next = create(url, { ...headers, Origin: LIVE_ORIGIN }); } catch { failures++; retry = timers.setTimeout(connect, UNSUPPORTED); return; }
+    try {
+      next = create(url, { ...headers, Origin: LIVE_ORIGIN });
+    } catch {
+      failures++;
+      retry = timers.setTimeout(connect, UNSUPPORTED);
+      return;
+    }
     socket = next;
-    next.onopen = () => { if (next !== socket) return; failures = 0; up = true; quiet(); onStatus(true); };
-    next.onmessage = event => {
+    next.onopen = () => {
+      if (next !== socket) return;
+      failures = 0;
+      up = true;
+      quiet();
+      onStatus(true);
+    };
+    next.onmessage = (event) => {
       if (next !== socket) return;
       quiet();
       let type: unknown;
-      try { type = JSON.parse(String(event.data)).type; } catch { return; }
-      if (type === 'runs' || type === 'project' || type === 'accounts') onSignal(type);
+      try {
+        type = JSON.parse(String(event.data)).type;
+      } catch {
+        return;
+      }
+      if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
     };
     // Both platforms put the refused upgrade's status in the message ("…101… but was '404 Not Found'").
-    next.onerror = event => { if (/\b404\b/.test(event?.message ?? '')) unsupported = true; lost(next); };
+    next.onerror = (event) => {
+      if (/\b404\b/.test(event?.message ?? "")) unsupported = true;
+      lost(next);
+    };
     next.onclose = () => lost(next);
   }
   connect();
@@ -85,7 +118,7 @@ export function openLive(url: string, headers: Record<string, string>, { onSigna
 
 export type SyncOptions = {
   /** Opens the Project's live socket. */
-  connect: (options: Pick<LiveOptions, 'onSignal' | 'onStatus'>) => Live;
+  connect: (options: Pick<LiveOptions, "onSignal" | "onStatus">) => Live;
   snapshot: () => Promise<void>;
   runs: () => Promise<void>;
   accounts?: () => void;
@@ -111,29 +144,48 @@ export function syncProject({ connect, snapshot, runs, accounts, onError, active
   let pending: LiveSignal | null = null;
   let fetching = false;
   async function pull(kind: LiveSignal) {
-    pending = pending === 'project' || kind === 'project' ? 'project' : 'runs';
+    pending = pending === "project" || kind === "project" ? "project" : "runs";
     if (fetching) return;
     fetching = true;
     try {
+      // oxlint-disable-next-line no-unmodified-loop-condition -- the returned stop function sets stopped, and watcher events set pending, while the loop awaits
       while (pending && !stopped) {
         const next = pending;
         pending = null;
-        try { await (next === 'project' ? snapshot() : runs()); } catch (error) { if (!stopped) onError(error as Error); }
+        try {
+          await (next === "project" ? snapshot() : runs());
+        } catch (error) {
+          if (!stopped) onError(error as Error);
+        }
       }
-    } finally { fetching = false; }
+    } finally {
+      fetching = false;
+    }
   }
   function schedule() {
     timers.clearTimeout(poll);
     if (stopped || open || !active()) return;
-    poll = timers.setTimeout(() => { void pull('project').finally(schedule); }, pollDelay());
+    poll = timers.setTimeout(() => {
+      void pull("project").finally(schedule);
+    }, pollDelay());
   }
   function start() {
     open = false;
     live?.close();
     live = connect({
-      onSignal: signal => { if (stopped) return; if (signal === 'accounts') accounts?.(); else void pull(signal); },
+      onSignal: (signal) => {
+        if (stopped) return;
+        if (signal === "accounts") accounts?.();
+        else void pull(signal);
+      },
       // On opening, catch up on what changed while it was down; on losing it, poll until it is back.
-      onStatus: next => { if (stopped) return; open = next; if (open) timers.clearTimeout(poll); void pull('project'); if (!open) schedule(); },
+      onStatus: (next) => {
+        if (stopped) return;
+        open = next;
+        if (open) timers.clearTimeout(poll);
+        void pull("project");
+        if (!open) schedule();
+      },
     });
   }
   function background() {
@@ -142,13 +194,24 @@ export function syncProject({ connect, snapshot, runs, accounts, onError, active
     live = null;
     open = false;
   }
-  if (active()) { void pull('project'); start(); schedule(); }
-  const unwatch = watchActive(foreground => {
+  if (active()) {
+    void pull("project");
+    start();
+    schedule();
+  }
+  const unwatch = watchActive((foreground) => {
     if (stopped) return;
-    if (!foreground) { background(); return; }
-    void pull('project');
+    if (!foreground) {
+      background();
+      return;
+    }
+    void pull("project");
     start();
     schedule();
   });
-  return () => { stopped = true; unwatch(); background(); };
+  return () => {
+    stopped = true;
+    unwatch();
+    background();
+  };
 }

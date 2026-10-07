@@ -37,15 +37,18 @@ class AttentionNotifier {
 
   /** @param {{ projectPath?: string; activeChatId?: string | null; unread?: string[]; notifyOnCompletion?: boolean; showDockBadge?: boolean }} [state] */
   sync({ projectPath, activeChatId = null, unread = [], notifyOnCompletion = true, showDockBadge = true } = {}) {
-    this.activeChatId = typeof activeChatId === 'string' ? activeChatId : null;
+    this.activeChatId = typeof activeChatId === "string" ? activeChatId : null;
     this.notifyOnCompletion = notifyOnCompletion === true;
     this.showDockBadge = showDockBadge === true;
-    if (typeof projectPath === 'string') {
+    if (typeof projectPath === "string") {
       const prefix = `${projectPath}#`;
       for (const id of this.unread) if (id.startsWith(prefix)) this.unread.delete(id);
-      if (Array.isArray(unread)) for (const id of unread) if (typeof id === 'string' && id.startsWith(prefix)) this.unread.add(id);
+      if (Array.isArray(unread)) for (const id of unread) if (typeof id === "string" && id.startsWith(prefix)) this.unread.add(id);
       for (const [id, notification] of this.completionNotifications) {
-        if (id.startsWith(prefix) && !this.unread.has(id)) { notification.close(); this.completionNotifications.delete(id); }
+        if (id.startsWith(prefix) && !this.unread.has(id)) {
+          notification.close();
+          this.completionNotifications.delete(id);
+        }
       }
     }
     this.updateBadge();
@@ -53,22 +56,23 @@ class AttentionNotifier {
 
   updateBadge() {
     const chats = new Set(this.unread);
-    for (const key of this.open.keys()) chats.add(key.slice(0, key.lastIndexOf('\n')));
-    this.setBadge(this.showDockBadge && chats.size ? String(chats.size) : '');
+    for (const key of this.open.keys()) chats.add(key.slice(0, key.lastIndexOf("\n")));
+    this.setBadge(this.showDockBadge && chats.size ? String(chats.size) : "");
   }
 
   observe(chatId, event) {
-    if (event.type === 'turn-started') {
+    if (event.type === "turn-started") {
       this.previews.delete(chatId);
       this.completed.delete(chatId);
-    } else if (event.type === 'text-delta') {
-      this.previews.set(chatId, ((this.previews.get(chatId) || '') + event.text).slice(-MAX_BODY));
+    } else if (event.type === "text-delta") {
+      this.previews.set(chatId, ((this.previews.get(chatId) || "") + event.text).slice(-MAX_BODY));
     }
     if (isTerminal(event)) {
-      if (event.type !== 'turn-cancelled') this.completed.set(chatId, {
-        failed: event.type === 'turn-failed',
-        body: event.type === 'turn-failed' ? event.message : this.previews.get(chatId) || 'Turn completed.',
-      });
+      if (event.type !== "turn-cancelled")
+        this.completed.set(chatId, {
+          failed: event.type === "turn-failed",
+          body: event.type === "turn-failed" ? event.message : this.previews.get(chatId) || "Turn completed.",
+        });
       else this.completed.delete(chatId);
       this.previews.delete(chatId);
       if (this.completed.size > 100) this.completed.delete(this.completed.keys().next().value);
@@ -89,7 +93,11 @@ class AttentionNotifier {
   notify({ chatId, requestId, title, subtitle, body } = {}) {
     const key = keyOf(String(chatId), String(requestId));
     if (!this.open.has(key) || this.open.get(key) || this.isAppFocused()) return false;
-    const notification = this.createNotification({ title: capped(title, MAX_TITLE) || "Milagre", subtitle: capped(subtitle, MAX_TITLE), body: capped(body, MAX_BODY) });
+    const notification = this.createNotification({
+      title: capped(title, MAX_TITLE) || "Milagre",
+      subtitle: capped(subtitle, MAX_TITLE),
+      body: capped(body, MAX_BODY),
+    });
     notification.on("click", () => this.openChat(String(chatId)));
     this.open.set(key, notification);
     notification.show();
@@ -102,10 +110,14 @@ class AttentionNotifier {
     const result = this.completed.get(chatId);
     this.completed.delete(chatId);
     if (!result || !this.notifyOnCompletion || (this.isAppFocused() && this.activeChatId === chatId)) return false;
-    const notification = this.createNotification({ title: `${capped(title, MAX_TITLE) || 'Milagre'} - ${result.failed ? 'Turn failed' : 'Turn completed'}`, subtitle: capped(subtitle, MAX_TITLE), body: capped(result.body, MAX_BODY) });
+    const notification = this.createNotification({
+      title: `${capped(title, MAX_TITLE) || "Milagre"} - ${result.failed ? "Turn failed" : "Turn completed"}`,
+      subtitle: capped(subtitle, MAX_TITLE),
+      body: capped(result.body, MAX_BODY),
+    });
     this.completionNotifications.get(chatId)?.close();
     this.completionNotifications.set(chatId, notification);
-    notification.on('click', () => this.openChat(chatId));
+    notification.on("click", () => this.openChat(chatId));
     notification.show();
     return true;
   }
@@ -113,7 +125,11 @@ class AttentionNotifier {
   // A phone paired with this Mac for the first time. Shown even while Milagre has focus: it is about who can reach
   // the agents, and the pairing window opens just by looking at Settings → Phone. Clicking it opens that page.
   notifyPhonePaired() {
-    const notification = this.createNotification({ title: "New phone paired", subtitle: "", body: "A phone can now reach your agents on this Mac. If it wasn't you, reset access in Settings → Phone." });
+    const notification = this.createNotification({
+      title: "New phone paired",
+      subtitle: "",
+      body: "A phone can now reach your agents on this Mac. If it wasn't you, reset access in Settings → Phone.",
+    });
     this.phonePaired?.close();
     this.phonePaired = notification;
     notification.on("click", () => this.openPhoneSettings());
@@ -133,7 +149,7 @@ class AttentionNotifier {
     this.completionNotifications.clear();
     this.completed.clear();
     this.previews.clear();
-    this.setBadge('');
+    this.setBadge("");
   }
 }
 

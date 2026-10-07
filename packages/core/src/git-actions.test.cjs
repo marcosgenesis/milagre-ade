@@ -79,7 +79,13 @@ async function fixture(t, { origin = true, gh = true } = {}) {
   await fs.writeFile(path.join(decoy, "gh"), DECOY_GH, { mode: 0o755 });
   const gitconfig = path.join(root, "gitconfig");
   await fs.writeFile(gitconfig, "[user]\n\tname = Milagre\n\temail = milagre@example.com\n[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n");
-  const env = { HOME: root, PATH: `${decoy}:${process.env.PATH ?? ""}:/usr/bin:/bin`, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true" };
+  const env = {
+    HOME: root,
+    PATH: `${decoy}:${process.env.PATH ?? ""}:/usr/bin:/bin`,
+    GIT_CONFIG_GLOBAL: gitconfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_EDITOR: "true",
+  };
   const run = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }).trim();
   // A git command that is meant to fail (a conflicting merge, say).
   const fail = (cwd, ...args) => assert.throws(() => run(cwd, ...args));
@@ -102,7 +108,11 @@ async function fixture(t, { origin = true, gh = true } = {}) {
 
   const ghCalls = async () => {
     try {
-      return (await fs.readFile(path.join(bin, "gh-calls.jsonl"), "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      return (await fs.readFile(path.join(bin, "gh-calls.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
     } catch {
       return [];
     }
@@ -171,7 +181,7 @@ test("commit stages everything and takes the message from stdin", async (t) => {
   await fs.writeFile(path.join(worktree, "cart.js"), "export const cart = [1];\n");
   await fs.mkdir(path.join(worktree, ".milagre"));
   await fs.writeFile(path.join(worktree, ".milagre", "coordination.json"), "{}\n");
-  const message = "feat: add the checkout page\n\nIt reads the cart's \"total\" and $HOME stays literal.";
+  const message = 'feat: add the checkout page\n\nIt reads the cart\'s "total" and $HOME stays literal.';
 
   const result = await actions.commit({ cwd: worktree, message });
   assert.equal(result.ok, true);
@@ -233,11 +243,15 @@ test("a signing failure is reported as git says it, not as a hook failure", asyn
   assert.equal(result.output, undefined);
 });
 
-test("hook output that says \"assigning\" is still a hook failure, not a signing one", async (t) => {
+test('hook output that says "assigning" is still a hook failure, not a signing one', async (t) => {
   const { worktree, run, actions } = await fixture(t);
   const hooks = run(worktree, "rev-parse", "--git-path", "hooks");
   await fs.mkdir(path.resolve(worktree, hooks), { recursive: true });
-  await fs.writeFile(path.resolve(worktree, hooks, "pre-commit"), "#!/bin/sh\necho 'checkout.js:3 error: assigning to a constant (no-const-assign)' >&2\nexit 1\n", { mode: 0o755 });
+  await fs.writeFile(
+    path.resolve(worktree, hooks, "pre-commit"),
+    "#!/bin/sh\necho 'checkout.js:3 error: assigning to a constant (no-const-assign)' >&2\nexit 1\n",
+    { mode: 0o755 },
+  );
   await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
 
   const result = await actions.commit({ cwd: worktree, message: "feat: checkout" });
@@ -294,12 +308,30 @@ test("nothing is committed on a detached HEAD", async (t) => {
   await fs.writeFile(path.join(worktree, "checkout.js"), "v1\n");
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.branch, null);
-  assert.deepEqual(await actions.commit({ cwd: worktree, message: "feat: checkout" }), { ok: false, kind: "blocked", message: DETACHED_COMMIT, code: "DETACHED_COMMIT" });
+  assert.deepEqual(await actions.commit({ cwd: worktree, message: "feat: checkout" }), {
+    ok: false,
+    kind: "blocked",
+    message: DETACHED_COMMIT,
+    code: "DETACHED_COMMIT",
+  });
   assert.equal(run(worktree, "status", "--porcelain"), "?? checkout.js");
 });
 
 test("looksSecret matches env files, keys and credentials, but not example env files", () => {
-  for (const file of [".env", ".env.local", "config/.env.production", "deploy.pem", "server.key", "AuthKey_ABC.p8", "id_rsa", "id_ed25519.pub", "aws-credentials.json", "client_secret.json", "Secrets.yml"]) assert.equal(looksSecret(file), true, file);
+  for (const file of [
+    ".env",
+    ".env.local",
+    "config/.env.production",
+    "deploy.pem",
+    "server.key",
+    "AuthKey_ABC.p8",
+    "id_rsa",
+    "id_ed25519.pub",
+    "aws-credentials.json",
+    "client_secret.json",
+    "Secrets.yml",
+  ])
+    assert.equal(looksSecret(file), true, file);
   for (const file of ["cart.js", ".env.example", "keyboard.ts", "README.md", "package-lock.json"]) assert.equal(looksSecret(file), false, file);
 });
 
@@ -323,7 +355,11 @@ test("commit refuses secret-looking files and puts the index back as it was", as
   const head = run(worktree, "rev-parse", "HEAD");
 
   const result = await actions.commit({ cwd: worktree, message: "feat: checkout" });
-  assert.deepEqual(result, { ok: false, kind: "secrets", message: "These look like secrets and would be committed: .env.local. Add them to .gitignore, or commit them yourself if you mean to." });
+  assert.deepEqual(result, {
+    ok: false,
+    kind: "secrets",
+    message: "These look like secrets and would be committed: .env.local. Add them to .gitignore, or commit them yourself if you mean to.",
+  });
   assert.equal(run(worktree, "rev-parse", "HEAD"), head);
   // What the user staged stays staged; what Milagre staged doesn't.
   assert.equal(run(worktree, "diff", "--cached", "--name-only"), "README.md");
@@ -344,7 +380,11 @@ test("a file renamed to a secret-looking name is refused too", async (t) => {
   const head = run(worktree, "rev-parse", "HEAD");
 
   const result = await actions.commit({ cwd: worktree, message: "chore: move settings" });
-  assert.deepEqual(result, { ok: false, kind: "secrets", message: "These look like secrets and would be committed: .env. Add them to .gitignore, or commit them yourself if you mean to." });
+  assert.deepEqual(result, {
+    ok: false,
+    kind: "secrets",
+    message: "These look like secrets and would be committed: .env. Add them to .gitignore, or commit them yourself if you mean to.",
+  });
   assert.equal(run(worktree, "rev-parse", "HEAD"), head);
 });
 
@@ -409,7 +449,12 @@ test("a repo without origin can commit but not push or open a PR", async (t) => 
   assert.equal(changes.base, "main");
   assert.equal((await actions.commit({ cwd: worktree, message: "feat: checkout" })).ok, true);
   assert.deepEqual(await actions.push({ cwd: worktree }), { ok: false, kind: "no-origin", message: NO_ORIGIN, code: "NO_ORIGIN" });
-  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "no-origin", message: NO_ORIGIN, code: "NO_ORIGIN" });
+  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), {
+    ok: false,
+    kind: "no-origin",
+    message: NO_ORIGIN,
+    code: "NO_ORIGIN",
+  });
   assert.deepEqual(await ghCalls(), []);
 });
 
@@ -418,7 +463,12 @@ test("without gh, opening a PR says how to install it", async (t) => {
   const changes = await actions.readChanges({ cwd: worktree, base: "main" });
   assert.equal(changes.ghReady, false);
   assert.equal(changes.ghMessage, GH_MISSING);
-  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-missing", message: GH_MISSING, code: "GH_MISSING" });
+  assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), {
+    ok: false,
+    kind: "gh-missing",
+    message: GH_MISSING,
+    code: "GH_MISSING",
+  });
 });
 
 test("when gh is signed out, opening a PR says to log in", async (t) => {
@@ -429,7 +479,13 @@ test("when gh is signed out, opening a PR says to log in", async (t) => {
   assert.equal(changes.ghMessage, GH_LOGIN);
   assert.deepEqual(await actions.openPr({ cwd: worktree, base: "main", title: "Checkout", body: "" }), { ok: false, kind: "gh-auth", message: GH_LOGIN });
   // The fake answered both, not the logged-out gh on PATH.
-  assert.deepEqual((await ghCalls()).map((call) => call.args.slice(0, 2)), [["pr", "view"], ["pr", "create"]]);
+  assert.deepEqual(
+    (await ghCalls()).map((call) => call.args.slice(0, 2)),
+    [
+      ["pr", "view"],
+      ["pr", "create"],
+    ],
+  );
 });
 
 test("openPr passes the base and title as --flag=value, the body on stdin, and lets gh find the head", async (t) => {
@@ -491,7 +547,10 @@ test("in a fork with an upstream remote, the PR goes where gh's default repo say
   await actions.push({ cwd: worktree });
   const result = await actions.openPr({ cwd: worktree, base: "main", title: "feat: checkout", body: "" });
   assert.deepEqual(result, { ok: true, url: "https://github.com/acme/shop/pull/12", number: 12 });
-  assert.equal((await ghCalls()).at(-1).args.some((arg) => arg.startsWith("--head")), false);
+  assert.equal(
+    (await ghCalls()).at(-1).args.some((arg) => arg.startsWith("--head")),
+    false,
+  );
 
   // No default repo set: the dialog says how to choose one.
   await setGh({});

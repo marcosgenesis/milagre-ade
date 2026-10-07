@@ -50,12 +50,13 @@ class Inbox {
   }
 }
 
+// The uuid comes back in the result of the turn that reads the message (see mapClaudeMessage).
 function userMessage(prompt, images = []) {
   const content = [
     { type: "text", text: prompt },
     ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } })),
   ];
-  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
+  return { type: "user", uuid: randomUUID(), message: { role: "user", content }, parent_tool_use_id: null };
 }
 
 // A Chat's linked tools, served in-process. They are allowed outright: the reads need no approval, and
@@ -146,6 +147,7 @@ class ClaudeSession {
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
+    this.implicitTurn = false;
     // Whether this turn's init announced a session id (session-started); see readMessages.
     this.announcedId = false;
     this.cancelRequested = false;
@@ -378,9 +380,12 @@ class ClaudeSession {
     try {
       for await (const message of query) {
         // Claude Code opens every turn with init. One arriving while no turn runs is a turn Claude Code
-        // started by itself, for a steering message that came in just as the last turn ended.
-        if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.beginImplicitTurn();
+        // started by itself, for a steering message that came in just as the last turn ended. It starts
+        // with its first event, so a turn that only records a task notification never shows.
+        if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.implicitTurn = true;
         for (const event of mapClaudeMessage(message, this.state)) {
+          if (this.implicitTurn && !this.turnActive && !this.closed) this.beginImplicitTurn();
+          this.implicitTurn = false;
           if (event.type === "session-started") this.announcedId = true;
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
@@ -395,6 +400,7 @@ class ClaudeSession {
             if (event.login) void this.close();
           }
         }
+        if (message.type === "result") this.implicitTurn = false;
       }
       this.handleEnd(query, null);
     } catch (error) {

@@ -3800,3 +3800,53 @@ test("mobile Ports sheet stops only this Chat's process and refuses another host
   await settle();
   assert.deepEqual(calls, []);
 });
+
+test("a reply shows the thinking it wrote nothing after, once it waits on a question or ends, not while working", () => {
+  const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
+  const { ChatReply } = load("chat-reply.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+    "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
+    "react-native-svg": { default: "Svg", Path: "Path" },
+    "expo-router": { router: {} },
+    "@hugeicons/core-free-icons": new Proxy({}, { get: (_, key) => key }),
+    "@milagre/shared/reply-parts": require("@milagre/shared/reply-parts"),
+    "./file-chip": { FileChip: "FileChip" },
+    "./markdown": { Markdown: "Markdown" },
+    "./icons": { Icon: "Icon" },
+    "./activity-item": { ActivityTitle: "ActivityTitle" },
+    "./tool-row": { ToolRow: "ToolRow" },
+    "./theme": { hex: () => "#000" },
+    "./viewer-store": { showImages() {} },
+    "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
+  });
+  const conclusion = "T3 Code tries every route in parallel.";
+  const steps = [
+    { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },
+    { id: "a", kind: "other", title: "Ran an agent", status: "done", offset: 9 },
+    { id: "t2", kind: "thinking", title: "Thought", status: "done", detail: conclusion, offset: 9 },
+  ];
+  const run = (questions) => ({ text: "Checking.", model: "m", startedAt: 0, steps, approvals: [], questions, answered: {} });
+  const markdown = (tree) => {
+    const texts = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.type === "Markdown") texts.push(node.props.text);
+      walk(node.props?.children);
+    };
+    walk(tree);
+    return texts;
+  };
+  const props = { media: () => null, onActivity() {} };
+  assert.deepEqual(markdown(ChatReply({ ...props, run: run([{ requestId: "q" }]) })), ["Checking.", conclusion]);
+  assert.deepEqual(markdown(ChatReply({ ...props, run: run([]) })), ["Checking."]);
+  assert.deepEqual(markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking.", steps } })), [
+    "Checking.",
+    conclusion,
+  ]);
+  assert.deepEqual(
+    markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
+    ["Checking. Done."],
+  );
+});

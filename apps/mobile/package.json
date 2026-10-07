@@ -23,7 +23,6 @@
     "@react-native-masked-view/masked-view": "0.3.2",
     "@sbaiahmed1/react-native-blur": "6.0.2",
     "expo": "~57.0.26",
-    "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
     "expo-clipboard": "~57.0.2",

@@ -206,6 +206,8 @@ declare global {
       /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
       getLinkedWork: () => Promise<LinkedWork>;
       onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** An app ⌘⇧ shortcut pressed while an embedded frame had focus, forwarded by the main process (its letter). */
+      onAppShortcut: (callback: (key: string) => void) => () => void;
       /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
       stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;

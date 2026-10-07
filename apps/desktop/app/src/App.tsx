@@ -55,6 +55,7 @@ import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { isMac } from "./lib/shortcut-hints";
 import { CORNER_PITCH, PanelToggles, sidePanelCount, useSidePanels } from "./components/agents/PanelToggles";
 import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
 import { AttentionButton, ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
@@ -1279,6 +1280,15 @@ function App() {
   }
   useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
 
+  // The main process sends on the app's ⌘⇧ shortcuts pressed inside an embedded frame (a design, the simulator), which
+  // the window's listeners never see; replayed here, every handler takes them as if pressed in the window.
+  useEffect(
+    () =>
+      window.milagre.onAppShortcut?.((key) =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: isMac, ctrlKey: !isMac, shiftKey: true, bubbles: true, cancelable: true })),
+      ),
+    [],
+  );
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (selectedLinkRef.current) return;

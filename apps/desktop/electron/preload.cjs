@@ -98,6 +98,11 @@ const bridge = {
   openCanvasProject: (projectPath) => ipcRenderer.invoke("canvas:open-project", projectPath),
   getLinkedWork: () => ipcRenderer.invoke("linked:snapshot"),
   stopNegotiation: (id) => ipcRenderer.invoke("linked:stop-negotiation", id),
+  onAppShortcut: (callback) => {
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on("app:shortcut", listener);
+    return () => ipcRenderer.removeListener("app:shortcut", listener);
+  },
   onLinkedWork: (callback) => {
     const listener = (_event, work) => callback(work);
     ipcRenderer.on("linked:changed", listener);

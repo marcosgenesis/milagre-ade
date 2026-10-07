@@ -3552,6 +3552,8 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
     "react-native": { View: "View" },
     "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
     "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },

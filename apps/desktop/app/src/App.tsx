@@ -85,6 +85,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
+import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore } from "./lib/draft-store";
 import { restoredChatsNotice } from "./lib/restored-chats";
@@ -124,7 +125,6 @@ type FailedSend = PendingSend & { draft: string; error: string; target: Prepared
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
-  const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
   const projectRef = useRef<OpenProject | null>(null);
   const projectsSeen = useRef(new Map<string, Pick<OpenProject, "path" | "name">>());
   const projectNavigation = useRef(0);
@@ -304,6 +304,8 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  // Which Project the Settings page shows; any recent Project can be picked there, the open one by default.
+  const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -342,22 +344,7 @@ function App() {
     });
   }, []);
 
-  useEffect(() => {
-    const projectPath = project?.path;
-    if (!projectPath) return;
-    let cancelled = false;
-    window.milagre
-      .getProjectImage(projectPath)
-      .then((src) => {
-        if (!cancelled) setProjectImage({ path: projectPath, src });
-      })
-      .catch(() => {
-        if (!cancelled) setProjectImage({ path: projectPath, src: null });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [project?.path]);
+  const projectImage = useProjectImages([project?.path ?? ""]);
 
   async function loadInitialProject() {
     setLoading(true);
@@ -1363,6 +1350,7 @@ function App() {
     setView("canvas");
   });
   const openProjectSettings = useEvent(() => {
+    setSettingsProject(null);
     setSettingsSection("project");
     setView("settings");
   });
@@ -1439,12 +1427,12 @@ function App() {
           <SettingsNav
             showProjectSettings={false}
             section={settingsSection}
-            projectName={selectedLink.link.name}
+            onSelectProject={() => {}}
             onSelect={setSettingsSection}
             onBack={() => setView("chat")}
           />
           <main className="min-w-0 flex-1">
-            <SettingsPanel section={settingsSection} projectPath={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
+            <SettingsPanel section={settingsSection} accountScope={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
           </main>
         </div>
       </DotBackground>
@@ -1561,10 +1549,7 @@ function App() {
         icon: "settings",
         detail: current.name,
         keywords: "worktree setup files",
-        run: () => {
-          setSettingsSection("project");
-          setView("settings");
-        },
+        run: openProjectSettings,
       },
     ];
     if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
@@ -1716,7 +1701,7 @@ function App() {
               key={project.path}
               fill
               workspaceName={project.name}
-              workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
+              workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
               onOpenProject={openProjectFromSidebar}
@@ -1746,7 +1731,17 @@ function App() {
           </div>
           {view === "settings" && (
             <div className="flex shrink-0 py-3 pl-3">
-              <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
+              <SettingsNav
+                section={settingsSection}
+                project={settingsProject ?? project}
+                current={project}
+                onSelect={setSettingsSection}
+                onSelectProject={(picked) => {
+                  setSettingsProject(picked);
+                  setSettingsSection("project");
+                }}
+                onBack={() => setView("chat")}
+              />
             </div>
           )}
 
@@ -1767,7 +1762,13 @@ function App() {
                     {notice}
                   </NoticeCard>
                 )}
-                <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} onSectionChange={setSettingsSection} />
+                <SettingsPanel
+                  section={settingsSection}
+                  project={settingsProject ?? project}
+                  models={models}
+                  update={update}
+                  onSectionChange={setSettingsSection}
+                />
               </div>
             )}
             {view === "canvas" && (

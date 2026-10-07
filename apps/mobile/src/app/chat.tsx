@@ -710,8 +710,9 @@ export default function ChatScreen() {
           {session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo("/")} /> : null}
         </KeyboardChatScrollView>
         {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
-        find this scroll view (it only follows each view's first child), so the blur is drawn here. */}
-        <EdgeFade edge="top" height={insets.top + 72} />
+        find this scroll view (it only follows each view's first child), so the blur is drawn here. It ends where the
+        transcript's top padding does and is at full strength behind the title, so the title stays readable. */}
+        <EdgeFade edge="top" height={insets.top + 84} ramp={36} />
         <AttentionPill projectPath={project.path} />
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>

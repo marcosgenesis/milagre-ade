@@ -10,6 +10,7 @@ const zlib = require("node:zlib");
 const { WebSocketServer, WebSocket } = require("ws");
 const { chatInProject } = require("@milagre/shared/agent-runs");
 const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
+const { chatsNeedingAttention } = require("@milagre/shared/attention");
 const { connect } = require("./client.cjs");
 const { createConfinement } = require("./confine.cjs");
 
@@ -492,6 +493,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           if (!validScope(projectPath)) throw failure(400, "Choose a valid Project or Link");
           await confine?.check(projectPath);
           reply(200, { result: runsForPhone(projectRuns(await client.call("chat:runs"), projectPath)) }, { etag: true });
+          return;
+        }
+        // The chat keys, in every Project, whose turn waits on the user: a few bytes the phone polls for its attention dots.
+        // A confined phone only opens its one Project, so it gets none.
+        if (req.method === "GET" && target.pathname === "/attention") {
+          reply(200, { result: confine ? [] : chatsNeedingAttention((await client.call("chat:runs")).runs) }, { etag: true });
           return;
         }
         if (req.method === "GET" && target.pathname === "/message") {

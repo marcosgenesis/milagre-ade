@@ -19,6 +19,8 @@ export interface AppSettings {
   notifyWhenWaiting: boolean;
   notifyOnCompletion: boolean;
   showDockBadge: boolean;
+  /** The top-right button that opens a chat waiting on the user in another project. */
+  showAttentionButton: boolean;
   /** Keep the Mac from sleeping while an agent works; the screen can still turn off. */
   keepAwake: boolean;
   /** The editor that "Open in" uses, by id; empty means the first one found. */
@@ -58,6 +60,7 @@ const DEFAULTS: AppSettings = {
   notifyWhenWaiting: true,
   notifyOnCompletion: true,
   showDockBadge: true,
+  showAttentionButton: true,
   keepAwake: true,
   editorId: "",
   claudeReplies: "concise",
@@ -87,6 +90,7 @@ function load(): AppSettings {
       notifyWhenWaiting: typeof saved.notifyWhenWaiting === "boolean" ? saved.notifyWhenWaiting : DEFAULTS.notifyWhenWaiting,
       notifyOnCompletion: typeof saved.notifyOnCompletion === "boolean" ? saved.notifyOnCompletion : DEFAULTS.notifyOnCompletion,
       showDockBadge: typeof saved.showDockBadge === "boolean" ? saved.showDockBadge : DEFAULTS.showDockBadge,
+      showAttentionButton: typeof saved.showAttentionButton === "boolean" ? saved.showAttentionButton : DEFAULTS.showAttentionButton,
       keepAwake: typeof saved.keepAwake === "boolean" ? saved.keepAwake : DEFAULTS.keepAwake,
       editorId: typeof saved.editorId === "string" ? saved.editorId : DEFAULTS.editorId,
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,

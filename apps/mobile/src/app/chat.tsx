@@ -47,6 +47,7 @@ import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
 import { runChatAction } from "../chat-actions";
 import { MessageNavigation } from "../message-navigation";
+import { AttentionPill } from "../attention";
 
 const PAGE = 40;
 
@@ -711,6 +712,7 @@ export default function ChatScreen() {
         {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
         find this scroll view (it only follows each view's first child), so the blur is drawn here. */}
         <EdgeFade edge="top" height={insets.top + 72} />
+        <AttentionPill projectPath={project.path} />
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
           {showJumpToBottom && (

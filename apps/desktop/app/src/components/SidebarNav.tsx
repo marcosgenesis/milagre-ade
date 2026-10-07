@@ -114,6 +114,8 @@ type SidebarNavProps = {
   projectPath?: string;
   /** Opens a project from the recent list in the project menu. */
   onSwitchProject?: (path: string) => void;
+  /** Other projects with a chat that waits on the user: their rows and the project button get a dot. */
+  attentionPaths?: string[];
   onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
@@ -124,6 +126,11 @@ type SidebarNavProps = {
 };
 
 const NO_CHAT_ACTIONS: ChatRowActions = {};
+const NO_PATHS: string[] = [];
+
+function AttentionDot({ className = "" }: { className?: string }) {
+  return <span role="img" aria-label="Needs attention" title="A chat here waits for you" className={`size-2 shrink-0 rounded-full bg-orange ${className}`} />;
+}
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
@@ -208,6 +215,7 @@ function WorkspaceMenu({
   registeredProjects,
   onSwitchLink,
   onLinkProject,
+  attentionPaths,
 }: {
   position: { top: number; left: number };
   onClose: () => void;
@@ -223,6 +231,7 @@ function WorkspaceMenu({
   registeredProjects: Array<{ id: string; path: string; name: string }>;
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  attentionPaths: string[];
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
@@ -339,6 +348,7 @@ function WorkspaceMenu({
                       <IconCheckmark1Small size={18} />
                     </span>
                   )}
+                  {!row.current && attentionPaths.includes(row.path) && <AttentionDot className="mr-1 group-hover/project:opacity-0" />}
                 </button>
                 {!row.current && (
                   <button
@@ -440,6 +450,7 @@ export default memo(function SidebarNav({
   projectPath,
   onOpenProjectSettings,
   onSwitchProject,
+  attentionPaths = NO_PATHS,
   recents = DEFAULT_RECENTS,
   chatActions = NO_CHAT_ACTIONS,
   usage,
@@ -655,15 +666,23 @@ export default memo(function SidebarNav({
               onClick={() => (workspaceOpen ? setWorkspaceOpen(false) : openWorkspaceMenu())}
               className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
             >
-              <span className={`sidebar-logo flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
+              <span className={`sidebar-logo relative flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
                 {selectedLink ? (
                   <ProjectAvatarStack projects={selectedLink.projects} />
                 ) : (
                   <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />
                 )}
+                {/* Collapsed, the copy beside the logo hides, so the dot moves onto its corner. */}
+                {attentionPaths.length > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute -top-0.5 -right-0.5 hidden size-2 rounded-full bg-orange ring-2 ring-surface in-data-[sidebar-collapsed=true]:block"
+                  />
+                )}
               </span>
               <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">{workspace.name}</span>
               {selectedLink && <span className="sidebar-copy mr-1 text-[11px] text-ink-3">Link</span>}
+              {attentionPaths.length > 0 && <AttentionDot className="sidebar-copy mr-1" />}
               <span className="sidebar-copy ml-1 flex shrink-0 text-ink-3">
                 <IconChevronDownSmall size={16} />
               </span>
@@ -684,6 +703,7 @@ export default memo(function SidebarNav({
                 onSwitchProject={onSwitchProject}
                 onOpenProject={onOpenProject}
                 onForgetProject={forgetProject}
+                attentionPaths={attentionPaths}
                 onClose={() => setWorkspaceOpen(false)}
               />
             )}

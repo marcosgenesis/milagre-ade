@@ -251,6 +251,9 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
         <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
           <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
         </Row>
+        <Row label="Attention button" description="Top right, when a chat in another project needs an approval or an answer">
+          <Switch label="Attention button" checked={settings.showAttentionButton} onChange={(showAttentionButton) => updateSettings({ showAttentionButton })} />
+        </Row>
       </Group>
       <Group title="Sidebar">
         <Row label="Chat order" description="Newest chat first keeps chats in place as replies arrive">

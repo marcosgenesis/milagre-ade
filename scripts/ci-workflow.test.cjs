@@ -161,3 +161,13 @@ test("mobile fingerprint check watches the native inputs, needs the approval lab
   assert.ok(steps.find((step) => step.name === "Fingerprint main").run.includes("npx patch-package --patch-dir apps/mobile/patches"));
   assert.ok(steps.find((step) => step.name === "Compare").run.includes("Could not read a fingerprint hash"));
 });
+
+test("a native-gate job always reports for branch protection and only fails when native tests failed", () => {
+  const gate = ci.jobs["native-gate"];
+  assert.ok(gate, "native-gate job exists");
+  assert.equal(gate.if, "always()");
+  assert.deepEqual(gate.needs, ["native-tests"]);
+  const run = gate.steps.map((step) => step.run).join("\n");
+  assert.match(run, /success\|skipped\) exit 0/);
+  assert.deepEqual(ci.jobs.release.needs, ["javascript", "native-gate"]);
+});

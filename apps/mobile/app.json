@@ -16,6 +16,9 @@
           "ios": {
             "enableSceneSupport": true,
             "buildReactNativeFromSource": true
+          },
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ],
@@ -59,7 +62,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.victorlucas.milagre",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Milagre connects to your computer directly when you are on the same network."
       }
     },
     "android": {

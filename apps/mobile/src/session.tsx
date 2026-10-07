@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from "react-native";
 import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot, type ProjectPreview } from "./client";
 import { relayRuntime } from "./relay-native";
+import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
 import { readPermission, savedHosts, savedNavigation, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
@@ -96,6 +97,7 @@ function useSessionState() {
   const loadHosts = useCallback(async () => {
     const list = await savedHosts.list();
     setHosts(list);
+    for (const saved of list) lanRoutes.set(saved.id, saved.token, saved.routes?.lan);
     return list;
   }, []);
   // Saved computers are read once at launch; the startup splash waits for them.
@@ -103,7 +105,11 @@ function useSessionState() {
     void Promise.all([
       savedHosts
         .list()
-        .then(setHosts)
+        .then((list) => {
+          setHosts(list);
+          for (const saved of list) lanRoutes.set(saved.id, saved.token, saved.routes?.lan);
+          return list;
+        })
         .catch(() => {}),
       savedNavigation.read().then(setLastLocation),
     ]).finally(() => setBooted(true));
@@ -144,6 +150,7 @@ function useSessionState() {
         }
       }
       if (current !== generation.current) return false;
+      if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token.trim(), relay: host.relay }).catch(() => {});
       setModels(null);
       setCliStatus(null);
       setProviderError("");
@@ -167,6 +174,7 @@ function useSessionState() {
     try {
       await next.call("daemon:status");
       if (current !== generation.current) return false;
+      if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token, relay: host.relay }).catch(() => {});
       const projects = await next.recentScopes();
       const state = await next.open(projectPath);
       const project = state.project;

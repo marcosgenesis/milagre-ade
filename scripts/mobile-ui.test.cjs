@@ -3475,7 +3475,7 @@ for (const provider of ["claude", "codex"])
     const { ProjectAccountsSection } = load("project-accounts-section.tsx", {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
-      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", StyleSheet: { hairlineWidth: 1 } },
       "@hugeicons/core-free-icons": {},
       "@milagre/shared/providers": require("@milagre/shared/providers"),
       "./session": { useSession: () => session },
@@ -3484,9 +3484,18 @@ for (const provider of ["claude", "codex"])
       "./ui": { ListRow: "ListRow", PageScroll: "PageScroll", PullDown: "PullDown", colors: {}, styles: {} },
       "expo-router": { router: { push() {} } },
     });
+    // Renders nested function components in place, sharing one hook host in a stable order.
+    const expand = (node) =>
+      Array.isArray(node)
+        ? node.map(expand)
+        : node && typeof node.type === "function"
+          ? expand(node.type(node.props))
+          : node?.props?.children !== undefined
+            ? { ...node, props: { ...node.props, children: expand(node.props.children) } }
+            : node;
     const render = () => {
       react.begin();
-      return ProjectAccountsSection().type();
+      return expand(ProjectAccountsSection());
     };
     const settle = () => new Promise((resolve) => setImmediate(resolve));
     try {
@@ -3498,14 +3507,19 @@ for (const provider of ["claude", "codex"])
       assert.ok(menu(), "Provider selector loads for the current Project");
       const items = menu().props.sections.flatMap((s) => s.items);
       assert.equal(items.find((i) => i.id === "out").disabled, true);
-      assert.equal(items.find((i) => i.id === "gone").disabled, true);
       assert.equal(
-        find(render(), (n) => n.props.title === "Re-authenticate: Removed account"),
+        items.find((i) => i.id === "gone"),
         undefined,
+        "Removed accounts are not offered",
       );
       assert.equal(
-        find(render(), (n) => n.props.title === "Re-authenticate: default@example.test"),
+        find(render(), (n) => n.props.title === "Re-authenticate"),
         undefined,
+        "A ready account needs no sign-in",
+      );
+      assert.ok(
+        find(render(), (n) => n.type === "Text" && n.props.children === "Default"),
+        "Inherited account is tagged Default",
       );
       assert.match(items.find((i) => i.id === "__default__").title, /default@example.test/);
       menu().props.onSelect("work");
@@ -3516,7 +3530,11 @@ for (const provider of ["claude", "codex"])
       assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[3] === null));
       assert.ok(calls.some((c) => c[0] === "refreshProviders"));
       assert.equal(find(render(), (n) => n.type === "ListRow" && n.props.title === "Project").props.leading.props.path, "/p");
-      find(render(), (n) => n.props.title === "Re-authenticate: Expired").props.onPress();
+      // An assignment that later signed out offers Re-authenticate for that account only.
+      menu().props.onSelect("out");
+      await settle();
+      render();
+      find(render(), (n) => n.props.title === "Re-authenticate").props.onPress();
       find(render(), (n) => n.props.title === "Project").props.onPress();
       find(render(), (n) => n.props.title === "Linked work").props.onPress();
       render();

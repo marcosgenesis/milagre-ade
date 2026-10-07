@@ -356,3 +356,50 @@ test("a beta is a separate prerelease built from the newest draft candidate on t
   assert.ok(publish.includes("beta-mac.yml"));
   assert.ok(!publish.includes("--latest"), "a beta never becomes the latest release");
 });
+
+test("macos+linux publishes macOS and Linux without Windows, signing or WinGet", () => {
+  const platforms = publishWorkflow.on.workflow_dispatch.inputs.platforms;
+  assert.deepEqual(platforms.options, ["macos", "macos+linux", "all"]);
+  assert.equal(platforms.default, "macos");
+  const jobs = publishWorkflow.jobs;
+  assert.equal(jobs["package-windows"].if, "inputs.platforms == 'all'");
+  assert.equal(jobs["package-linux"].if, "contains(inputs.platforms, 'linux') || inputs.platforms == 'all'");
+  const evaluate = (condition, value) =>
+    new Function("inputs", "contains", `return ${condition.replace(/\binputs\.platforms\b/g, "inputs.platforms")}`)({ platforms: value }, (a, b) =>
+      a.includes(b),
+    );
+  assert.equal(evaluate(jobs["package-windows"].if, "macos+linux"), false);
+  assert.equal(evaluate(jobs["package-linux"].if, "macos+linux"), true);
+  assert.equal(evaluate(jobs["package-linux"].if, "macos"), false);
+  const publish = jobs["publish-macos-linux"];
+  assert.equal(publish.if, "inputs.platforms == 'macos+linux'");
+  assert.deepEqual(publish.needs, ["package-macos", "package-linux"]);
+  const text = JSON.stringify(publish);
+  assert.doesNotMatch(text, /\.exe|winget|windows/i);
+  for (const asset of ["*.AppImage", "*.deb", "*.rpm", "latest-linux.yml", "milagre-linux-repository.tar.gz", "homebrew/milagre.rb", "SHA256SUMS"])
+    assert.ok(text.includes(asset), asset);
+  for (const feed of ["latest-mac.yml", "beta-mac.yml", "latest-linux.yml"]) assert.ok(text.includes(feed), feed);
+  assert.match(text, /--platform macos,linux --check/);
+  assert.match(text, /draft=false --latest/);
+  // The macOS leg only un-drafts alone for platforms=macos.
+  assert.match(uploadStep.run, /\[ "\$\{PUBLISH_PLATFORMS:-macos\}" = macos \]/);
+  const f = { root: fs.mkdtempSync(path.join(os.tmpdir(), "milagre-pub-")) };
+  fs.mkdirSync(path.join(f.root, "release/package-managers/homebrew"), { recursive: true });
+  fs.mkdirSync(path.join(f.root, "bin"));
+  for (const name of ["latest-mac.yml", "beta-mac.yml"]) fs.writeFileSync(path.join(f.root, "release", name), "x");
+  fs.writeFileSync(path.join(f.root, "release/package-managers/homebrew/milagre.rb"), "x");
+  fs.writeFileSync(path.join(f.root, "release/package-managers/SHA256SUMS"), "x");
+  fs.writeFileSync(path.join(f.root, "bin/gh"), '#!/bin/bash\necho "$1 $2" >> "$CALL_LOG"\n', { mode: 0o755 });
+  const env = {
+    PATH: `${path.join(f.root, "bin")}${path.delimiter}${process.env.PATH}`,
+    CALL_LOG: path.join(f.root, "calls.log"),
+    RELEASE_TAG: "v9.9.9",
+    PUBLISH_PLATFORMS: "macos+linux",
+  };
+  const result = runStep(uploadStep, f.root, env);
+  assert.equal(result.status, 0, result.stderr);
+  const calls = fs.readFileSync(env.CALL_LOG, "utf8");
+  assert.match(calls, /release upload/);
+  assert.doesNotMatch(calls, /release edit/);
+  fs.rmSync(f.root, { recursive: true, force: true });
+});

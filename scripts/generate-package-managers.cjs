@@ -21,15 +21,15 @@ async function main() {
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(options.tag ?? "")) {
     throw new Error("Pass --tag vX.Y.Z for a stable release");
   }
-  if (!["macos", "windows", "linux", "all"].includes(options.platform)) {
-    throw new Error("Pass --platform macos, windows, linux, or all");
+  const platforms = options.platform === "all" ? ["macos", "windows", "linux"] : (options.platform ?? "").split(",");
+  if (!platforms.every((name) => ["macos", "windows", "linux"].includes(name)) || new Set(platforms).size !== platforms.length) {
+    throw new Error("Pass --platform macos, windows, linux, a comma list such as macos,linux, or all");
   }
   const version = options.tag.slice(1);
   const legacyIntel = options["mac-intel-name"] === `Milagre-${version}.dmg`;
   if (options["mac-intel-name"] && !legacyIntel && options["mac-intel-name"] !== `Milagre-${version}-x64.dmg`) {
     throw new Error("The Intel DMG filename must match this release version");
   }
-  const platforms = options.platform === "all" ? ["macos", "windows", "linux"] : [options.platform];
   const artifacts = {
     macos: [`Milagre-${version}-arm64.dmg`, options["mac-intel-name"] ?? `Milagre-${version}-x64.dmg`],
     windows: [`Milagre-Setup-${version}-x64.exe`],

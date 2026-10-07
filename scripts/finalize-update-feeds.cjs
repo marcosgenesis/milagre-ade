@@ -17,7 +17,9 @@ async function main() {
     options[args[i].slice(2)] = args[++i];
   }
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(0|[1-9]\d*))?$/.test(options.tag ?? "")) throw new Error("Expected --tag vX.Y.Z or vX.Y.Z-beta.N");
-  if (!["macos", "windows", "linux", "all"].includes(options.platform)) throw new Error("Invalid platform");
+  const selected = options.platform === "all" ? ["macos", "windows", "linux"] : options.platform.split(",");
+  if (!selected.length || new Set(selected).size !== selected.length || !selected.every((name) => ["macos", "windows", "linux"].includes(name)))
+    throw new Error("Invalid platform");
   const v = options.tag.slice(1);
   const beta = v.includes("-beta.");
   const feeds = {
@@ -29,7 +31,7 @@ async function main() {
     linux: [["latest-linux.yml"], [`Milagre-${v}-x86_64.AppImage`, `Milagre-${v}-amd64.deb`, `Milagre-${v}-x86_64.rpm`]],
   };
   const changes = [];
-  for (const platform of options.platform === "all" ? Object.keys(feeds) : [options.platform]) {
+  for (const platform of selected) {
     const [names, expected] = feeds[platform];
     for (const name of names) {
       const file = path.resolve(options.artifacts, name);

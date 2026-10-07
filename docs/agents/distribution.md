@@ -40,7 +40,7 @@ node scripts/finalize-update-feeds.cjs --tag v1.2.3 --check
 
 `package:repositories` requires `GNUPGHOME` outside the repo and `MILAGRE_LINUX_SIGNING_KEY` set to the full signing fingerprint. [Repository instructions](../../distribution/linux-repository/README.md) cover tooling and prior-release retention.
 
-`package:managers` supports `macos`, `windows`, `linux`, or `all`, plus `--artifacts` and `--output`. It requires stable tags and nonempty regular installer files. It writes `homebrew/milagre.rb`, `winget/Milagre.Milagre.yaml`, and `SHA256SUMS` from the final installer bytes. For the old Intel naming convention, pass `--mac-intel-name Milagre-X.Y.Z.dmg`.
+`package:managers` supports `macos`, `windows`, `linux`, a comma list such as `macos,linux` (also accepted by `finalize-update-feeds.cjs --platform`), or `all`, plus `--artifacts` and `--output`. It requires stable tags and nonempty regular installer files. It writes `homebrew/milagre.rb`, `winget/Milagre.Milagre.yaml`, and `SHA256SUMS` from the final installer bytes. For the old Intel naming convention, pass `--mac-intel-name Milagre-X.Y.Z.dmg`.
 
 The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook). WinGet uses Microsoft's [singleton manifest format](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest), user scope, and `/currentuser`. Its proposed identifier is `Milagre.Milagre`. Generating a manifest does not create a public WinGet listing.
 
@@ -51,6 +51,8 @@ The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook
 The `release` job of CI cuts a candidate (a tag and a draft release) for every push to `main` once `javascript` and `native-tests` pass. The non-required `desktop-checks` job does not gate it. Drafts are invisible to installed apps.
 
 **Publish installers** defaults to `platforms=macos`. Selecting `all` adds Windows and Linux builds. Windows requires Authenticode signing; Linux signs the RPM and APT/RPM indexes. All selected platforms must pass before the draft becomes public. The final stage verifies complete updater feeds and regenerates combined checksums/manifests from the signed assets. DMG notarization and RPM signing are followed by feed hash refreshes.
+
+`platforms=macos+linux` ships macOS and Linux without Windows signing: it runs the macOS and Linux builds only, the macOS leg stages `signed-macos` instead of un-drafting, and a final job requires `latest-mac.yml`, `beta-mac.yml` and `latest-linux.yml`, uploads the DMG, zip, AppImage, DEB, RPM, blockmaps, feeds, `milagre-linux-repository.tar.gz`, the Homebrew cask and `SHA256SUMS` (no WinGet manifest), then un-drafts the release. The first Linux publication needs `initialize_linux_repository=true`. APT/RPM hosting needs the `CLOUDFLARE_PACKAGES_API_TOKEN` secret and a run of the **Deploy Linux package repository** workflow afterwards.
 
 ## Beta channel
 

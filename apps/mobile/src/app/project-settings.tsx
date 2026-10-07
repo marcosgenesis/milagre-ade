@@ -49,7 +49,7 @@ export default function ProjectSettingsScreen() {
         <View style={[styles.card, { alignItems: "center", gap: 16 }]}>
           <ProjectIcon client={client} path={path} size={72} />
           <Text style={[styles.caption, { textAlign: "center" }]}>
-            Shown in your Projects list and on the desktop app. Reset goes back to the repository's own icon.
+            Shown in your Projects list and on the desktop app. Reset goes back to the repository&apos;s own icon.
           </Text>
           <View style={{ flexDirection: "row", gap: 10 }}>
             <PillButton title="Choose photo" loading={busy} onPress={() => void save(pickIcon)} />

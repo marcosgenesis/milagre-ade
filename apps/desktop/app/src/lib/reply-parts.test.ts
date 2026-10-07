@@ -133,15 +133,18 @@ test("the summary starts with a capital and leaves out what didn't happen", () =
   );
 });
 
-test("a reply that only thought surfaces its last thinking; one that wrote anything doesn't", () => {
-  const withDetail = (id: string, detail: string): ChatStep => ({ ...thought(id, 0), detail });
-  const silent = replyActivity("", [withDetail("t1", "Looking."), step("a", 0), withDetail("t2", "So the answer is no."), withDetail("t3", "  ")]);
-  assert.equal(unspokenThought(silent.activity, silent.answer), "So the answer is no.");
-  const spoken = replyActivity("No, it isn't.", [withDetail("t1", "So the answer is no.")]);
-  assert.equal(unspokenThought(spoken.activity, spoken.answer), "");
-  const narrated = replyActivity("Checking.", [withDetail("t1", "Hm."), step("a", 9)]);
-  assert.equal(unspokenThought(narrated.activity, narrated.answer), "");
-  assert.equal(unspokenThought(replyActivity("", [step("a", 0)]).activity, ""), "");
+test("a reply surfaces its last thinking when it wrote nothing after it", () => {
+  const withDetail = (id: string, detail: string, offset = 0): ChatStep => ({ ...thought(id, offset), detail });
+  assert.equal(
+    unspokenThought("", [withDetail("t1", "Looking."), step("a", 0), withDetail("t2", "So the answer is no."), withDetail("t3", "  ")]),
+    "So the answer is no.",
+  );
+  assert.equal(unspokenThought("No, it isn't.", [withDetail("t1", "So the answer is no.")]), "");
+  // Text before the thinking, then a question with nothing written after it.
+  assert.equal(unspokenThought("Checking.", [withDetail("t1", "T3 tries every route.", 9), step("a", 9)]), "T3 tries every route.");
+  assert.equal(unspokenThought("Checking. Done.", [withDetail("t1", "Hm.", 9)]), "");
+  assert.equal(unspokenThought("", [{ ...withDetail("t1", "Still going"), status: "running" }]), "");
+  assert.equal(unspokenThought("", [step("a", 0)]), "");
 });
 
 const setupStep = (status: ChatStep["status"] = "done"): ChatStep => ({

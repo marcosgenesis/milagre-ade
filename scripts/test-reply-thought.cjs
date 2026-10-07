@@ -1,6 +1,6 @@
 // Run with node scripts/test-reply-thought.cjs. Checks that a reply which only thought shows its
-// last thinking under the fold (once done, or while it waits on a question) and that a reply which
-// wrote text doesn't. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
+// last thinking under the fold (once done, or while it waits on a question), that so does one which
+// wrote text before that thinking, and that a reply which wrote text after it doesn't. Set MILAGRE_SCREENSHOT_DIR to keep screenshots.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -15,6 +15,7 @@ const noop = () => {};
 const thought = (id, detail, durationMs) => ({ id, kind: "thinking", title: "Thought for " + Math.round(durationMs / 1000) + "s", status: "done", detail, durationMs, offset: 0 });
 const ran = (id, command) => ({ id, kind: "shell", title: "Ran \\u0060" + command + "\\u0060", status: "done", detail: "$ " + command + "\\n", offset: 0 });
 const silentSteps = [thought("t1", "Checking whether the Subagents button covers the to-do list.", 4000), ran("r1", "grep -rn todo app/src"), thought("t2", "So the answer is no: the Subagents button only shows child agents, not the agent's own to-do list. #44 is still open.", 6000)];
+const preamble = "Checking the sidebar first.";
 function Fixture() {
   const [state, setState] = useState("asking");
   window.setFixture = setState;
@@ -29,7 +30,9 @@ function Fixture() {
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={!done} sendBlocked={false}
-      streamingText="" streamingSteps={done ? undefined : silentSteps} asking={state === "asking"}
+      streamingText={state === "preamble" ? preamble : ""}
+      streamingSteps={done ? undefined : state === "preamble" ? silentSteps.map((step) => ({ ...step, offset: preamble.length })) : silentSteps}
+      asking={state === "asking" || state === "preamble"}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={MODEL_CATALOG[0]} onModelChange={noop}
       capability={capabilityFor(MODEL_CATALOG[0], null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
@@ -79,7 +82,15 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[data-slot=message-thought]")');
     assert.equal((await evaluate(thoughts)).length, 1, "the reply that wrote text shows no thought");
     await screenshot("done");
-    console.log("PASS: a reply that only thought shows its last thinking when asking or done, not while working; a reply with text shows none");
+    await evaluate('window.setFixture("preamble")');
+    await waitFor('document.body.textContent.includes("Checking the sidebar first.")');
+    assert.deepEqual(await evaluate(thoughts), [
+      "So the answer is no: the Subagents button only shows child agents, not the agent's own to-do list. #44 is still open.",
+    ]);
+    await screenshot("preamble");
+    console.log(
+      "PASS: a reply's last thinking shows when nothing was written after it (asking or done), not while working; a reply with text after its thinking shows none",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);

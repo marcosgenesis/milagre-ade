@@ -49,7 +49,14 @@ async function browserChecks() {
   await app.whenReady();
   const window = new BrowserWindow({ width: 1200, height: 560, show: false, webPreferences: { backgroundThrottling: false, partition: "chat-pins-check" } });
   window.webContents.on("did-finish-load", () => window.webContents.setZoomFactor(1));
-  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  // A throw in the page comes back as its own message and the expression, not Electron's generic "Script failed to execute".
+  const evaluate = async (source) => {
+    const result = await window.webContents.executeJavaScript(
+      `(async () => { try { return { value: await (${source}) }; } catch (error) { return { error: String(error?.stack ?? error) }; } })()`,
+    );
+    if ("error" in result) throw new Error(`${result.error}\nExpression: ${source}`);
+    return result.value;
+  };
   // Moves carry leftButtonDown, or Chromium reads them as the button already released.
   const mouse = (type, x, y) =>
     window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
@@ -74,6 +81,7 @@ async function browserChecks() {
   const calls = () => evaluate("window.calls");
   // Presses on a row, moves in steps past the 4px threshold, and holds over the point before letting go.
   async function drag(from, to, { release = true } = {}) {
+    mouse("mouseMove", from.x, from.y);
     mouse("mouseDown", from.x, from.y);
     for (let i = 1; i <= 6; i++) {
       mouse("mouseMove", from.x, Math.round(from.y + ((to.y - from.y) * i) / 6));
@@ -102,12 +110,14 @@ async function browserChecks() {
 
     // A click with no movement opens the chat.
     const three = await row(3);
+    mouse("mouseMove", three.x, three.y);
     mouse("mouseDown", three.x, three.y);
     mouse("mouseUp", three.x, three.y);
     await delay(150);
     assert.deepEqual((await calls()).picks, ["3"], "a click opens the chat");
 
     // Dragging a chat shows an empty Pinned section; dropping there pins it, and Undo takes it back.
+    mouse("mouseMove", three.x, three.y);
     mouse("mouseDown", three.x, three.y);
     mouse("mouseMove", three.x, three.y + 2);
     await delay(100);

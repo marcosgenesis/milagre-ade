@@ -7,8 +7,8 @@ const EMPTY: UsageState = { snapshot: null, loading: false, error: '' };
 const idleSubscribe = () => () => {};
 const empty = () => EMPTY;
 
-export function useUsage(client: Client | null) {
-  const usage = useMemo(() => client ? createUsageState(client) : null, [client]);
+export function useUsage(client: Client | null, scopeKey?: string, revision = 0) {
+  const usage = useMemo(() => client ? createUsageState(client, Date.now, scopeKey) : null, [client, scopeKey, revision]); // eslint-disable-line react-hooks/exhaustive-deps
   const state = useSyncExternalStore(usage?.subscribe ?? idleSubscribe, usage?.get ?? empty, empty);
   // A plain effect, so usage also loads in the navigation panel, outside the router's screens.
   useEffect(() => {

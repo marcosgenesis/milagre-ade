@@ -44,7 +44,7 @@ function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number 
 /** Plan usage, sourced only from the currently connected computer. */
 export function UsageSection() {
   const session = useSession();
-  const usage = useUsage(session.client);
+  const usage = useUsage(session.client, session.snapshot?.project.path, session.providerRevision);
   const [now, setNow] = useState(Date.now);
   // A plain effect: the section also shows in the navigation panel, which sits outside the router's screens.
   useEffect(() => {

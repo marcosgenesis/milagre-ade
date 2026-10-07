@@ -6,7 +6,7 @@ import { useAppUpdates } from '../update-sheet';
 import { Icon } from '../icons';
 import { ListRow, PageScroll, styles } from '../ui';
 
-type SettingsPage = 'notifications' | 'usage' | 'accounts';
+type SettingsPage = 'notifications' | 'usage' | 'accounts' | 'project-accounts';
 
 export default function SettingsScreen() {
   return <>
@@ -22,6 +22,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
   const status = updates.state.status;
   const update = status === 'disabled' ? 'Not available in this build' : status === 'checking' ? 'Checking…' : status === 'downloading' ? 'Downloading…' : status === 'ready' ? 'Ready to install' : status === 'up-to-date' ? 'Up to date' : status === 'restarting' ? 'Restarting…' : status === 'error' || status === 'check-error' ? 'Could not check' : 'Check for updates';
   return <View style={[styles.card, { paddingVertical: 4, gap: 0 }]}>
+    <ListRow compact title="Project Accounts" leading={<Icon icon={UserMultipleIcon} tone="ink" size={20} />} onPress={() => onOpen('project-accounts')} />
+    <View style={styles.separator} />
     <ListRow compact title="Accounts" leading={<Icon icon={UserMultipleIcon} tone="ink" size={20} />} onPress={() => onOpen('accounts')} />
     <View style={styles.separator} />
     <ListRow compact title="Notifications" subtitle={push.state ? push.state.enabled ? 'On' : 'Off' : undefined}

@@ -27,13 +27,13 @@ function chatContext(chat = {}) {
  * SDK and Codex start directly, without a shell.
  */
 function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVersion, env = process.env, actions = createGitActions({ env }), diff = createGitDiff({ env }), models, knownFolders } = {}) {
-  const command = (name) => async () => {
-    const status = await cli(name);
+  const command = (name, cwd) => async () => {
+    const status = await cli(name, cwd);
     return status?.problem ? null : status ?? null;
   };
-  const textModels = models ?? {
-    claude: claudeModel({ getCommand: command("claude") }),
-    codex: codexModel({ getCommand: command("codex"), clientVersion }),
+  const textModels = cwd => models ?? {
+    claude: claudeModel({ getCommand: command("claude", cwd) }),
+    codex: codexModel({ getCommand: command("codex", cwd), clientVersion }),
   };
 
   async function folder(cwd) {
@@ -54,7 +54,7 @@ function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVers
     const checked = await folder(cwd);
     try {
       const context = await actions.readTextContext({ cwd: checked, base });
-      return await generateGitText({ ...chatContext(chat), ...context }, { provider: provider === "codex" ? "codex" : "claude", models: textModels });
+      return await generateGitText({ ...chatContext(chat), ...context }, { provider: provider === "codex" ? "codex" : "claude", models: textModels(checked) });
     } catch {
       return { ok: false, message: GENERATION_FAILED };
     }

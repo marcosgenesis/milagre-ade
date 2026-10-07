@@ -10,6 +10,7 @@ import '/src/styles.css';
 let snapshot = { providers: ['claude', 'codex'].map(provider => ({ provider, selectedId: 'default', accounts: [
   { id: 'default', provider, label: 'Connected CLI account', email: 'personal@example.test', plan: 'pro', state: 'ready' },
   { id: 'work', provider, label: 'Work', email: 'work@example.test', plan: 'team', state: 'ready' },
+  { id: 'business', provider, label: 'Business', email: 'business@example.test', plan: provider === 'claude' ? 'self_serve_business_polite' : 'business', state: 'ready' },
 ] })) };
 window.calls = [];
 window.milagre = {
@@ -43,7 +44,11 @@ async function browserChecks() {
   assert.equal(await evaluate(`!!document.querySelector('[role=radio][aria-label="work@example.test"]')`), true, 'Account row is directly selectable');
   await evaluate(`document.querySelector('[role=radio][aria-label="work@example.test"]').click()`);
   await waitFor(`window.calls.some(c=>c.action==='select' && c.provider==='claude' && c.value==='work')`);
-  assert.equal(await evaluate(`document.querySelector('[data-accounts-settings] section').textContent.includes('Work · team')`),true);
+  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Team account"]').length`), 2);
+  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Business account"]').length`), 2);
+  assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Personal account"]').length`), 2);
+  assert.equal(await evaluate(`document.body.textContent.includes('self_serve_business_polite')`), false);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('[role=radio][aria-label="work@example.test"]')).cursor`), 'pointer');
   await shot('selected-account');
   await click('Re-authenticate');
   await waitFor(`window.calls.some(c=>c.action==='login' && c.value==='work')`);

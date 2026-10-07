@@ -13,6 +13,7 @@ export type SelectOption<T extends string> = {
   icon?: ReactNode;
   // Consecutive options with the same group sit under one heading.
   group?: string;
+  disabled?: boolean;
 };
 
 const GAP = 6;
@@ -28,12 +29,14 @@ export function Select<T extends string>({
   options,
   onChange,
   width = 240,
+  disabled = false,
 }: {
   label: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
   width?: number;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number }>({ left: 0, maxHeight: 0 });
@@ -58,6 +61,7 @@ export function Select<T extends string>({
   }
 
   function choose(next: T) {
+    if (disabled || options.find(option => option.value === next)?.disabled) return;
     if (next !== value) onChange(next);
     close();
   }
@@ -65,8 +69,9 @@ export function Select<T extends string>({
   useLayoutEffect(() => {
     if (!open) return;
     const rows = panelRef.current?.querySelectorAll<HTMLElement>("[data-picker-row]");
-    const index = Math.max(0, options.findIndex((option) => option.value === value));
-    rows?.[index]?.focus({ preventScroll: false });
+    const index = options.findIndex((option) => option.value === value && !option.disabled);
+    const focusIndex = index >= 0 ? index : options.findIndex(option => !option.disabled);
+    rows?.[focusIndex]?.focus({ preventScroll: false });
   }, [open]);
 
   useDismiss(open, () => close(false), (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)), place);
@@ -89,6 +94,7 @@ export function Select<T extends string>({
     <>
       <button
         ref={triggerRef}
+        disabled={disabled}
         type="button"
         aria-label={label}
         aria-haspopup="listbox"
@@ -109,7 +115,7 @@ export function Select<T extends string>({
                 {option.group && option.group !== options[index - 1]?.group && (
                   <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{option.group}</div>
                 )}
-                <PickerRow icon={option.icon} label={option.label} description={option.description} selected={option.value === value} onClick={() => choose(option.value)} option />
+                <PickerRow disabled={option.disabled} icon={option.icon} label={option.label} description={option.description} selected={option.value === value} onClick={() => choose(option.value)} option />
               </Fragment>
             ))}
           </PickerPanel>

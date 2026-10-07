@@ -98,7 +98,7 @@ class ChatHost {
       if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
       const unknown = (session.subagents ?? []).filter(agent => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
       if (!unknown.length) return;
-      const events = await this.readSubagents({ cwd, agents: unknown });
+      const events = await this.readSubagents({ cwd, agents: unknown, projectPath });
       if (!events.length) return;
       const { state, changed } = await this.states.update(projectPath, (latest) => {
         const current = latest.sessions[sessionId];
@@ -364,7 +364,7 @@ class ChatHost {
       const transcript = renderTranscript(state, sessionId);
       transcriptPath = await this.handoverTools.writeTranscript({ projectPath, sessionId, markdown: transcript });
       const lastUserMessage = state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
-      const body = await this.handoverTools.brief({ transcript, transcriptPath, provider: source.provider, lastUserMessage, worktrees: source.worktrees, cwd: source.workspacePath ?? state.worktrees[source.worktree_id].path });
+      const body = await this.handoverTools.brief({ projectPath, transcript, transcriptPath, provider: source.provider, lastUserMessage, worktrees: source.worktrees, cwd: source.workspacePath ?? state.worktrees[source.worktree_id].path });
       await this.settleHandover(projectPath, target, body);
     } catch (error) {
       await this.settleHandover(projectPath, target);

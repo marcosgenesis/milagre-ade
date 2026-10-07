@@ -1,3 +1,4 @@
+import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
@@ -28,11 +29,12 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "accounts" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
+  { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
@@ -40,7 +42,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
 
 const PROJECT_SECTION = { key: "project" as const, label: "Worktrees", icon: GitBranchIcon };
 
-export function SettingsNav({ section, projectName, onSelect, onBack }: { section: SettingsSection; projectName?: string; onSelect: (section: SettingsSection) => void; onBack: () => void }) {
+export function SettingsNav({ section, projectName, onSelect, onBack, showProjectSettings = true }: { showProjectSettings?: boolean; section: SettingsSection; projectName?: string; onSelect: (section: SettingsSection) => void; onBack: () => void }) {
   return (
     <aside aria-label="Settings navigation" className="flex h-full w-[224px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
       <div aria-hidden className="h-8 shrink-0" />
@@ -54,10 +56,12 @@ export function SettingsNav({ section, projectName, onSelect, onBack }: { sectio
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
       </GlideGroup>
+      {showProjectSettings && <>
       <div className="mx-2 mt-2 flex h-8 items-center px-2 text-[12.5px] font-medium text-ink-3"><span className="truncate">{projectName ? `Project · ${projectName}` : "Project"}</span></div>
       <GlideGroup>
         <RailButton icon={<Icon icon={PROJECT_SECTION.icon} />} label={PROJECT_SECTION.label} active={section === PROJECT_SECTION.key} onClick={() => onSelect(PROJECT_SECTION.key)} />
       </GlideGroup>
+      </>}
     </aside>
   );
 }
@@ -613,7 +617,7 @@ function ProjectSettings({ projectPath }: { projectPath?: string }) {
   );
 }
 
-export function SettingsPanel({ section, projectPath, models, update }: { section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
+export function SettingsPanel({ section, projectPath, models, update, onSectionChange }: { onSectionChange?: (section: SettingsSection) => void; section: SettingsSection; projectPath?: string; models: ModelOption[]; update: UpdateState | null }) {
   const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">
@@ -621,6 +625,7 @@ export function SettingsPanel({ section, projectPath, models, update }: { sectio
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "accounts" && <AccountsSettings />}
+        {section === "project-accounts" && <ProjectAccountsSettings projectPath={projectPath} onManageAccounts={() => onSectionChange?.("accounts")} />}
         {section === "appearance" && <AppearanceSettings />}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}

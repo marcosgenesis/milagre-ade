@@ -50,23 +50,32 @@ function useSessionState() {
   // Launch may open the only saved computer once; after any connect or a Disconnect it never does again.
   const autoOpen = useRef(true);
   const claimAutoOpen = () => { const first = autoOpen.current; autoOpen.current = false; return first; };
-  useEffect(() => {
-    let cancelled = false;
-    if (!client || process.env.EXPO_PUBLIC_DEMO === '1') return;
-    void Promise.all([client.call<AgentModels>('agent:models'), client.call<AgentCliStatus>('agent:cli-status')]).then(([models, status]) => {
-      if (!cancelled) { setModels(models); setCliStatus(status); }
-    }).catch(() => { if (!cancelled) setProviderError('Could not check the installed agents. Reconnect to check again.'); });
-    return () => { cancelled = true; };
-  }, [client]);
+  const scopeKey = snapshot?.project.path;
+  const providerRequest = useRef(0);
+  const providerContext = useRef({ client, scopeKey });
+  useEffect(() => { providerContext.current = { client, scopeKey }; }, [client, scopeKey]);
+  const [providerRevision, setProviderRevision] = useState(0);
   const refreshProviders = useCallback(async () => {
-    if (!client) return;
-    const version = generation.current;
+    if (!client || process.env.EXPO_PUBLIC_DEMO === '1') return;
+    const version = ++providerRequest.current;
+    const current = () => version === providerRequest.current && providerContext.current.client === client && providerContext.current.scopeKey === scopeKey;
+    setProviderRevision(value => value + 1);
+    setModels(null); setCliStatus(null); setProviderError('');
     try {
-      const [models, status] = await Promise.all([client.call<AgentModels>('agent:models'), client.call<AgentCliStatus>('agent:cli-status')]);
-      if (version !== generation.current) return;
-      setModels(models); setCliStatus(status); setProviderError('');
-    } catch { setProviderError('Could not check the installed agents. Reconnect to check again.'); }
-  }, [client]);
+      const args = scopeKey ? [scopeKey] : [];
+      const [models, status] = await Promise.all([client.call<AgentModels>('agent:models', args), client.call<AgentCliStatus>('agent:cli-status', args)]);
+      if (!current()) return;
+      setModels(models); setCliStatus(status);
+    } catch { if (current()) setProviderError('Could not check the installed agents. Reconnect to check again.'); }
+  }, [client, scopeKey]);
+  const invalidateProviders = useCallback(() => { providerRequest.current++; }, []);
+  useEffect(() => {
+    // Invalidate previously displayed discovery when the selected Project changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshProviders();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') void refreshProviders(); });
+    return () => { invalidateProviders(); subscription.remove(); };
+  }, [refreshProviders, invalidateProviders]);
   const loadHosts = useCallback(async () => {
     const list = await savedHosts.list();
     setHosts(list);
@@ -227,18 +236,18 @@ function useSessionState() {
     if (!client || !projectPath) return;
     return syncProject({
       connect: options => client.live(projectPath, options),
-      snapshot: refresh, runs: refreshRuns,
+      snapshot: refresh, runs: refreshRuns, accounts: () => { void refreshProviders(); },
       onError: error => setError(error.message),
       active: () => AppState.currentState === 'active',
       watchActive: listener => { const subscription = AppState.addEventListener('change', state => listener(state === 'active')); return () => subscription.remove(); },
       // Live turns refresh every second; an idle Project only needs a slower check for changes made elsewhere.
       pollDelay: () => running.current || Date.now() < busyUntil.current ? 1000 : 4000,
     });
-  }, [client, projectPath, refresh, refreshRuns]);
+  }, [client, projectPath, refresh, refreshRuns, refreshProviders]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => { autoOpen.current = false; generation.current++; selection.current = null; setClient(null); setSnapshot(null); setError(''); };
-  return { booted, lastLocation, rememberChat, cachedProject, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
+  return { booted, lastLocation, rememberChat, cachedProject, previewProject, reloadProjects, claimAutoOpen, opening, hosts, loadHosts, hostName, expectActivity, client, recent, snapshot, error, setError, models, cliStatus, providerError, refreshProviders, providerRevision, connect, open, openNotificationTarget, navigationVersion, cancelNavigation, refresh, isSelected, disconnect };
 }
 /**
  * Drafts, attachments and turn settings change on every keystroke, so they live in their own context: typing re-renders

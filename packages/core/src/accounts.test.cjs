@@ -10,7 +10,7 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'milagre-accounts-'));
   const home = path.join(root, 'home'); fs.mkdirSync(home);
   const children = [], seen = [], changed = [];
-  const env = { HOME: home, ANTHROPIC_API_KEY: 'secret-claude', OPENAI_API_KEY: 'secret-codex' };
+  const env = { HOME: home, ANTHROPIC_API_KEY: 'secret-claude', OPENAI_API_KEY: 'secret-codex', CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1' };
   const options = { dataDir: path.join(root, 'profile'), home, env, cli: async p => ({ command: `/cli/${p}` }), changed: p => changed.push(p),
     inspect: async (p, opts) => { seen.push({ p, ...opts }); return { state: 'ready', email: `${p}@example.test`, plan: 'pro' }; },
     spawn: (command, args, opts) => { const child = new EventEmitter(); children.push({ child, command, args, opts }); return child; },
@@ -57,6 +57,8 @@ test('Claude uses its own config directory; cancelling and retrying never select
   const env = f.children[0].opts.env;
   assert.equal(env.ANTHROPIC_API_KEY, '');
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, '');
+  assert.equal(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '');
+  assert.equal(f.accounts.environment('claude', 'default').CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '1');
   assert.ok(env.CLAUDE_CONFIG_DIR);
   assert.deepEqual(f.children[0].args, ['auth', 'login', '--claudeai']);
   assert.equal(f.accounts.selected('claude'), 'default');
@@ -66,6 +68,8 @@ test('Claude uses its own config directory; cancelling and retrying never select
   await f.accounts.login('claude', added.id);
   f.children[1].child.emit('close', 0); await tick();
   f.accounts.select('claude', added.id);
+  assert.equal(f.accounts.environment('claude').CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '');
+  assert.equal(f.seen.find(s => s.env.CLAUDE_CONFIG_DIR === env.CLAUDE_CONFIG_DIR).env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '');
   const snapshot = f.accounts.remove('claude', added.id);
   assert.equal(group(snapshot, 'claude').accounts.length, 1);
   assert.equal(group(snapshot, 'claude').selectedId, 'default');
@@ -105,4 +109,61 @@ test('cancelling during the identity check ignores its late result', async t => 
   resolveIdentity({ state: 'ready' }); await tick();
   assert.equal(group(await accounts.list(), 'claude').accounts[1].state, 'signed-out');
   assert.deepEqual(f.changed, []);
+});
+
+test('Project and Link overrides are independent, inherit dynamically and survive restart', async t => {
+  const f = fixture(t);
+  await f.accounts.list();
+  const a = group(await f.accounts.add('claude', 'Personal'), 'claude').accounts[1];
+  f.children[0].child.emit('close', 0); await tick();
+  const b = group(await f.accounts.add('claude', 'Business'), 'claude').accounts[2];
+  f.children[1].child.emit('close', 0); await tick();
+  const project = '/projects/milagre';
+  const link = 'milagre-link:11111111-1111-4111-8111-111111111111';
+  f.accounts.assign(project, 'claude', a.id);
+  f.accounts.assign(link, 'claude', b.id);
+  assert.equal(f.accounts.selected('claude', project), a.id);
+  assert.equal(f.accounts.selected('claude', link), b.id);
+  f.accounts.select('claude', b.id);
+  assert.equal(f.accounts.selected('claude', project), a.id);
+  assert.equal(f.accounts.selected('claude', '/projects/other'), b.id);
+  assert.equal(createAccounts(f.options).selected('claude', link), b.id);
+  f.accounts.assign(project, 'claude', null);
+  assert.equal(f.accounts.selected('claude', project), b.id);
+  const scope = await f.accounts.scope(project);
+  assert.equal(scope.scopeKey, project);
+  assert.equal(scope.providers[0].accountId, null);
+  assert.equal(scope.providers[0].effectiveId, b.id);
+  f.accounts.assign(project, 'claude', 'default');
+  assert.equal(f.accounts.selected('claude', project), 'default');
+  assert.equal(f.accounts.selected('codex', link), 'default');
+});
+
+test('removing an explicitly assigned account never falls back to computer defaults', async t => {
+  const f = fixture(t);
+  await f.accounts.list();
+  const a = group(await f.accounts.add('claude', 'Work'), 'claude').accounts[1];
+  f.children[0].child.emit('close', 0); await tick();
+  f.accounts.assign('/projects/work', 'claude', a.id);
+  f.changed.length = 0;
+  f.accounts.remove('claude', a.id);
+  assert.deepEqual(f.changed, ['claude'], 'Removing a scope-pinned account must notify all clients and invalidate discovery');
+  assert.equal(f.accounts.selected('claude', '/projects/work'), a.id);
+  assert.throws(() => f.accounts.environment('claude', a.id), /not found/);
+  const snapshot = await f.accounts.scope('/projects/work');
+  const missing = snapshot.providers[0].accounts.find(item => item.id === a.id);
+  assert.equal(missing.state, 'error');
+  assert.match(missing.message, /removed/i);
+  assert.equal(createAccounts(f.options).selected('claude', '/projects/work'), a.id);
+});
+
+test('scope assignment rejects invalid keys and unfinished or foreign-provider accounts', async t => {
+  const f = fixture(t); await f.accounts.list();
+  const a = group(await f.accounts.add('claude', 'Work'), 'claude').accounts[1];
+  assert.throws(() => f.accounts.assign('/projects/work', 'claude', a.id), /Finish signing/);
+  assert.throws(() => f.accounts.assign('/projects/work', 'codex', a.id), /not found/);
+  assert.throws(() => f.accounts.assign('__proto__', 'claude', null), /valid Project or Link/);
+  assert.throws(() => f.accounts.assign('milagre-link:invalid', 'claude', null), /valid Project or Link/);
+  f.accounts.cancel('claude', a.id);
+  assert.throws(() => f.accounts.assign('/projects/work', 'claude', a.id), /Sign in/);
 });

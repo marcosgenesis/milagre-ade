@@ -103,3 +103,14 @@ test('usage state for another computer starts empty and old requests cannot publ
   assert.equal(updates, before);
   await next.refresh(); assert.equal(next.get().snapshot?.providers[0].windows[0].usedPercent, 70);
 });
+
+test('usage reads and cached usage stay isolated to the selected scope', async () => {
+  const calls: [string, unknown[] | undefined][] = [];
+  const rpc = { call: async <T,>(method: string, args?: unknown[]) => { calls.push([method, args]); return snapshot() as T; } };
+  const project = createUsageState(rpc, () => NOW, '/project');
+  const link = createUsageState(rpc, () => NOW, 'link:two');
+  await project.loadCached(); await project.refresh();
+  assert.equal(link.get().snapshot, null);
+  await link.refresh();
+  assert.deepEqual(calls, [['usage:cached', ['/project']], ['usage:read', ['/project']], ['usage:read', ['link:two']]]);
+});

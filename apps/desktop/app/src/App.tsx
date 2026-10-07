@@ -144,20 +144,33 @@ function App() {
   const [fastMode, setFastModeState] = useState(() => localStorage.getItem("milagre.fastMode") === "on");
   const setFastMode = (on: boolean) => { setFastModeState(on); localStorage.setItem("milagre.fastMode", on ? "on" : "off"); };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
-  const [reported, setReported] = useState<AgentModels | null>(null);
+  const accountScope = selectedLink ? `milagre-link:${selectedLink.link.id}` : project?.path;
+  const accountScopeRef = useRef(accountScope); accountScopeRef.current = accountScope;
+  const accountGeneration = useRef(0);
+  const [loadedAccountScope, setLoadedAccountScope] = useState<string | undefined>(undefined);
+  const [rawReported, setReported] = useState<AgentModels | null>(null);
+  const reported = loadedAccountScope === accountScope ? rawReported : null;
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
   // Whether each agent's CLI is missing, outdated, broken or logged out, for the model picker. Loaded at
   // startup and again each time the picker opens, so a fix shows without a restart.
-  const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
+  const [rawCliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
   // The model lists come along: the main process keeps a good list for the run but asks again for an agent
   // that had none (a CLI that was missing, or Claude Code before it was logged in).
+  const cliStatus = loadedAccountScope === accountScope ? rawCliStatus : null;
   const refreshCliStatus = () => {
+    const generation = ++accountGeneration.current;
+    const live = () => generation === accountGeneration.current && accountScopeRef.current === accountScope;
     // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
     // re-apply anything that depends on the lists.
-    void window.milagre.getCliStatus().then((next) => setCliStatus((previous) => keepIfSame(previous, next))).catch(() => undefined);
-    void window.milagre.getModels().then((next) => setReported((previous) => keepIfSame(previous, next))).catch(() => undefined);
+    void window.milagre.getCliStatus(accountScope).then((next) => { if (live()) { setLoadedAccountScope(accountScope); setCliStatus((previous) => keepIfSame(previous, next)); } }).catch(() => undefined);
+    void window.milagre.getModels(accountScope).then((next) => { if (live()) { setLoadedAccountScope(accountScope); setReported((previous) => keepIfSame(previous, next)); } }).catch(() => undefined);
   };
-  useEffect(() => { refreshCliStatus(); return window.milagre.onAccountsChanged?.(refreshCliStatus); }, []);
+  useEffect(() => {
+    const reset = () => { setReported(null); setCliStatus(null); refreshCliStatus(); };
+    reset();
+    const off = window.milagre.onAccountsChanged?.(reset);
+    return () => { accountGeneration.current++; off?.(); };
+  }, [accountScope]);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
   // and the open chat isn't on the other agent. After that a model the agents don't offer only gives way to
@@ -194,14 +207,14 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
 
+  const refreshCliStatusRef = useRef(refreshCliStatus);
+  refreshCliStatusRef.current = refreshCliStatus;
   const updateCli = async (provider: ModelProvider) => {
     setUpdatingCli(provider);
     try {
       const result = await window.milagre.updateCli(provider);
-      if (result.status) {
-        setCliStatus((previous) => (previous ? { ...previous, [provider]: result.status! } : previous));
-      }
-      refreshCliStatus();
+      // Updating the CLI is global; read authentication and models for the scope open now.
+      refreshCliStatusRef.current();
       if (result.ok) {
         setNotice(`${cliName(provider)} updated to version ${result.version ?? "latest"} successfully!`);
       } else {
@@ -364,7 +377,7 @@ function App() {
   const waitingStepIds = useMemo(() => run?.approvals.flatMap(request => request.stepId ? [request.stepId] : []), [run?.approvals]);
   const agentPorts = useAgentPorts();
   const isSending = preparingHere || Boolean(run);
-  const usage = useUsage();
+  const usage = useUsage(accountScope);
   const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } = useSettings();
 
   // Visiting an old chat can change its displayed model, but never the preference for new chats.
@@ -532,7 +545,7 @@ function App() {
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
   // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
   useEffect(() => {
-    if (selectedLink) return;
+  if (selectedLink) return;
     void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
   }, [selectedSessionId, view, project?.path, selectedLink?.link.id]);
 
@@ -1081,7 +1094,8 @@ function App() {
   }
 
   const linkDialog = linkDialogOpen ? <LinkProjectDialog onClose={() => setLinkDialogOpen(false)} onCreated={link => { setLinkDialogOpen(false); void selectLink(link.id); }} /> : null;
-  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSelectedLink(null); setView('settings'); }} linkedWork={linkedWork} onCanvasChat={(path, id) => void openCanvasChat(path, id)} usage={sidebarUsage} />{linkDialog}</>;
+    if (selectedLink && view === "settings") return <DotBackground><div className="flex h-screen gap-3 p-3 pt-10"><SettingsNav showProjectSettings={false} section={settingsSection} projectName={selectedLink.link.name} onSelect={setSettingsSection} onBack={() => setView("chat")} /><main className="min-w-0 flex-1"><SettingsPanel section={settingsSection} projectPath={accountScope} models={models} update={update} onSectionChange={setSettingsSection} /></main></div></DotBackground>;
+  if (selectedLink) return <><LinkWorkspace key={selectedLink.link.id} opened={selectedLink} state={linkStates[selectedLink.link.id] ?? selectedLink.state} hostConnection={hostConnection} ports={agentPorts} agents={agentRuns} drafts={scopeDrafts} initialSessionId={linkInitialSession} preferences={{ models, selectedModel, onModelChange: chooseModel, cliStatus, onModelPickerOpen: refreshCliStatus, onUpdateCli: handleUpdateCli, updatingCli, capability: selectedCapability, effort: effortFor(selectedCapability, effort), onEffortChange: setEffort, ultracode, onUltracodeChange: setUltracode, fastMode, onFastModeChange: setFastMode, permissionMode, onPermissionModeChange: setPermissionMode }} onSwitchProject={path => void switchProject(path)} onSwitchLink={id => void selectLink(id)} onLinkProject={() => setLinkDialogOpen(true)} onOpenProject={() => void openProject()} onSettings={() => { setSettingsSection('project-accounts'); setView('settings'); }} linkedWork={linkedWork} onCanvasChat={(path, id) => void openCanvasChat(path, id)} usage={sidebarUsage} />{linkDialog}</>;
 
   if (loading || !project || !state || splash === "intro") {
     return <>{splashOverlay(false)}</>;
@@ -1196,7 +1210,7 @@ function App() {
         {view === "settings" && (
           <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {notice && <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>{notice}</NoticeCard>}
-            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
+            <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} onSectionChange={setSettingsSection} />
           </div>
         )}
         {view === "canvas" && <CanvasView states={states} runs={agentRuns.runs} linkedWork={linkedWork} onOpenChat={(path, id) => void openCanvasChat(path, id)} onBack={() => setView("chat")} />}

@@ -7,6 +7,9 @@ const { CodexRpc } = require('./agents/codex-rpc.cjs');
 const { killTree } = require('./agents/process-tree.cjs');
 const { preparePrivateDirectory } = require('./private-files.cjs');
 
+const { scopeKey, scopeFromKey } = require('@milagre/shared/chat-scopes');
+const validScope = key => { scopeKey(scopeFromKey(key)); return key; };
+
 const PROVIDERS = ['claude', 'codex'];
 const text = value => typeof value === 'string' ? value.slice(0, 200) : undefined;
 
@@ -34,14 +37,21 @@ async function inspectAccount(provider, { command, env }) {
 function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, home = os.homedir(), inspect = inspectAccount, spawn = spawnCommand, changed = () => {} }) {
   const root = path.join(dataDir, 'accounts');
   const file = path.join(root, 'accounts.json');
-  let saved = { accounts: [], selected: { claude: 'default', codex: 'default' } };
+  let saved = { scopes: {}, accounts: [], selected: { claude: 'default', codex: 'default' } };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!Array.isArray(parsed.accounts) || !parsed.selected || parsed.accounts.some(a => !PROVIDERS.includes(a.provider) || !/^[a-f0-9-]{36}$/.test(a.id) || typeof a.label !== 'string')) throw new Error();
     for (const provider of PROVIDERS) {
       if (parsed.selected[provider] !== 'default' && !parsed.accounts.some(a => a.provider === provider && a.id === parsed.selected[provider])) throw new Error();
     }
-    saved = { accounts: parsed.accounts.map(({ id, provider, label }) => ({ id, provider, label })), selected: { claude: parsed.selected.claude, codex: parsed.selected.codex } };
+    const scopes = parsed.scopes ?? {};
+    if (!scopes || typeof scopes !== 'object' || Array.isArray(scopes)) throw new Error();
+    for (const [key, choices] of Object.entries(scopes)) {
+      validScope(key);
+      if (!choices || typeof choices !== 'object' || Array.isArray(choices)) throw new Error();
+      for (const [provider, id] of Object.entries(choices)) if (!PROVIDERS.includes(provider) || (id !== 'default' && !/^[a-f0-9-]{36}$/.test(id))) throw new Error();
+    }
+    saved = { scopes, accounts: parsed.accounts.map(({ id, provider, label }) => ({ id, provider, label })), selected: { claude: parsed.selected.claude, codex: parsed.selected.codex } };
   } catch (error) { if (error.code !== 'ENOENT') throw new Error('Could not read saved accounts. Restore accounts/accounts.json before switching accounts.'); }
   const identities = new Map();
   const logins = new Map();
@@ -63,7 +73,9 @@ function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, hom
     const next = { ...env };
     const names = provider === 'codex' ? ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN'] : ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_PROFILE'];
     for (const name of names) next[name] = '';
-    if (provider === 'claude') next.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1';
+    // The CLI owns this profile's OAuth login. Host-managed mode bypasses that
+    // saved login, so clear it even when inherited from the launching process.
+    if (provider === 'claude') next.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '';
     next[provider === 'codex' ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] = directory(provider, id);
     return next;
   }
@@ -91,6 +103,36 @@ function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, hom
       await checking;
     }
     return snapshot();
+  }
+  function selected(provider, scope) {
+    providerCheck(provider);
+    return (scope ? saved.scopes[validScope(scope)]?.[provider] : undefined) ?? saved.selected[provider];
+  }
+  function scopeSnapshot(scope) {
+    validScope(scope);
+    return { scopeKey: scope, providers: snapshot().providers.map(group => {
+      const accountId = saved.scopes[scope]?.[group.provider] ?? null;
+      const effectiveId = selected(group.provider, scope);
+      const entries = [...group.accounts];
+      if (!entries.some(a => a.id === effectiveId)) entries.push({ id: effectiveId, provider: group.provider, label: 'Removed account', state: 'error', missing: true, message: 'This assigned account was removed. Choose another account or use the computer default.' });
+      return { provider: group.provider, accountId, effectiveId, defaultId: group.selectedId, accounts: entries };
+    }) };
+  }
+  async function scope(key, refresh = false) { validScope(key); await list(refresh); return scopeSnapshot(key); }
+  function assign(scope, provider, id) {
+    validScope(scope); providerCheck(provider);
+    if (id !== null) {
+      account(provider, id);
+      if (logins.has(key(provider, id))) throw new Error('Finish signing in before using this account.');
+      if (identities.get(key(provider, id))?.state !== 'ready') throw new Error('Sign in to this account, then refresh before using it.');
+    }
+    const choices = { ...saved.scopes[scope] };
+    if (id === null) delete choices[provider]; else choices[provider] = id;
+    const scopes = { ...saved.scopes };
+    if (Object.keys(choices).length) scopes[scope] = choices; else delete scopes[scope];
+    persist({ ...saved, scopes });
+    changed(provider);
+    return scopeSnapshot(scope);
   }
   function select(provider, id) {
     account(provider, id);
@@ -190,10 +232,10 @@ function createAccounts({ dataDir, cli, ready = () => {}, env = process.env, hom
     // Retain the private profile: a running reply may still use it. Forgetting never revokes its tokens.
     persist({ ...saved, accounts: saved.accounts.filter(a => a.id !== id), selected: wasSelected ? { ...saved.selected, [provider]: 'default' } : saved.selected });
     identities.delete(key(provider, id));
-    if (wasSelected) changed(provider);
+    changed(provider);
     return snapshot();
   }
-  return { list, select, add, login, cancel, remove, environment, directory, selected: provider => saved.selected[provider], close() { closed = true; for (const k of [...logins.keys()]) cancel(...k.split(':')); } };
+  return { list, select, add, login, cancel, remove, environment, directory, selected, scope, assign, close() { closed = true; for (const k of [...logins.keys()]) cancel(...k.split(':')); } };
 }
 
 module.exports = { createAccounts, inspectAccount };

@@ -189,7 +189,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       handle = relayed.live(path, data => {
         let type: unknown;
         try { type = JSON.parse(data).type; } catch { return; }
-        if (type === 'runs' || type === 'project') onSignal(type);
+        if (type === 'runs' || type === 'project' || type === 'accounts') onSignal(type);
       }, onStatus);
     }, () => { /* the snapshot polls until a live socket opens */ });
     return { close() { closed = true; handle?.close(); handle = null; } };

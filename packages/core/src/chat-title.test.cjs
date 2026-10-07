@@ -59,7 +59,7 @@ test('main process names first messages once, persists and broadcasts across pro
   await h.send('/beta', 'fix authentication');
   await tick();
   assert.equal(h.calls.length, 2);
-  assert.deepEqual(h.calls[0], { prompt: 'when I switch chats the scroll jumps', provider: 'codex' });
+  assert.deepEqual(h.calls[0], { prompt: 'when I switch chats the scroll jumps', provider: 'codex', projectPath: '/alpha' });
   h.replies[0]('Preserve chat scroll position');
   h.replies[1]('Fix authentication');
   await Promise.all([...h.titles.pending.values()]);

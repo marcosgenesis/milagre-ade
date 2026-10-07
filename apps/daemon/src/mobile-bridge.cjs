@@ -19,7 +19,7 @@ const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daem
   'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
-  'accounts:list', 'accounts:add', 'accounts:select', 'accounts:login', 'accounts:cancel', 'accounts:remove',
+  'accounts:scopes', 'accounts:scope', 'accounts:assign', 'accounts:list', 'accounts:add', 'accounts:select', 'accounts:login', 'accounts:cancel', 'accounts:remove',
   'usage:read', 'usage:cached', 'agent:answer-question', 'agent:set-permission-mode', 'agent:models', 'agent:cli-status', 'chat:patch',
   'chat:archive-subagent', 'chat:archive-finished-subagents',
   'attachment:preview', 'worktree:pull-request', 'project:branches', 'skills:list', 'worktree:create', 'git:diff-files', 'git:diff-file',
@@ -194,9 +194,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
     entry.timer = setTimeout(() => {
       entry.timer = null;
       // A snapshot carries the runs too, so "project" covers "runs".
-      const type = entry.kinds.has('project') ? 'project' : 'runs';
+      const types = [];
+      if (entry.kinds.has('accounts')) types.push('accounts');
+      if (entry.kinds.has('project')) types.push('project');
+      else if (entry.kinds.has('runs')) types.push('runs');
       entry.kinds.clear();
-      if (entry.socket.readyState === WebSocket.OPEN) entry.socket.send(JSON.stringify({ type }));
+      if (entry.socket.readyState === WebSocket.OPEN) for (const type of types) entry.socket.send(JSON.stringify({ type }));
     }, delay);
   }
   function drop(entry) {
@@ -224,6 +227,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   }
   client.on('event', ({ channel, payload } = {}) => {
     for (const entry of live) {
+      if (channel === 'accounts:changed' && !confine) signal(entry, 'accounts', 0);
       if ((channel === 'project:state' && payload?.path === entry.projectPath) || (channel === 'link:state' && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)) signal(entry, 'project');
       else if (channel === 'agent:event' && typeof payload?.chatId === 'string' && chatInProject(entry.projectPath, payload.chatId)) {
         // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs

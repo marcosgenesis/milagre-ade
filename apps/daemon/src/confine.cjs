@@ -56,18 +56,21 @@ const PATHS = Object.freeze({
   'chat:resume': ([projectPath]) => [projectPath],
   'agent:interrupt': ([chatId]) => [chatProject(chatId)],
   'agent:respond-permission': ([value]) => [chatProject(value?.chatId)],
+  'accounts:scopes': none,
+  'accounts:scope': none,
+  'accounts:assign': none,
   'accounts:list': none,
   'accounts:add': none,
   'accounts:select': none,
   'accounts:login': none,
   'accounts:cancel': none,
   'accounts:remove': none,
-  'usage:read': none,
-  'usage:cached': none,
+  'usage:read': args => args[0] == null ? [] : [args[0]],
+  'usage:cached': args => args[0] == null ? [] : [args[0]],
   'agent:answer-question': ([value]) => [chatProject(value?.chatId)],
   'agent:set-permission-mode': ([value]) => [chatProject(value?.chatId)],
-  'agent:models': none,
-  'agent:cli-status': none,
+  'agent:models': args => args[0] == null ? [] : [args[0]],
+  'agent:cli-status': args => args[0] == null ? [] : [args[0]],
   'chat:patch': ([projectPath]) => [projectPath],
   'chat:archive-subagent': ([projectPath]) => [projectPath],
   'chat:archive-finished-subagents': ([projectPath]) => [projectPath],
@@ -122,6 +125,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     if (!paths || !Array.isArray(args)) throw refused();
     // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
     if (method === 'accounts:list') return { result: { providers: [] } };
+    if (method === 'accounts:scopes') return { result: [] };
     if (method.startsWith('accounts:')) throw failure(403, 'Accounts cannot be changed on this demo computer.');
     if (method === 'push:register') throw failure(403, NOTIFICATIONS_OFF);
     if (method === 'push:unregister') return { result: { registered: false } };

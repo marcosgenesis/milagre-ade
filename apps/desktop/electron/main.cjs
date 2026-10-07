@@ -34,7 +34,7 @@ async function startDesktop() {
   let updateState = { status: "idle", version: null, progress: 0 };
   /** @type {Promise<typeof updateState> | null} */
   let updateCheck = null;
-  const { createReleaseChannelStore, configureUpdater, isChannelNotPublished } = require("./release-channel.cjs");
+  const { createReleaseChannelStore, prepareUpdater, isChannelNotPublished } = require("./release-channel.cjs");
   const releaseChannel = createReleaseChannelStore({ file: path.join(app.getPath("userData"), "release-channel.json") });
   function publishUpdateState(nextState) {
     updateState = { ...updateState, ...nextState };
@@ -48,12 +48,11 @@ async function startDesktop() {
     if (!app.isPackaged) return Promise.resolve(publishUpdateState({ status: "unavailable" }));
     if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
     if (updateCheck) return updateCheck;
-    configureUpdater(autoUpdater, releaseChannel.get());
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = false;
     publishUpdateState({ status: "checking", version: null, progress: 0 });
-    updateCheck = autoUpdater
-      .checkForUpdates()
+    updateCheck = prepareUpdater(autoUpdater, releaseChannel.get())
+      .then(() => autoUpdater.checkForUpdates())
       .then(
         () => (updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState),
         (error) => {

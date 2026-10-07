@@ -162,7 +162,9 @@ jobs:
 
   release:
     # Every CI-green push to main becomes a release candidate: a tag and a DRAFT GitHub release.
-    # Drafts are invisible to installed apps; "Publish beta" or "Publish installers" ship one.
+    # Stable installs never see drafts (they ask for GitHub's latest release). The tag does show in the releases
+    # atom feed, so beta installs resolve their feed through the REST API instead (electron/release-channel.cjs).
+    # "Publish beta" or "Publish installers" ship a candidate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'the-ptf/milagre-ade'
     needs: [javascript, native-gate]
     runs-on: ubuntu-latest

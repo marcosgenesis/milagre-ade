@@ -87,3 +87,12 @@ test("a chosen icon is saved per project and removed with null", async (t) => {
   await settings.setIcon("/work/shop", null);
   assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")).projects, {});
 });
+
+test("a hidden project is listed until it is shown again", async (t) => {
+  const { file, settings } = await store(t);
+  await settings.setHidden("/work/shop", true);
+  await settings.setFilesToCopy("/work/blog", [".env"]);
+  assert.deepEqual([...(await createProjectSettings(file).hiddenPaths())], ["/work/shop"]);
+  await settings.setHidden("/work/shop", false);
+  assert.deepEqual([...(await settings.hiddenPaths())], []);
+});

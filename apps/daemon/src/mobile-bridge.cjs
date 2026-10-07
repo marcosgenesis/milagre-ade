@@ -27,6 +27,7 @@ const METHODS = new Set([
   "project:find",
   "project:image",
   "project:set-icon",
+  "project:set-hidden",
   "chat:runs",
   "chat:ports",
   "agent:stop-port",

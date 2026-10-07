@@ -172,6 +172,9 @@ function codexStep(item) {
       return step("image", `Viewed ${fileName(item.path)}`, undefined, item.path);
     case "imageGeneration":
       return step("image", "Generating an image");
+    // Codex summarizes the conversation when the context window fills, before or during a turn.
+    case "contextCompaction":
+      return step("other", "Compacting context");
     default:
       return null;
   }
@@ -227,6 +230,8 @@ function codexStepResult(item) {
         file: filePath(item.savedPath),
       });
     }
+    case "contextCompaction":
+      return { id, status: "done", title: "Compacted context" };
     default:
       return { id, status: item.status === "failed" ? "failed" : "done" };
   }

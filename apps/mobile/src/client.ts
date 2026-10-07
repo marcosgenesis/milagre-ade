@@ -12,7 +12,8 @@ export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false }
 /** Drawer metadata only. Never use it as the Chat screen's snapshot. Older hosts return a full Snapshot. */
 export type ProjectPreview = Omit<Snapshot, "previewOnly"> & { previewOnly: true };
 export type RegisteredProject = { id: string; path: string; name: string };
-export type RecentProject = { path: string; name?: string; link?: NamedProjectLink; projects?: RegisteredProject[] };
+/** `hidden`: the user keeps this Project out of the Projects list (and desktop's all-Projects sidebar). */
+export type RecentProject = { path: string; name?: string; hidden?: boolean; link?: NamedProjectLink; projects?: RegisteredProject[] };
 
 /** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
 export type Access = { id: string; secret: string };

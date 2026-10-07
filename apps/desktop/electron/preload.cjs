@@ -73,9 +73,12 @@ const bridge = {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   listRecentProjects: () => ipcRenderer.invoke("project:recent"),
+  setProjectHidden: (projectPath, hidden) => ipcRenderer.invoke("project:set-hidden", projectPath, hidden),
+  readProject: (projectPath) => ipcRenderer.invoke("project:read", projectPath),
   listNamedLinks: () => ipcRenderer.invoke("link:list"),
   createNamedLink: (request) => ipcRenderer.invoke("link:create", request),
   openNamedLink: (id) => ipcRenderer.invoke("link:open", id),
+  readLink: (id) => ipcRenderer.invoke("link:snapshot", id),
   sendLinkMessage: (request) => ipcRenderer.invoke("link:send", request),
   onLinkState: (callback) => {
     const listener = (_event, update) => callback(update);

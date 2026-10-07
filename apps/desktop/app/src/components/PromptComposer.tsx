@@ -3,7 +3,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, FlashIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
-import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, ContextUsage, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
 import Tooltip from "./primitives/Tooltip";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
@@ -78,6 +78,8 @@ interface PromptComposerProps {
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Keep the tall layout (input above the controls) even while the draft is empty. */
   alwaysExpanded?: boolean;
+  /** How full the agent's context window is, shown as a ring beside Send. */
+  contextUsage?: ContextUsage;
 }
 
 const POPOVER_GAP = 12;
@@ -88,6 +90,38 @@ const POPOVER_TOP_INSET = 48;
 const POPOVER_BOTTOM_INSET = 16;
 // Smallest room below a tall composer that still fits a usable list.
 const POPOVER_MIN_BELOW = 220;
+
+const formatTokens = (tokens: number) => (tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens));
+
+/** A ring that fills as the agent's context window does; the agent compacts it when it gets close to full. */
+function ContextRing({ used, size }: ContextUsage) {
+  const ratio = Math.min(1, used / size);
+  const percent = Math.round(ratio * 100);
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const label = `Context: ${percent}% used (${formatTokens(used)} of ${formatTokens(size)} tokens)`;
+  return (
+    <Tooltip align="end" label={label}>
+      <span role="img" aria-label={label} className="flex size-7 shrink-0 items-center justify-center">
+        <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
+          <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--line-strong)" strokeWidth="2" />
+          <circle
+            cx="8"
+            cy="8"
+            r={radius}
+            fill="none"
+            stroke={percent >= 90 ? "var(--red)" : percent >= 75 ? "var(--accent-ink)" : "var(--ink-2)"}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - ratio)}
+            className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
+          />
+        </svg>
+      </span>
+    </Tooltip>
+  );
+}
 
 /** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
 function EffortMeter({ level, total }: { level: number; total: number }) {
@@ -134,6 +168,7 @@ export function PromptComposer({
   permissionMode,
   onPermissionModeChange,
   alwaysExpanded = false,
+  contextUsage,
 }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -651,7 +686,7 @@ export function PromptComposer({
           )}
 
           <div
-            className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}
+            className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_auto]"}`}
           >
             <button
               type="button"
@@ -765,16 +800,19 @@ export function PromptComposer({
               <Icon icon={SecurityCheckIcon} size={14} />
               <span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span>
             </button>
-            <button
-              type="button"
-              aria-label={canStop ? "Stop agent" : "Send"}
-              disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)}
-              onClick={canStop ? onStop : send}
-              className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`}
-              style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}
-            >
-              {canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}
-            </button>
+            <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`}>
+              {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
+              <button
+                type="button"
+                aria-label={canStop ? "Stop agent" : "Send"}
+                disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)}
+                onClick={canStop ? onStop : send}
+                className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2`}
+                style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}
+              >
+                {canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>

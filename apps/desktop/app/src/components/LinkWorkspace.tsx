@@ -18,6 +18,7 @@ import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { DotBackground } from "./DotBackground";
 import SidebarNav from "./SidebarNav";
+import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
 import { createDraftStore } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
@@ -112,6 +113,7 @@ export function LinkWorkspace({
   const run = chatId ? agents.runs[chatId] : undefined;
   // Every project's chats that wait on the user; the Link's own are marked in its sidebar.
   const attentionKey = chatsNeedingAttention(agents.runs).join("\n");
+  const sidebarRunKeys = runKeys(agents.runs);
   const attentionChats = useMemo(() => (attentionKey ? attentionKey.split("\n") : []), [attentionKey]);
   const { showAttentionButton } = useSettings();
   const attentionPaths = useMemo(() => [...new Set(attentionChats.map(projectOfKey))], [attentionChats]);
@@ -385,6 +387,10 @@ export function LinkWorkspace({
             activeId={sessionId == null ? null : String(sessionId)}
             recents={recents}
             usage={usage}
+            runningKeys={sidebarRunKeys.running}
+            waitingKeys={sidebarRunKeys.waiting}
+            askingKeys={sidebarRunKeys.asking}
+            onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
             chatActions={{
               onRename: (id, title) => void window.milagre.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
               onMarkUnread: (id, unread) => void window.milagre.patchChat(owner, Number(id), { unread }),
@@ -463,6 +469,7 @@ export function LinkWorkspace({
                     runStartedAt={run?.startedAt}
                     runModelName={run?.model}
                     tasks={run?.tasks}
+                    contextUsage={run?.contextUsage ?? session?.contextUsage}
                     subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
                     ports={chatId ? ports[chatId] : undefined}
                     waitingForSubagents={run?.waitingForSubagents}

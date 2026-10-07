@@ -712,6 +712,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "@milagre/shared/message-navigation": require("@milagre/shared/message-navigation"),
     "../message-navigation": { MessageNavigation: "MessageNavigation" },
     "../prompt-field": { PromptField: "PromptField" },
+    "../context-ring": { ContextRing: "ContextRing" },
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../ports": { PortsChip: "PortsChip" },
     react,

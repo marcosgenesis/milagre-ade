@@ -33,7 +33,7 @@ import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { WorkspaceIcon } from "./WorkspaceIcon";
-import { projectInitial, projectRows } from "../lib/project-list";
+import { RECENT_PROJECTS_CHANGED, projectInitial, projectRows } from "../lib/project-list";
 import type { RecentProject } from "../lib/project-list";
 import { setProjectImage, useProjectImages } from "../lib/project-images";
 
@@ -266,6 +266,9 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
               { value: "recent", label: "Latest message first" },
             ]}
           />
+        </Row>
+        <Row label="Show every project" description="List each project and Link with its chats. Hide a project in its own settings.">
+          <Switch label="Show every project" checked={settings.sidebarAllProjects} onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })} />
         </Row>
       </Group>
       <Group title="Editor">
@@ -974,11 +977,46 @@ function ProjectIconSetting({ project }: { project: SettingsProject }) {
   );
 }
 
+// Shared with the phone: a hidden project also leaves its Projects list.
+function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
+  const [hidden, setHidden] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    window.milagre.listRecentProjects().then(
+      (list) => setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden)),
+      () => setHidden(false),
+    );
+  }, [project.path]);
+  async function change(show: boolean) {
+    setError(null);
+    setHidden(!show);
+    try {
+      const list = await window.milagre.setProjectHidden(project.path, !show);
+      setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden));
+      window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+    } catch (failure) {
+      setHidden(show);
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  return (
+    <div data-show-in-sidebar>
+      <Row label="Show in sidebar" description="When the sidebar shows every project, and in your phone's Projects list">
+        <Switch label="Show in sidebar" checked={hidden === false} onChange={(show) => void change(show)} />
+      </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
 function ProjectSettings({ project }: { project: SettingsProject }) {
   return (
     <>
       <Group title="Appearance">
         <ProjectIconSetting project={project} />
+      </Group>
+      <Group title="Sidebar">
+        <ShowInSidebarSetting project={project} />
       </Group>
       <Group title="New worktrees">
         <FilesToCopy projectPath={project.path} />

@@ -145,6 +145,7 @@ async function browserChecks() {
       ),
       { release: false },
     );
+    await waitFor('!!document.querySelector("[data-pin-zone]")');
     const pinZone = await box("[data-pin-zone]");
     mouse("mouseMove", pinZone.x, pinZone.y);
     await delay(120);

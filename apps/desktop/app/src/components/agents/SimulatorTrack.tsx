@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, Cancel01Icon, SidebarRight01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SidebarRight01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
 import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme } from "@milagre/shared/simulator-receiver";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -147,7 +147,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
               className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
             >
               <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-                {selected || attaching ? (
+                {attaching ? (
                   <Tooltip label="Back to devices">
                     <button
                       type="button"
@@ -165,8 +165,20 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                   <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px]">{selected?.name ?? (attaching ? "Attach simulator" : "Simulators")}</div>
-                  <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>
+                  {selected ? (
+                    <button
+                      type="button"
+                      aria-label={`${selected.name}, choose simulator`}
+                      onClick={() => setSelected(null)}
+                      className="-ml-1 flex max-w-full items-center gap-1 rounded px-1 text-[13px] hover:bg-hover"
+                    >
+                      <span className="truncate">{selected.name}</span>
+                      <HugeiconsIcon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" aria-hidden />
+                    </button>
+                  ) : (
+                    <div className="truncate text-[13px]">{attaching ? "Attach simulator" : "Simulators"}</div>
+                  )}
+                  {!selected && <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>}
                 </div>
                 {selected && (
                   <Tooltip label={docked ? "Undock simulator" : "Dock simulator to the right"}>

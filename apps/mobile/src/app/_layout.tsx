@@ -74,7 +74,11 @@ export default function Layout() {
                     <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="ports-sheet" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
-                    <Stack.Screen name="simulator-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    {/* A full-screen page, not a sheet: a downward drag on the simulator must reach the device, not dismiss the viewer. */}
+                    <Stack.Screen
+                      name="simulator-sheet"
+                      options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
+                    />
                     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     <Stack.Screen
                       name="viewer"

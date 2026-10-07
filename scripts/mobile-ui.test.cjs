@@ -3670,7 +3670,12 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   const render = () => h.render("SimulatorSheet", { hostId: "mac", chatId: "/p#7" });
   render();
   await settle();
-  find(render(), (n) => n.props.label === "Back to devices").props.onPress();
+  assert.equal(
+    find(render(), (n) => n.props.label === "Back to devices"),
+    undefined,
+    "the viewer has no back button",
+  );
+  find(render(), (n) => n.props.accessibilityLabel === "My iPhone, choose simulator").props.onPress();
   assert.equal(
     find(render(), (n) => n.props.accessibilityLabel === "Attach Other device"),
     undefined,
@@ -3679,7 +3684,7 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   find(render(), (n) => n.props.accessibilityLabel === "Attach Other device").props.onPress();
   await settle();
   assert.ok(find(render(), (n) => n.props.deviceId === "b"));
-  find(render(), (n) => n.props.label === "Back to devices").props.onPress();
+  find(render(), (n) => n.props.accessibilityLabel === "Other device, choose simulator").props.onPress();
   find(render(), (n) => n.props.label === "Detach Other device from Chat").props.onPress();
   await settle();
   assert.equal(

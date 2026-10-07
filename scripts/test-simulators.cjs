@@ -185,7 +185,13 @@ async function browserChecks() {
     await click("[data-simulator-device=device-2]");
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
     assert.equal(await evaluate("window.simulatorCalls.at(-1).chatId"), "/fixture#1");
-    await click('[aria-label="Back to devices"]');
+    assert.equal(await evaluate("!!document.querySelector(\"[aria-label='Back to devices']\")"), false, "the viewer has no back button");
+    assert.equal(
+      await evaluate('document.querySelector("[data-slot=simulator-popover] header").textContent.includes("This Chat")'),
+      false,
+      "the viewer has no subtitle",
+    );
+    await click('[aria-label="Other Chat device, choose simulator"]');
     await click('[aria-label="Detach Other Chat device from Chat"]');
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });

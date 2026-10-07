@@ -1,5 +1,5 @@
 const { isLinkScopeKey, scopeKey } = require("@milagre/shared/chat-scopes");
-const { ensureDaemon, compatibleClient } = require("@milagre/daemon/bootstrap");
+const { ensureDaemon, compatibleClient, HOST_GONE } = require("@milagre/daemon/bootstrap");
 const { projectOfKey } = require("@milagre/shared/agent-runs");
 
 // A host from before result pages still works; it only fails on very large Projects, as it always did. The window
@@ -11,8 +11,6 @@ const MAX_HELD = 10_000;
 // A host that went away without being asked to (it crashed, or was killed) is started again: this many times, the
 // delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
 const START_ATTEMPTS = 3;
-// A connection that failed this way has no host behind it, rather than a slow or older one.
-const HOST_GONE = ["ENOENT", "ECONNREFUSED"];
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
 
 // The Project an event belongs to, when it names one.

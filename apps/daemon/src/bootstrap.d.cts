@@ -20,3 +20,5 @@ export interface DaemonOptions {
 }
 export function ensureDaemon(options: DaemonOptions): Promise<DaemonClient>;
 export function compatibleClient(dataDir: string, timeoutMs?: number): Promise<DaemonClient>;
+/** Error codes of a connection with no host behind it. */
+export const HOST_GONE: readonly string[];

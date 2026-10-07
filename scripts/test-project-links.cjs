@@ -23,13 +23,13 @@ async function cdp(url) {
   await once(socket, "open");
   let id = 0;
   const pending = new Map();
-  // oxlint-disable-next-line no-unused-expressions -- directive or optional call used for its side effect; nothing to assign
   socket.addEventListener("message", ({ data }) => {
     const response = JSON.parse(data),
       request = pending.get(response.id);
     if (!request) return;
     pending.delete(response.id);
     clearTimeout(request.timer);
+    // oxlint-disable-next-line no-unused-expressions -- directive or optional call used for its side effect; nothing to assign
     response.error ? request.reject(new Error(response.error.message)) : request.resolve(response.result);
   });
   return {

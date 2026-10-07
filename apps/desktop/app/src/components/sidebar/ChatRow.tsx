@@ -660,8 +660,8 @@ function ChatMenu({
     if (!actions.onArchiveCheck || !actions.onArchive) return;
     let live = true;
     // A worktree that can't be checked only hides the chat, as before.
-    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     actions.onArchiveCheck(item.id).then(
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
       (next) => live && setPlan(next),
       () => live && setPlan(HIDE_ONLY),
     );

@@ -59,8 +59,8 @@ function codexModels(entries) {
 
 async function listClaudeModels({ command, env, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   const { query } = await loadSdk();
-  // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
   const idle = {
+    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
     async *[Symbol.asyncIterator]() {
       await new Promise(() => {});
     },

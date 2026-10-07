@@ -286,7 +286,6 @@ function SimulatorFrame({ api, deviceId, chatId, onClose }: { api: SimulatorApi;
       bridge.dispose();
     };
   }, [api, deviceId, chatId, onClose]);
-  // oxlint-disable-next-line react/iframe-missing-sandbox -- flagged for review, see PR body
   return (
     <iframe
       ref={frame}
@@ -294,6 +293,7 @@ function SimulatorFrame({ api, deviceId, chatId, onClose }: { api: SimulatorApi;
       title="Live simulator"
       data-slot="simulator-frame"
       srcDoc={html}
+      // oxlint-disable-next-line react/iframe-missing-sandbox -- flagged for review, see PR body
       sandbox="allow-scripts allow-same-origin"
       allow="autoplay"
       className="min-h-0 w-full flex-1 border-0 bg-black"

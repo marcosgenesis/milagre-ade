@@ -21,10 +21,10 @@ export function useAgentPorts() {
       updated = true;
       setPorts(snapshot.ports);
     });
-    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     void window.milagre
       .getAgentPorts()
       .then((next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
         if (live && !updated) setPorts(next);
       })
       .catch(() => {});

@@ -34,8 +34,9 @@ export function usePullRequest(worktree?: Worktree) {
         clearInterval(timer);
         subscription.remove();
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [session.client, worktree?.path]),
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );
   return pr;
 }
 

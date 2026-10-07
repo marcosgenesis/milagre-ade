@@ -301,9 +301,9 @@ async function readClaudeProfileUsage({
   const done = (status, windows, message) => providerResult("claude", now, status, windows, message);
   try {
     const { query } = await loadSdk();
-    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
     session = query({
       prompt: {
+        // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
         async *[Symbol.asyncIterator]() {
           await new Promise(() => {});
         },

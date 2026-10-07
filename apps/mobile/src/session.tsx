@@ -13,8 +13,8 @@ import { defaultPreferences, type TurnPreferences } from "./turn-options";
 import { pendingChatSessionId, type PendingChat } from "@milagre/shared/chats";
 import { createLinkOperations } from "./link-operations";
 
-// oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- url comes from a pairing payload that is not validated here (see the String(url || '') fallback), so it may be empty or missing
 const hostOf = (url: string) =>
+  // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- url comes from a pairing payload that is not validated here (see the String(url || '') fallback), so it may be empty or missing
   /^relay:/.test(url)
     ? "Mac"
     : String(url || "")
@@ -115,8 +115,9 @@ function useSessionState() {
       setLastLocation(location);
       void savedNavigation.save(location);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, snapshot?.project.path],
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const connect = async (host: HostLink, remember = true) => {
     const next = createClient(host, undefined, undefined, relayRuntime);
     const name = host.name || "";

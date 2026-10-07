@@ -114,11 +114,19 @@ test("CI lints every workspace with oxlint and keeps the mobile ESLint rules", (
   assert.ok(runs.has("npm run lint --workspace @milagre/mobile"));
 });
 
-test("CI looks for dead code right after linting", () => {
+test("CI checks formatting right after linting", () => {
   const steps = ci.jobs.javascript.steps;
   const lint = steps.findIndex((step) => step.run === "npm run lint");
-  assert.equal(steps[lint + 1].name, "Dead code");
-  assert.equal(steps[lint + 1].run, "npm run knip");
+  assert.equal(steps[lint + 1].name, "Format check");
+  assert.equal(steps[lint + 1].run, "npm run format:check");
+  assert.equal(require("../package.json").scripts["format:check"], "oxfmt --check .");
+});
+
+test("CI looks for dead code right after the format check", () => {
+  const steps = ci.jobs.javascript.steps;
+  const format = steps.findIndex((step) => step.run === "npm run format:check");
+  assert.equal(steps[format + 1].name, "Dead code");
+  assert.equal(steps[format + 1].run, "npm run knip");
   assert.equal(require("../package.json").scripts.knip, "knip");
 });
 

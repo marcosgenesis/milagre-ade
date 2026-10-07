@@ -49,8 +49,8 @@ export function createSimulatorInputQueue(send, failed, limit = 32) {
   const drain = async () => {
     if (sending || disposed) return;
     sending = true;
-    // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- dispose() and the catch/push paths flip `disposed` from other closures while the loop awaits send()
     try {
+      // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- dispose() and the catch/push paths flip `disposed` from other closures while the loop awaits send()
       while (queue.length && !disposed) await send(queue.shift());
     } catch (error) {
       if (!disposed) {

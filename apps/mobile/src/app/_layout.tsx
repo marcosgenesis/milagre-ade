@@ -32,7 +32,6 @@ export default function Layout() {
     headerShown: false,
     contentStyle: { backgroundColor: palette.page },
   } as const;
-  // oxlint-disable-next-line react/style-prop-object -- React Native style object; the rule targets web DOM styles
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
@@ -40,6 +39,7 @@ export default function Layout() {
           <PushProvider>
             <SidePanelsProvider>
               <ThemeProvider value={theme}>
+                {/* oxlint-disable-next-line react/style-prop-object -- React Native style object; the rule targets web DOM styles */}
                 <StatusBar style="auto" />
                 <UpdateShell>
                   <Stack

@@ -47,8 +47,9 @@ export function useOpenProject(params: { projectPath?: string; hostId?: string; 
       return () => {
         live = false;
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `attempt` reloads after Retry
     }, [client, chatId, attempt]),
-  ); // eslint-disable-line react-hooks/exhaustive-deps -- `attempt` reloads after Retry
+  );
   const retry = useCallback(() => {
     setFailure(null);
     setAttempt((value) => value + 1);

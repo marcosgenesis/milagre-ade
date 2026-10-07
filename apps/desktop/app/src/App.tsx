@@ -334,8 +334,8 @@ function App() {
   async function loadInitialProject() {
     setLoading(true);
     setStartupError(null);
-    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     try {
+      // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
       adoptProject(await window.milagre.getCurrentProject());
     } catch (error) {
       setStartupError(ipcErrorMessage(error));
@@ -388,9 +388,9 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
-  // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads selectedSession.subagents and selectedSession.native_session_id, both listed; the compiler infers the whole selectedSession object from the property access
   const subagents = useMemo(
     () => selectedSession?.subagents?.filter((agent) => agent.id !== selectedSession.native_session_id),
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads selectedSession.subagents and selectedSession.native_session_id, both listed; the compiler infers the whole selectedSession object from the property access
     [selectedSession?.subagents, selectedSession?.native_session_id],
   );
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
@@ -425,8 +425,8 @@ function App() {
         ? pendingCanonicalId !== null
           ? state!.messages.filter((message) => message.session_id === pendingCanonicalId)
           : [...messages, pendingSend.message]
-        : // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
-          messages,
+        : messages,
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages],
   );
   // A handed-over chat's brief, attached to its first message until it is sent.
@@ -859,8 +859,8 @@ function App() {
     () =>
       window.milagre.onOpenChat((chatId) => {
         const owner = projectOfKey(chatId);
-        // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
         if (isLinkScopeKey(owner)) {
+          // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
           void selectLink(owner.slice("milagre-link:".length), sessionIdFromKey(chatId));
           return;
         }

@@ -17,6 +17,8 @@ export type RelayTransport = {
   request(method: "GET" | "POST", path: string, headers: Record<string, string>, body?: Uint8Array | string): Promise<RelayResponse>;
   /** Streams the bridge's live socket at `path`. `onStatus(true)` once subscribed, `onStatus(false)` when lost; it resubscribes by itself. */
   live(path: string, onData: (data: string) => void, onStatus: (up: boolean) => void): RelayLiveHandle;
+  /** Opens the socket and finishes the hello now, instead of on the first request. */
+  ready(): Promise<void>;
   /** Closes the socket, fails what is pending and forgets a refused pairing. The transport reconnects on its next use. */
   close(): void;
 };
@@ -33,6 +35,8 @@ export type RelayTransportOptions = {
   timers?: RelayTimers;
   /** A number in [0, 1) for the backoff jitter. */
   jitter?: () => number;
+  /** An open socket was lost (dropped, silent, refused mid-session). Not called when close() ends it. */
+  onLost?: () => void;
 };
 
 export type RelayErrorCode = "host-offline" | "bad-token" | "host-reset" | "unknown-phone" | "bad-host" | "lost";
@@ -116,6 +120,8 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
   let abortConnect: ((error: RelayTransportError) => void) | null = null;
   /** Set when the Mac refused this phone for good; nothing reconnects until close(). */
   let refused: RelayTransportError | null = null;
+  /** True while close() ends the socket, so that is not reported as a loss. */
+  let closing = false;
 
   function teardown(c: Conn, error: RelayTransportError) {
     if (conn === c) conn = null;
@@ -206,6 +212,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
         if (refusal) refused = error;
         if (c) {
           c.over = true;
+          if (!closing) options.onLost?.();
           teardown(c, error);
         } else reject(error);
       };
@@ -355,6 +362,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
 
   return {
     request,
+    ready: () => connect().then(() => undefined),
     live(path, onData, onStatus) {
       const live: LiveState = { path, onData, onStatus, up: false, closed: false, failures: 0, retry: undefined, conn: null, id: 0 };
       lives.add(live);
@@ -375,6 +383,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
       };
     },
     close() {
+      closing = true;
       for (const live of lives) {
         live.closed = true;
         timers.clearTimeout(live.retry);
@@ -386,6 +395,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
       connecting = null;
       abortConnect?.(fail("lost"));
       current?.end(fail("lost"));
+      closing = false;
     },
   };
 }

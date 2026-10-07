@@ -144,6 +144,7 @@ function fakeRelay(answer: (sent: Sent) => Promise<RelayResponse> | RelayRespons
   const lives: { path: string; onData: (data: string) => void; onStatus: (up: boolean) => void; closed: boolean }[] = [];
   const written = new Map<string, Uint8Array>();
   const transport: RelayTransport = {
+    ready: async () => {},
     request: async (method, path, headers, body) => {
       const request = { method, path, headers, body };
       sent.push(request);

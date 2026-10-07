@@ -21,7 +21,7 @@ crosses the Wi-Fi.
 | When it re-evaluates | On connect, every 60 s, on app foreground, and on network change (`expo-network`). Migrates an open session. |
 | LAN security | Relay protocol (tweetnacl box hello + secretbox frames) over a direct WebSocket, with the Mac's key pinned. |
 | Desktop control | "Allow on local network" toggle in Settings → Phone, on by default. |
-| Indicator | "Local network" / "Remote" label next to each computer's status dot; route list with "In use" in the computer's settings. |
+| Indicator | The computers list row says "Local network" while the LAN route is in use. |
 | Native build | Needed (`expo-network`). Add `NSLocalNetworkUsageDescription` in the same build. Approved by Victor 2026-10-06; never started by an agent. |
 
 ## Today
@@ -49,8 +49,9 @@ their limits: `MAX_LIVE`, `MAX_INFLIGHT`, `MAX_UPLOAD`, `REQUEST_TIMEOUT`) into 
 given a `send(bytes)` and a stream of incoming bytes. The relay session feeds it frames demultiplexed by conn id; the
 LAN listener feeds it one socket per phone. Both forward to the loopback bridge with the bearer token, as today.
 
-`hostAccept` already checks the token inside the hello and refuses unknown phone keys unless pairing is open; the LAN
-listener uses the same `phones` list and the same `canPair`.
+`hostAccept` already checks the token inside the hello and refuses unknown phone keys. The LAN listener shares the
+`phones` list but never opens a pairing window (`canPair: () => false`): a phone is known on the LAN only after it
+paired over the relay or registered through `phone:routes` over a trusted route.
 
 ### Identity for every Mac
 
@@ -129,9 +130,8 @@ same walk.
 
 ### UI
 
-- Computers list: "Local network" or "Remote" next to the status dot.
-- Computer settings page: the routes (Local network with its address, Cloudflare or Relay), the active one marked
-  "In use".
+There is no per-computer settings page, so the route shows in the computers list. The row subtitle reads
+"Online · Local network" while the LAN route is in use and "Online · <relay or Cloudflare host>" otherwise.
 
 ### Native
 
@@ -140,6 +140,8 @@ same walk.
   on the same network."
 - Confirm with `expo prebuild` that ATS allows `ws://` to private IPs (Expo's template sets `NSAllowsLocalNetworking`;
   raw IPs are also outside ATS). If it does not, add `NSAllowsLocalNetworking` in the same change.
+- Android blocks cleartext `ws://` in release builds. Add `expo-build-properties` with
+  `android.usesCleartextTraffic: true` in the same build; the LAN payload is already end-to-end encrypted.
 - The fingerprint changes. The PR is not merged until a new build is planned; no agent starts EAS or TestFlight.
 
 ## Desktop and mobile parity

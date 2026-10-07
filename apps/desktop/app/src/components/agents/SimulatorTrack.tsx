@@ -51,6 +51,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
         if (result.chatId !== chatId) throw new Error("Update Milagre on this Mac to attach simulators to Chats.");
         if (!disposed && started === revision.current) {
           setList(result);
+          if (!result.attached?.length) close();
           setSelected((current) => (current && result.devices.find((d) => d.id === current.id)) || null);
         }
       } catch (error) {
@@ -83,6 +84,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       setList(result);
       setAttaching(false);
       setSelected(method === "attach" ? device : null);
+      if (!result.attached?.length) close();
     } catch (error) {
       setList((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not update attachment." }));
     } finally {
@@ -90,7 +92,8 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       setBusy(false);
     }
   };
-  if (!api || !list.supported) return null;
+  const attachedCount = list.attached?.length ?? 0;
+  if (!api || !list.supported || !attachedCount) return null;
   const open = () => {
     if (opened) {
       close();
@@ -108,12 +111,12 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
           aria-haspopup="dialog"
           aria-expanded={opened}
           aria-controls={opened ? panelId : undefined}
-          aria-label={`Simulators, ${list.devices.length} running in this Chat`}
+          aria-label={`Simulators, ${attachedCount} attached to this Chat`}
           onClick={open}
           className="flex h-6 items-center gap-1.5 rounded-full border border-line bg-surface px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2"
         >
           <HugeiconsIcon icon={SmartphoneIcon} size={12} aria-hidden />
-          Simulators <span className="tabular-nums">{list.devices.length}</span>
+          Simulators <span className="tabular-nums">{attachedCount}</span>
         </button>
       </Tooltip>
       {opened &&

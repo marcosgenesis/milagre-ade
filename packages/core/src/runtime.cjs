@@ -558,24 +558,20 @@ function createRuntime(options) {
     send: (chatId, event) => void chats.receive(chatId, event),
   });
 
-  // lsof reports real paths (/private/var for /var).
-  function realCwd(cwd) {
-    try {
-      return realpathSync(cwd);
-    } catch {
-      return cwd;
-    }
-  }
-
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
     isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
-    roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
+    roots: () => agents.processes(),
     publish: (next) => {
       emit("agent:ports", next);
     },
   });
   commands.handle("agent:ports", () => ports.snapshot());
+  commands.handle("chat:ports", (_event, chatId) => {
+    if (typeof chatId !== "string" || !chatId) throw new Error("A Chat is required to list ports.");
+    const snapshot = ports.snapshot();
+    return { chatId, ports: Object.hasOwn(snapshot, chatId) ? snapshot[chatId] : [] };
+  });
   // The renderer is untrusted: only a pid the chat's port list shows can be stopped.
   commands.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 

@@ -690,6 +690,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../message-navigation": { MessageNavigation: "MessageNavigation" },
     "../prompt-field": { PromptField: "PromptField" },
     "../simulator": { SimulatorChip: "SimulatorChip" },
+    "../ports": { PortsChip: "PortsChip" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": native,
@@ -2832,7 +2833,7 @@ test("an accepted preview cannot assign its Chat id to a different requested Pro
   assert.equal(screen.session.pendingChats["mac|/p#new:1"].promoted, undefined);
 });
 
-function simulatorHost(client) {
+function simulatorHost(client, file = "simulator.tsx") {
   const react = hookHost({ effects: true }),
     files = new Map(),
     listeners = new Set();
@@ -2868,7 +2869,7 @@ function simulatorHost(client) {
     }
   }
   const source = load(
-    "simulator.tsx",
+    file,
     {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -2877,6 +2878,7 @@ function simulatorHost(client) {
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 34 }) },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "expo-clipboard": { setStringAsync: async () => {} },
       "@hugeicons/core-free-icons": {},
       "@milagre/shared/simulator-receiver": require("../packages/shared/src/simulator-receiver.mjs"),
       "./session": { useSession: () => ({ client }) },
@@ -2884,9 +2886,9 @@ function simulatorHost(client) {
       "./theme": {
         hex: () => ({ page: "#fafafb", surface: "#ffffff", ink: "#1f2124", ink2: "#62656b", line: "#ecedef", hover: "#f4f5f6", accent: "#0285ff" }),
       },
-      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", colors: {}, styles: {} },
+      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", ErrorNotice: "ErrorNotice", colors: {}, styles: {} },
     },
-    "\nexports.TestSimulatorWebView = SimulatorWebView;",
+    file === "simulator.tsx" ? "\nexports.TestSimulatorWebView = SimulatorWebView;" : "",
   );
   return {
     source,
@@ -2894,6 +2896,10 @@ function simulatorHost(client) {
     background() {
       native.AppState.currentState = "background";
       for (const fn of listeners) fn("background");
+    },
+    foreground() {
+      native.AppState.currentState = "active";
+      for (const fn of listeners) fn("active");
     },
     render(name, props) {
       react.begin();
@@ -3579,6 +3585,42 @@ test("new mobile Chat has no simulator pill; an existing Chat carries its identi
   );
   const existing = ongoingChatHost();
   assert.equal(find(existing.render(), (n) => n.type === "SimulatorChip").props.chatId, "/p#7");
+  assert.equal(
+    find(fresh.render(), (n) => n.type === "PortsChip"),
+    undefined,
+  );
+  assert.equal(find(existing.render(), (n) => n.type === "PortsChip").props.chatId, "/p#7");
+});
+
+test("mobile simulator pill stays hidden until this Chat has attachments, including stopped devices", async (t) => {
+  const device = { id: "a", name: "My iPhone", platform: "ios", version: "27" };
+  for (const attached of [[], [device]]) {
+    const gate = deferred();
+    const h = simulatorHost({ url: "mac", call: () => gate.promise });
+    t.after(() => h.cleanup());
+    const render = () => h.render("SimulatorChip", { chatId: "/p#7" });
+    assert.equal(render(), null, "loading must not flash an empty pill");
+    gate.resolve({ chatId: "/p#7", supported: true, devices: [], attached, available: [device] });
+    await settle();
+    if (attached.length) assert.equal(render().props.accessibilityLabel, "Simulators, 1 attached to this Chat");
+    else assert.equal(render(), null, "other running devices must not show the pill");
+    h.cleanup();
+  }
+});
+
+test("mobile simulator pill disappears after the last attachment is removed", async (t) => {
+  const device = { id: "a", name: "My iPhone", platform: "ios", version: "27" };
+  let attached = [device];
+  const h = simulatorHost({ url: "mac", call: async () => ({ chatId: "/p#7", supported: true, devices: attached, attached }) });
+  t.after(() => h.cleanup());
+  const render = () => h.render("SimulatorChip", { chatId: "/p#7" });
+  render();
+  await settle();
+  assert.ok(render());
+  attached = [];
+  h.foreground();
+  await settle();
+  assert.equal(render(), null);
 });
 
 test("mobile picker exposes other devices only in Attach and detach updates this Chat", async () => {
@@ -3665,4 +3707,65 @@ test("Chat header shows archive progress until the delayed request completes", a
   await settleAll();
   assert.equal(archiveIndicator(header()), undefined);
   assert.equal(screen.router.replaced, "/projects");
+});
+
+test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {
+  for (const reply of [
+    { chatId: "/p#7", ports: [] },
+    { chatId: "/p#8", ports: [{ port: 3000, pid: 22 }] },
+    { chatId: "/p#7", ports: [{ port: 3000, pid: 22 }] },
+  ]) {
+    const calls = [];
+    const h = simulatorHost(
+      {
+        url: "mac",
+        call: async (...args) => {
+          calls.push(args);
+          return reply;
+        },
+      },
+      "ports.tsx",
+    );
+    t.after(() => h.cleanup());
+    const render = () => h.render("PortsChip", { chatId: "/p#7" });
+    assert.equal(render(), null);
+    await settle();
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["chat:ports", ["/p#7"]]]);
+    if (reply.chatId === "/p#7" && reply.ports.length) assert.equal(render().props.accessibilityLabel, "Ports, 1 listening");
+    else assert.equal(render(), null);
+  }
+});
+
+test("mobile Ports sheet stops only this Chat's process and refuses another host", async (t) => {
+  const calls = [];
+  let ports = [{ port: 3000, pid: 22, command: "node", address: "127.0.0.1" }];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      calls.push([method, args]);
+      if (method === "agent:stop-port") {
+        ports = [];
+        return true;
+      }
+      return { chatId: "/p#7", ports };
+    },
+  };
+  const h = simulatorHost(client, "ports.tsx");
+  t.after(() => h.cleanup());
+  const render = () => h.render("PortsSheet", { hostId: "mac", chatId: "/p#7" });
+  render();
+  await settle();
+  await find(render(), (n) => n.props.accessibilityLabel === "Stop port 3000").props.onPress();
+  await settle();
+  assert.ok(calls.some(([method, args]) => method === "agent:stop-port" && args[0] === "/p#7" && args[1] === 22));
+  assert.equal(
+    find(render(), (n) => n.props.accessibilityLabel === "Stop port 3000"),
+    undefined,
+  );
+  const other = simulatorHost(client, "ports.tsx");
+  t.after(() => other.cleanup());
+  calls.length = 0;
+  other.render("PortsSheet", { hostId: "other", chatId: "/p#7" });
+  await settle();
+  assert.deepEqual(calls, []);
 });

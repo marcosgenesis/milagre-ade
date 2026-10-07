@@ -11,16 +11,20 @@ const DOCK_WIDTH = 560;
 // Narrower than this beside the dock, the chat is no use: the design takes the whole workspace instead.
 const MIN_CHAT_WIDTH = 420;
 
-/** The workspace beside the sidebar, which an expanded design fills. */
+/**
+ * The workspace between the sidebar and the git changes panel, which an expanded design fills; `right` is how much of
+ * the window's right edge the changes panel takes, so the design docks beside it rather than over it.
+ */
 function useWorkspaceArea() {
-  const [area, setArea] = useState<{ left: number; width: number } | null>(null);
+  const [area, setArea] = useState<{ left: number; right: number; width: number } | null>(null);
   useEffect(() => {
     const main = document.querySelector<HTMLElement>("[data-workspace-main]") ?? document.querySelector<HTMLElement>("[data-chat-pane]");
     if (!main) return;
-    // The workspace's own width, without the space a dock reserves in it.
+    // The workspace's own width, without the space a dock reserves in it. The changes panel opening narrows <main>.
     const measure = () => {
       const rect = main.getBoundingClientRect();
-      setArea({ left: rect.left, width: window.innerWidth - rect.left });
+      const right = document.querySelector("[data-changes-slot]")?.getBoundingClientRect().width ?? 0;
+      setArea({ left: rect.left, right, width: window.innerWidth - rect.left - right });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -32,6 +36,19 @@ function useWorkspaceArea() {
     };
   }, []);
   return area;
+}
+
+/** Whether the element is laid out: false while an ancestor hides it (the diff, settings or canvas in place of the chat). */
+function useShown() {
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    if (!element) return;
+    const observer = new ResizeObserver(() => setShown(element.getClientRects().length > 0));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return [setElement, shown] as const;
 }
 
 type ArtifactsValue = {
@@ -141,10 +158,13 @@ export function ArtifactsProvider({ chatId, steps, children }: { chatId: string 
     () => ({ chatId, latest, opened, open: (ref) => setOpened({ id: ref.id, version: latest.get(ref.id)?.version === ref.version ? null : ref.version }) }),
     [chatId, latest, opened, setOpened],
   );
+  // The design belongs to the chat: while something else takes the chat's place, it steps aside and comes back with it.
+  const [anchor, chatShown] = useShown();
   return (
     <Artifacts.Provider value={value}>
+      <span ref={anchor} aria-hidden className="pointer-events-none absolute top-0 left-0 h-px w-px" />
       {children}
-      {opened && chatId && (
+      {opened && chatId && chatShown && (
         <ArtifactDock
           key={opened.id}
           chatId={chatId}
@@ -203,11 +223,11 @@ function ArtifactDock({
       aria-modal="false"
       data-slot="artifact-dock"
       data-full={full || undefined}
-      // Beside a docked simulator, not under it.
+      // Beside a docked simulator and the git changes panel, not over them.
       style={
         full && area
-          ? { top: 40, left: area.left, right: "calc(12px + var(--simulator-dock, 0px))", bottom: 12 }
-          : { top: 40, right: "calc(12px + var(--simulator-dock, 0px))", bottom: 12, width: DOCK_WIDTH }
+          ? { top: 40, left: area.left, right: `calc(${area.right + 12}px + var(--simulator-dock, 0px))`, bottom: 12 }
+          : { top: 40, right: `calc(${(area?.right ?? 0) + 12}px + var(--simulator-dock, 0px))`, bottom: 12, width: DOCK_WIDTH }
       }
       className="fixed z-40 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised"
     >

@@ -43,6 +43,10 @@ window.latest = 2;
 const step = (version, offset) => ({ id: "s" + version, kind: "artifact", title: "Showed \`Login screen\`", status: "done", offset, artifact: { id: "login", version, title: version === 1 ? "Login screen" : "Login screen, warmer" } });
 function Fixture() {
   const [revised, setRevised] = useState(false);
+  const [changes, setChanges] = useState(false);
+  const [diff, setDiff] = useState(false);
+  window.setChanges = setChanges;
+  window.setDiff = setDiff;
   window.revise = () => { window.latest = 3; setRevised(true); };
   const messages = [
     { id: 1, session_id: 1, context: null, role: "user", body: "design a login screen" },
@@ -52,7 +56,7 @@ function Fixture() {
     ...(revised ? [{ id: 5, session_id: 1, context: null, role: "assistant", body: "Orange accent.", steps: [step(3, 0)] }] : []),
   ];
   // The app's layout: the chat pane inside the workspace, beside a 260px sidebar.
-  return <div style={{ display: "flex", height: "100%" }}><aside style={{ width: 260, flexShrink: 0 }} /><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
+  return <div style={{ display: "flex", height: "100%" }}><aside style={{ width: 260, flexShrink: 0 }} /><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane className={diff ? "hidden" : undefined} style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false}
@@ -62,7 +66,7 @@ function Fixture() {
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
       onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
       isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} />
-  </div></main></div>;
+  </div></main>{changes && <div data-changes-slot style={{ width: 300, flexShrink: 0 }} />}</div>;
 }
 document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<Fixture />);
@@ -132,6 +136,18 @@ async function browserChecks() {
     await waitFor(`/Version 2 of 3/.test(${dock}.textContent) && !/follows/.test(${dock}.textContent)`);
     await screenshot("earlier-version");
 
+    // The git changes panel opens at the window's right edge: the design docks beside it instead of covering it.
+    await evaluate("window.setChanges(true)");
+    await waitFor(`Math.round(window.innerWidth - ${dock}.getBoundingClientRect().right) === 312`);
+    // With the diff in the chat's place, the design steps aside, and comes back with the chat.
+    await evaluate("window.setDiff(true)");
+    await waitFor(`!${dock}`);
+    assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "a hidden design reserves nothing");
+    await evaluate("window.setDiff(false)");
+    await waitFor(`!!${dock}`);
+    await evaluate("window.setChanges(false)");
+    await waitFor(`Math.round(window.innerWidth - ${dock}.getBoundingClientRect().right) === 12`);
+
     // The design can fill the workspace beside the sidebar, covering the chat, and go back beside it.
     await evaluate(`${dock}.querySelector("[aria-label='Fill the window with the design']").click()`);
     await waitFor(`${dock}.dataset.full === "true" && Math.round(${dock}.getBoundingClientRect().left) === 260`);
@@ -150,7 +166,7 @@ async function browserChecks() {
     await waitFor(`!${dock}`);
     assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "closing gives the chat its width back");
     console.log(
-      "PASS: a shown design is a card outside the activity with a sandboxed preview that can't make requests; Open docks it at the top right beside the chat (filling the workspace when expanded or when the window is narrow), the dock follows the agent's revision, steps back through versions and closes on Escape",
+      "PASS: a shown design is a card outside the activity with a sandboxed preview that can't make requests; Open docks it at the top right beside the chat (beside the git changes panel, away while the diff replaces the chat, filling the workspace when expanded or narrow), the dock follows the agent's revision, steps back through versions and closes on Escape",
     );
     app.exit(0);
   } catch (error) {

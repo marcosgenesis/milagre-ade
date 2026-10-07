@@ -21,7 +21,10 @@ async function waitFor(read) {
 }
 
 /** A bridge and tunnel that only record what the phone asks of them. */
-async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDelaysMs = [1, 1, 1], clock = { now: 0 } } = {}) {
+async function fixture(
+  t,
+  { cloudflare = false, failBridge, failTunnel, failLan, lanPort = 8798, onPaired = () => {}, retryDelaysMs = [1, 1, 1], clock = { now: 0 } } = {},
+) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-phone-")));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   if (cloudflare)
@@ -92,6 +95,23 @@ async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDel
     log.push(options.retired ? "retired:start" : "relay:start");
     return relay;
   };
+  // No test may bind a real port on the LAN: every phone gets this fake.
+  const lans = [];
+  const startLan = async (options) => {
+    if (failLan?.()) throw new Error("listen EADDRINUSE: address already in use 0.0.0.0:8798");
+    const lan = {
+      options,
+      port: options.port,
+      closed: false,
+      close: async () => {
+        lan.closed = true;
+        log.push("lan:close");
+      },
+    };
+    lans.push(lan);
+    log.push(`lan:start:${options.port}`);
+    return lan;
+  };
   const changes = [];
   const paired = [];
   const create = () =>
@@ -104,18 +124,24 @@ async function fixture(t, { cloudflare = false, failBridge, failTunnel, retryDel
       retryDelaysMs,
       name: () => "Test Mac",
       onChange: (status) => changes.push(status.state),
-      onPaired: (info) => paired.push(info),
+      onPaired: (info) => {
+        paired.push(info);
+        onPaired(info);
+      },
+      startLan,
+      lanPort,
+      addresses: () => ["192.168.1.20"],
     });
   const phone = create();
   t.after(() => phone.close());
-  return { dataDir, phone, create, log, bridges, tunnelsStarted, relays, retired, paired, clock, changes, file: path.join(dataDir, "mobile.json") };
+  return { dataDir, phone, create, log, bridges, tunnelsStarted, relays, retired, lans, paired, clock, changes, file: path.join(dataDir, "mobile.json") };
 }
 
 test("a phone that was never enabled is off and starts nothing", async (t) => {
   const { phone, log, file } = await fixture(t);
   await phone.start();
   await phone.settled();
-  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "none" });
+  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "none", lan: { enabled: true, addresses: [] } });
   assert.deepEqual(log, []);
   await assert.rejects(fs.stat(file), { code: "ENOENT" });
 });
@@ -144,7 +170,7 @@ test("without a tunnel the phone pairs through the relay", async (t) => {
   assert.equal(relays[0].options.bridgeUrl, `http://127.0.0.1:${LOCAL_PORT}`);
   assert.equal(relays[0].options.token, bridges[0].token);
   assert.equal(new URL(status.pairingLink).searchParams.get("host"), relays[0].options.identity.hostId);
-  assert.deepEqual(log, [`bridge:start:${LOCAL_PORT}`, "relay:start"]);
+  assert.deepEqual(log, [`bridge:start:${LOCAL_PORT}`, "relay:start", "lan:start:8798"]);
   assert.equal(tunnelsStarted.length, 0);
   relays[0].state = "online";
   relays[0].options.onStatus("online");
@@ -172,7 +198,7 @@ test("the pairing window closes after 10 minutes and opens again on openPairing"
 test("openPairing while the phone is off opens nothing", async (t) => {
   const { phone, clock } = await fixture(t);
   clock.now = 5;
-  assert.deepEqual(await phone.openPairing(), { enabled: false, state: "off", remote: "none" });
+  assert.deepEqual(await phone.openPairing(), { enabled: false, state: "off", remote: "none", lan: { enabled: true, addresses: [] } });
 });
 
 test("reset opens the pairing window again and forgets relay phones", async (t) => {
@@ -324,7 +350,7 @@ test("reset keeps the old room answering, only to say the Mac was reset", async 
   // It holds no token, bridge or phone list: it can let nobody in.
   for (const key of ["token", "bridgeUrl", "phones", "canPair"]) assert.equal(retired[0].options[key], undefined, key);
   assert.notEqual(relays[1].options.identity.hostId, old.hostId);
-  assert.deepEqual(log, ["relay:close", "bridge:close:0", `bridge:start:${LOCAL_PORT}`, "relay:start", "retired:start"]);
+  assert.deepEqual(log, ["lan:close", "relay:close", "bridge:close:0", `bridge:start:${LOCAL_PORT}`, "relay:start", "retired:start", "lan:start:8798"]);
   // Turning the phone off lets the old room go too.
   await phone.setEnabled(false);
   await phone.settled();
@@ -364,7 +390,7 @@ test("a reset that fails while the phone is off stays off and says it failed", a
   const { phone, dataDir, changes } = await fixture(t);
   await fs.mkdir(path.join(dataDir, "relay-phones.json"));
   await assert.rejects(phone.reset());
-  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "none" });
+  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "none", lan: { enabled: true, addresses: [] } });
   assert.equal(changes.includes("error"), false);
 });
 
@@ -386,7 +412,7 @@ test("disabling stops the relay before the bridge", async (t) => {
   await phone.settled();
   await phone.setEnabled(false);
   await phone.settled();
-  assert.deepEqual(log.slice(2), ["relay:close", "bridge:close:0"]);
+  assert.deepEqual(log.slice(3), ["lan:close", "relay:close", "bridge:close:0"]);
   assert.equal(phone.status().relay, "offline");
 });
 
@@ -410,7 +436,7 @@ test("with cloudflare.json the bridge uses its port, a named tunnel runs and the
   assert.equal(status.pairingUntil, undefined);
   assert.equal(status.publicUrl, "https://mac.example.com");
   assert.equal(status.localUrl, "http://127.0.0.1:8801");
-  assert.deepEqual(log, ["bridge:start:8801", "tunnel:start"]);
+  assert.deepEqual(log, ["bridge:start:8801", "tunnel:start", "lan:start:8798"]);
   assert.deepEqual(tunnelsStarted[0].options, { hostname: "mac.example.com", connectorToken: "connector" });
   const link = new URL(status.pairingLink);
   assert.equal(link.searchParams.get("address"), "https://mac.example.com");
@@ -426,9 +452,9 @@ test("disabling stops the tunnel before the bridge and keeps the setting off", a
   const disabled = await phone.setEnabled(false);
   assert.equal(disabled.state, "off");
   await phone.settled();
-  assert.deepEqual(log.slice(2), ["tunnel:close", "bridge:close:0"]);
+  assert.deepEqual(log.slice(3), ["lan:close", "tunnel:close", "bridge:close:0"]);
   assert.equal(tunnelsStarted[0].closed && bridges[0].closed, true);
-  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "cloudflare" });
+  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "cloudflare", lan: { enabled: true, addresses: [] } });
   assert.equal(JSON.parse(await fs.readFile(file, "utf8")).enabled, false);
   assert.deepEqual(changes, ["starting", "on", "off"]);
 });
@@ -613,7 +639,7 @@ test("allowedRoot reaches the bridge only when it is set", async (t) => {
   };
   const startRelay = () => ({ status: () => "connecting", close: async () => {} });
   for (const extra of [{ allowedRoot: "/demo/project" }, {}]) {
-    const phone = createPhone({ dataDir, startBridge, startRelay, name: () => "Test Mac", ...extra });
+    const phone = createPhone({ dataDir, startBridge, startRelay, lanPort: null, name: () => "Test Mac", ...extra });
     // The second phone finds the setting already on and starts from it.
     await phone.start();
     await phone.setEnabled(true);
@@ -622,4 +648,136 @@ test("allowedRoot reaches the bridge only when it is set", async (t) => {
   }
   assert.equal(seen[0].allowedRoot, "/demo/project");
   assert.equal("allowedRoot" in seen[1], false);
+});
+
+test("phone access starts the LAN host with the relay identity and reports its addresses", async (t) => {
+  const { phone, lans } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(lans.length, 1);
+  assert.equal(lans[0].port, 8798);
+  assert.equal(lans[0].options.hostname, "0.0.0.0");
+  assert.match(lans[0].options.identity.hostId, /^[A-Za-z0-9_-]{22}$/);
+  assert.deepEqual(phone.status().lan, { enabled: true, addresses: ["192.168.1.20"] });
+});
+
+test("a Cloudflare Mac also gets a relay identity and a LAN host", async (t) => {
+  const { phone, lans } = await fixture(t, { cloudflare: true });
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(phone.status().remote, "cloudflare");
+  assert.equal(lans.length, 1);
+});
+
+test("a LAN port that is taken leaves phone access on, with the error in lan", async (t) => {
+  const { phone } = await fixture(t, { failLan: () => true });
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(phone.status().state, "on");
+  assert.equal(phone.status().lan.enabled, true);
+  assert.deepEqual(phone.status().lan.addresses, []);
+  assert.match(phone.status().lan.error, /EADDRINUSE/);
+});
+
+test("setLan(false) closes the LAN host, is saved, and survives a restart", async (t) => {
+  const { phone, lans, dataDir } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const status = await phone.setLan(false);
+  assert.equal(lans[0].closed, true);
+  assert.deepEqual(status.lan, { enabled: false, addresses: [] });
+  assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, "mobile.json"), "utf8")).lan, false);
+  await phone.setLan(true);
+  assert.equal(lans.length, 2);
+  assert.equal(phone.status().lan.enabled, true);
+});
+
+test("a saved lan:false is still off after a restart", async (t) => {
+  const { phone, create, lans } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await phone.setLan(false);
+  await phone.close();
+  const next = create();
+  t.after(() => next.close());
+  await next.start();
+  await next.settled();
+  assert.equal(next.status().state, "on");
+  assert.equal(lans.length, 1, "no second LAN host");
+  assert.equal(next.status().lan.enabled, false);
+});
+
+test("a failed LAN start does not leak, and turning it on again retries", async (t) => {
+  let fail = true;
+  const { phone, lans } = await fixture(t, { failLan: () => fail });
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.match(phone.status().lan.error, /EADDRINUSE/);
+  fail = false;
+  await phone.setLan(false);
+  assert.equal(phone.status().lan.error, undefined);
+  await phone.setLan(true);
+  assert.equal(lans.length, 1);
+  assert.deepEqual(phone.status().lan, { enabled: true, addresses: ["192.168.1.20"] });
+});
+
+test("the LAN host closes before the bridge when phone access turns off", async (t) => {
+  const { phone, log } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await phone.setEnabled(false);
+  await phone.settled();
+  assert.ok(log.indexOf("lan:close") !== -1);
+  assert.ok(log.indexOf("lan:close") < log.indexOf("bridge:close:0"));
+});
+
+test("routes registers the phone's key without announcing a pairing, and lists the LAN endpoints", async (t) => {
+  const paired = [];
+  const { phone, dataDir } = await fixture(t, { onPaired: (info) => paired.push(info) });
+  await phone.setEnabled(true);
+  await phone.settled();
+  const phoneKey = "k".repeat(43);
+  const answer = await phone.routes(phoneKey);
+  assert.match(answer.hostId, /^[A-Za-z0-9_-]{22}$/);
+  assert.match(answer.key, /^[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(answer.lan, ["ws://192.168.1.20:8798"]);
+  assert.deepEqual(paired, []);
+  const phones = createPhones(dataDir);
+  await phones.load();
+  assert.equal(phones.isKnown(phoneKey), true);
+  await phone.setLan(false);
+  assert.deepEqual((await phone.routes(phoneKey)).lan, []);
+  await assert.rejects(phone.routes("short"), /key/);
+});
+
+test("routes before phone access is running is a 409", async (t) => {
+  const { phone } = await fixture(t);
+  await assert.rejects(phone.routes("k".repeat(43)), { status: 409 });
+});
+
+test("lanPort null never starts a LAN host", async (t) => {
+  const { phone, lans } = await fixture(t, { lanPort: null });
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(lans.length, 0);
+  assert.deepEqual(phone.status().lan, { enabled: false, addresses: [] });
+});
+
+test("a confined phone (allowedRoot) never starts a LAN host", async (t) => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-phone-")));
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const started = [];
+  const phone = createPhone({
+    dataDir,
+    allowedRoot: "/demo/project",
+    startBridge: async (options) => ({ url: `http://127.0.0.1:${options.port}`, lost: new Promise(() => {}), close: async () => {} }),
+    startRelay: () => ({ status: () => "connecting", close: async () => {} }),
+    startLan: async (options) => started.push(options),
+    name: () => "Test Mac",
+  });
+  t.after(() => phone.close());
+  await phone.setEnabled(true);
+  await phone.settled();
+  assert.equal(started.length, 0);
+  assert.equal(phone.status().lan.enabled, false);
 });

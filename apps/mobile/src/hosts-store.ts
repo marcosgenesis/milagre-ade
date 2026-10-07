@@ -1,7 +1,17 @@
 import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from "./client.ts";
+import { validLanRoute, type LanRoute } from "./lan-route.ts";
 
 /** A paired computer. A relay computer's `address` and `id` are `relay://<hostId>`; it has no URL of its own. */
-export type SavedHost = { id: string; name: string; address: string; token: string; access?: Access; relay?: RelayLink; lastUsed: number };
+export type SavedHost = {
+  id: string;
+  name: string;
+  address: string;
+  token: string;
+  access?: Access;
+  relay?: RelayLink;
+  routes?: { lan?: LanRoute };
+  lastUsed: number;
+};
 type SecureStorage = {
   getItemAsync(key: string): Promise<string | null>;
   setItemAsync(key: string, value: string): Promise<void>;
@@ -15,10 +25,12 @@ function validate(value: unknown): SavedHost {
   const host = value as Partial<SavedHost>;
   if (!/^[a-f0-9]{64}$/i.test(String(host?.token ?? ""))) throw new Error("A saved computer has no valid token.");
   const lastUsed = Number(host.lastUsed) || 0;
+  const lan = validLanRoute((host as { routes?: { lan?: unknown } }).routes?.lan);
+  const routes = lan ? { routes: { lan } } : {};
   if (host.relay) {
     const relay = validRelay(host.relay);
     const address = relayAddress(relay.hostId);
-    return { id: address, name: String(host.name || "Mac").slice(0, 80), address, token: String(host.token), relay, lastUsed };
+    return { id: address, name: String(host.name || "Mac").slice(0, 80), address, token: String(host.token), relay, ...routes, lastUsed };
   }
   const address = localEndpoint(String(host?.address ?? ""));
   const access = validAccess(host.access);
@@ -28,6 +40,7 @@ function validate(value: unknown): SavedHost {
     address,
     token: String(host.token),
     ...(access ? { access } : {}),
+    ...routes,
     lastUsed,
   };
 }
@@ -79,9 +92,23 @@ export function createHostsStore(storage: SecureStorage, now = () => Date.now())
     list: () => ordered(read),
     save: (host: { name: string; address: string; token: string; access?: Access; relay?: RelayLink }) =>
       ordered(async () => {
+        const hosts = await read();
         const saved = validate({ ...host, lastUsed: now() });
-        await write([saved, ...(await read()).filter((item) => item.id !== saved.id)]);
-        return saved;
+        const learned = hosts.find((item) => item.id === saved.id)?.routes;
+        const next = learned ? { ...saved, routes: learned } : saved;
+        await write([next, ...hosts.filter((item) => item.id !== saved.id)]);
+        return next;
+      }),
+    /** Remembers (or, with undefined, forgets) how to reach this computer on the local network. */
+    learn: (id: string, lan: LanRoute | undefined) =>
+      ordered(async () => {
+        await write(
+          (await read()).map((item) => {
+            if (item.id !== id) return item;
+            const { routes: _old, ...rest } = item;
+            return lan ? { ...rest, routes: { lan } } : rest;
+          }),
+        );
       }),
     rename: (id: string, name: string) =>
       ordered(async () => {

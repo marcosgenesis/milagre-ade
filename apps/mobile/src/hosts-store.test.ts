@@ -183,3 +183,24 @@ test("address and relay computers coexist, and rename and forget work on either"
     ["https://mac.example.com"],
   );
 });
+
+const lan = { hostId: "H".repeat(22), key: "K".repeat(43), endpoints: ["ws://192.168.1.20:8798"], learnedAt: 1 };
+
+test("learn saves a LAN route on that computer, and a re-pairing keeps it until relearned", async () => {
+  const store = createHostsStore(storage());
+  const saved = await store.save({ name: "Mac", address: "https://mac.example.com", token });
+  await store.learn(saved.id, lan);
+  assert.deepEqual((await store.list())[0].routes, { lan });
+  await store.save({ name: "Mac", address: "https://mac.example.com", token: "b".repeat(64) });
+  assert.deepEqual((await store.list())[0].routes, { lan });
+  await store.learn(saved.id, undefined);
+  assert.equal((await store.list())[0].routes, undefined);
+});
+
+test("a damaged LAN route is dropped, the computer is kept", async () => {
+  const driver = storage();
+  driver.values.set("milagre.hosts.v1", JSON.stringify([{ name: "Mac", address: "https://mac.example.com", token, routes: { lan: { hostId: "bad" } } }]));
+  const [host] = await createHostsStore(driver).list();
+  assert.equal(host.address, "https://mac.example.com");
+  assert.equal(host.routes, undefined);
+});

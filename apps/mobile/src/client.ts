@@ -58,10 +58,14 @@ export const relayAddress = (hostId: string) => `relay://${hostId}`;
 
 /** What a client needs to reach one computer: a direct address, or the relay. */
 export type ClientHost = { address: string; token: string; access?: Access; relay?: RelayLink };
+/** Which LAN transport, if any, carries this computer's traffic right now. */
+export type RouteView = { current(): RelayTransport | null; subscribe(listener: () => void): () => void };
 /** The phone's side of the relay, injected so this file stays free of native modules. */
 export type RelayRuntime = {
   /** The one transport for this Mac, opened on first use and shared by every client. */
   transport(host: { relay: RelayLink; token: string }): Promise<RelayTransport>;
+  /** This computer's LAN route; requests and live streams use its transport while `current()` has one. */
+  lan?(host: { id: string; token: string }): RouteView;
   /** Images fetched through the relay, kept as files in the cache folder. */
   files: { find(name: string): Promise<string | null>; write(name: string, bytes: Uint8Array): Promise<string> };
 };
@@ -87,6 +91,62 @@ const MEDIA_AT_ONCE = 4;
 // Creating a worktree can fetch and copy files; removing one with big ignored folders can take minutes.
 const LONG_CALLS = new Set(["worktree:create", "worktree:remove", "link:send", "link:open"]);
 
+/**
+ * One request through a transport, the relay's or the LAN's. The relay's own failures, and a phone key that can't be read, carry copy for the
+ * user; anything else is a lost connection.
+ */
+function overRelay(
+  through: Promise<RelayTransport>,
+  method: "GET" | "POST",
+  route: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+  signal: AbortSignal,
+) {
+  // The transport cannot cancel a request, so the deadline only stops waiting for it.
+  const deadline = new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error(LOST)), { once: true }));
+  const answer = through.then((relayed) =>
+    relayed.request(method, route, headers, body).catch((error) => {
+      throw (error as Error)?.name === "RelayTransportError" ? error : new Error(LOST);
+    }),
+  );
+  return Promise.race([deadline, answer]);
+}
+
+/** The bridge's live socket, read through the relay. It opens once the transport is ready, unless closed first. */
+function relayLive(path: string, { onSignal, onStatus }: LiveOptions, through: Promise<RelayTransport>): Live {
+  let closed = false;
+  let handle: { close(): void } | null = null;
+  through.then(
+    (relayed) => {
+      if (closed) return;
+      handle = relayed.live(
+        path,
+        (data) => {
+          let type: unknown;
+          try {
+            type = JSON.parse(data).type;
+          } catch {
+            return;
+          }
+          if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
+        },
+        onStatus,
+      );
+    },
+    () => {
+      /* the snapshot polls until a live socket opens */
+    },
+  );
+  return {
+    close() {
+      closed = true;
+      handle?.close();
+      handle = null;
+    },
+  };
+}
+
 export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, timeoutMs = 30000, runtime?: RelayRuntime) {
   const relay = host.relay ? validRelay(host.relay) : undefined;
   if (relay && !runtime) throw new Error("This app cannot reach a Mac through the relay.");
@@ -97,8 +157,15 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
   // The last snapshot per route and its ETag: an unchanged Project answers 304 instead of megabytes.
   const cached = new Map<string, { etag: string; value: unknown }>();
   const auth = { Authorization: `Bearer ${token}`, ...(access ? { "CF-Access-Client-Id": access.id, "CF-Access-Client-Secret": access.secret } : {}) };
-  // The Mac adds the token to every request it forwards; over the relay it only rides the handshake.
-  const transport = () => runtime!.transport({ relay: relay!, token });
+  const lanView = runtime?.lan?.({ id: url, token });
+  const lanNow = () => lanView?.current() ?? null;
+  // The Mac adds the token to every request it forwards; over the relay or the LAN it only rides the handshake.
+  /** The transport this request rides: the LAN when it is up, else the relay for a relay computer, else none (HTTPS). */
+  const carrier = (): Promise<RelayTransport> | null => {
+    const lan = lanNow();
+    if (lan) return Promise.resolve(lan);
+    return relay ? runtime!.transport({ relay, token }) : null;
+  };
 
   async function overHttp(route: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal): Promise<Answer> {
     let response: Response;
@@ -110,21 +177,6 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     if (response.redirected || (response.url && new URL(response.url).origin !== url))
       throw new Error("The computer address redirected. Enter its direct HTTPS address.");
     return { status: response.status, ok: response.ok, etag: response.headers?.get?.("etag"), text: () => response.text() };
-  }
-
-  /**
-   * One request through the relay. The relay's own failures, and a phone key that can't be read, carry copy for the
-   * user; anything else is a lost connection.
-   */
-  function overRelay(method: "GET" | "POST", route: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal) {
-    // The transport cannot cancel a request, so the deadline only stops waiting for it.
-    const deadline = new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error(LOST)), { once: true }));
-    const answer = transport().then((relayed) =>
-      relayed.request(method, route, headers, body).catch((error) => {
-        throw (error as Error)?.name === "RelayTransportError" ? error : new Error(LOST);
-      }),
-    );
-    return Promise.race([deadline, answer]);
   }
 
   /** Runs `work` with a signal that aborts after `deadlineMs`, including the time to read the body. */
@@ -144,8 +196,9 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       const headers = { "Content-Type": "application/json", ...(previous ? { "If-None-Match": previous.etag } : {}) };
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let response: Answer;
-      if (relay) {
-        const relayed = await overRelay(sent === undefined ? "GET" : "POST", route, headers, sent, signal);
+      const through = carrier();
+      if (through) {
+        const relayed = await overRelay(through, sent === undefined ? "GET" : "POST", route, headers, sent, signal);
         response = {
           status: relayed.status,
           ok: relayed.status >= 200 && relayed.status < 300,
@@ -161,7 +214,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       } catch {
         throw new Error(
           [401, 403].includes(response.status)
-            ? relay
+            ? through
               ? "Your Mac refused this phone. Scan its code again in Settings → Phone."
               : "Your computer's Cloudflare access was refused. Scan its pairing code again."
             : response.status >= 500
@@ -179,7 +232,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
   const mediaRoute = (projectPath: string, path: string) => `/media?projectPath=${encodeURIComponent(projectPath)}&path=${encodeURIComponent(path)}`;
   /** An image file on the computer, served by the bridge only from the Project's Worktrees and Milagre's image folders. */
   function media(projectPath: string, path: string) {
-    if (relay) throw new Error("Images from a relay computer load through mediaFile.");
+    if (relay || lanNow()) throw new Error("Images from a relay computer load through mediaFile.");
     return { uri: url + mediaRoute(projectPath, path), headers: auth };
   }
   // One load per image: thumbnails ask on every render, and must get the same source back.
@@ -210,7 +263,12 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     const loading = (async () => {
       const found = await runtime!.files.find(name);
       if (found) return { uri: found };
-      const response = await inTurn(() => timed(timeoutMs, (signal) => overRelay("GET", mediaRoute(projectPath, path), {}, undefined, signal)));
+      // The carrier is chosen when the request starts: a route that switched while this waited its turn is not the one to use.
+      const response = await inTurn(async () => {
+        const through = carrier();
+        if (!through) throw new Error(LOST);
+        return timed(timeoutMs, (signal) => overRelay(through, "GET", mediaRoute(projectPath, path), {}, undefined, signal));
+      });
       if (response.status !== 200) throw new Error("Could not load this image from your Mac.");
       return { uri: await runtime!.files.write(name, response.body) };
     })();
@@ -219,40 +277,6 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       if (images.get(name) === loading) images.delete(name);
     });
     return loading;
-  }
-
-  /** The bridge's live socket, read through the relay. It opens once the transport is ready, unless closed first. */
-  function relayLive(path: string, { onSignal, onStatus }: LiveOptions): Live {
-    let closed = false;
-    let handle: { close(): void } | null = null;
-    transport().then(
-      (relayed) => {
-        if (closed) return;
-        handle = relayed.live(
-          path,
-          (data) => {
-            let type: unknown;
-            try {
-              type = JSON.parse(data).type;
-            } catch {
-              return;
-            }
-            if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
-          },
-          onStatus,
-        );
-      },
-      () => {
-        /* the snapshot polls until a live socket opens */
-      },
-    );
-    return {
-      close() {
-        closed = true;
-        handle?.close();
-        handle = null;
-      },
-    };
   }
 
   return {
@@ -299,7 +323,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     mediaFile: (projectPath: string, path: string) => relayImage(projectPath, path).then((source) => source.uri),
     /** The image source to show: the authenticated URL directly, or the cached file through the relay. */
     image: (projectPath: string, path: string): { uri: string; headers?: Record<string, string> } | Promise<{ uri: string }> =>
-      relay ? relayImage(projectPath, path) : media(projectPath, path),
+      relay || lanNow() ? relayImage(projectPath, path) : media(projectPath, path),
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: async (projectPath: string) =>
@@ -312,7 +336,27 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     /** The Project's live socket, through the same tunnel and Access headers as every request, or through the relay. */
     live: (projectPath: string, options: LiveOptions) => {
       const path = `/live?projectPath=${encodeURIComponent(projectPath)}`;
-      return relay ? relayLive(path, options) : openLive(`${url.replace(/^http/, "ws")}${path}`, auth, options);
+      const open = () => {
+        const through = carrier();
+        return through ? relayLive(path, options, through) : openLive(`${url.replace(/^http/, "ws")}${path}`, auth, options);
+      };
+      if (!lanView) return open();
+      let using = lanNow();
+      let inner = open();
+      // A switch of route moves the stream: the old one closes, the new one opens; the snapshot polls in between.
+      const unsubscribe = lanView.subscribe(() => {
+        if (lanNow() === using) return;
+        using = lanNow();
+        inner.close();
+        options.onStatus(false);
+        inner = open();
+      });
+      return {
+        close() {
+          unsubscribe();
+          inner.close();
+        },
+      };
     },
   };
 }

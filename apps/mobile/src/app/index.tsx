@@ -9,6 +9,7 @@ import { savedHosts } from "../hosts-native";
 import { confirmSheet } from "../confirm-store";
 import { createClient } from "../client";
 import { relayRuntime } from "../relay-native";
+import { lanRoutes } from "../routes-native";
 import type { SavedHost } from "../hosts-store";
 import { Icon } from "../icons";
 import { ErrorNotice, HeaderButton, IconButton, ListRow, PageScroll, colors, showActions, styles } from "../ui";
@@ -24,6 +25,7 @@ export default function ComputersScreen() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [, setRouteTick] = useState(0);
   const autoOpened = useRef(false);
   const check = useCallback(async (hosts: SavedHost[]) => {
     setStatus(Object.fromEntries(hosts.map((host) => [host.id, "checking"])));
@@ -68,6 +70,10 @@ export default function ComputersScreen() {
     }, [load]),
   );
   useEffect(() => {
+    const unsubscribe = session.hosts.map((host) => lanRoutes.subscribe(host.id, () => setRouteTick((tick) => tick + 1)));
+    return () => unsubscribe.forEach((stop) => stop());
+  }, [session.hosts]);
+  useEffect(() => {
     // Resume the last computer (or the only pairing) once, unless a deep link takes over.
     if (autoOpened.current || !session.booted) return;
     const target =
@@ -111,6 +117,7 @@ export default function ComputersScreen() {
               .then(() => savedHosts.forget(host.id))
               .then(() => {
                 if (host.relay) relayRuntime.forget(host.relay.hostId);
+                lanRoutes.forget(host.id);
               })
               .then(load)
               .catch((e) => setError(e.message));
@@ -166,7 +173,13 @@ export default function ComputersScreen() {
                     })
                   }
                   title={host.name}
-                  subtitle={`${label(status[host.id])} · ${host.relay ? host.relay.url.replace(/^wss:\/\//, "") : host.address.replace(/^https?:\/\//, "")}`}
+                  subtitle={`${label(status[host.id])} · ${
+                    status[host.id] === "online" && lanRoutes.kind(host.id) === "lan"
+                      ? "Local network"
+                      : host.relay
+                        ? host.relay.url.replace(/^wss:\/\//, "")
+                        : host.address.replace(/^https?:\/\//, "")
+                  }`}
                   disabled={!!busy}
                   onPress={() => void open(host)}
                   leading={

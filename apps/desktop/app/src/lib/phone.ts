@@ -22,6 +22,15 @@ export function phoneStatusLine(status: PhoneStatus | null): string {
   }
 }
 
+/** The line under "Allow on local network". Null until the daemon reports it. */
+export function phoneLanLine(status: PhoneStatus | null): string | null {
+  if (!status?.lan) return null;
+  if (!status.lan.enabled) return "Off";
+  if (status.lan.error) return `Couldn't listen on the local network: ${status.lan.error}`;
+  if (!status.lan.addresses.length) return "Not connected to a local network";
+  return `Reachable at ${status.lan.addresses.join(", ")}`;
+}
+
 /** Whether new phones may still pair, and for how many whole minutes (rounded up). Only a relay phone has a window. */
 export function pairingWindow(status: PhoneStatus | null, now: number): { open: boolean; minutes: number } | null {
   if (!status || status.remote !== "relay" || status.pairingUntil === undefined) return null;

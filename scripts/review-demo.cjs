@@ -145,7 +145,7 @@ async function startReviewDemo({ dataDir = DEFAULT_DATA_DIR, phoneOptions = {}, 
       dataDir,
       version: `${version}-review-demo`,
       runtimeOptions,
-      phoneOptions: { localPort: PHONE_PORT, name: () => COMPUTER_NAME, ...phoneOptions, allowedRoot: project },
+      phoneOptions: { localPort: PHONE_PORT, lanPort: null, name: () => COMPUTER_NAME, ...phoneOptions, allowedRoot: project },
     });
     client = await connect({ dataDir });
     await client.call("project:open", [project]);

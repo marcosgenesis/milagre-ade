@@ -526,7 +526,7 @@ test("a daemon that resumes a turn at startup brings the chats back first and ke
 });
 
 // No test may dial the real relay.
-const fakePhoneOptions = () => ({ localPort: 0, startRelay: () => ({ close: async () => {}, status: () => "online" }) });
+const fakePhoneOptions = () => ({ localPort: 0, lanPort: null, startRelay: () => ({ close: async () => {}, status: () => "online" }) });
 const phoneStatus = async (client, state) =>
   waitFor(async () => {
     const next = await client.call("phone:status");
@@ -545,7 +545,7 @@ test("phone methods are advertised to desktop, drive a real bridge, and stay out
   const desktop = await client();
   const status = await desktop.call("daemon:status");
   for (const method of ["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"]) assert.ok(status.methods.includes(method), method);
-  assert.deepEqual(await desktop.call("phone:status"), { enabled: false, state: "off", remote: "none" });
+  assert.deepEqual(await desktop.call("phone:status"), { enabled: false, state: "off", remote: "none", lan: { enabled: false, addresses: [] } });
   const changes = [];
   desktop.on("event", (event) => {
     if (event.channel === "phone:status") changes.push(event.payload.state);
@@ -583,13 +583,32 @@ test("phone methods are advertised to desktop, drive a real bridge, and stay out
   assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, "mobile.json"), "utf8")).enabled, false);
 });
 
+test("phone:set-lan is listed, reaches the phone setting and stays out of the mobile bridge", async (t) => {
+  const { client } = await fixture(t, { phoneOptions: fakePhoneOptions() });
+  const desktop = await client();
+  const status = await desktop.call("daemon:status");
+  assert.ok(status.methods.includes("phone:set-lan"));
+  // The fake phone has no LAN port, so the setting stays off whatever is saved.
+  assert.equal((await desktop.call("phone:set-lan", [false])).lan.enabled, false);
+  await assert.rejects(desktop.call("phone:set-lan", ["yes"]), /true or false/);
+  await desktop.call("phone:set-enabled", [true]);
+  const on = await phoneStatus(desktop, "on");
+  const token = new URL(on.pairingLink).searchParams.get("token");
+  const response = await fetch(on.localUrl + "/rpc", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ v: 1, method: "phone:set-lan", args: [true] }),
+  });
+  assert.equal(response.status, 403);
+});
+
 test("a first pairing reaches the desktop as phone:paired, with the count in the phone status", async (t) => {
   const relays = [];
   const startRelay = (options) => {
     relays.push(options);
     return { close: async () => {}, status: () => "online" };
   };
-  const { client } = await fixture(t, { phoneOptions: { localPort: 0, startRelay } });
+  const { client } = await fixture(t, { phoneOptions: { localPort: 0, lanPort: null, startRelay } });
   const desktop = await client();
   const paired = [];
   desktop.on("event", (event) => {
@@ -606,7 +625,7 @@ test("a first pairing reaches the desktop as phone:paired, with the count in the
 test("a phone reset while the phone is off answers off", async (t) => {
   const { client } = await fixture(t, { phoneOptions: fakePhoneOptions() });
   const desktop = await client();
-  assert.deepEqual(await desktop.call("phone:reset"), { enabled: false, state: "off", remote: "none" });
+  assert.deepEqual(await desktop.call("phone:reset"), { enabled: false, state: "off", remote: "none", lan: { enabled: false, addresses: [] } });
 });
 
 test("an enabled phone comes back when the daemon restarts, and stopping the daemon closes its bridge", async (t) => {
@@ -802,7 +821,7 @@ test("daemon delivers push after clients leave and Phone reset/disable revokes r
 });
 
 test("a phone reset or disable answers with the status it settled on, not the one it started from", async (t) => {
-  const { client } = await fixture(t, { phoneOptions: { localPort: 0 } });
+  const { client } = await fixture(t, { phoneOptions: { localPort: 0, lanPort: null } });
   const desktop = await client();
   await desktop.call("phone:set-enabled", [true]);
   const on = await phoneStatus(desktop, "on");

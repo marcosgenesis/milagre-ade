@@ -70,6 +70,8 @@ export type PhoneStatus = {
   publicUrl?: string;
   pairingLink?: string;
   qrSvg?: string;
+  /** Phone access on this Mac's local network: on or off, and the addresses a phone on the same network dials. */
+  lan?: { enabled: boolean; addresses: string[]; error?: string };
 };
 
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
@@ -257,6 +259,8 @@ declare global {
       getPhoneStatus: () => Promise<PhoneStatus>;
       /** Turns phone access on or off. Resolves as it starts; progress and the result arrive through onPhoneStatus. */
       setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
+      /** Turns phone access over the local network on or off. Resolves with the new status. */
+      setPhoneLan(enabled: boolean): Promise<PhoneStatus>;
       /** A new access token: phones paired before scan again. */
       resetPhoneAccess: () => Promise<PhoneStatus>;
       /** Lets phones that have not paired yet do so for another ten minutes. */

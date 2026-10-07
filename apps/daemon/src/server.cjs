@@ -16,7 +16,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
-const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing"]);
+const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
 
 const PAGES_TTL_MS = 30000;
 // What one connection may hold in paged responses at once, in characters. A response larger than that alone is still
@@ -360,6 +360,7 @@ async function startDaemon({
           await push.clear();
           result = phone.status();
         } else if (request.method === "phone:open-pairing") result = await phone.openPairing();
+        else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);

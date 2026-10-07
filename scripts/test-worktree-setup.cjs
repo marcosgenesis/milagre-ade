@@ -65,7 +65,6 @@ window.milagre = new Proxy({
   },
   onAgentEvent: (callback) => { listeners.add(callback); return () => listeners.delete(callback); },
   listEditors: async () => [],
-  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   listRecentProjects: async () => [{ path: "/fixture", name: "shop", openedAt: "" }, { path: "/blog", name: "blog", openedAt: "" }],
   getProjectImage: async (projectPath) => window.icons?.[projectPath] ?? null,
   setProjectIcon: async (projectPath, icon) => {

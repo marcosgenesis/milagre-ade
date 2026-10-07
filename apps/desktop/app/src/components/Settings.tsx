@@ -61,8 +61,8 @@ export function SettingsNav({
   onBack,
 }: {
   section: SettingsSection;
-  project: SettingsProject;
-  current: SettingsProject;
+  project?: SettingsProject;
+  current?: SettingsProject;
   onSelect: (section: SettingsSection) => void;
   onSelectProject: (project: SettingsProject) => void;
   onBack: () => void;
@@ -74,7 +74,7 @@ export function SettingsNav({
       () => {},
     );
   }, []);
-  const rows = projectRows({ recent, currentPath: current.path, currentName: current.name });
+  const rows = current ? projectRows({ recent, currentPath: current.path, currentName: current.name }) : [];
   const imageOf = useProjectImages(rows.map((row) => row.path));
   return (
     <aside aria-label="Settings navigation" className="flex h-full w-[224px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
@@ -101,7 +101,7 @@ export function SettingsNav({
                 </span>
               }
               label={row.name}
-              active={section === "project" && project.path === row.path}
+              active={section === "project" && project?.path === row.path}
               onClick={() => onSelectProject({ path: row.path, name: row.name })}
             />
           ))}
@@ -970,11 +970,11 @@ export function SettingsPanel({
   update,
 }: {
   section: SettingsSection;
-  project: SettingsProject;
+  project?: SettingsProject;
   models: ModelOption[];
   update: UpdateState | null;
 }) {
-  const title = section === "project" ? project.name : SECTIONS.find((item) => item.key === section)?.label;
+  const title = section === "project" ? project?.name : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
@@ -984,7 +984,7 @@ export function SettingsPanel({
         {section === "appearance" && <AppearanceSettings />}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
-        {section === "project" && <ProjectSettings key={project.path} project={project} />}
+        {section === "project" && project && <ProjectSettings key={project.path} project={project} />}
       </div>
     </ScrollArea>
   );

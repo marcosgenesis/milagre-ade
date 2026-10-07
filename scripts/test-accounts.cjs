@@ -14,6 +14,7 @@ let snapshot = { providers: ['claude', 'codex'].map(provider => ({ provider, sel
 window.calls = [];
 window.milagre = {
  listAccounts: async () => structuredClone(snapshot),
+ listRecentProjects: async () => [],
  onAccountsChanged: () => () => {},
  accountAction: async (action, provider, value) => {
    window.calls.push({action, provider, value});

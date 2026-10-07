@@ -237,7 +237,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
             } catch {
               return;
             }
-            if (type === "runs" || type === "project") onSignal(type);
+            if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
           },
           onStatus,
         );

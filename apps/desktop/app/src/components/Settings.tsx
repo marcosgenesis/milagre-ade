@@ -1,4 +1,6 @@
+import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
+import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
@@ -6,8 +8,8 @@ import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
-  GitBranchIcon,
   InformationCircleIcon,
+  MagicWand01Icon,
   PaintBoardIcon,
   SecurityCheckIcon,
   Settings01Icon,
@@ -30,6 +32,10 @@ import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
+import { WorkspaceIcon } from "./WorkspaceIcon";
+import { projectInitial, projectRows } from "../lib/project-list";
+import type { RecentProject } from "../lib/project-list";
+import { setProjectImage, useProjectImages } from "../lib/project-images";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -37,29 +43,46 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "accounts" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
+  { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
+  { key: "skills", label: "Skills", icon: MagicWand01Icon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
 
-const PROJECT_SECTION = { key: "project" as const, label: "Worktrees", icon: GitBranchIcon };
+export type SettingsProject = { path: string; name: string };
 
 export function SettingsNav({
   section,
-  projectName,
+  project,
+  current,
   onSelect,
+  onSelectProject,
   onBack,
+  showProjectSettings = true,
 }: {
+  showProjectSettings?: boolean;
   section: SettingsSection;
-  projectName?: string;
+  project?: SettingsProject;
+  current?: SettingsProject;
   onSelect: (section: SettingsSection) => void;
+  onSelectProject: (project: SettingsProject) => void;
   onBack: () => void;
 }) {
+  const [recent, setRecent] = useState<RecentProject[]>([]);
+  useEffect(() => {
+    window.milagre.listRecentProjects().then(
+      (list) => setRecent(list ?? []),
+      () => {},
+    );
+  }, []);
+  const rows = current ? projectRows({ recent, currentPath: current.path, currentName: current.name }) : [];
+  const imageOf = useProjectImages(rows.map((row) => row.path));
   return (
     <aside aria-label="Settings navigation" className="flex h-full w-[224px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
       <div aria-hidden className="h-8 shrink-0" />
@@ -73,17 +96,28 @@ export function SettingsNav({
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
       </GlideGroup>
-      <div className="mx-2 mt-2 flex h-8 items-center px-2 text-[12.5px] font-medium text-ink-3">
-        <span className="truncate">{projectName ? `Project · ${projectName}` : "Project"}</span>
-      </div>
-      <GlideGroup>
-        <RailButton
-          icon={<Icon icon={PROJECT_SECTION.icon} />}
-          label={PROJECT_SECTION.label}
-          active={section === PROJECT_SECTION.key}
-          onClick={() => onSelect(PROJECT_SECTION.key)}
-        />
-      </GlideGroup>
+      {showProjectSettings && (
+        <>
+          <div className="mx-2 mt-2 flex h-8 shrink-0 items-center px-2 text-[12.5px] font-medium text-ink-3">Projects</div>
+          <ScrollArea className="min-h-0 flex-1 pb-2">
+            <GlideGroup>
+              {rows.map((row) => (
+                <RailButton
+                  key={row.path}
+                  icon={
+                    <span className="flex size-[18px] items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface">
+                      <WorkspaceIcon src={imageOf(row.path)} fallback={row.initial} />
+                    </span>
+                  }
+                  label={row.name}
+                  active={section === "project" && project?.path === row.path}
+                  onClick={() => onSelectProject({ path: row.path, name: row.name })}
+                />
+              ))}
+            </GlideGroup>
+          </ScrollArea>
+        </>
+      )}
     </aside>
   );
 }
@@ -855,38 +889,126 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
   );
 }
 
-function ProjectSettings({ projectPath }: { projectPath?: string }) {
-  if (!projectPath) return <p className="mt-6 text-[13px] text-ink-3">Open a project to change its settings.</p>;
+// Icons are scaled down before saving: the phone gets the same image, and a full-size app icon would not fit.
+async function iconDataUrl(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/png");
+}
+
+function ProjectIconSetting({ project }: { project: SettingsProject }) {
+  const imageOf = useProjectImages([project.path]);
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(icon: () => Promise<string | null>) {
+    setBusy(true);
+    setError(null);
+    try {
+      setProjectImage(project.path, await window.milagre.setProjectIcon(project.path, await icon()));
+    } catch (failure) {
+      setError(failure instanceof DOMException ? "This file isn't an image Milagre can read." : ipcErrorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
-    <Group title="New worktrees">
-      <FilesToCopy projectPath={projectPath} />
-      <SetupCommand projectPath={projectPath} />
-    </Group>
+    <div className="grid gap-2 px-4 py-3">
+      <div className="flex items-center gap-4">
+        <span
+          data-project-icon-preview
+          className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-ink text-[16px] font-semibold text-surface"
+        >
+          <WorkspaceIcon src={imageOf(project.path)} fallback={projectInitial(project.name)} />
+        </span>
+        <div className="grid min-w-0 flex-1 gap-0.5">
+          <span className="text-[13.5px] font-medium text-ink">Icon</span>
+          <span className="text-[12px] text-ink-3">
+            Shown in the sidebar, the project switcher and on your phone. Reset goes back to the repository's own icon.
+          </span>
+        </div>
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          data-project-icon-input
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void save(() => iconDataUrl(file));
+          }}
+        />
+        <button type="button" disabled={busy} data-project-icon-choose onClick={() => input.current?.click()} className={SECONDARY_BUTTON}>
+          Choose image
+        </button>
+        <button type="button" disabled={busy} data-project-icon-reset onClick={() => void save(async () => null)} className={SECONDARY_BUTTON}>
+          Reset
+        </button>
+      </div>
+      {error && (
+        <p data-project-icon-error className="break-words text-[12px] text-red">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ProjectSettings({ project }: { project: SettingsProject }) {
+  return (
+    <>
+      <Group title="Appearance">
+        <ProjectIconSetting project={project} />
+      </Group>
+      <Group title="New worktrees">
+        <FilesToCopy projectPath={project.path} />
+        <SetupCommand projectPath={project.path} />
+      </Group>
+    </>
   );
 }
 
 export function SettingsPanel({
   section,
-  projectPath,
+  project,
   models,
   update,
+  onSectionChange,
+  accountScope,
 }: {
+  onSectionChange?: (section: SettingsSection) => void;
+  accountScope?: string;
   section: SettingsSection;
-  projectPath?: string;
+  project?: SettingsProject;
   models: ModelOption[];
   update: UpdateState | null;
 }) {
-  const title = section === "project" ? PROJECT_SECTION.label : SECTIONS.find((item) => item.key === section)?.label;
+  const title = section === "project" ? project?.name : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h1>
         {section === "general" && <GeneralSettings models={models} />}
         {section === "accounts" && <AccountsSettings />}
+        {section === "project-accounts" && (
+          <ProjectAccountsSettings projectPath={accountScope ?? project?.path} onManageAccounts={() => onSectionChange?.("accounts")} />
+        )}
         {section === "appearance" && <AppearanceSettings />}
+        {section === "skills" &&
+          (project ? (
+            <SkillsSettings key={project.path} projectPath={project.path} />
+          ) : (
+            <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
+          ))}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
-        {section === "project" && <ProjectSettings projectPath={projectPath} />}
+        {section === "project" && project && <ProjectSettings key={project.path} project={project} />}
       </div>
     </ScrollArea>
   );

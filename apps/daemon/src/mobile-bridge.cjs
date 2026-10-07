@@ -25,6 +25,7 @@ const METHODS = new Set([
   "project:forget",
   "project:find",
   "project:image",
+  "project:set-icon",
   "chat:runs",
   "chat:ports",
   "agent:stop-port",
@@ -46,6 +47,9 @@ const METHODS = new Set([
   "chat:resume",
   "agent:interrupt",
   "agent:respond-permission",
+  "accounts:scopes",
+  "accounts:scope",
+  "accounts:assign",
   "accounts:list",
   "accounts:add",
   "accounts:select",
@@ -65,6 +69,7 @@ const METHODS = new Set([
   "worktree:pull-request",
   "project:branches",
   "skills:list",
+  "skills:read",
   "worktree:create",
   "git:diff-files",
   "git:diff-file",
@@ -307,9 +312,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
     entry.timer = setTimeout(() => {
       entry.timer = null;
       // A snapshot carries the runs too, so "project" covers "runs".
-      const type = entry.kinds.has("project") ? "project" : "runs";
+      const types = [];
+      if (entry.kinds.has("accounts")) types.push("accounts");
+      if (entry.kinds.has("project")) types.push("project");
+      else if (entry.kinds.has("runs")) types.push("runs");
       entry.kinds.clear();
-      if (entry.socket.readyState === WebSocket.OPEN) entry.socket.send(JSON.stringify({ type }));
+      if (entry.socket.readyState === WebSocket.OPEN) for (const type of types) entry.socket.send(JSON.stringify({ type }));
     }, delay);
   }
   function drop(entry) {
@@ -350,6 +358,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
   }
   client.on("event", ({ channel, payload } = {}) => {
     for (const entry of live) {
+      if (channel === "accounts:changed" && !confine) signal(entry, "accounts", 0);
       if (
         (channel === "project:state" && payload?.path === entry.projectPath) ||
         (channel === "link:state" && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)
@@ -566,7 +575,12 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };
             // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
-            if (request.method === "project:image" && typeof result === "string" && result.length > MAX_PROJECT_IMAGE) result = null;
+            if (
+              (request.method === "project:image" || request.method === "project:set-icon") &&
+              typeof result === "string" &&
+              result.length > MAX_PROJECT_IMAGE
+            )
+              result = null;
           }
         } else throw failure(404, "Unknown endpoint");
         reply(200, { result: result ?? null });

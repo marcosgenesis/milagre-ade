@@ -116,7 +116,7 @@ class ChatHost {
       if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
       const unknown = (session.subagents ?? []).filter((agent) => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
       if (!unknown.length) return;
-      const events = await this.readSubagents({ cwd, agents: unknown });
+      const events = await this.readSubagents({ cwd, agents: unknown, projectPath });
       if (!events.length) return;
       const { state, changed } = await this.states.update(projectPath, (latest) => {
         const current = latest.sessions[sessionId];
@@ -462,6 +462,7 @@ class ChatHost {
       const lastUserMessage =
         state.messages.filter((item) => item.session_id === sessionId && item.role !== "assistant" && item.body?.trim()).at(-1)?.body ?? "";
       const body = await this.handoverTools.brief({
+        projectPath,
         transcript,
         transcriptPath,
         provider: source.provider,

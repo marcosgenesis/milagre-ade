@@ -85,6 +85,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import type { RecentProject } from "./lib/project-list";
+import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore } from "./lib/draft-store";
 import { restoredChatsNotice } from "./lib/restored-chats";
@@ -124,7 +125,6 @@ type FailedSend = PendingSend & { draft: string; error: string; target: Prepared
 
 function App() {
   const [project, setProject] = useState<OpenProject | null>(null);
-  const [projectImage, setProjectImage] = useState<{ path: string; src: string | null } | null>(null);
   const projectRef = useRef<OpenProject | null>(null);
   const projectsSeen = useRef(new Map<string, Pick<OpenProject, "path" | "name">>());
   const projectNavigation = useRef(0);
@@ -173,29 +173,57 @@ function App() {
     localStorage.setItem("milagre.fastMode", on ? "on" : "off");
   };
   // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
-  const [reported, setReported] = useState<AgentModels | null>(null);
+  const accountScope = selectedLink ? `milagre-link:${selectedLink.link.id}` : project?.path;
+  const accountScopeRef = useRef(accountScope);
+  accountScopeRef.current = accountScope;
+  const accountGeneration = useRef(0);
+  const [loadedAccountScope, setLoadedAccountScope] = useState<string | undefined>(undefined);
+  const [rawReported, setReported] = useState<AgentModels | null>(null);
+  const reported = loadedAccountScope === accountScope ? rawReported : null;
   const models = useMemo(() => mergeModels(reported, MODEL_CATALOG), [reported]);
   // Whether each agent's CLI is missing, outdated, broken or logged out, for the model picker. Loaded at
   // startup and again each time the picker opens, so a fix shows without a restart.
-  const [cliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
+  const [rawCliStatus, setCliStatus] = useState<AgentCliStatus | null>(null);
   // The model lists come along: the main process keeps a good list for the run but asks again for an agent
   // that had none (a CLI that was missing, or Claude Code before it was logged in).
+  const cliStatus = loadedAccountScope === accountScope ? rawCliStatus : null;
   const refreshCliStatus = () => {
+    const generation = ++accountGeneration.current;
+    const live = () => generation === accountGeneration.current && accountScopeRef.current === accountScope;
     // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
     // re-apply anything that depends on the lists.
     void window.milagre
-      .getCliStatus()
-      .then((next) => setCliStatus((previous) => keepIfSame(previous, next)))
+      .getCliStatus(accountScope)
+      .then((next) => {
+        if (live()) {
+          setLoadedAccountScope(accountScope);
+          setCliStatus((previous) => keepIfSame(previous, next));
+        }
+      })
       .catch(() => undefined);
     void window.milagre
-      .getModels()
-      .then((next) => setReported((previous) => keepIfSame(previous, next)))
+      .getModels(accountScope)
+      .then((next) => {
+        if (live()) {
+          setLoadedAccountScope(accountScope);
+          setReported((previous) => keepIfSame(previous, next));
+        }
+      })
       .catch(() => undefined);
   };
   useEffect(() => {
-    refreshCliStatus();
-    return window.milagre.onAccountsChanged?.(refreshCliStatus);
-  }, []);
+    const reset = () => {
+      setReported(null);
+      setCliStatus(null);
+      refreshCliStatus();
+    };
+    reset();
+    const off = window.milagre.onAccountsChanged?.(reset);
+    return () => {
+      accountGeneration.current++;
+      off?.();
+    };
+  }, [accountScope]);
   const capabilities = useMemo(() => capabilitiesFrom(reported), [reported]);
   // The Settings default applies once, when the agents' lists first arrive, if the user hasn't picked a model
   // and the open chat isn't on the other agent. After that a model the agents don't offer only gives way to
@@ -245,14 +273,14 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [updatingCli, setUpdatingCli] = useState<ModelProvider | null>(null);
 
+  const refreshCliStatusRef = useRef(refreshCliStatus);
+  refreshCliStatusRef.current = refreshCliStatus;
   const updateCli = async (provider: ModelProvider) => {
     setUpdatingCli(provider);
     try {
       const result = await window.milagre.updateCli(provider);
-      if (result.status) {
-        setCliStatus((previous) => (previous ? { ...previous, [provider]: result.status! } : previous));
-      }
-      refreshCliStatus();
+      // Updating the CLI is global; read authentication and models for the scope open now.
+      refreshCliStatusRef.current();
       if (result.ok) {
         setNotice(`${cliName(provider)} updated to version ${result.version ?? "latest"} successfully!`);
       } else {
@@ -276,6 +304,8 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  // Which Project the Settings page shows; any recent Project can be picked there, the open one by default.
+  const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -314,22 +344,7 @@ function App() {
     });
   }, []);
 
-  useEffect(() => {
-    const projectPath = project?.path;
-    if (!projectPath) return;
-    let cancelled = false;
-    window.milagre
-      .getProjectImage(projectPath)
-      .then((src) => {
-        if (!cancelled) setProjectImage({ path: projectPath, src });
-      })
-      .catch(() => {
-        if (!cancelled) setProjectImage({ path: projectPath, src: null });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [project?.path]);
+  const projectImage = useProjectImages([project?.path ?? ""]);
 
   async function loadInitialProject() {
     setLoading(true);
@@ -460,7 +475,7 @@ function App() {
   const waitingStepIds = useMemo(() => run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : [])), [run?.approvals]);
   const agentPorts = useAgentPorts();
   const isSending = preparingHere || Boolean(run);
-  const usage = useUsage();
+  const usage = useUsage(accountScope);
   const { chatOrder, showUsageInSidebar, keepAwake, defaultModelId, defaultPermissionMode, notifyOnCompletion, showDockBadge, notifyWhenWaiting } =
     useSettings();
 
@@ -1335,6 +1350,7 @@ function App() {
     setView("canvas");
   });
   const openProjectSettings = useEvent(() => {
+    setSettingsProject(null);
     setSettingsSection("project");
     setView("settings");
   });
@@ -1404,6 +1420,23 @@ function App() {
       }}
     />
   ) : null;
+  if (selectedLink && view === "settings")
+    return (
+      <DotBackground>
+        <div className="flex h-screen gap-3 p-3 pt-10">
+          <SettingsNav
+            showProjectSettings={false}
+            section={settingsSection}
+            onSelectProject={() => {}}
+            onSelect={setSettingsSection}
+            onBack={() => setView("chat")}
+          />
+          <main className="min-w-0 flex-1">
+            <SettingsPanel section={settingsSection} accountScope={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
+          </main>
+        </div>
+      </DotBackground>
+    );
   if (selectedLink)
     return (
       <>
@@ -1439,7 +1472,7 @@ function App() {
           onLinkProject={() => setLinkDialogOpen(true)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
-            setSelectedLink(null);
+            setSettingsSection("project-accounts");
             setView("settings");
           }}
           linkedWork={linkedWork}
@@ -1516,10 +1549,7 @@ function App() {
         icon: "settings",
         detail: current.name,
         keywords: "worktree setup files",
-        run: () => {
-          setSettingsSection("project");
-          setView("settings");
-        },
+        run: openProjectSettings,
       },
     ];
     if (view === "settings") commands.push({ id: "back-to-chat", label: "Back to chat", group: "Actions", icon: "chat", run: () => setView("chat") });
@@ -1671,7 +1701,7 @@ function App() {
               key={project.path}
               fill
               workspaceName={project.name}
-              workspaceImage={projectImage?.path === project.path ? projectImage.src : null}
+              workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
               onOpenProject={openProjectFromSidebar}
@@ -1701,7 +1731,17 @@ function App() {
           </div>
           {view === "settings" && (
             <div className="flex shrink-0 py-3 pl-3">
-              <SettingsNav section={settingsSection} projectName={project.name} onSelect={setSettingsSection} onBack={() => setView("chat")} />
+              <SettingsNav
+                section={settingsSection}
+                project={settingsProject ?? project}
+                current={project}
+                onSelect={setSettingsSection}
+                onSelectProject={(picked) => {
+                  setSettingsProject(picked);
+                  setSettingsSection("project");
+                }}
+                onBack={() => setView("chat")}
+              />
             </div>
           )}
 
@@ -1722,7 +1762,13 @@ function App() {
                     {notice}
                   </NoticeCard>
                 )}
-                <SettingsPanel section={settingsSection} projectPath={project.path} models={models} update={update} />
+                <SettingsPanel
+                  section={settingsSection}
+                  project={settingsProject ?? project}
+                  models={models}
+                  update={update}
+                  onSectionChange={setSettingsSection}
+                />
               </div>
             )}
             {view === "canvas" && (

@@ -63,6 +63,7 @@ const PATHS = Object.freeze({
   // The search names no path; its results are cut down to the folder (filterResult).
   "project:find": none,
   "project:image": ([projectPath]) => [projectPath],
+  "project:set-icon": ([projectPath]) => [projectPath],
   "chat:runs": none,
   "chat:ports": ([chatId]) => [chatProject(chatId)],
   "agent:stop-port": ([chatId]) => [chatProject(chatId)],
@@ -74,25 +75,30 @@ const PATHS = Object.freeze({
   "chat:resume": ([projectPath]) => [projectPath],
   "agent:interrupt": ([chatId]) => [chatProject(chatId)],
   "agent:respond-permission": ([value]) => [chatProject(value?.chatId)],
+  "accounts:scopes": none,
+  "accounts:scope": none,
+  "accounts:assign": none,
   "accounts:list": none,
   "accounts:add": none,
   "accounts:select": none,
   "accounts:login": none,
   "accounts:cancel": none,
   "accounts:remove": none,
-  "usage:read": none,
-  "usage:cached": none,
+  "usage:read": (args) => (args[0] == null ? [] : [args[0]]),
+  "usage:cached": (args) => (args[0] == null ? [] : [args[0]]),
   "agent:answer-question": ([value]) => [chatProject(value?.chatId)],
   "agent:set-permission-mode": ([value]) => [chatProject(value?.chatId)],
-  "agent:models": none,
-  "agent:cli-status": none,
+  "agent:models": (args) => (args[0] == null ? [] : [args[0]]),
+  "agent:cli-status": (args) => (args[0] == null ? [] : [args[0]]),
   "chat:patch": ([projectPath]) => [projectPath],
   "chat:archive-subagent": ([projectPath]) => [projectPath],
   "chat:archive-finished-subagents": ([projectPath]) => [projectPath],
   "worktree:pull-request": ([worktreePath]) => [worktreePath],
   "project:branches": ([projectPath]) => [projectPath],
   "attachment:preview": ([file]) => [attached(file)],
+  // A null Project (user skills only) is refused: confined, the phone sees no user skills.
   "skills:list": ([projectPath]) => [projectPath],
+  "skills:read": ([projectPath, file]) => [projectPath, file],
   "worktree:create": ([value]) => [value?.projectPath],
   "git:diff-files": ([value]) => [value?.cwd],
   "git:diff-file": ([value]) => [value?.cwd],
@@ -142,6 +148,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     if (!paths || !Array.isArray(args)) throw refused();
     // No push device is ever registered, so there is nothing to unregister or focus, and no daemon state to grow.
     if (method === "accounts:list") return { result: { providers: [] } };
+    if (method === "accounts:scopes") return { result: [] };
     if (method.startsWith("accounts:")) throw failure(403, "Accounts cannot be changed on this demo computer.");
     if (method === "push:register") throw failure(403, NOTIFICATIONS_OFF);
     if (method === "push:unregister") return { result: { registered: false } };
@@ -163,6 +170,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
       const kept = await Promise.all(result.skills.map((skill) => skill.scope === "bundled" || (skill.scope === "workspace" && allows(skill.path))));
       return {
         skills: result.skills.filter((_skill, index) => kept[index]).map((skill) => (skill.scope === "bundled" ? { ...skill, path: "" } : skill)),
+        shadowed: [],
         warnings: [],
       };
     }

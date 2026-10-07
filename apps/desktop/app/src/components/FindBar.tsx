@@ -13,7 +13,7 @@ function blockOf(element: Element, cache: Map<Element, Element>): Element {
   const cached = cache.get(element);
   if (cached) return cached;
   let block = element;
-  while (block.parentElement && /^inline/.test(getComputedStyle(block).display)) block = block.parentElement;
+  while (block.parentElement && getComputedStyle(block).display.startsWith("inline")) block = block.parentElement;
   cache.set(element, block);
   return block;
 }
@@ -46,7 +46,10 @@ function collectRanges(root: Element, query: string): Range[] {
     if (!visible.has(parent)) visible.set(parent, parent.checkVisibility?.() ?? true);
     if (!visible.get(parent)) continue;
     const block = blockOf(parent, blocks);
-    if (block !== groupBlock) { flush(); groupBlock = block; }
+    if (block !== groupBlock) {
+      flush();
+      groupBlock = block;
+    }
     group.push(node);
   }
   flush();
@@ -65,7 +68,8 @@ function clear() {
   CSS.highlights.delete(ACTIVE);
 }
 
-const iconButton = "flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40";
+const iconButton =
+  "flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40";
 
 /** Find-in-page for the open chat, scoped to the message list under `rootRef` (highlights via the CSS Custom Highlight API). */
 export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<HTMLElement | null>; focusSignal: number; onClose: () => void }) {
@@ -100,7 +104,10 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
       frame = requestAnimationFrame(() => search(false));
     });
     observer.observe(column, { childList: true, characterData: true, subtree: true });
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [query]);
 
   useEffect(() => {
@@ -111,15 +118,21 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
 
   // Closing returns focus to where it was, usually the composer.
   const returnTo = useRef(document.activeElement);
-  useEffect(() => () => {
-    clear();
-    const target = returnTo.current;
-    const prompt = rootRef.current?.querySelector<HTMLElement>('textarea[aria-label="Prompt"]');
-    (target instanceof HTMLElement && target.isConnected && target !== document.body ? target : prompt)?.focus();
-  }, []);
+  useEffect(
+    () => () => {
+      clear();
+      const target = returnTo.current;
+      const prompt = rootRef.current?.querySelector<HTMLElement>('textarea[aria-label="Prompt"]');
+      (target instanceof HTMLElement && target.isConnected && target !== document.body ? target : prompt)?.focus();
+    },
+    [],
+  );
 
   // Reopening while open selects the text, so a new search replaces the old one.
-  useLayoutEffect(() => { input.current?.focus(); input.current?.select(); }, [focusSignal]);
+  useLayoutEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [focusSignal]);
 
   function step(direction: 1 | -1) {
     if (!total) return;
@@ -145,7 +158,10 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
       className="absolute top-11 right-4 z-20 flex items-center gap-1 rounded-[10px] border border-line bg-surface py-1 pr-1 pl-2.5 shadow-raised [-webkit-app-region:no-drag]"
       style={{ animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") { event.preventDefault(); onClose(); }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        }
       }}
     >
       <input
@@ -153,7 +169,10 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); step(event.shiftKey ? -1 : 1); }
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            step(event.shiftKey ? -1 : 1);
+          }
         }}
         aria-label="Find in chat"
         placeholder="Find in chat"
@@ -161,15 +180,23 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
         autoComplete="off"
         className="w-44 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
       />
-      <span data-find-count aria-live="polite" className="min-w-[4.5rem] text-right text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{findLabel(query, active, total)}</span>
+      <span data-find-count aria-live="polite" className="min-w-[4.5rem] text-right text-[12px] whitespace-nowrap text-ink-3 tabular-nums">
+        {findLabel(query, active, total)}
+      </span>
       <Tooltip label="Previous match" side="bottom" align="end">
-        <button type="button" aria-label="Previous match" disabled={!total} onClick={() => step(-1)} className={iconButton}><HugeiconsIcon icon={ArrowUp01Icon} size={15} strokeWidth={1.8} /></button>
+        <button type="button" aria-label="Previous match" disabled={!total} onClick={() => step(-1)} className={iconButton}>
+          <HugeiconsIcon icon={ArrowUp01Icon} size={15} strokeWidth={1.8} />
+        </button>
       </Tooltip>
       <Tooltip label="Next match" shortcut="⌘G" side="bottom" align="end">
-        <button type="button" aria-label="Next match" disabled={!total} onClick={() => step(1)} className={iconButton}><HugeiconsIcon icon={ArrowDown01Icon} size={15} strokeWidth={1.8} /></button>
+        <button type="button" aria-label="Next match" disabled={!total} onClick={() => step(1)} className={iconButton}>
+          <HugeiconsIcon icon={ArrowDown01Icon} size={15} strokeWidth={1.8} />
+        </button>
       </Tooltip>
       <Tooltip label="Close" side="bottom" align="end">
-        <button type="button" aria-label="Close find" onClick={onClose} className={iconButton}><HugeiconsIcon icon={Cancel01Icon} size={15} strokeWidth={1.8} /></button>
+        <button type="button" aria-label="Close find" onClick={onClose} className={iconButton}>
+          <HugeiconsIcon icon={Cancel01Icon} size={15} strokeWidth={1.8} />
+        </button>
       </Tooltip>
     </div>
   );

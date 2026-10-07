@@ -25,7 +25,12 @@ class CodexRpc extends EventEmitter {
   }
 
   start() {
-    const child = spawnCommand(this.command, this.args, { cwd: this.cwd, env: this.env, stdio: ["pipe", "pipe", "pipe"], detached: true, windowsHide: true }, this.spawnImpl);
+    const child = spawnCommand(
+      this.command,
+      this.args,
+      { cwd: this.cwd, env: this.env, stdio: ["pipe", "pipe", "pipe"], detached: true, windowsHide: true },
+      this.spawnImpl,
+    );
     this.child = child;
     createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
     child.stderr.on("data", (chunk) => {
@@ -62,9 +67,10 @@ class CodexRpc extends EventEmitter {
   handleExit({ code, signal, error }) {
     if (this.exited) return;
     this.exited = true;
-    const detail = error?.code === "ENOENT"
-      ? `${path.basename(String(this.command))} isn't installed or isn't on your PATH.`
-      : error?.message || this.stderr.trim() || `Codex exited with code ${code}${signal ? ` (${signal})` : ""}.`;
+    const detail =
+      error?.code === "ENOENT"
+        ? `${path.basename(String(this.command))} isn't installed or isn't on your PATH.`
+        : error?.message || this.stderr.trim() || `Codex exited with code ${code}${signal ? ` (${signal})` : ""}.`;
     for (const waiter of this.pending.values()) {
       clearTimeout(waiter.timer);
       waiter.reject(new Error(detail));

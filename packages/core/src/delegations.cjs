@@ -56,7 +56,11 @@ function jsonFileStore(file) {
     async load() {
       try {
         const data = JSON.parse(await fs.readFile(file, "utf8"));
-        return { delegations: Array.isArray(data?.delegations) ? data.delegations : [], negotiations: Array.isArray(data?.negotiations) ? data.negotiations : [], grants: Array.isArray(data?.grants) ? data.grants : [] };
+        return {
+          delegations: Array.isArray(data?.delegations) ? data.delegations : [],
+          negotiations: Array.isArray(data?.negotiations) ? data.negotiations : [],
+          grants: Array.isArray(data?.grants) ? data.grants : [],
+        };
       } catch (error) {
         if (error.code === "ENOENT" || error instanceof SyntaxError) return { delegations: [], negotiations: [], grants: [] };
         throw error;
@@ -64,12 +68,14 @@ function jsonFileStore(file) {
     },
     save(data) {
       const text = JSON.stringify(data, null, 2);
-      queue = queue.catch(() => {}).then(async () => {
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        const temporary = `${file}.${process.pid}.${++counter}.tmp`;
-        await fs.writeFile(temporary, text);
-        await fs.rename(temporary, file);
-      });
+      queue = queue
+        .catch(() => {})
+        .then(async () => {
+          await fs.mkdir(path.dirname(file), { recursive: true });
+          const temporary = `${file}.${process.pid}.${++counter}.tmp`;
+          await fs.writeFile(temporary, text);
+          await fs.rename(temporary, file);
+        });
       return queue;
     },
   };
@@ -102,8 +108,8 @@ class Delegations {
     this.endedTurns = new Map();
     this.pumping = new Set();
     this.ready = store.load().then((data) => {
-      const delegations = data.delegations.filter(item => OPEN.has(item.status));
-      const negotiations = data.negotiations.filter(item => item.status === "running");
+      const delegations = data.delegations.filter((item) => OPEN.has(item.status));
+      const negotiations = data.negotiations.filter((item) => item.status === "running");
       for (const delegation of delegations) delegation.status = "cancelled";
       for (const negotiation of negotiations) negotiation.status = "stopped";
       this.data = data;
@@ -113,8 +119,23 @@ class Delegations {
 
   snapshot() {
     return {
-      delegations: this.data.delegations.filter(item => OPEN.has(item.status)).map(({ id, link_id, from_chat, to_chat, from_label, to_label, status, negotiation_id, round, message }) => ({ id, link_id, from_chat, to_chat, from_label, to_label, status, negotiation_id, round, message: clip(message, 120) })),
-      negotiations: this.data.negotiations.filter(item => item.status === "running").map(({ id, link_id, chats, labels, round }) => ({ id, link_id, chats, labels, round })),
+      delegations: this.data.delegations
+        .filter((item) => OPEN.has(item.status))
+        .map(({ id, link_id, from_chat, to_chat, from_label, to_label, status, negotiation_id, round, message }) => ({
+          id,
+          link_id,
+          from_chat,
+          to_chat,
+          from_label,
+          to_label,
+          status,
+          negotiation_id,
+          round,
+          message: clip(message, 120),
+        })),
+      negotiations: this.data.negotiations
+        .filter((item) => item.status === "running")
+        .map(({ id, link_id, chats, labels, round }) => ({ id, link_id, chats, labels, round })),
     };
   }
 
@@ -122,38 +143,48 @@ class Delegations {
   openBetween(worktreeA, worktreeB) {
     const between = (a, b) => (a === worktreeA && b === worktreeB) || (a === worktreeB && b === worktreeA);
     return [
-      ...this.data.negotiations.filter(item => item.status === "running" && between(...item.worktrees)).map(item => `Negotiation between ${item.labels[0]} and ${item.labels[1]}, round ${item.round} of ${NEGOTIATION_ROUNDS}`),
-      ...this.data.delegations.filter(item => OPEN.has(item.status) && between(item.from_worktree, item.to_worktree)).map(item => `Delegation ${item.status} from ${item.from_label} to ${item.to_label}: "${clip(item.message, 120)}"`),
+      ...this.data.negotiations
+        .filter((item) => item.status === "running" && between(...item.worktrees))
+        .map((item) => `Negotiation between ${item.labels[0]} and ${item.labels[1]}, round ${item.round} of ${NEGOTIATION_ROUNDS}`),
+      ...this.data.delegations
+        .filter((item) => OPEN.has(item.status) && between(item.from_worktree, item.to_worktree))
+        .map((item) => `Delegation ${item.status} from ${item.from_label} to ${item.to_label}: "${clip(item.message, 120)}"`),
     ];
   }
 
   persist() {
     // Closed records beyond the latest KEEP are dropped; open ones always stay.
     const trim = (items, open) => items.filter((item, index) => open(item) || index >= items.length - KEEP);
-    this.data.delegations = trim(this.data.delegations, item => OPEN.has(item.status));
-    this.data.negotiations = trim(this.data.negotiations, item => item.status === "running");
+    this.data.delegations = trim(this.data.delegations, (item) => OPEN.has(item.status));
+    this.data.negotiations = trim(this.data.negotiations, (item) => item.status === "running");
     this.ports.changed(this.snapshot());
-    return this.store.save(this.data).catch(error => console.warn("Milagre couldn't save Delegations:", error.message));
+    return this.store.save(this.data).catch((error) => console.warn("Milagre couldn't save Delegations:", error.message));
   }
 
   /** The `delegate` tool. Resolves to what the requesting agent is told; refusals throw. */
   async delegate(fromChat, { worktree, chat, message, negotiation = false }) {
     await this.ready;
-    const current = this.data.negotiations.find(item => item.status === "running" && item.chats.includes(fromChat) && item.chats.includes(chat));
+    const current = this.data.negotiations.find((item) => item.status === "running" && item.chats.includes(fromChat) && item.chats.includes(chat));
     if (current) return this.nextRound(fromChat, current, message);
-    if (negotiation && this.holding(fromChat, ({ item }) => item.kind === "delegation")) throw new Error("Only the requesting side can open a Negotiation, and this turn is handling a Delegation. Give your answer in your final reply; it goes back as the Delegation report.");
+    if (negotiation && this.holding(fromChat, ({ item }) => item.kind === "delegation"))
+      throw new Error(
+        "Only the requesting side can open a Negotiation, and this turn is handling a Delegation. Give your answer in your final reply; it goes back as the Delegation report.",
+      );
     if (this.holding(fromChat, ({ item }) => item.kind === "delegation" && !item.negotiationId)) {
-      throw new Error(negotiation
-        ? "Only the requesting side can open a Negotiation, and this turn is handling a Delegation. Give your answer in your final reply; it goes back as the Delegation report."
-        : "This turn is handling a Delegation, so it can't make one. Finish the request; your final reply goes back as the Delegation report.");
+      throw new Error(
+        negotiation
+          ? "Only the requesting side can open a Negotiation, and this turn is handling a Delegation. Give your answer in your final reply; it goes back as the Delegation report."
+          : "This turn is handling a Delegation, so it can't make one. Finish the request; your final reply goes back as the Delegation report.",
+      );
     }
     const target = await this.ports.target(fromChat, worktree);
     if (!target) throw new Error("That Worktree isn't linked to this Chat. Use linked_overview to see the ones that are.");
     let toLabel = `${target.projectName} / ${target.branch} / a new Chat`;
     if (chat !== "new") {
       const info = await this.ports.chat(chat);
-      if (!info || info.worktreePath !== worktree) throw new Error("That Chat isn't in the Worktree you named. Pick a Chat ref from linked_overview, or \"new\".");
-      if (info.archived) throw new Error("That Chat is archived and can't receive a Delegation. Pick another one, or \"new\".");
+      if (!info || info.worktreePath !== worktree)
+        throw new Error('That Chat isn\'t in the Worktree you named. Pick a Chat ref from linked_overview, or "new".');
+      if (info.archived) throw new Error('That Chat is archived and can\'t receive a Delegation. Pick another one, or "new".');
       toLabel = info.label;
     }
     const from = await this.ports.chat(fromChat);
@@ -161,9 +192,31 @@ class Delegations {
     if (decision === "deny") throw new Error("The user denied this Delegation. Don't send it again unless they ask.");
     if (decision === "cancelled") throw new Error("The approval card closed before the user answered, so nothing was sent.");
     const toChat = chat === "new" ? await this.ports.openChat(target.projectPath, worktree) : chat;
-    const record = negotiation ? { id: this.id(), link_id: target.link_id, chats: [fromChat, toChat], labels: [from.label, toLabel], worktrees: [from.worktreePath, worktree], round: 0, status: "running", awaiting: toChat, move: false } : null;
+    const record = negotiation
+      ? {
+          id: this.id(),
+          link_id: target.link_id,
+          chats: [fromChat, toChat],
+          labels: [from.label, toLabel],
+          worktrees: [from.worktreePath, worktree],
+          round: 0,
+          status: "running",
+          awaiting: toChat,
+          move: false,
+        }
+      : null;
     if (record) this.data.negotiations.push(record);
-    const delegation = this.record({ link_id: target.link_id, from_chat: fromChat, from_label: from.label, from_worktree: from.worktreePath, to_chat: toChat, to_label: toLabel, to_worktree: worktree, message, ...(record ? { negotiation_id: record.id, round: 1 } : {}) });
+    const delegation = this.record({
+      link_id: target.link_id,
+      from_chat: fromChat,
+      from_label: from.label,
+      from_worktree: from.worktreePath,
+      to_chat: toChat,
+      to_label: toLabel,
+      to_worktree: worktree,
+      message,
+      ...(record ? { negotiation_id: record.id, round: 1 } : {}),
+    });
     await this.enqueue(toChat, this.delegationItem(delegation));
     return record
       ? `Negotiation opened with ${toLabel} (up to ${NEGOTIATION_ROUNDS} rounds). Their Delegation report starts your next move; end your turn now.`
@@ -174,9 +227,11 @@ class Delegations {
   async nextRound(fromChat, negotiation, message) {
     const mine = negotiation.chats.indexOf(fromChat);
     if (negotiation.awaiting !== fromChat || !negotiation.move) {
-      throw new Error(negotiation.awaiting === fromChat
-        ? "Give your answer in your final reply: it goes back as your Delegation report in this Negotiation."
-        : `It's ${negotiation.labels[1 - mine]}'s turn in this Negotiation. End your turn; their report starts your next move.`);
+      throw new Error(
+        negotiation.awaiting === fromChat
+          ? "Give your answer in your final reply: it goes back as your Delegation report in this Negotiation."
+          : `It's ${negotiation.labels[1 - mine]}'s turn in this Negotiation. End your turn; their report starts your next move.`,
+      );
     }
     if (negotiation.round >= NEGOTIATION_ROUNDS) {
       await this.end(negotiation, "capped");
@@ -184,7 +239,18 @@ class Delegations {
     }
     const other = negotiation.chats[1 - mine];
     Object.assign(negotiation, { awaiting: other, move: false });
-    const delegation = this.record({ link_id: negotiation.link_id, from_chat: fromChat, from_label: negotiation.labels[mine], from_worktree: negotiation.worktrees[mine], to_chat: other, to_label: negotiation.labels[1 - mine], to_worktree: negotiation.worktrees[1 - mine], message, negotiation_id: negotiation.id, round: negotiation.round + 1 });
+    const delegation = this.record({
+      link_id: negotiation.link_id,
+      from_chat: fromChat,
+      from_label: negotiation.labels[mine],
+      from_worktree: negotiation.worktrees[mine],
+      to_chat: other,
+      to_label: negotiation.labels[1 - mine],
+      to_worktree: negotiation.worktrees[1 - mine],
+      message,
+      negotiation_id: negotiation.id,
+      round: negotiation.round + 1,
+    });
     await this.enqueue(other, this.delegationItem(delegation));
     return `Round ${delegation.round} sent to ${delegation.to_label}. Their report starts your next move; end your turn now.`;
   }
@@ -192,7 +258,9 @@ class Delegations {
   /** The `conclude_negotiation` tool: a turn that took one of the Negotiation's rounds or reports may conclude it. */
   async conclude(fromChat, summary) {
     await this.ready;
-    const negotiation = this.data.negotiations.find(item => item.status === "running" && this.holding(fromChat, ({ item: held }) => held.negotiationId === item.id));
+    const negotiation = this.data.negotiations.find(
+      (item) => item.status === "running" && this.holding(fromChat, ({ item: held }) => held.negotiationId === item.id),
+    );
     if (!negotiation) throw new Error("This turn doesn't belong to a running Negotiation.");
     await this.end(negotiation, "concluded", { summary, by: fromChat });
     return "Negotiation concluded. The agreement is posted in both Chats.";
@@ -239,7 +307,13 @@ class Delegations {
       negotiationId: delegation.negotiation_id,
       body: delegation.message,
       prompt: delegationPrompt(delegation),
-      context: { kind: "delegation", delegationId: delegation.id, from: delegation.from_chat, fromLabel: delegation.from_label, ...(delegation.negotiation_id ? { negotiation: { id: delegation.negotiation_id, round: delegation.round } } : {}) },
+      context: {
+        kind: "delegation",
+        delegationId: delegation.id,
+        from: delegation.from_chat,
+        fromLabel: delegation.from_label,
+        ...(delegation.negotiation_id ? { negotiation: { id: delegation.negotiation_id, round: delegation.round } } : {}),
+      },
     };
   }
 
@@ -273,8 +347,8 @@ class Delegations {
   }
 
   async start(chatKey, item) {
-    const delegation = item.kind === "delegation" ? this.data.delegations.find(entry => entry.id === item.delegationId) : null;
-    const negotiation = item.negotiationId ? this.data.negotiations.find(entry => entry.id === item.negotiationId) : null;
+    const delegation = item.kind === "delegation" ? this.data.delegations.find((entry) => entry.id === item.delegationId) : null;
+    const negotiation = item.negotiationId ? this.data.negotiations.find((entry) => entry.id === item.negotiationId) : null;
     if ((delegation && delegation.status !== "queued") || (negotiation && negotiation.status !== "running")) return;
     if (delegation) {
       delegation.status = "running";
@@ -291,18 +365,26 @@ class Delegations {
     // The turn that takes it may start long after (a new Worktree's setup runs first); the queue moves on.
     const entry = { item, turnId: undefined, steered: false };
     this.entries(chatKey).push(entry);
-    void Promise.resolve(started).then(result => this.attach(chatKey, entry, result), () => this.attach(chatKey, entry, null))
-      .catch(error => console.warn("Milagre couldn't follow a Delegation:", error.message));
+    void Promise.resolve(started)
+      .then(
+        (result) => this.attach(chatKey, entry, result),
+        () => this.attach(chatKey, entry, null),
+      )
+      .catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
   }
 
   async attach(chatKey, entry, result) {
     if (!result?.turnId) {
       this.remove(chatKey, entry);
-      await this.undelivered(entry.item, result?.cancelled ? "cancelled" : "failed", result?.cancelled ? "it was stopped before its turn started" : "its turn didn't start");
+      await this.undelivered(
+        entry.item,
+        result?.cancelled ? "cancelled" : "failed",
+        result?.cancelled ? "it was stopped before its turn started" : "its turn didn't start",
+      );
       return;
     }
     entry.steered = Boolean(result.steered);
-    const ended = this.endedTurns.get(chatKey)?.find(turn => turn.turnId === result.turnId);
+    const ended = this.endedTurns.get(chatKey)?.find((turn) => turn.turnId === result.turnId);
     if (!ended) entry.turnId = result.turnId;
     // A steer into a turn that already ended runs in the next one; a turn started for it that already ended handled it.
     else if (entry.steered) entry.turnId = null;
@@ -318,12 +400,15 @@ class Delegations {
   }
 
   async undelivered(item, status, problem) {
-    const delegation = item.kind === "delegation" ? this.data.delegations.find(entry => entry.id === item.delegationId) : null;
-    const negotiation = item.negotiationId ? this.data.negotiations.find(entry => entry.id === item.negotiationId) : null;
+    const delegation = item.kind === "delegation" ? this.data.delegations.find((entry) => entry.id === item.delegationId) : null;
+    const negotiation = item.negotiationId ? this.data.negotiations.find((entry) => entry.id === item.negotiationId) : null;
     if (delegation) {
       delegation.status = status;
       await this.persist();
-      await this.ports.note(delegation.from_chat, { body: `Couldn't deliver the Delegation to ${delegation.to_label}: ${problem}.`, context: { kind: "delegation-report", delegationId: delegation.id, from: delegation.to_chat, fromLabel: delegation.to_label, status } });
+      await this.ports.note(delegation.from_chat, {
+        body: `Couldn't deliver the Delegation to ${delegation.to_label}: ${problem}.`,
+        context: { kind: "delegation-report", delegationId: delegation.id, from: delegation.to_chat, fromLabel: delegation.to_label, status },
+      });
     }
     if (negotiation) await this.end(negotiation, "stopped", { reason: "a message couldn't be delivered" });
   }
@@ -334,7 +419,7 @@ class Delegations {
     if (event.type === "turn-started") {
       this.currentTurn.set(chatKey, event.turnId);
       const settling = this.settling.get(chatKey) ?? [];
-      for (const held of settling.filter(item => event.continues && item.from === event.continues)) {
+      for (const held of settling.filter((item) => event.continues && item.from === event.continues)) {
         clearTimeout(held.timer);
         settling.splice(settling.indexOf(held), 1);
         this.entries(chatKey).push(Object.assign(held.entry, { turnId: event.turnId }));
@@ -352,29 +437,41 @@ class Delegations {
     this.currentTurn.delete(chatKey);
     this.endedTurns.set(chatKey, [...(this.endedTurns.get(chatKey) ?? []), { turnId, outcome }].slice(-RECENT_TURNS));
     const entries = this.entries(chatKey);
-    const handled = turnId ? entries.filter(entry => entry.turnId === turnId) : [];
+    const handled = turnId ? entries.filter((entry) => entry.turnId === turnId) : [];
     for (const entry of handled) entries.splice(entries.indexOf(entry), 1);
-    for (const entry of handled.filter(item => item.steered)) {
+    for (const entry of handled.filter((item) => item.steered)) {
       const held = { entry, from: turnId, outcome };
       held.timer = setTimeout(() => {
         const settling = this.settling.get(chatKey);
         settling.splice(settling.indexOf(held), 1);
-        void this.handle(chatKey, [entry], outcome).then(() => this.pump(chatKey)).catch(error => console.warn("Milagre couldn't follow a Delegation:", error.message));
+        void this.handle(chatKey, [entry], outcome)
+          .then(() => this.pump(chatKey))
+          .catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
       }, STEER_GRACE_MS);
       held.timer.unref?.();
       this.settling.set(chatKey, [...(this.settling.get(chatKey) ?? []), held]);
     }
-    await this.handle(chatKey, handled.filter(item => !item.steered), outcome);
+    await this.handle(
+      chatKey,
+      handled.filter((item) => !item.steered),
+      outcome,
+    );
     await this.pump(chatKey);
   }
 
   // The turn that took these items ended: Delegations report, and a requesting side that let its move go ends its Negotiation.
   async handle(chatKey, entries, outcome) {
     for (const { item } of entries) {
-      if (item.kind === "delegation") await this.finish(this.data.delegations.find(entry => entry.id === item.delegationId), outcome);
-      const negotiation = item.kind === "report" ? this.data.negotiations.find(entry => entry.id === item.negotiationId) : null;
+      if (item.kind === "delegation")
+        await this.finish(
+          this.data.delegations.find((entry) => entry.id === item.delegationId),
+          outcome,
+        );
+      const negotiation = item.kind === "report" ? this.data.negotiations.find((entry) => entry.id === item.negotiationId) : null;
       if (negotiation?.status === "running" && negotiation.awaiting === chatKey && negotiation.move) {
-        await this.end(negotiation, "stopped", { reason: `${negotiation.labels[negotiation.chats.indexOf(chatKey)]} ended a turn without another round or a conclusion` });
+        await this.end(negotiation, "stopped", {
+          reason: `${negotiation.labels[negotiation.chats.indexOf(chatKey)]} ended a turn without another round or a conclusion`,
+        });
       }
     }
   }
@@ -383,14 +480,21 @@ class Delegations {
     if (delegation?.status !== "running") return;
     delegation.status = outcome;
     const reply = await this.ports.reply(delegation.to_chat, delegation.id);
-    const negotiation = delegation.negotiation_id ? this.data.negotiations.find(entry => entry.id === delegation.negotiation_id) : null;
+    const negotiation = delegation.negotiation_id ? this.data.negotiations.find((entry) => entry.id === delegation.negotiation_id) : null;
     const context = { kind: "delegation-report", delegationId: delegation.id, from: delegation.to_chat, fromLabel: delegation.to_label, status: outcome };
     if (negotiation?.status === "running" && outcome === "done") {
       Object.assign(negotiation, { awaiting: delegation.from_chat, move: true });
-      await this.enqueue(delegation.from_chat, { kind: "report", negotiationId: negotiation.id, body: reply || "The receiving agent finished without a reply.", prompt: reportPrompt(delegation, reply), context: { ...context, negotiation: { id: negotiation.id, round: delegation.round } } });
+      await this.enqueue(delegation.from_chat, {
+        kind: "report",
+        negotiationId: negotiation.id,
+        body: reply || "The receiving agent finished without a reply.",
+        prompt: reportPrompt(delegation, reply),
+        context: { ...context, negotiation: { id: negotiation.id, round: delegation.round } },
+      });
       return;
     }
-    if (negotiation?.status === "running") await this.end(negotiation, "stopped", { reason: `round ${delegation.round} ${outcome === "cancelled" ? "was stopped" : "failed"}` });
+    if (negotiation?.status === "running")
+      await this.end(negotiation, "stopped", { reason: `round ${delegation.round} ${outcome === "cancelled" ? "was stopped" : "failed"}` });
     await this.persist();
     await this.ports.note(delegation.from_chat, { body: reportBody(outcome, reply), context });
   }
@@ -399,38 +503,57 @@ class Delegations {
   async end(negotiation, status, { summary, by, reason } = {}) {
     if (negotiation.status !== "running") return;
     Object.assign(negotiation, { status, ...(summary ? { summary } : {}) });
-    this.dropQueued(item => item.negotiationId === negotiation.id);
-    for (const delegation of this.data.delegations) if (delegation.negotiation_id === negotiation.id && delegation.status === "queued") delegation.status = "cancelled";
+    this.dropQueued((item) => item.negotiationId === negotiation.id);
+    for (const delegation of this.data.delegations)
+      if (delegation.negotiation_id === negotiation.id && delegation.status === "queued") delegation.status = "cancelled";
     await this.persist();
     await this.tellBoth(negotiation, status, { summary, by, reason });
   }
 
   tellBoth(negotiation, status, { summary, by, reason }) {
-    return Promise.all(negotiation.chats.map((chatKey, index) => {
-      const other = negotiation.labels[1 - index];
-      const body = status === "concluded"
-        ? summary
-        : status === "capped"
-          ? `The Negotiation with ${other} reached ${NEGOTIATION_ROUNDS} rounds without an agreement and stopped. Step in to settle it.`
-          : `The Negotiation with ${other} stopped: ${reason ?? "stopped by the user"}.`;
-      return this.ports.note(chatKey, { body, context: { kind: status === "concluded" ? "negotiation-agreement" : "linked-notice", negotiationId: negotiation.id, with: other, ...(by ? { by } : {}) } });
-    }));
+    return Promise.all(
+      negotiation.chats.map((chatKey, index) => {
+        const other = negotiation.labels[1 - index];
+        const body =
+          status === "concluded"
+            ? summary
+            : status === "capped"
+              ? `The Negotiation with ${other} reached ${NEGOTIATION_ROUNDS} rounds without an agreement and stopped. Step in to settle it.`
+              : `The Negotiation with ${other} stopped: ${reason ?? "stopped by the user"}.`;
+        return this.ports.note(chatKey, {
+          body,
+          context: {
+            kind: status === "concluded" ? "negotiation-agreement" : "linked-notice",
+            negotiationId: negotiation.id,
+            with: other,
+            ...(by ? { by } : {}),
+          },
+        });
+      }),
+    );
   }
 
   async noteInterrupted(delegations, negotiations) {
     await this.persist();
-    const notes = delegations.map(delegation => this.ports.note(delegation.from_chat, {
-      body: `Milagre restarted before ${delegation.to_label} finished this Delegation, so it was cancelled: "${clip(delegation.message, 120)}"`,
-      context: { kind: "delegation-report", delegationId: delegation.id, from: delegation.to_chat, fromLabel: delegation.to_label, status: "cancelled" },
-    }));
-    const results = await Promise.allSettled([...notes, ...negotiations.map(negotiation => this.tellBoth(negotiation, "stopped", { reason: "Milagre restarted" }))]);
+    const notes = delegations.map((delegation) =>
+      this.ports.note(delegation.from_chat, {
+        body: `Milagre restarted before ${delegation.to_label} finished this Delegation, so it was cancelled: "${clip(delegation.message, 120)}"`,
+        context: { kind: "delegation-report", delegationId: delegation.id, from: delegation.to_chat, fromLabel: delegation.to_label, status: "cancelled" },
+      }),
+    );
+    const results = await Promise.allSettled([
+      ...notes,
+      ...negotiations.map((negotiation) => this.tellBoth(negotiation, "stopped", { reason: "Milagre restarted" })),
+    ]);
     for (const result of results) if (result.status === "rejected") console.warn("Milagre couldn't post a Delegation notice:", result.reason?.message);
   }
 
   /** Stop pressed in a Chat or on the canvas: its running Negotiations stop. */
   async stop({ chatKey, negotiationId }) {
     await this.ready;
-    for (const negotiation of this.data.negotiations.filter(item => item.status === "running" && (item.id === negotiationId || item.chats.includes(chatKey)))) {
+    for (const negotiation of this.data.negotiations.filter(
+      (item) => item.status === "running" && (item.id === negotiationId || item.chats.includes(chatKey)),
+    )) {
       await this.end(negotiation, "stopped", { reason: "stopped by the user" });
     }
   }
@@ -446,21 +569,24 @@ class Delegations {
       if (still) record.link_id = still.link_id;
       return Boolean(still);
     };
-    for (const negotiation of this.data.negotiations.filter(item => item.link_id === linkId && item.status === "running")) {
-      if (!(await relink(negotiation, negotiation.chats[0], negotiation.worktrees[1]))) await this.end(negotiation, "stopped", { reason: "its Link was removed" });
+    for (const negotiation of this.data.negotiations.filter((item) => item.link_id === linkId && item.status === "running")) {
+      if (!(await relink(negotiation, negotiation.chats[0], negotiation.worktrees[1])))
+        await this.end(negotiation, "stopped", { reason: "its Link was removed" });
     }
     const cancelled = [];
-    for (const delegation of this.data.delegations.filter(item => item.link_id === linkId && item.status === "queued")) {
+    for (const delegation of this.data.delegations.filter((item) => item.link_id === linkId && item.status === "queued")) {
       if (!(await relink(delegation, delegation.from_chat, delegation.to_worktree))) cancelled.push(delegation);
     }
-    this.dropQueued(item => cancelled.some(delegation => delegation.id === item.delegationId));
+    this.dropQueued((item) => cancelled.some((delegation) => delegation.id === item.delegationId));
     for (const delegation of cancelled) delegation.status = "cancelled";
     await this.persist();
-    await Promise.all(cancelled.flatMap((delegation) => {
-      const body = `The Link between ${delegation.from_label} and ${delegation.to_label} was removed, so this Delegation was cancelled before delivery: "${clip(delegation.message, 120)}"`;
-      const context = { kind: "linked-notice", delegationId: delegation.id };
-      return [this.ports.note(delegation.from_chat, { body, context }), this.ports.note(delegation.to_chat, { body, context })];
-    }));
+    await Promise.all(
+      cancelled.flatMap((delegation) => {
+        const body = `The Link between ${delegation.from_label} and ${delegation.to_label} was removed, so this Delegation was cancelled before delivery: "${clip(delegation.message, 120)}"`;
+        const context = { kind: "linked-notice", delegationId: delegation.id };
+        return [this.ports.note(delegation.from_chat, { body, context }), this.ports.note(delegation.to_chat, { body, context })];
+      }),
+    );
   }
 }
 

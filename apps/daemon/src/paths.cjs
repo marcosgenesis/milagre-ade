@@ -1,14 +1,14 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { createHash } = require('node:crypto');
+const fs = require("node:fs");
+const path = require("node:path");
+const { createHash } = require("node:crypto");
 
 function socketPath(dataDir) {
-  if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new Error('Pass an absolute --data-dir');
+  if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) throw new Error("Pass an absolute --data-dir");
   const real = fs.realpathSync(dataDir);
-  const digest = createHash('sha256').update(real).digest('hex').slice(0, 24);
-  if (process.platform === 'win32') return `\\\\.\\pipe\\milagre-${digest}`;
+  const digest = createHash("sha256").update(real).digest("hex").slice(0, 24);
+  if (process.platform === "win32") return `\\\\.\\pipe\\milagre-${digest}`;
   // Unix sockets have a short path limit; a userData path may exceed it on macOS.
-  return path.join('/tmp', `milagre-${process.getuid()}`, `${digest}.sock`);
+  return path.join("/tmp", `milagre-${process.getuid()}`, `${digest}.sock`);
 }
 function prepareSocketDirectory(socket) {
   if (process.platform === "win32") return;

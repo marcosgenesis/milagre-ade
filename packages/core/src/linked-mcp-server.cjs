@@ -15,8 +15,14 @@ function createLinkedMcpServer({ toolsFor }) {
 
   const server = http.createServer((request, response) => {
     const chatId = tokens.get(/^\/mcp\/([a-f0-9]+)$/.exec(request.url ?? "")?.[1]);
-    if (!chatId) { response.writeHead(404).end(); return; }
-    if (request.method !== "POST") { response.writeHead(405, { allow: "POST" }).end(); return; }
+    if (!chatId) {
+      response.writeHead(404).end();
+      return;
+    }
+    if (request.method !== "POST") {
+      response.writeHead(405, { allow: "POST" }).end();
+      return;
+    }
     let body = "";
     request.setEncoding("utf8");
     request.on("data", (chunk) => {
@@ -25,13 +31,21 @@ function createLinkedMcpServer({ toolsFor }) {
     });
     request.on("end", () => {
       let message;
-      try { message = JSON.parse(body); } catch { reply(response, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }); return; }
+      try {
+        message = JSON.parse(body);
+      } catch {
+        reply(response, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+        return;
+      }
       const messages = Array.isArray(message) ? message : [message];
-      Promise.all(messages.map(item => answer(chatId, item))).then((answers) => {
-        const replies = answers.filter(Boolean);
-        if (!replies.length) response.writeHead(202).end();
-        else reply(response, Array.isArray(message) ? replies : replies[0]);
-      }, (error) => reply(response, { jsonrpc: "2.0", id: null, error: { code: -32603, message: error.message } }));
+      Promise.all(messages.map((item) => answer(chatId, item))).then(
+        (answers) => {
+          const replies = answers.filter(Boolean);
+          if (!replies.length) response.writeHead(202).end();
+          else reply(response, Array.isArray(message) ? replies : replies[0]);
+        },
+        (error) => reply(response, { jsonrpc: "2.0", id: null, error: { code: -32603, message: error.message } }),
+      );
     });
   });
 
@@ -45,13 +59,24 @@ function createLinkedMcpServer({ toolsFor }) {
     const tools = toolsFor(chatId);
     switch (message.method) {
       case "initialize":
-        return ok({ protocolVersion: message.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "milagre", version: "1" } });
+        return ok({
+          protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: "milagre", version: "1" },
+        });
       case "ping":
         return ok({});
       case "tools/list":
-        return ok({ tools: tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: inputSchema(tool), annotations: { readOnlyHint: tool.readOnly } })) });
+        return ok({
+          tools: tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: inputSchema(tool),
+            annotations: { readOnlyHint: tool.readOnly },
+          })),
+        });
       case "tools/call": {
-        const tool = tools.find(item => item.name === message.params?.name);
+        const tool = tools.find((item) => item.name === message.params?.name);
         if (!tool) return ok({ content: [{ type: "text", text: `Unknown tool: ${message.params?.name}` }], isError: true });
         const { text, isError } = await runTool(tool, message.params?.arguments);
         return ok({ content: [{ type: "text", text }], isError });
@@ -68,7 +93,10 @@ function createLinkedMcpServer({ toolsFor }) {
       listening ??= new Promise((resolve, reject) => {
         server.once("error", reject);
         server.listen(0, "127.0.0.1", () => resolve(server.address().port));
-      }).catch((error) => { listening = null; throw error; });
+      }).catch((error) => {
+        listening = null;
+        throw error;
+      });
       const port = await listening;
       if (!chats.has(chatId)) {
         const token = randomBytes(24).toString("hex");
@@ -80,7 +108,7 @@ function createLinkedMcpServer({ toolsFor }) {
     close() {
       if (!listening) return Promise.resolve();
       server.closeAllConnections();
-      return new Promise(resolve => server.close(() => resolve()));
+      return new Promise((resolve) => server.close(() => resolve()));
     },
   };
 }

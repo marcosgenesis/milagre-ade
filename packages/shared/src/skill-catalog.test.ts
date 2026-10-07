@@ -3,7 +3,13 @@ import test from "node:test";
 import { filterSkills, groupSkills, shadowedBy, shortenHome, skillBody, skillProviderLabel } from "./skill-catalog.ts";
 import type { SkillOption } from "./model.ts";
 
-const skill = (name: string, scope: SkillOption["scope"], provider: string, description = "Use this skill"): SkillOption => ({ name, description, scope, provider, path: `/p/${scope}/${provider}/${name}/SKILL.md` });
+const skill = (name: string, scope: SkillOption["scope"], provider: string, description = "Use this skill"): SkillOption => ({
+  name,
+  description,
+  scope,
+  provider,
+  path: `/p/${scope}/${provider}/${name}/SKILL.md`,
+});
 const skills = [
   skill("review", "workspace", "claude", "Review the diff"),
   skill("ship", "workspace", "agents", "Open a PR"),
@@ -13,21 +19,43 @@ const skills = [
 
 test("search matches name or description, case-insensitively", () => {
   const all = { scope: "all" as const, provider: "all" };
-  assert.deepEqual(filterSkills(skills, { ...all, query: "REVIEW" }).map((item) => item.name), ["review"]);
-  assert.deepEqual(filterSkills(skills, { ...all, query: " release " }).map((item) => item.name), ["notes"]);
+  assert.deepEqual(
+    filterSkills(skills, { ...all, query: "REVIEW" }).map((item) => item.name),
+    ["review"],
+  );
+  assert.deepEqual(
+    filterSkills(skills, { ...all, query: " release " }).map((item) => item.name),
+    ["notes"],
+  );
   assert.equal(filterSkills(skills, { ...all, query: "" }).length, 4);
 });
 
 test("scope, provider and search narrow together", () => {
-  assert.deepEqual(filterSkills(skills, { query: "", scope: "workspace", provider: "all" }).map((item) => item.name), ["review", "ship"]);
-  assert.deepEqual(filterSkills(skills, { query: "", scope: "workspace", provider: "agents" }).map((item) => item.name), ["ship"]);
+  assert.deepEqual(
+    filterSkills(skills, { query: "", scope: "workspace", provider: "all" }).map((item) => item.name),
+    ["review", "ship"],
+  );
+  assert.deepEqual(
+    filterSkills(skills, { query: "", scope: "workspace", provider: "agents" }).map((item) => item.name),
+    ["ship"],
+  );
   assert.deepEqual(filterSkills(skills, { query: "review", scope: "workspace", provider: "agents" }), []);
   assert.deepEqual(filterSkills(skills, { query: "", scope: "user", provider: "claude" }), []);
 });
 
 test("groups follow Project, User, Built-in order and drop empty groups", () => {
-  assert.deepEqual(groupSkills(skills).map((group) => [group.label, group.skills.length]), [["Project", 2], ["User", 1], ["Built-in", 1]]);
-  assert.deepEqual(groupSkills(skills.filter((item) => item.scope === "user")).map((group) => group.label), ["User"]);
+  assert.deepEqual(
+    groupSkills(skills).map((group) => [group.label, group.skills.length]),
+    [
+      ["Project", 2],
+      ["User", 1],
+      ["Built-in", 1],
+    ],
+  );
+  assert.deepEqual(
+    groupSkills(skills.filter((item) => item.scope === "user")).map((group) => group.label),
+    ["User"],
+  );
 });
 
 test("a winner lists only the skills it hides", () => {

@@ -42,4 +42,10 @@ export function runStatus(run: AgentRun | undefined): "idle" | "working" | "wait
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
 export function applyAgentEvent<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent<T>;
 export function splitRunForSteer<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent<T>;
-export function recordAnswers<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: T; runs: AgentRuns; messageId: number | null };
+export function recordAnswers<T extends TranscriptState>(
+  state: T,
+  runs: AgentRuns,
+  projectPath: string,
+  chatId: string,
+  body: string,
+): { state: T; runs: AgentRuns; messageId: number | null };

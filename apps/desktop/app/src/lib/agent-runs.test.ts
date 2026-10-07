@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, CoordinatorState, ModelOption, PermissionRequest, QuestionRequest } from "../model";
-import { chatKey, chatsAskingUser, chatsRunning, chatsWaitingForUser, clearAnswered, markAnswered, modelForChat, sentDecision, sentReply } from "./agent-runs.ts";
+import {
+  chatKey,
+  chatsAskingUser,
+  chatsRunning,
+  chatsWaitingForUser,
+  clearAnswered,
+  markAnswered,
+  modelForChat,
+  sentDecision,
+  sentReply,
+} from "./agent-runs.ts";
 import type { AgentRuns } from "./agent-runs.ts";
 // Runs are set up with the reducer the main process saves turns with.
 import { applyAgentEvent, startRun } from "@milagre/shared/agent-runs";
@@ -42,7 +52,14 @@ test("picks a model from the chat's provider", () => {
   assert.equal(modelForChat(codex, "claude", [], catalog), opus);
 });
 
-const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
+const approval = (requestId: string): PermissionRequest => ({
+  requestId,
+  kind: "command",
+  tool: "Shell",
+  title: "Run this command?",
+  command: "ls",
+  allowForChat: true,
+});
 
 test("an answer is kept on its chat's run, and a second chat with the same request id is unaffected", () => {
   const runs: AgentRuns = { [key(1)]: startRun({}, key(1), "gpt-6-sol")[key(1)], [key(2)]: startRun({}, key(2), "claude-opus-5-5")[key(2)] };
@@ -106,7 +123,20 @@ test("chatsRunning counts a chat whose subagents outlive its turn", () => {
   assert.deepEqual([...chatsRunning({}, PROJECT, sessions)], [1]);
 });
 
-const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });
+const question = (requestId: string): QuestionRequest => ({
+  requestId,
+  questions: [
+    {
+      id: "0",
+      header: "Color",
+      question: "Which color?",
+      options: [{ label: "Red" }, { label: "Green" }],
+      multiSelect: false,
+      allowOther: true,
+      secret: false,
+    },
+  ],
+});
 
 test("questions wait on the run, oldest first, until they're resolved", () => {
   const state = base();
@@ -117,7 +147,10 @@ test("questions wait on the run, oldest first, until they're resolved", () => {
 
   runs = markAnswered(runs, key(1), "a", "answered");
   runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "a", outcome: "answered" }).runs;
-  assert.deepEqual(runs[key(1)].questions.map((item) => item.requestId), ["b"]);
+  assert.deepEqual(
+    runs[key(1)].questions.map((item) => item.requestId),
+    ["b"],
+  );
   assert.deepEqual(runs[key(1)].answered, {});
 
   const unchanged = applyAgentEvent(state, runs, PROJECT, key(1), { type: "question-resolved", requestId: "missing", outcome: "cancelled" });

@@ -14,8 +14,14 @@ export function ChatTitle({ label }: { label: string }) {
   return (
     <span className="chat-title" data-chat-title data-changing={outgoing !== null ? "true" : undefined}>
       <span className="sr-only">{label}</span>
-      {outgoing !== null && <span key={`old-${label}`} className="chat-title-outgoing" aria-hidden>{outgoing}</span>}
-      <span key={label} className="chat-title-current" aria-hidden>{label}</span>
+      {outgoing !== null && (
+        <span key={`old-${label}`} className="chat-title-outgoing" aria-hidden>
+          {outgoing}
+        </span>
+      )}
+      <span key={label} className="chat-title-current" aria-hidden>
+        {label}
+      </span>
     </span>
   );
 }

@@ -18,21 +18,37 @@ test("a clean Milagre worktree offers one item that removes it", () => {
 
 test("a worktree with unsaved work offers only delete, with what would be lost and how to keep it", () => {
   const result = archiveChoices({ plan: plan({ status: dirty }), running: false });
-  assert.deepEqual(result.choices.map((choice) => [choice.mode, choice.label, choice.tone]), [["delete", "Archive and delete worktree", "danger"]]);
+  assert.deepEqual(
+    result.choices.map((choice) => [choice.mode, choice.label, choice.tone]),
+    [["delete", "Archive and delete worktree", "danger"]],
+  );
   assert.equal(result.reason, "3 uncommitted files and 2 unpushed commits will be lost. Commit and push them first to keep them.");
   assert.deepEqual(labels(archiveChoices({ plan: plan({ status: dirty }), running: true })), ["Stop, archive and delete worktree"]);
-  assert.equal(archiveChoices({ plan: plan({ status: { ...dirty, unpushed: 0, uncommitted: 2 } }), running: false }).reason, "2 uncommitted files will be lost. Commit them first to keep them.");
-  assert.equal(archiveChoices({ plan: plan({ status: { ...dirty, uncommitted: 0, unpushed: 1 } }), running: false }).reason, "1 unpushed commit will be lost. Push them first to keep them.");
+  assert.equal(
+    archiveChoices({ plan: plan({ status: { ...dirty, unpushed: 0, uncommitted: 2 } }), running: false }).reason,
+    "2 uncommitted files will be lost. Commit them first to keep them.",
+  );
+  assert.equal(
+    archiveChoices({ plan: plan({ status: { ...dirty, uncommitted: 0, unpushed: 1 } }), running: false }).reason,
+    "1 unpushed commit will be lost. Push them first to keep them.",
+  );
   const detached = archiveChoices({ plan: plan({ status: { ...dirty, uncommitted: 0, unpushed: 0, branch: null } }), running: false });
   assert.equal(detached.reason, "Its HEAD is detached, so what it holds isn't on a branch. Check out a branch first to keep it.");
   // Nothing offers to keep the worktree.
-  for (const status of [dirty, clean]) assert.equal(labels(archiveChoices({ plan: plan({ status }), running: false })).some((label) => /keep/i.test(label)), false);
+  for (const status of [dirty, clean])
+    assert.equal(
+      labels(archiveChoices({ plan: plan({ status }), running: false })).some((label) => /keep/i.test(label)),
+      false,
+    );
 });
 
 test("a check that failed never offers deletion", () => {
   for (const running of [false, true]) {
     const result = archiveChoices({ plan: plan({ status: null }), running });
-    assert.deepEqual(result.choices.map((choice) => choice.mode), ["hide"]);
+    assert.deepEqual(
+      result.choices.map((choice) => choice.mode),
+      ["hide"],
+    );
   }
 });
 
@@ -70,7 +86,8 @@ test("a Milagre worktree has a base and lives under the root", () => {
   assert.equal(isMilagreWorktree(undefined, ["/tmp/wt"]), false);
 });
 
-const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}): AgentSession => ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
+const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}): AgentSession =>
+  ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
 const message = (id: number, session_id: number) => ({ id, session_id, body: "hi", context: null, role: "user" }) as ChatMessage;
 const state = (): CoordinatorState => ({
   next_id: 10,
@@ -82,7 +99,10 @@ const state = (): CoordinatorState => ({
   },
   sessions: { "1": session(1, 1), "2": session(2, 2), "3": session(3, 2), "4": session(4, 3) },
   connections: { "1": { id: 1, left_worktree_id: 1, right_worktree_id: 2, kind: "Information", lifetime: "Persistent" } as never },
-  events: [{ id: 1, worktree_id: 2, kind: "Change", summary: "", details: "" }, { id: 2, worktree_id: 3, kind: "Change", summary: "", details: "" }],
+  events: [
+    { id: 1, worktree_id: 2, kind: "Change", summary: "", details: "" },
+    { id: 2, worktree_id: 3, kind: "Change", summary: "", details: "" },
+  ],
   messages: [message(1, 2), message(2, 3), message(3, 4)],
   approvals: [],
   tasks: { "1": { id: 1, worktree_id: 2, title: "t", status: "open" } },

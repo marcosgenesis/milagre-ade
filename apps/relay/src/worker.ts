@@ -1,22 +1,24 @@
-import { createRoom, type Room as RoomLogic } from './room.mjs';
+import { createRoom, type Room as RoomLogic } from "./room.mjs";
 
-export interface Env { ROOMS: DurableObjectNamespace }
+export interface Env {
+  ROOMS: DurableObjectNamespace;
+}
 const ID = /^[A-Za-z0-9_-]{22}$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return new Response('ok');
-    const role = url.pathname === '/v1/host' ? 'host' : url.pathname === '/v1/phone' ? 'phone' : null;
-    if (!role) return new Response('Not found', { status: 404 });
-    if (!ID.test(url.searchParams.get('id') ?? '')) return new Response('Bad id', { status: 400 });
-    if (request.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });
-    const id = url.searchParams.get('id')!;
+    if (url.pathname === "/health") return new Response("ok");
+    const role = url.pathname === "/v1/host" ? "host" : url.pathname === "/v1/phone" ? "phone" : null;
+    if (!role) return new Response("Not found", { status: 404 });
+    if (!ID.test(url.searchParams.get("id") ?? "")) return new Response("Bad id", { status: 400 });
+    if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
+    const id = url.searchParams.get("id")!;
     return env.ROOMS.get(env.ROOMS.idFromName(id)).fetch(request);
   },
 };
 
-type Role = 'host' | 'phone';
+type Role = "host" | "phone";
 
 /**
  * One Mac's room, on the WebSocket Hibernation API: while nobody sends anything the runtime may
@@ -30,24 +32,25 @@ type Role = 'host' | 'phone';
  */
 export class Room implements DurableObject {
   private room?: RoomLogic;
-  private roomId = ''; // the id the room in memory checks proofs against
+  private roomId = ""; // the id the room in memory checks proofs against
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const id = url.searchParams.get('id')!;
-    const role: Role = url.pathname === '/v1/host' ? 'host' : 'phone';
+    const id = url.searchParams.get("id")!;
+    const role: Role = url.pathname === "/v1/host" ? "host" : "phone";
     // A hibernation wake has no request to read the id from, and the room needs it to check a Mac's proof.
     const kv = this.state.storage.kv;
-    if (kv.get('id') !== id) kv.put('id', id);
+    if (kv.get("id") !== id) kv.put("id", id);
     // A room woken without its id (storage lost it) would refuse every proof until the next eviction:
     // rebuild it from the marks, exactly as after an eviction, now that the request says which Mac this is.
     if (this.room && this.roomId !== id) this.room = undefined;
     const room = this.live(); // before accepting, so a rebuild cannot mistake the new socket for one that lost its state
     const [client, server] = Object.values(new WebSocketPair());
+    if (!client || !server) throw new Error("WebSocketPair did not yield two sockets");
     // A phone turned away at the door never becomes hibernatable: the runtime takes about 10 s to finish
     // closing a hibernatable socket that has not sent anything yet, and the phone would wait that long for its 4404.
-    const refusal = role === 'phone' ? room.phoneRefusal() : null;
+    const refusal = role === "phone" ? room.phoneRefusal() : null;
     if (refusal) {
       server.accept();
       server.close(refusal.code, refusal.reason);
@@ -55,31 +58,44 @@ export class Room implements DurableObject {
     }
     // Hibernatable sockets hand binary over as an ArrayBuffer, which the room reads with its brand check.
     this.state.acceptWebSocket(server, [role]);
-    if (role === 'host') room.hostOpened(server); else room.phoneOpened(server);
+    if (role === "host") room.hostOpened(server);
+    else room.phoneOpened(server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     const room = this.live();
-    if (this.roleOf(ws) === 'host') room.hostMessage(ws, message); else room.phoneMessage(ws, message);
+    if (this.roleOf(ws) === "host") room.hostMessage(ws, message);
+    else room.phoneMessage(ws, message);
   }
 
   webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
     this.closed(ws);
     // The compatibility date turns on web_socket_auto_reply_to_close, so the runtime has already answered
     // the peer's Close frame; closing back is only a fallback and throws if the socket is already closed.
-    if (ws.readyState !== WebSocket.READY_STATE_CLOSED) { try { ws.close(1000, 'closed'); } catch { /* already closed */ } }
+    if (ws.readyState !== WebSocket.READY_STATE_CLOSED) {
+      try {
+        ws.close(1000, "closed");
+      } catch {
+        /* already closed */
+      }
+    }
   }
 
   webSocketError(ws: WebSocket, _error: unknown): void {
     this.closed(ws);
-    try { ws.close(1011, 'error'); } catch { /* already closed */ }
+    try {
+      ws.close(1011, "error");
+    } catch {
+      /* already closed */
+    }
   }
 
   /** A socket can end with an error, a close, or both; the room ignores a socket it already forgot. */
   private closed(ws: WebSocket): void {
     const room = this.live(ws);
-    if (this.roleOf(ws) === 'host') room.hostClosed(ws); else room.phoneClosed(ws);
+    if (this.roleOf(ws) === "host") room.hostClosed(ws);
+    else room.phoneClosed(ws);
   }
 
   /**
@@ -90,11 +106,11 @@ export class Room implements DurableObject {
    */
   private live(ending?: WebSocket): RoomLogic {
     if (this.room) return this.room;
-    const id = this.state.storage.kv.get<string>('id') ?? '';
+    const id = this.state.storage.kv.get<string>("id") ?? "";
     const room = createRoom({ id, mark: (socket, state) => (socket as WebSocket).serializeAttachment(state) });
     const sockets = this.state.getWebSockets();
     if (ending && !sockets.includes(ending)) sockets.unshift(ending);
-    room.restore(sockets.map(ws => ({ socket: ws, state: this.stateOf(ws) })));
+    room.restore(sockets.map((ws) => ({ socket: ws, state: this.stateOf(ws) })));
     this.roomId = id;
     return (this.room = room);
   }
@@ -102,14 +118,18 @@ export class Room implements DurableObject {
   /** The room's mark on a socket, if it agrees with the socket's role tag. */
   private stateOf(ws: WebSocket): unknown {
     const state: unknown = ws.deserializeAttachment();
-    const role = state && typeof state === 'object' ? (state as { role?: unknown }).role : undefined;
-    const tag: Role | null = role === 'host' || role === 'pending' ? 'host' : role === 'phone' ? 'phone' : null;
+    const role = state && typeof state === "object" ? (state as { role?: unknown }).role : undefined;
+    const tag: Role | null = role === "host" || role === "pending" ? "host" : role === "phone" ? "phone" : null;
     return tag && tag === this.roleOf(ws) ? state : null;
   }
 
   private roleOf(ws: WebSocket): Role | null {
     let tags: string[];
-    try { tags = this.state.getTags(ws); } catch { return null; }
-    return tags.includes('host') ? 'host' : tags.includes('phone') ? 'phone' : null;
+    try {
+      tags = this.state.getTags(ws);
+    } catch {
+      return null;
+    }
+    return tags.includes("host") ? "host" : tags.includes("phone") ? "phone" : null;
   }
 }

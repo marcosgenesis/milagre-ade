@@ -4,7 +4,12 @@ import type { PromptSkillPart } from "../lib/prompt-skills";
 import { TooltipBubble, TOOLTIP_SHOW_DELAY } from "./primitives/Tooltip";
 
 /** A visual copy under the native textarea, which still owns editing and selection. */
-export function PromptHighlights({ inputRef, parts, descriptions, className }: {
+export function PromptHighlights({
+  inputRef,
+  parts,
+  descriptions,
+  className,
+}: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   parts: PromptSkillPart[];
   descriptions: ReadonlyMap<string, string>;
@@ -34,7 +39,10 @@ export function PromptHighlights({ inputRef, parts, descriptions, className }: {
       text.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
     };
     const move = (event: PointerEvent) => {
-      if (event.buttons) { hide(); return; }
+      if (event.buttons) {
+        hide();
+        return;
+      }
       const contains = (rect: DOMRect) => event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom;
       // The input remains the pointer target. Hit-test the painted text, including wrapped spans.
       let next: HTMLElement | null = null;
@@ -42,7 +50,10 @@ export function PromptHighlights({ inputRef, parts, descriptions, className }: {
       if (contains(viewport.getBoundingClientRect())) {
         for (const span of text.querySelectorAll<HTMLElement>("[data-prompt-skill]")) {
           bounds = Array.from(span.getClientRects()).find(contains);
-          if (bounds) { next = span; break; }
+          if (bounds) {
+            next = span;
+            break;
+          }
         }
       }
       if (next === target) return;
@@ -83,13 +94,27 @@ export function PromptHighlights({ inputRef, parts, descriptions, className }: {
     <>
       <div ref={viewportRef} data-prompt-highlights aria-hidden="true" className="pointer-events-none absolute top-0 left-0 overflow-hidden">
         <div ref={textRef} className={`${className} whitespace-pre-wrap text-ink [overflow-wrap:anywhere]`}>
-          {parts.map((part, index) => part.skill
-            ? <span key={index} data-prompt-skill className="text-accent-ink">{part.text}</span>
-            : part.text)}
+          {parts.map((part, index) =>
+            part.skill ? (
+              <span key={index} data-prompt-skill className="text-accent-ink">
+                {part.text}
+              </span>
+            ) : (
+              part.text
+            ),
+          )}
           {"\u200b"}
         </div>
       </div>
-      {hovered && <TooltipBubble label={hovered.label} rect={hovered.rect} wrap align={hovered.rect.left > window.innerWidth - 280 ? "end" : "start"} side={hovered.rect.top < 96 ? "bottom" : "top"} />}
+      {hovered && (
+        <TooltipBubble
+          label={hovered.label}
+          rect={hovered.rect}
+          wrap
+          align={hovered.rect.left > window.innerWidth - 280 ? "end" : "start"}
+          side={hovered.rect.top < 96 ? "bottom" : "top"}
+        />
+      )}
     </>
   );
 }

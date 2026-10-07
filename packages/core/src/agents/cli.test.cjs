@@ -37,31 +37,58 @@ test("runs --version and keeps the last line of a failure", async () => {
   };
   assert.deepEqual(await runVersion("/bin/codex", { execFileImpl: ok }), { output: "codex-cli 0.158.0\n" });
   assert.deepEqual(calls, [{ file: "/bin/codex", args: ["--version"], options: { encoding: "utf8", timeout: 10000 } }]);
-  const broken = (file, args, options, callback) => callback(Object.assign(new Error("Command failed: /bin/codex --version"), { code: 127 }), "", "env: node: No such file or directory\n");
+  const broken = (file, args, options, callback) =>
+    callback(Object.assign(new Error("Command failed: /bin/codex --version"), { code: 127 }), "", "env: node: No such file or directory\n");
   assert.deepEqual(await runVersion("/bin/codex", { execFileImpl: broken }), { error: "env: node: No such file or directory" });
 });
 
 test("a missing, outdated or broken CLI comes with the message the turn fails with", async () => {
   const resolve = async (name) => (name === "codex" ? null : "/Users/x/.local/bin/claude");
   assert.deepEqual(await inspectCli("codex", { resolve }), { command: null, version: null, problem: missingCliMessage("codex") });
-  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), { command: "/Users/x/.local/bin/claude", version: "2.1.200", problem: cliTooOldMessage("claude", "2.1.200", "2.1.288") });
-  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ error: "Killed: 9" }) }), { command: "/Users/x/.local/bin/claude", version: null, problem: cliBrokenMessage("claude", "/Users/x/.local/bin/claude", "Killed: 9") });
+  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ output: "2.1.200 (Claude Code)" }) }), {
+    command: "/Users/x/.local/bin/claude",
+    version: "2.1.200",
+    problem: cliTooOldMessage("claude", "2.1.200", "2.1.288"),
+  });
+  assert.deepEqual(await inspectCli("claude", { resolve, version: async () => ({ error: "Killed: 9" }) }), {
+    command: "/Users/x/.local/bin/claude",
+    version: null,
+    problem: cliBrokenMessage("claude", "/Users/x/.local/bin/claude", "Killed: 9"),
+  });
   // codex-cli 0.158.0 runs, but doesn't know GPT-6.1 Sol; the picker offers the update.
   const codex = async () => "/opt/homebrew/bin/codex";
-  assert.deepEqual(await inspectCli("codex", { resolve: codex, version: async () => ({ output: "codex-cli 0.158.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.158.0", problem: cliTooOldMessage("codex", "0.158.0", "0.160.0") });
+  assert.deepEqual(await inspectCli("codex", { resolve: codex, version: async () => ({ output: "codex-cli 0.158.0\n" }) }), {
+    command: "/opt/homebrew/bin/codex",
+    version: "0.158.0",
+    problem: cliTooOldMessage("codex", "0.158.0", "0.160.0"),
+  });
 });
 
 test("a current CLI, or one whose version can't be read, is used as is", async () => {
   const resolve = async () => "/opt/homebrew/bin/codex";
-  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli 0.160.0\n" }) }), { command: "/opt/homebrew/bin/codex", version: "0.160.0" });
-  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli dev build" }) }), { command: "/opt/homebrew/bin/codex", version: null });
+  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli 0.160.0\n" }) }), {
+    command: "/opt/homebrew/bin/codex",
+    version: "0.160.0",
+  });
+  assert.deepEqual(await inspectCli("codex", { resolve, version: async () => ({ output: "codex-cli dev build" }) }), {
+    command: "/opt/homebrew/bin/codex",
+    version: null,
+  });
 });
 
 test("each CLI is inspected once per run, after the environment, until it has a problem", async () => {
   const order = [];
   let release;
-  const environment = new Promise((resolve) => { release = resolve; });
-  const statuses = { claude: [{ command: "/c", version: "2.1.287" }], codex: [{ command: null, version: null, problem: "missing" }, { command: "/x", version: "0.158.0" }] };
+  const environment = new Promise((resolve) => {
+    release = resolve;
+  });
+  const statuses = {
+    claude: [{ command: "/c", version: "2.1.287" }],
+    codex: [
+      { command: null, version: null, problem: "missing" },
+      { command: "/x", version: "0.158.0" },
+    ],
+  };
   const cli = createCliCache({
     ready: () => environment.then(() => order.push("environment")),
     inspect: async (name) => {
@@ -107,8 +134,16 @@ test("a CLI whose installer creates a new folder is found on the next check", as
 
 test("the refresh runs only before looking again at a CLI that had a problem", async () => {
   let refreshed = 0;
-  const answers = [{ command: null, version: null, problem: "missing" }, { command: "/c", version: "2.1.287" }];
-  const cli = createCliCache({ inspect: async () => answers.shift() ?? { command: "/c", version: "2.1.287" }, refresh: () => { refreshed += 1; } });
+  const answers = [
+    { command: null, version: null, problem: "missing" },
+    { command: "/c", version: "2.1.287" },
+  ];
+  const cli = createCliCache({
+    inspect: async () => answers.shift() ?? { command: "/c", version: "2.1.287" },
+    refresh: () => {
+      refreshed += 1;
+    },
+  });
   await cli("claude");
   assert.equal(refreshed, 0);
   await cli("claude");

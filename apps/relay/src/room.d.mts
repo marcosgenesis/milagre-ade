@@ -1,4 +1,3 @@
-export const MAX_FRAME: number;
 export const MAX_PHONES: number;
 export type Payload = string | ArrayBuffer | ArrayBufferView;
 export interface RoomSocket {
@@ -8,10 +7,7 @@ export interface RoomSocket {
 export function frame(type: number, conn: bigint, payload?: Uint8Array): Uint8Array;
 export function unframe(bytes: ArrayBuffer | Uint8Array): { type: number; conn: bigint; payload: Uint8Array };
 /** What the room marks on a socket so a fresh room can rebuild after eviction; null once the room is done with it. */
-export type RoomSocketState =
-  | { role: 'pending'; challenge: string }
-  | { role: 'host'; next: string }
-  | { role: 'phone'; conn: string };
+export type RoomSocketState = { role: "pending"; challenge: string } | { role: "host"; next: string } | { role: "phone"; conn: string };
 export interface Room {
   hostOpened(socket: RoomSocket): void;
   hostMessage(socket: RoomSocket, data: Payload): void;

@@ -30,9 +30,12 @@ export interface SkillFilter {
 /** Search matches name and description like the `/` menu; scope and provider ("all" for any) narrow it further. */
 export function filterSkills<T extends SkillOption>(skills: T[], { query, scope, provider }: SkillFilter) {
   const needle = query.trim().toLowerCase();
-  return skills.filter((skill) => (scope === "all" || skill.scope === scope)
-    && (provider === "all" || skill.provider === provider)
-    && `${skill.name} ${skill.description}`.toLowerCase().includes(needle));
+  return skills.filter(
+    (skill) =>
+      (scope === "all" || skill.scope === scope) &&
+      (provider === "all" || skill.provider === provider) &&
+      `${skill.name} ${skill.description}`.toLowerCase().includes(needle),
+  );
 }
 
 export function groupSkills<T extends SkillOption>(skills: T[]) {

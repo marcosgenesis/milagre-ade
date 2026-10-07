@@ -1,10 +1,10 @@
-const { preparePrivateDirectory, assertPrivate, windowsAcl } = require('@milagre/core/private-files');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { randomBytes } = require('node:crypto');
-const { boxKeyPair, signKeyPair, hostIdOf, b64url, fromB64url } = require('@milagre/shared/relay-crypto');
+const { preparePrivateDirectory, assertPrivate, windowsAcl } = require("@milagre/core/private-files");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { randomBytes } = require("node:crypto");
+const { boxKeyPair, signKeyPair, hostIdOf, b64url, fromB64url } = require("@milagre/shared/relay-crypto");
 
-const random = n => new Uint8Array(randomBytes(n));
+const random = (n) => new Uint8Array(randomBytes(n));
 const MAX_PHONES = 32;
 // Each retired identity holds one more relay socket while the phone is on, so only the last few are kept.
 const MAX_RETIRED = 3;
@@ -12,31 +12,34 @@ const MAX_RETIRED = 3;
 async function writePrivate(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   if (process.platform === "win32") preparePrivateDirectory(path.dirname(file));
-  const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
+  const temporary = `${file}.${randomBytes(8).toString("hex")}.tmp`;
   try {
-    await fs.writeFile(temporary, JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+    await fs.writeFile(temporary, JSON.stringify(value, null, 2), { flag: "wx", mode: 0o600 });
     if (process.platform === "win32") windowsAcl(temporary, { mode: "protect" });
     await fs.rename(temporary, file);
-  } finally { await fs.rm(temporary, { force: true }); }
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
-const identityFile = dataDir => path.join(dataDir, 'relay-identity.json');
+const identityFile = (dataDir) => path.join(dataDir, "relay-identity.json");
 
 /** The Mac's relay identity: a signing key the relay checks, and a box key the phone pins from the QR. */
 async function readIdentity(dataDir) {
   try {
     assertPrivate(identityFile(dataDir));
-    const value = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8'));
-    const sign = decode(value.sign), box = decode(value.box);
+    const value = JSON.parse(await fs.readFile(identityFile(dataDir), "utf8"));
+    const sign = decode(value.sign),
+      box = decode(value.box);
     return { hostId: hostIdOf(sign.publicKey), sign, box };
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+    if (error.code !== "ENOENT") throw error;
   }
   return rotateIdentity(dataDir);
 }
 
-const encode = pair => ({ publicKey: b64url(pair.publicKey), secretKey: b64url(pair.secretKey) });
-const decode = pair => ({ publicKey: fromB64url(pair.publicKey), secretKey: fromB64url(pair.secretKey) });
+const encode = (pair) => ({ publicKey: b64url(pair.publicKey), secretKey: b64url(pair.secretKey) });
+const decode = (pair) => ({ publicKey: fromB64url(pair.publicKey), secretKey: fromB64url(pair.secretKey) });
 
 /**
  * New sign and box key pairs, replacing any saved ones. Reset calls it, so a host id that leaked with an old link
@@ -46,23 +49,32 @@ const decode = pair => ({ publicKey: fromB64url(pair.publicKey), secretKey: from
 async function rotateIdentity(dataDir, { retireUntil, now = Date.now() } = {}) {
   if (retireUntil) {
     let old;
-    try { old = JSON.parse(await fs.readFile(identityFile(dataDir), 'utf8')).sign; } catch { /* nothing saved, or unreadable: nothing to retire */ }
+    try {
+      old = JSON.parse(await fs.readFile(identityFile(dataDir), "utf8")).sign;
+    } catch {
+      /* nothing saved, or unreadable: nothing to retire */
+    }
     if (old) {
-      const kept = (await readRetiredRaw(dataDir)).filter(entry => entry.until > now && entry.sign.publicKey !== old.publicKey);
+      const kept = (await readRetiredRaw(dataDir)).filter((entry) => entry.until > now && entry.sign.publicKey !== old.publicKey);
       await writePrivate(retiredFile(dataDir), { retired: [...kept, { sign: old, until: retireUntil }].slice(-MAX_RETIRED) });
     }
   }
-  const sign = signKeyPair(random), box = boxKeyPair(random);
+  const sign = signKeyPair(random),
+    box = boxKeyPair(random);
   await writePrivate(identityFile(dataDir), { sign: encode(sign), box: encode(box) });
   return { hostId: hostIdOf(sign.publicKey), sign, box };
 }
 
-const retiredFile = dataDir => path.join(dataDir, 'relay-retired.json');
+const retiredFile = (dataDir) => path.join(dataDir, "relay-retired.json");
 async function readRetiredRaw(dataDir) {
   try {
-    const value = JSON.parse(await fs.readFile(retiredFile(dataDir), 'utf8')).retired;
-    return Array.isArray(value) ? value.filter(entry => typeof entry?.sign?.publicKey === 'string' && typeof entry.sign.secretKey === 'string' && Number.isFinite(entry.until)) : [];
-  } catch { return []; }
+    const value = JSON.parse(await fs.readFile(retiredFile(dataDir), "utf8")).retired;
+    return Array.isArray(value)
+      ? value.filter((entry) => typeof entry?.sign?.publicKey === "string" && typeof entry.sign.secretKey === "string" && Number.isFinite(entry.until))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -73,25 +85,47 @@ async function readRetired(dataDir, now = Date.now()) {
   const out = [];
   for (const entry of await readRetiredRaw(dataDir)) {
     if (entry.until <= now) continue;
-    try { const sign = decode(entry.sign); out.push({ hostId: hostIdOf(sign.publicKey), sign, until: entry.until }); } catch { /* a damaged entry is skipped */ }
+    try {
+      const sign = decode(entry.sign);
+      out.push({ hostId: hostIdOf(sign.publicKey), sign, until: entry.until });
+    } catch {
+      /* a damaged entry is skipped */
+    }
   }
   return out;
 }
 
 /** Phones that paired with the current token. Reset clears it, so an old phone must scan again. */
 function createPhones(dataDir) {
-  const file = path.join(dataDir, 'relay-phones.json');
+  const file = path.join(dataDir, "relay-phones.json");
   let known = [];
   // Writes land in call order, so a clear is never overwritten by an add that started before it.
   let writes = Promise.resolve();
-  const write = phones => { const next = writes.then(() => writePrivate(file, { phones })); writes = next.catch(() => {}); return next; };
+  const write = (phones) => {
+    const next = writes.then(() => writePrivate(file, { phones }));
+    writes = next.catch(() => {});
+    return next;
+  };
   return {
-    async load() { try { assertPrivate(file); known = JSON.parse(await fs.readFile(file, 'utf8')).phones ?? []; } catch { known = []; } },
-    isKnown: id => known.includes(id),
+    async load() {
+      try {
+        assertPrivate(file);
+        known = JSON.parse(await fs.readFile(file, "utf8")).phones ?? [];
+      } catch {
+        known = [];
+      }
+    },
+    isKnown: (id) => known.includes(id),
     /** How many phones are paired now. */
     count: () => known.length,
-    async add(id) { known = [...known.filter(item => item !== id), id].slice(-MAX_PHONES); await write(known); },
-    async clear() { known = []; await write(known); },
+    async add(id) {
+      known = [...known.filter((item) => item !== id), id].slice(-MAX_PHONES);
+      await write(known);
+    },
+    async clear() {
+      known = [];
+      await write(known);
+    },
   };
 }
 

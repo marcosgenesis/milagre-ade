@@ -52,7 +52,12 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
       setNear(true);
       return;
     }
-    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) setNear(true); }, { root, rootMargin: `${NEAR_MARGIN}px 0px` });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
+      },
+      { root, rootMargin: `${NEAR_MARGIN}px 0px` },
+    );
     observer.observe(node);
     return () => observer.disconnect();
   }, [near]);
@@ -60,8 +65,15 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
   useEffect(() => {
     if (!near || !language || languageReady) return;
     let live = true;
-    loadLanguage(language).then(() => { if (live) setLoadedCount((count) => count + 1); }, () => {});
-    return () => { live = false; };
+    loadLanguage(language).then(
+      () => {
+        if (live) setLoadedCount((count) => count + 1);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
   }, [near, language, languageReady]);
 
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
@@ -69,18 +81,26 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
   const lines = useMemo(() => (near && language && languageReady ? highlight(source, language) : undefined), [near, source, language, languageReady]);
 
   const copy = () => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.clearTimeout(copiedTimer.current);
-      copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
-    }, () => {});
+    navigator.clipboard.writeText(code).then(
+      () => {
+        setCopied(true);
+        window.clearTimeout(copiedTimer.current);
+        copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => {},
+    );
   };
 
   return (
     <div ref={frame} className="markdown-code my-2 overflow-hidden rounded-control border border-line bg-inset">
       <div className="flex h-7 items-center justify-between border-b border-line pr-1 pl-2.5 text-[11px] text-ink-3">
         <span className="font-mono">{fence?.toLowerCase() || "text"}</span>
-        <button type="button" aria-label={copied ? "Copied" : "Copy code"} onClick={copy} className="flex size-6 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink">
+        <button
+          type="button"
+          aria-label={copied ? "Copied" : "Copy code"}
+          onClick={copy}
+          className="flex size-6 items-center justify-center rounded-chip text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+        >
           <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={13} strokeWidth={1.8} color="currentColor" />
         </button>
       </div>
@@ -89,10 +109,16 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
           <code className="block min-w-max">
             {rows.map((row, index) => (
               <span key={index} className={`flex pr-3 ${ROW_TINT[row.kind]}`}>
-                <span aria-hidden className={`w-6 shrink-0 select-none text-center ${MARKER_COLOR[row.kind]}`}>{ROW_MARKER[row.kind]}</span>
+                <span aria-hidden className={`w-6 shrink-0 select-none text-center ${MARKER_COLOR[row.kind]}`}>
+                  {ROW_MARKER[row.kind]}
+                </span>
                 <span className="whitespace-pre">
                   {lines?.[index]
-                    ? lines[index].map((token, tokenIndex) => <span key={tokenIndex} className="code-token" style={token.htmlStyle as CSSProperties}>{token.content}</span>)
+                    ? lines[index].map((token, tokenIndex) => (
+                        <span key={tokenIndex} className="code-token" style={token.htmlStyle as CSSProperties}>
+                          {token.content}
+                        </span>
+                      ))
                     : row.text || "\u200b"}
                 </span>
                 {index < rows.length - 1 && "\n"}
@@ -101,19 +127,23 @@ export function CodeBlock({ code, fence, diff = false }: { code: string; fence?:
           </code>
         </pre>
       ) : (
-      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12px] leading-[1.6]">
-        <code>
-          {/* Lines stay joined by real newlines so a hand selection copies blank lines too. */}
-          {lines
-            ? lines.map((line, index) => (
-                <Fragment key={index}>
-                  {index > 0 && "\n"}
-                  {line.map((token, tokenIndex) => <span key={tokenIndex} className="code-token" style={token.htmlStyle as CSSProperties}>{token.content}</span>)}
-                </Fragment>
-              ))
-            : code}
-        </code>
-      </pre>
+        <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12px] leading-[1.6]">
+          <code>
+            {/* Lines stay joined by real newlines so a hand selection copies blank lines too. */}
+            {lines
+              ? lines.map((line, index) => (
+                  <Fragment key={index}>
+                    {index > 0 && "\n"}
+                    {line.map((token, tokenIndex) => (
+                      <span key={tokenIndex} className="code-token" style={token.htmlStyle as CSSProperties}>
+                        {token.content}
+                      </span>
+                    ))}
+                  </Fragment>
+                ))
+              : code}
+          </code>
+        </pre>
       )}
     </div>
   );

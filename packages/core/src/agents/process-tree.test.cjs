@@ -14,7 +14,8 @@ const isAlive = (pid) => {
 };
 
 test("killTree stops a detached child and the processes it started", { timeout: 45000 }, async (t) => {
-  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: process.platform === "win32", stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
+  const script =
+    'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: process.platform === "win32", stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
   const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
   t.after(() => killTree(child));
   const grandchildPid = Number(String(await waitForOutput(child)).trim());
@@ -29,7 +30,8 @@ test("killTree stops a detached child and the processes it started", { timeout: 
 test("killTree stops the rest of the group after its leader already exited", { timeout: 45000 }, async (t) => {
   // Detached Windows children escape Node's own inner kill-on-close job, while
   // remaining in the production helper's outer job after their leader exits.
-  const script = 'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: process.platform === "win32", stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
+  const script =
+    'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: process.platform === "win32", stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
   const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
   t.after(() => killTree(child));
   const grandchildPid = Number(String(await waitForOutput(child)).trim());

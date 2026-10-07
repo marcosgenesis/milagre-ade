@@ -6,7 +6,10 @@ import { patchSession, renameWorktree, withDiffStats } from "./project-edits.mjs
 const state = (): CoordinatorState => ({
   next_id: 4,
   projects: {},
-  worktrees: { "1": { id: 1, project_id: 1, path: "/work/app", name: "main" }, "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/fix-the-thing-ab12" } },
+  worktrees: {
+    "1": { id: 1, project_id: 1, path: "/work/app", name: "main" },
+    "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/fix-the-thing-ab12" },
+  },
   sessions: {
     "1": { id: 1, worktree_id: 1, agent_name: "main", status: "Created" },
     "2": { id: 2, worktree_id: 2, agent_name: "milagre/fix-the-thing-ab12", status: "Created" },
@@ -45,7 +48,10 @@ const session: AgentSession = { id: 1, worktree_id: 1, agent_name: "main", statu
 const chatState = (): CoordinatorState => ({
   next_id: 3,
   projects: {},
-  worktrees: { "1": { id: 1, project_id: 1, path: "/work/app", name: "main" }, "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/x", diff: { added: 3, removed: 1 } } },
+  worktrees: {
+    "1": { id: 1, project_id: 1, path: "/work/app", name: "main" },
+    "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/x", diff: { added: 3, removed: 1 } },
+  },
   sessions: { "1": session },
   connections: {},
   events: [],

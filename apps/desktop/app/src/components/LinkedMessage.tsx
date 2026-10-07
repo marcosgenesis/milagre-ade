@@ -12,10 +12,16 @@ const ENDED = { cancelled: "stopped", failed: "failed" } as const;
 function heading(context: LinkedContext): { text: string; chat: string | null } {
   switch (context.kind) {
     case "delegation":
-      return { text: `Delegation from ${context.fromLabel}${context.negotiation ? ` · Negotiation round ${context.negotiation.round}` : ""}`, chat: context.from };
+      return {
+        text: `Delegation from ${context.fromLabel}${context.negotiation ? ` · Negotiation round ${context.negotiation.round}` : ""}`,
+        chat: context.from,
+      };
     case "delegation-report": {
       const ended = context.status === "done" ? "" : ` · ${ENDED[context.status]}`;
-      return { text: `Delegation report from ${context.fromLabel}${ended}${context.negotiation ? ` · Negotiation round ${context.negotiation.round}` : ""}`, chat: context.from };
+      return {
+        text: `Delegation report from ${context.fromLabel}${ended}${context.negotiation ? ` · Negotiation round ${context.negotiation.round}` : ""}`,
+        chat: context.from,
+      };
     }
     case "negotiation-agreement":
       return { text: `Negotiation agreement with ${context.with}`, chat: null };
@@ -34,7 +40,14 @@ export function LinkedMessageHeader({ context, onOpenChat }: { context: LinkedCo
     </>
   );
   return chat && onOpenChat ? (
-    <button type="button" data-linked-from={chat} onClick={() => onOpenChat(chat)} className="flex max-w-full items-center gap-1.5 text-[11px] font-medium text-accent-ink hover:underline">{label}</button>
+    <button
+      type="button"
+      data-linked-from={chat}
+      onClick={() => onOpenChat(chat)}
+      className="flex max-w-full items-center gap-1.5 text-[11px] font-medium text-accent-ink hover:underline"
+    >
+      {label}
+    </button>
   ) : (
     <div className="flex max-w-full items-center gap-1.5 text-[11px] font-medium text-ink-3">{label}</div>
   );

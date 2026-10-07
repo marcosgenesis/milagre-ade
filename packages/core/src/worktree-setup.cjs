@@ -49,7 +49,7 @@ async function resolveSetupCommand(projectPath, setting) {
 
 function loginShell(env, platform = process.platform) {
   if (platform === "win32") return env.ComSpec || path.win32.join(env.SystemRoot || "C:\\Windows", "System32/cmd.exe");
-  return env.SHELL && SHELLS.has(path.basename(env.SHELL)) ? env.SHELL : (platform === "darwin" ? "/bin/zsh" : "/bin/sh");
+  return env.SHELL && SHELLS.has(path.basename(env.SHELL)) ? env.SHELL : platform === "darwin" ? "/bin/zsh" : "/bin/sh";
 }
 
 /**
@@ -57,7 +57,16 @@ function loginShell(env, platform = process.platform) {
  * Resolves (never rejects) to { status: "done" | "failed" | "timed-out" | "cancelled", exitCode, signal,
  * error?, output, durationMs }. A timeout or an aborted `signal` stops the shell and everything it started.
  */
-function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(env), timeoutMs = SETUP_TIMEOUT_MS, signal, onOutput = () => {}, now = Date.now }) {
+function runSetupCommand({
+  command,
+  cwd,
+  env = process.env,
+  shell = loginShell(env),
+  timeoutMs = SETUP_TIMEOUT_MS,
+  signal,
+  onOutput = () => {},
+  now = Date.now,
+}) {
   const started = now();
   return new Promise((resolve) => {
     let output = "";
@@ -81,7 +90,13 @@ function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(e
     const onAbort = () => stop("cancelled");
     const timer = setTimeout(() => stop("timed-out"), timeoutMs);
     try {
-      child = spawnCommand(shell, process.platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-l", "-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true, windowsVerbatimArguments: process.platform === "win32" });
+      child = spawnCommand(shell, process.platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-l", "-c", command], {
+        cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+        windowsVerbatimArguments: process.platform === "win32",
+      });
     } catch (error) {
       void finish({ status: "failed", error: error.message });
       return;
@@ -110,11 +125,14 @@ function runSetupCommand({ command, cwd, env = process.env, shell = loginShell(e
   });
 }
 
+// oxlint-disable-next-line no-control-regex -- matches ANSI escape sequences in setup output
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** The last `lines` lines of command output, without colour codes or trailing blank lines. */
 function outputTail(text, lines = NOTE_LINES) {
-  const trimmed = String(text ?? "").replace(ANSI, "").replace(/\s+$/, "");
+  const trimmed = String(text ?? "")
+    .replace(ANSI, "")
+    .replace(/\s+$/, "");
   return trimmed ? trimmed.split(/\r?\n/).slice(-lines).join("\n") : "";
 }
 
@@ -141,9 +159,18 @@ function setupCompleted(id, command, result, timeoutMs = SETUP_TIMEOUT_MS) {
   const took = formatDuration(result.durationMs);
   const failed = result.exitCode !== null && result.exitCode !== undefined ? `exited with code ${result.exitCode} after ${took}` : `failed after ${took}`;
   const note = { done: took, cancelled: `stopped after ${took}`, "timed-out": `timed out after ${formatDuration(timeoutMs)}` }[result.status] ?? failed;
-  const why = result.status === "failed" ? `\n${result.error ?? (result.exitCode !== null ? `Exited with code ${result.exitCode}` : `Stopped by ${result.signal}`)}` : "";
+  const why =
+    result.status === "failed" ? `\n${result.error ?? (result.exitCode !== null ? `Exited with code ${result.exitCode}` : `Stopped by ${result.signal}`)}` : "";
   const ok = result.status === "done";
-  return { type: "step-completed", id, status: ok ? "done" : "failed", title: `${ok ? "Ran setup" : "Setup failed"} ${code(command)}`, note, detail: capOutput(`$ ${command}\n${result.output}${why}`), durationMs: result.durationMs };
+  return {
+    type: "step-completed",
+    id,
+    status: ok ? "done" : "failed",
+    title: `${ok ? "Ran setup" : "Setup failed"} ${code(command)}`,
+    note,
+    detail: capOutput(`$ ${command}\n${result.output}${why}`),
+    durationMs: result.durationMs,
+  };
 }
 
 // Worktrees are keyed by their real path: git lists them resolved (/private/tmp, not /tmp), so the folder
@@ -218,12 +245,14 @@ class WorktreeSetups {
         buffered = capOutput(buffered + text);
         timer ??= setTimeout(flush, this.batchMs);
       },
-    }).then((result) => {
-      flush();
-      this.send(chatId, setupCompleted(id, command, result, this.timeoutMs));
-      this.keepAwake.setupEnded(chatId, { turnFollows: result.status !== "cancelled" });
-      return result;
-    }).finally(() => this.running.delete(chatId));
+    })
+      .then((result) => {
+        flush();
+        this.send(chatId, setupCompleted(id, command, result, this.timeoutMs));
+        this.keepAwake.setupEnded(chatId, { turnFollows: result.status !== "cancelled" });
+        return result;
+      })
+      .finally(() => this.running.delete(chatId));
     this.running.set(chatId, { controller, done });
     return done;
   }
@@ -241,4 +270,15 @@ class WorktreeSetups {
   }
 }
 
-module.exports = { loginShell, SETUP_FILE, SETUP_TIMEOUT_MS, WorktreeSetups, outputTail, resolveSetupCommand, runSetupCommand, setupCompleted, setupNote, setupStarted };
+module.exports = {
+  loginShell,
+  SETUP_FILE,
+  SETUP_TIMEOUT_MS,
+  WorktreeSetups,
+  outputTail,
+  resolveSetupCommand,
+  runSetupCommand,
+  setupCompleted,
+  setupNote,
+  setupStarted,
+};

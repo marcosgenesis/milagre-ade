@@ -2,7 +2,9 @@ import { useState, type ReactNode } from "react";
 
 function ImageIcon({ src, fallback }: { src: string; fallback: ReactNode }) {
   const [failed, setFailed] = useState(false);
-  return failed ? fallback : (
+  return failed ? (
+    fallback
+  ) : (
     <img src={src} alt="" className="size-full rounded-[4px] object-contain" onError={() => setFailed(true)} referrerPolicy="no-referrer" />
   );
 }

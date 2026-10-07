@@ -45,9 +45,25 @@ test("a failed save rejects without blocking the next one", async (t) => {
   assert.deepEqual(await fs.readdir(path.join(projectPath, ".milagre")), ["coordination.json"]);
 });
 
-const subagentState = (...transcripts) => ({ next_id: 3, messages: [], sessions: { 1: { id: 1, subagents: transcripts.map((text, index) => ({ id: `agent-${index}`, title: "Review", startedAt: 1, updatedAt: 2, transcript: [{ id: "m", kind: "message", text }] })) } } });
+const subagentState = (...transcripts) => ({
+  next_id: 3,
+  messages: [],
+  sessions: {
+    1: {
+      id: 1,
+      subagents: transcripts.map((text, index) => ({
+        id: `agent-${index}`,
+        title: "Review",
+        startedAt: 1,
+        updatedAt: 2,
+        transcript: [{ id: "m", kind: "message", text }],
+      })),
+    },
+  },
+});
 const sidecars = async (projectPath) => (await fs.readdir(path.join(projectPath, ".milagre", "subagents"))).sort();
-const referenced = async (projectPath) => JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")).sessions[1].subagents.map((agent) => agent.transcriptFile);
+const referenced = async (projectPath) =>
+  JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")).sessions[1].subagents.map((agent) => agent.transcriptFile);
 const NOW = { sweepMinAgeMs: 0 };
 
 test("an unchanged save writes no sidecar again, a changed agent writes only its own", async (t) => {
@@ -128,7 +144,10 @@ test("many subagents round-trip through bounded concurrent hydration", async (t)
   const texts = Array.from({ length: 20 }, (_, index) => `transcript ${index}`);
   await saveProjectState(projectPath, subagentState(...texts), NOW);
   const loaded = await readProjectState(projectPath);
-  assert.deepEqual(loaded.sessions[1].subagents.map((agent) => agent.transcript[0].text), texts);
+  assert.deepEqual(
+    loaded.sessions[1].subagents.map((agent) => agent.transcript[0].text),
+    texts,
+  );
   const calls = t.mock.method(fs, "mkdir");
   await readProjectState(projectPath);
   assert.equal(calls.mock.callCount(), 2); // contentDirectory once for the whole Project, not once per agent

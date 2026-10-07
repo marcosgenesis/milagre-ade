@@ -4,7 +4,7 @@ export type Channel = {
   open(frame: Uint8Array): unknown;
 };
 export type Random = (n: number) => Uint8Array;
-export type RelayAuthCode = 'unknown-phone' | 'bad-token' | 'bad-hello';
+export type RelayAuthCode = "unknown-phone" | "bad-token" | "bad-hello";
 
 export class RelayAuthError extends Error {
   code: RelayAuthCode;
@@ -16,12 +16,7 @@ export function fromB64url(text: string): Uint8Array;
 export function boxKeyPair(random: Random): KeyPair;
 export function signKeyPair(random: Random): KeyPair;
 export function hostIdOf(signPublicKey: Uint8Array): string;
-export function phoneHello(args: {
-  phone: KeyPair;
-  host: Uint8Array;
-  token: string;
-  random: Random;
-}): { message: Uint8Array; ephemeral: KeyPair };
+export function phoneHello(args: { phone: KeyPair; host: Uint8Array; token: string; random: Random }): { message: Uint8Array; ephemeral: KeyPair };
 export function hostAccept(args: {
   host: KeyPair;
   hello: Uint8Array;
@@ -30,9 +25,4 @@ export function hostAccept(args: {
   token: string;
   random: Random;
 }): { reply: Uint8Array; channel: Channel; phoneKey: string; firstPairing: boolean };
-export function phoneFinish(args: {
-  ephemeral: KeyPair;
-  phone: KeyPair;
-  host: Uint8Array;
-  reply: Uint8Array;
-}): Channel;
+export function phoneFinish(args: { ephemeral: KeyPair; phone: KeyPair; host: Uint8Array; reply: Uint8Array }): Channel;

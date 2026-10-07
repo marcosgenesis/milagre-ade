@@ -17,6 +17,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // So is the linked-work snapshot (linked:snapshot); null would crash useLinkedWork.
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
   listBranches: async () => ["main", "develop"],
   createWorktree: () => new Promise((resolve, reject) => {
@@ -50,10 +52,15 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 1100, height: 800, show: false, webPreferences: { partition: "selection-test", backgroundThrottling: false } });
-  window.webContents.on("console-message", event => { if (event.level === "error") console.error(event.message); });
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  window.webContents.on("console-message", (event) => {
+    if (event.level === "error") console.error(event.message);
+  });
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
-    for (let n = 0; n < 200; n++) { if (await evaluate(source)) return; await delay(25); }
+    for (let n = 0; n < 200; n++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
     throw Error(`Timed out: ${source}`);
   }
   async function click(text) {
@@ -62,7 +69,7 @@ async function browserChecks() {
     await evaluate(`(${expr}).click()`);
   }
   const newChat = () => evaluate(`document.querySelector('[aria-label="New chat"]').click()`);
-  const modelIs = name => waitFor(`[...document.querySelectorAll('[data-promptbar] button')].some(el => el.textContent === ${JSON.stringify(name)})`);
+  const modelIs = (name) => waitFor(`[...document.querySelectorAll('[data-promptbar] button')].some(el => el.textContent === ${JSON.stringify(name)})`);
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('[aria-label="New chat"]')`);
@@ -81,7 +88,8 @@ async function browserChecks() {
     await click("main");
     await waitFor(`!!document.querySelector('input[placeholder="Search branches…"]')`);
     await evaluate(`document.querySelector('input[placeholder="Search branches…"]').focus()`);
-    const key = name => evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`);
+    const key = (name) =>
+      evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`);
     await key("ArrowDown");
     assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first branch");
     await key("ArrowDown");
@@ -117,12 +125,19 @@ async function browserChecks() {
     await click("main");
     await click("develop");
     await newChat();
-    await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('New worktree') && document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
-    await new Promise(resolve => { window.webContents.once("did-finish-load", resolve); window.reload(); });
+    await waitFor(
+      `document.querySelector('[data-new-chat-pickers]').textContent.includes('New worktree') && document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`,
+    );
+    await new Promise((resolve) => {
+      window.webContents.once("did-finish-load", resolve);
+      window.reload();
+    });
     await waitFor(`!!document.querySelector('[aria-label="New chat"]')`);
     await newChat();
     await modelIs("Opus 5.5");
-    await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('New worktree') && document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
+    await waitFor(
+      `document.querySelector('[data-new-chat-pickers]').textContent.includes('New worktree') && document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`,
+    );
     await waitFor(`document.querySelector('[aria-label="Agent permissions"]').textContent === "Full"`);
     await evaluate(`(() => {
       const input = document.querySelector('textarea[aria-label="Prompt"]');
@@ -132,7 +147,8 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('[aria-label="Send"]').disabled`);
     await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
     await waitFor(`!!window.finishWorktree`);
-    assert.equal(await evaluate(`!!document.querySelector('[data-new-chat-pickers]')`), true, "Keep the new-chat layout until the worktree and first message are ready");
+    // Since #198 the submitted message shows at once while the worktree is prepared.
+    await waitFor(`document.querySelector('[aria-label="Conversation"]')?.textContent.includes('First prompt')`);
     await evaluate(`window.failWorktree()`);
     await waitFor(`document.body.textContent.includes('Could not create the worktree')`);
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "First prompt");
@@ -142,10 +158,13 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('[data-new-chat-pickers]')`);
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "");
     assert.equal(await evaluate(`document.querySelector('[aria-label="Conversation"]').textContent.includes('First prompt')`), true);
-    console.log("PASS: first send waits for preparation and preserves the draft on failure");
+    console.log("PASS: first send shows the message while preparing and preserves the draft on failure");
     console.log("PASS: new chats follow Settings, remember explicit selections, and restore them after reload");
     app.exit(0);
-  } catch (error) { console.error(error); app.exit(1); }
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
 }
 
 async function main() {
@@ -153,19 +172,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "chat-selections-fixture",
-      resolveId(id) { if (id === "/__chat_selections_fixture.tsx") return id; },
-      load(id) { if (id === "/__chat_selections_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__chat_selections__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_selections_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "chat-selections-fixture",
+        resolveId(id) {
+          if (id === "/__chat_selections_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__chat_selections_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__chat_selections__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__chat_selections_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -174,14 +202,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__chat_selections__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -9,12 +9,33 @@ for (const state of ["OPEN", "MERGED"]) {
     const exec = async (command, args, options) => {
       if (command === "git") return { stdout: "feature/sidebar\n" };
       assert.equal(command, "gh");
-      assert.deepEqual(args, ["pr", "list", "--head", "feature/sidebar", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup"]);
+      assert.deepEqual(args, [
+        "pr",
+        "list",
+        "--head",
+        "feature/sidebar",
+        "--state",
+        "all",
+        "--limit",
+        "1",
+        "--json",
+        "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup",
+      ]);
       assert.equal(options.cwd, "/project/worktree");
       assert.ok(options.timeout > 0);
       return { stdout: JSON.stringify([{ number: 10213, url, state, title }]) };
     };
-    assert.deepEqual(await readPullRequest("/project/worktree", exec), { number: 10213, url, state, title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
+    assert.deepEqual(await readPullRequest("/project/worktree", exec), {
+      number: 10213,
+      url,
+      state,
+      title,
+      readyToMerge: false,
+      hasConflicts: false,
+      conflictStatusKnown: false,
+      isBehind: false,
+      changesRequested: false,
+    });
   });
 }
 
@@ -31,7 +52,12 @@ test("hides closed PRs and invalid metadata", async () => {
 
 test("missing PRs, unavailable gh, authentication failures and malformed responses do not break the sidebar", async () => {
   for (const message of ["no pull requests found", "ENOENT", "authentication required", "timeout"]) {
-    assert.equal(await readPullRequest("/project", async () => { throw new Error(message); }), null);
+    assert.equal(
+      await readPullRequest("/project", async () => {
+        throw new Error(message);
+      }),
+      null,
+    );
   }
   assert.equal(await readPullRequest("/project", async () => ({ stdout: "not json" })), null);
 });
@@ -43,10 +69,31 @@ test("uses the checked-out branch for fork PRs instead of its upstream base", as
       assert.deepEqual(args, ["-C", "/project", "symbolic-ref", "--quiet", "--short", "HEAD"]);
       return { stdout: "project-menu\n" };
     }
-    assert.deepEqual(args, ["pr", "list", "--head", "project-menu", "--state", "all", "--limit", "1", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup"]);
+    assert.deepEqual(args, [
+      "pr",
+      "list",
+      "--head",
+      "project-menu",
+      "--state",
+      "all",
+      "--limit",
+      "1",
+      "--json",
+      "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup",
+    ]);
     return { stdout: JSON.stringify([{ number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title }]) };
   };
-  assert.deepEqual(await readPullRequest("/project", exec), { number: 49, url: "https://github.com/example/project/pull/49", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
+  assert.deepEqual(await readPullRequest("/project", exec), {
+    number: 49,
+    url: "https://github.com/example/project/pull/49",
+    state: "MERGED",
+    title,
+    readyToMerge: false,
+    hasConflicts: false,
+    conflictStatusKnown: false,
+    isBehind: false,
+    changesRequested: false,
+  });
 });
 
 for (const [name, overrides, ready] of [
@@ -90,22 +137,63 @@ test("reads a PR the chat created or merged by its URL or number", async () => {
     calls.push([command, args, options.cwd]);
     const ref = args[2];
     const number = Number(ref.split("/").at(-1));
-    return { stdout: JSON.stringify({ number, url: `https://github.com/example/project/pull/${number}`, state: number === 84 ? "MERGED" : "OPEN", title, mergeStateStatus: number === 90 ? "DIRTY" : "CLEAN" }) };
+    return {
+      stdout: JSON.stringify({
+        number,
+        url: `https://github.com/example/project/pull/${number}`,
+        state: number === 84 ? "MERGED" : "OPEN",
+        title,
+        mergeStateStatus: number === 90 ? "DIRTY" : "CLEAN",
+      }),
+    };
   };
   assert.deepEqual(await readPullRequests("/project", ["https://github.com/example/project/pull/84", "90"], exec), [
-    { number: 84, url: "https://github.com/example/project/pull/84", state: "MERGED", title, readyToMerge: false, hasConflicts: false, conflictStatusKnown: true, isBehind: false, changesRequested: false },
-    { number: 90, url: "https://github.com/example/project/pull/90", state: "OPEN", title, readyToMerge: false, hasConflicts: true, conflictStatusKnown: true, isBehind: false, changesRequested: false },
+    {
+      number: 84,
+      url: "https://github.com/example/project/pull/84",
+      state: "MERGED",
+      title,
+      readyToMerge: false,
+      hasConflicts: false,
+      conflictStatusKnown: true,
+      isBehind: false,
+      changesRequested: false,
+    },
+    {
+      number: 90,
+      url: "https://github.com/example/project/pull/90",
+      state: "OPEN",
+      title,
+      readyToMerge: false,
+      hasConflicts: true,
+      conflictStatusKnown: true,
+      isBehind: false,
+      changesRequested: false,
+    },
   ]);
-  assert.deepEqual(calls.map(([command, args, cwd]) => [command, args.slice(0, 3), cwd]), [
-    ["gh", ["pr", "view", "https://github.com/example/project/pull/84"], "/project"],
-    ["gh", ["pr", "view", "90"], "/project"],
-  ]);
+  assert.deepEqual(
+    calls.map(([command, args, cwd]) => [command, args.slice(0, 3), cwd]),
+    [
+      ["gh", ["pr", "view", "https://github.com/example/project/pull/84"], "/project"],
+      ["gh", ["pr", "view", "90"], "/project"],
+    ],
+  );
 });
 
 test("never passes a ref gh could read as a flag, and a failed lookup is null", async () => {
   let ran = 0;
-  const exec = async () => { ran++; throw new Error("not found"); };
-  assert.deepEqual(await readPullRequests("/project", ["--web", "-R", "javascript:alert(1)", "feature/x", 12, "91"], exec), [null, null, null, null, null, null]);
+  const exec = async () => {
+    ran++;
+    throw new Error("not found");
+  };
+  assert.deepEqual(await readPullRequests("/project", ["--web", "-R", "javascript:alert(1)", "feature/x", 12, "91"], exec), [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
   assert.equal(ran, 1, "Only the numeric ref reached gh");
   assert.deepEqual(await readPullRequests("/project", "90", exec), []);
 });
@@ -173,15 +261,43 @@ function batchStub({ branches, prs, repo = require("node:os").tmpdir() }) {
   };
   return { exec, ghCalls: () => calls.filter(([command]) => command === "gh") };
 }
-const listed = (number, headRefName, state = "OPEN") => ({ number, headRefName, url: `https://github.com/example/project/pull/${number}`, state, title: `PR ${number}` });
-const shape = (number, state = "OPEN") => ({ number, url: `https://github.com/example/project/pull/${number}`, state, title: `PR ${number}`, readyToMerge: false, hasConflicts: false, conflictStatusKnown: false, isBehind: false, changesRequested: false });
+const listed = (number, headRefName, state = "OPEN") => ({
+  number,
+  headRefName,
+  url: `https://github.com/example/project/pull/${number}`,
+  state,
+  title: `PR ${number}`,
+});
+const shape = (number, state = "OPEN") => ({
+  number,
+  url: `https://github.com/example/project/pull/${number}`,
+  state,
+  title: `PR ${number}`,
+  readyToMerge: false,
+  hasConflicts: false,
+  conflictStatusKnown: false,
+  isBehind: false,
+  changesRequested: false,
+});
 
 test("worktrees of one repository share a single batched gh pr list", async () => {
-  const { exec, ghCalls } = batchStub({ branches: { "/a": "feature/a", "/b": "feature/b", "/c": "no-pr" }, prs: [listed(2, "feature/b", "MERGED"), listed(1, "feature/a")] });
+  const { exec, ghCalls } = batchStub({
+    branches: { "/a": "feature/a", "/b": "feature/b", "/c": "no-pr" },
+    prs: [listed(2, "feature/b", "MERGED"), listed(1, "feature/a")],
+  });
   const read = createPullRequestReader({ exec });
   assert.deepEqual(await Promise.all(["/a", "/b", "/c"].map((path) => read(path))), [shape(1), shape(2, "MERGED"), null]);
   assert.equal(ghCalls().length, 1);
-  assert.deepEqual(ghCalls()[0][1], ["pr", "list", "--state", "all", "--limit", "100", "--json", "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,headRefName"]);
+  assert.deepEqual(ghCalls()[0][1], [
+    "pr",
+    "list",
+    "--state",
+    "all",
+    "--limit",
+    "100",
+    "--json",
+    "number,url,state,title,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,headRefName",
+  ]);
   assert.ok(["/a", "/b", "/c"].includes(ghCalls()[0][2].cwd), "gh runs from one of the repository's worktrees");
 });
 
@@ -208,7 +324,10 @@ test("separate repositories are batched separately", async () => {
 });
 
 test("the newest PR for a branch wins, and a closed latest PR hides older ones like the per-branch query", async () => {
-  const { exec } = batchStub({ branches: { "/a": "feature/a", "/b": "feature/b" }, prs: [listed(9, "feature/a"), listed(3, "feature/a", "MERGED"), listed(8, "feature/b", "CLOSED"), listed(4, "feature/b", "MERGED")] });
+  const { exec } = batchStub({
+    branches: { "/a": "feature/a", "/b": "feature/b" },
+    prs: [listed(9, "feature/a"), listed(3, "feature/a", "MERGED"), listed(8, "feature/b", "CLOSED"), listed(4, "feature/b", "MERGED")],
+  });
   const read = createPullRequestReader({ exec });
   assert.deepEqual(await read("/a"), shape(9));
   assert.equal(await read("/b"), null);
@@ -218,7 +337,8 @@ test("a branch missing from a full batch falls back to its own query", async () 
   const prs = Array.from({ length: 100 }, (_, index) => listed(index + 1, `branch-${index}`));
   const old = listed(500, "old-branch", "MERGED");
   const { exec, ghCalls } = batchStub({ branches: { "/a": "branch-3", "/b": "old-branch" }, prs });
-  const stub = async (command, args, options) => command === "gh" && args.includes("--head") ? { stdout: JSON.stringify([old]) } : exec(command, args, options);
+  const stub = async (command, args, options) =>
+    command === "gh" && args.includes("--head") ? { stdout: JSON.stringify([old]) } : exec(command, args, options);
   const read = createPullRequestReader({ exec: stub });
   assert.deepEqual(await read("/a"), shape(4));
   assert.deepEqual(await read("/b"), shape(500, "MERGED"));
@@ -243,8 +363,15 @@ test("a failed batch falls back to the per-branch query and is retried next time
 
 test("no branch, no gh and bad output are null", async () => {
   assert.equal(await createPullRequestReader({ exec: async (command) => ({ stdout: command === "git" ? "\n" : "[]" }) })("/a"), null);
-  assert.equal(await createPullRequestReader({ exec: async () => { throw new Error("ENOENT"); } })("/a"), null);
+  assert.equal(
+    await createPullRequestReader({
+      exec: async () => {
+        throw new Error("ENOENT");
+      },
+    })("/a"),
+    null,
+  );
   const { exec } = batchStub({ branches: { "/a": "x" }, prs: [] });
-  const garbled = async (command, args, options) => command === "gh" ? { stdout: "not json" } : exec(command, args, options);
+  const garbled = async (command, args, options) => (command === "gh" ? { stdout: "not json" } : exec(command, args, options));
   assert.equal(await createPullRequestReader({ exec: garbled })("/a"), null);
 });

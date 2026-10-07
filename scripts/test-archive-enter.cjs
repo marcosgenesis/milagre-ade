@@ -32,14 +32,19 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const win = new BrowserWindow({ width: 520, height: 420, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => win.webContents.executeJavaScript(source);
+  const evaluate = (source) => win.webContents.executeJavaScript(source);
   async function waitFor(source) {
-    for (let i = 0; i < 200; i++) { if (await evaluate(source)) return; await delay(20); }
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(source)) return;
+      await delay(20);
+    }
     throw Error(`Timed out: ${source}`);
   }
   // Real input events, so focus moves the way a mouse click and a key press move it.
   async function click(selector) {
-    const { x, y } = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+    const { x, y } = await evaluate(
+      `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`,
+    );
     win.webContents.sendInputEvent({ type: "mouseMove", x, y });
     win.webContents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
     win.webContents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
@@ -51,7 +56,7 @@ async function browserChecks() {
     win.webContents.sendInputEvent({ type: "keyUp", keyCode });
     await delay(60);
   }
-  const shot = async name => {
+  const shot = async (name) => {
     if (!shots) return;
     // Let the menu finish its pop-in and paint before reading the frame.
     await evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))");
@@ -84,7 +89,11 @@ async function browserChecks() {
     await evaluate("window.releaseCheck()");
     await waitFor(`!document.querySelector('${archiveRow}').disabled`);
     await click(archiveRow);
-    assert.equal(await evaluate('document.querySelector("[data-archive-choice]")?.textContent'), "Archive and remove worktree", "No checking step after the click");
+    assert.equal(
+      await evaluate('document.querySelector("[data-archive-choice]")?.textContent'),
+      "Archive and remove worktree",
+      "No checking step after the click",
+    );
     assert.equal(await evaluate('document.body.textContent.includes("Checking worktree")'), false);
     await shot("armed.png");
     await evaluate("document.activeElement.blur()");
@@ -113,7 +122,10 @@ async function browserChecks() {
 
     console.log("PASS: check runs on open, Archive waits for it with no checking row, Enter confirms wherever focus is, arrowed rows keep Enter");
     app.exit(0);
-  } catch (error) { console.error(error); app.exit(1); }
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
 }
 
 async function main() {
@@ -121,19 +133,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "archive-enter-fixture",
-      resolveId(id) { if (id === "/__archive_enter_fixture.tsx") return id; },
-      load(id) { if (id === "/__archive_enter_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__archive_enter__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__archive_enter_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "archive-enter-fixture",
+        resolveId(id) {
+          if (id === "/__archive_enter_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__archive_enter_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__archive_enter__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__archive_enter_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -142,13 +163,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__archive_enter__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

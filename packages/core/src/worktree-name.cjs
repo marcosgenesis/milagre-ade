@@ -11,7 +11,10 @@ const NAMING_INSTRUCTIONS = [
 const BARE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+){1,5}$/;
 
 function branchName(reply) {
-  const name = String(reply ?? "").trim().replace(/^[`"']+|[`"'.]+$/g, "").toLowerCase();
+  const name = String(reply ?? "")
+    .trim()
+    .replace(/^[`"']+|[`"'.]+$/g, "")
+    .toLowerCase();
   return BARE_NAME.test(name) ? name : "";
 }
 

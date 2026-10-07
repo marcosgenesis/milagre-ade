@@ -33,27 +33,56 @@ function useControlsClearance(open: boolean) {
 }
 
 /** `send` is the diff comments waiting to go to the chat; the button is there while any can. */
-export function DiffBar({ open, onBack, send, trailing }: { open: boolean; onBack: () => void; send?: { count: number; onSend: () => void }; trailing?: React.ReactNode }) {
+export function DiffBar({
+  open,
+  onBack,
+  send,
+  trailing,
+}: {
+  open: boolean;
+  onBack: () => void;
+  send?: { count: number; onSend: () => void };
+  trailing?: React.ReactNode;
+}) {
   const reduced = useReducedMotion();
   const { bar, inset } = useControlsClearance(open);
   return (
     <AnimatePresence initial={false}>
       {open && (
-        <motion.div ref={bar} key="diff-bar" data-diff-bar style={{ paddingLeft: inset }} className="absolute inset-x-3 top-[14px] z-[55] flex h-8 items-center justify-between"
-          initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-          transition={reduced ? { duration: 0 } : { duration: 0.2, ease: EASE_OUT }}>
+        <motion.div
+          ref={bar}
+          key="diff-bar"
+          data-diff-bar
+          style={{ paddingLeft: inset }}
+          className="absolute inset-x-3 top-[14px] z-[55] flex h-8 items-center justify-between"
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={reduced ? { duration: 0 } : { duration: 0.2, ease: EASE_OUT }}
+        >
           <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
-            <button type="button" data-diff-back onClick={onBack}
-              className="flex h-8 items-center gap-1.5 rounded-control bg-surface pr-3 pl-2 text-[12.5px] font-medium text-ink-2 shadow-card transition-colors hover:text-ink">
+            <button
+              type="button"
+              data-diff-back
+              onClick={onBack}
+              className="flex h-8 items-center gap-1.5 rounded-control bg-surface pr-3 pl-2 text-[12.5px] font-medium text-ink-2 shadow-card transition-colors hover:text-ink"
+            >
               <HugeiconsIcon icon={ArrowLeft02Icon} size={15} strokeWidth={1.8} color="currentColor" />
               Back
             </button>
             <AnimatePresence initial={false}>
               {send && send.count > 0 && (
-                <motion.button key="send" type="button" data-diff-send onClick={send.onSend}
-                  initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+                <motion.button
+                  key="send"
+                  type="button"
+                  data-diff-send
+                  onClick={send.onSend}
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
                   transition={reduced ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
-                  className="h-8 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface shadow-card transition-opacity hover:opacity-85">
+                  className="h-8 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface shadow-card transition-opacity hover:opacity-85"
+                >
                   {send.count === 1 ? "Send 1 comment" : `Send ${send.count} comments`}
                 </motion.button>
               )}
@@ -72,8 +101,14 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
     // Same line as the traffic lights and the sidebar toggle (top 14px, 32px tall).
     <div className="fixed top-[14px] right-3 z-[60] [-webkit-app-region:no-drag]">
       <Tooltip label={open ? "Hide changes" : "Show changes"} shortcut="⌘⇧D" side="bottom" align="end">
-        <button type="button" aria-label="Toggle changes panel" aria-pressed={open} data-changes-toggle onClick={onToggle}
-          className={`flex size-8 items-center justify-center rounded-control transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-3"}`}>
+        <button
+          type="button"
+          aria-label="Toggle changes panel"
+          aria-pressed={open}
+          data-changes-toggle
+          onClick={onToggle}
+          className={`flex size-8 items-center justify-center rounded-control transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-3"}`}
+        >
           <HugeiconsIcon icon={SidebarRight01Icon} size={18} strokeWidth={1.8} color="currentColor" />
         </button>
       </Tooltip>

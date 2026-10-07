@@ -25,7 +25,10 @@ async function linkedRepo(t) {
   const state = {
     next_id: 4,
     worktrees: { 1: { id: 1, path: web, name: "main" } },
-    sessions: { 2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex" }, 3: { id: 3, worktree_id: 1, agent_name: "main", status: "Created", provider: "claude", archived: true } },
+    sessions: {
+      2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex" },
+      3: { id: 3, worktree_id: 1, agent_name: "main", status: "Created", provider: "claude", archived: true },
+    },
     messages: [
       { id: 4, session_id: 2, role: "user", body: "Add the health check", context: null },
       { id: 5, session_id: 2, role: "assistant", body: "Added it.", context: null },
@@ -33,10 +36,11 @@ async function linkedRepo(t) {
     ],
   };
   const reads = createLinkedReads({
-    sides: async chatId => (chatId === "api#1" ? [{ project_id: "web-id", worktree_path: web, link_id: "link", projectPath: web, projectName: "web", sourceWorktree: "/api" }] : []),
+    sides: async (chatId) =>
+      chatId === "api#1" ? [{ project_id: "web-id", worktree_path: web, link_id: "link", projectPath: web, projectName: "web", sourceWorktree: "/api" }] : [],
     state: async () => state,
     runs: () => ({ [`${web}#2`]: { approvals: [{}], questions: [] } }),
-    receiveOnly: key => key === `${web}#2`,
+    receiveOnly: (key) => key === `${web}#2`,
     open: () => [],
   });
   return { web, hidden, reads };
@@ -59,7 +63,13 @@ test("the read tools serve the linked Worktree: overview, Chats (archived too), 
 
 test("every read is refused outside the Worktrees the Chat can see", async (t) => {
   const { web, hidden, reads } = await linkedRepo(t);
-  for (const read of [() => reads.git("other#1", web, "status"), () => reads.readFile("other#1", web, "client.ts"), () => reads.search("other#1", web, "health"), () => reads.readChat("other#1", `${web}#2`), () => reads.git("api#1", hidden, "status")]) {
+  for (const read of [
+    () => reads.git("other#1", web, "status"),
+    () => reads.readFile("other#1", web, "client.ts"),
+    () => reads.search("other#1", web, "health"),
+    () => reads.readChat("other#1", `${web}#2`),
+    () => reads.git("api#1", hidden, "status"),
+  ]) {
     await assert.rejects(read, /isn't linked to this Chat|isn't in a linked Worktree/);
   }
   assert.equal(await reads.overview("other#1"), "No Worktrees are linked to this Chat.");
@@ -73,10 +83,24 @@ test("every read is refused outside the Worktrees the Chat can see", async (t) =
 
 test("the tool definitions are read-only except delegate and conclude_negotiation, and check their input", async () => {
   const calls = [];
-  const definitions = linkedToolDefinitions("api#1", { reads: { git: async (...args) => { calls.push(args); return "ok"; } }, delegations: {} });
-  assert.deepEqual(definitions.filter(tool => !tool.readOnly).map(tool => tool.name), ["delegate", "conclude_negotiation"]);
-  assert.deepEqual(definitions.filter(tool => tool.readOnly).map(tool => tool.name), ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files"]);
-  const linkedGit = definitions.find(tool => tool.name === "linked_git");
+  const definitions = linkedToolDefinitions("api#1", {
+    reads: {
+      git: async (...args) => {
+        calls.push(args);
+        return "ok";
+      },
+    },
+    delegations: {},
+  });
+  assert.deepEqual(
+    definitions.filter((tool) => !tool.readOnly).map((tool) => tool.name),
+    ["delegate", "conclude_negotiation"],
+  );
+  assert.deepEqual(
+    definitions.filter((tool) => tool.readOnly).map((tool) => tool.name),
+    ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files"],
+  );
+  const linkedGit = definitions.find((tool) => tool.name === "linked_git");
   assert.deepEqual(inputSchema(linkedGit).properties.operation.enum, ["status", "diff", "log"]);
   const refused = await runTool(linkedGit, { worktree: "/web", operation: "reset" });
   assert.equal(refused.isError, true);
@@ -87,7 +111,7 @@ test("the tool definitions are read-only except delegate and conclude_negotiatio
 
 test("Codex reaches the tools over loopback MCP, one unguessable path per Chat", async (t) => {
   const tools = { "api#1": [{ name: "linked_overview", description: "Summary", input: {}, readOnly: true, run: async () => "summary of web" }] };
-  const server = createLinkedMcpServer({ toolsFor: chatId => tools[chatId] ?? [] });
+  const server = createLinkedMcpServer({ toolsFor: (chatId) => tools[chatId] ?? [] });
   t.after(() => server.close());
   const url = await server.url("api#1");
   assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/);
@@ -97,18 +121,38 @@ test("Codex reaches the tools over loopback MCP, one unguessable path per Chat",
   assert.equal(initialize.result.protocolVersion, "2025-06-18");
   assert.equal((await call(url, { jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
   const listed = await (await call(url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert.deepEqual(listed.result.tools, [{ name: "linked_overview", description: "Summary", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } }]);
+  assert.deepEqual(listed.result.tools, [
+    {
+      name: "linked_overview",
+      description: "Summary",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: true },
+    },
+  ]);
   const called = await (await call(url, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "linked_overview", arguments: {} } })).json();
   assert.deepEqual(called.result, { content: [{ type: "text", text: "summary of web" }], isError: false });
   assert.equal((await call(url.replace(/[a-f0-9]{48}$/, "0".repeat(48)), { jsonrpc: "2.0", id: 4, method: "tools/list" })).status, 404);
 });
-test('a canvas endpoint exposes one canonical shared transcript and rejects unlinked Link refs', async () => {
-  const { randomUUID } = require('node:crypto'); const { scopeKey } = require('@milagre/shared/chat-scopes');
-  const id = randomUUID(), owner = scopeKey({ kind: 'link', linkId: id });
-  const shared = { sessions: { 7: { id: 7, title: 'Across both', agent_name: 'Link', provider: 'codex', worktrees: [{ worktreePath: '/owned/api' }], workspacePath: '/workspace' } }, messages: [{ id: 1, session_id: 7, role: 'assistant', body: 'Canonical reply', context: null }] };
-  const project = { worktrees: { 1: { id: 1, path: '/owned/api', name: 'feature', sharedChat: { linkId: id, sessionId: 7 } } }, sessions: {}, messages: [] };
-  const reads = createLinkedReads({ sides: async () => [{ projectPath: '/api', projectName: 'API', worktree_path: '/owned/api' }], state: async key => key === owner ? shared : project, runs: () => ({}), open: () => [], receiveOnly: () => false });
-  assert.match(await reads.overview('/external#2'), new RegExp(owner + '#7'));
-  assert.match(await reads.readChat('/external#2', owner + '#7'), /Canonical reply/);
-  await assert.rejects(reads.readChat('/external#2', scopeKey({ kind: 'link', linkId: randomUUID() }) + '#7'), /isn't in a linked Worktree/);
+test("a canvas endpoint exposes one canonical shared transcript and rejects unlinked Link refs", async () => {
+  const { randomUUID } = require("node:crypto");
+  const { scopeKey } = require("@milagre/shared/chat-scopes");
+  const id = randomUUID(),
+    owner = scopeKey({ kind: "link", linkId: id });
+  const shared = {
+    sessions: {
+      7: { id: 7, title: "Across both", agent_name: "Link", provider: "codex", worktrees: [{ worktreePath: "/owned/api" }], workspacePath: "/workspace" },
+    },
+    messages: [{ id: 1, session_id: 7, role: "assistant", body: "Canonical reply", context: null }],
+  };
+  const project = { worktrees: { 1: { id: 1, path: "/owned/api", name: "feature", sharedChat: { linkId: id, sessionId: 7 } } }, sessions: {}, messages: [] };
+  const reads = createLinkedReads({
+    sides: async () => [{ projectPath: "/api", projectName: "API", worktree_path: "/owned/api" }],
+    state: async (key) => (key === owner ? shared : project),
+    runs: () => ({}),
+    open: () => [],
+    receiveOnly: () => false,
+  });
+  assert.match(await reads.overview("/external#2"), new RegExp(owner + "#7"));
+  assert.match(await reads.readChat("/external#2", owner + "#7"), /Canonical reply/);
+  await assert.rejects(reads.readChat("/external#2", scopeKey({ kind: "link", linkId: randomUUID() }) + "#7"), /isn't in a linked Worktree/);
 });

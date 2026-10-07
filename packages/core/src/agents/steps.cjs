@@ -23,7 +23,10 @@ const CLAUDE_AGENT_TOOLS = new Set(["Agent", "Task"]);
 
 // Text shown as code in a title: one line of at most 80 characters, with no backticks of its own.
 function code(text, max = 80) {
-  const flat = String(text ?? "").trim().replace(/`/g, "'").replace(/\s+/g, " ");
+  const flat = String(text ?? "")
+    .trim()
+    .replace(/`/g, "'")
+    .replace(/\s+/g, " ");
   return `\`${flat.length > max ? `${flat.slice(0, max - 1)}…` : flat}\``;
 }
 
@@ -41,7 +44,10 @@ function compact(object) {
 function blocksText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : "")).filter(Boolean).join("\n");
+  return content
+    .map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : ""))
+    .filter(Boolean)
+    .join("\n");
 }
 
 // --- Thinking ---
@@ -65,7 +71,8 @@ function claudeStep(id, name, input = {}) {
   const step = (kind, title, detail, file) => compact({ id: String(id), kind, title, detail, file: filePath(file) });
   if (name === "Bash") return step("shell", `Ran ${code(input.command)}`, capOutput(`$ ${input.command ?? ""}\n`));
   if (name === "Read") return step("read", `Read ${fileName(input.file_path)}`, undefined, input.file_path);
-  if (CLAUDE_EDIT_TOOLS.has(name)) return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`, undefined, input.file_path ?? input.notebook_path);
+  if (CLAUDE_EDIT_TOOLS.has(name))
+    return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`, undefined, input.file_path ?? input.notebook_path);
   if (name === "Write") return step("edit", `Wrote ${fileName(input.file_path)}`, undefined, input.file_path);
   if (name === "Grep") return step("search", `Searched for ${code(input.pattern)}${input.path ? ` in ${code(input.path)}` : ""}`);
   if (name === "Glob") return step("search", `Found files matching ${code(input.pattern)}`);
@@ -82,7 +89,9 @@ function claudeStep(id, name, input = {}) {
 function patchDiff(result) {
   const hunks = result?.structuredPatch;
   if (!Array.isArray(hunks) || !hunks.length) return undefined;
-  return capText(hunks.map((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...(hunk.lines ?? [])].join("\n")).join("\n"));
+  return capText(
+    hunks.map((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...(hunk.lines ?? [])].join("\n")).join("\n"),
+  );
 }
 
 const TODO_MARKS = { completed: "[x]", in_progress: "[~]", pending: "[ ]" };
@@ -100,7 +109,8 @@ function claudeStepResult(call, block, structured) {
   if (CLAUDE_EDIT_TOOLS.has(name) || name === "Write") return end({ detail: patchDiff(structured) ?? claudeEditDiff(name, input) });
   if (CLAUDE_AGENT_TOOLS.has(name) && structured?.status === "async_launched") return end({ title: `Started an agent: ${input.description || "a subtask"}` });
   if (CLAUDE_AGENT_TOOLS.has(name) && Array.isArray(structured?.content)) return end({ detail: capText(blocksText(structured.content)) || undefined });
-  if (name === "TodoWrite" && Array.isArray(input.todos)) return end({ detail: input.todos.map((todo) => `${TODO_MARKS[todo.status] ?? "[ ]"} ${todo.content}`).join("\n") });
+  if (name === "TodoWrite" && Array.isArray(input.todos))
+    return end({ detail: input.todos.map((todo) => `${TODO_MARKS[todo.status] ?? "[ ]"} ${todo.content}`).join("\n") });
   return end({ detail: text ? capText(text) : undefined });
 }
 
@@ -141,7 +151,12 @@ function codexStep(item) {
       const action = commandAction(item);
       const detail = capOutput(`$ ${command}\n`);
       if (action?.type === "read") return step("read", `Read ${code(action.name || path.basename(String(action.path ?? command)))}`, detail, action.path);
-      if (action?.type === "search") return step("search", action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`, detail);
+      if (action?.type === "search")
+        return step(
+          "search",
+          action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`,
+          detail,
+        );
       if (action?.type === "listFiles") return step("search", action.path ? `Listed files in ${code(action.path)}` : "Listed files", detail);
       return step("shell", `Ran ${code(command)}`, detail);
     }
@@ -170,17 +185,29 @@ function codexStepResult(item) {
       const failed = item.status !== "completed" || (item.exitCode ?? 0) !== 0;
       const status = failed ? "failed" : "done";
       if (!failed && commandAction(item)?.type === "read") return { id, status };
-      const output = item.status === "declined" ? "Declined." : item.aggregatedOutput ?? "";
+      const output = item.status === "declined" ? "Declined." : (item.aggregatedOutput ?? "");
       return { id, status, detail: capOutput(`$ ${unwrapShell(String(item.command ?? ""))}\n${output}`) };
     }
     case "fileChange": {
       const changes = item.changes ?? [];
-      return compact({ id, status: item.status === "completed" ? "done" : "failed", title: changeTitle(changes), detail: changes.length ? codexChangesDiff(changes) : undefined });
+      return compact({
+        id,
+        status: item.status === "completed" ? "done" : "failed",
+        title: changeTitle(changes),
+        detail: changes.length ? codexChangesDiff(changes) : undefined,
+      });
     }
     case "mcpToolCall":
-      return compact({ id, status: item.status === "completed" ? "done" : "failed", detail: capText(item.error?.message ?? blocksText(item.result?.content)) || undefined });
+      return compact({
+        id,
+        status: item.status === "completed" ? "done" : "failed",
+        detail: capText(item.error?.message ?? blocksText(item.result?.content)) || undefined,
+      });
     case "dynamicToolCall": {
-      const text = (item.contentItems ?? []).map((content) => (typeof content?.text === "string" ? content.text : "")).filter(Boolean).join("\n");
+      const text = (item.contentItems ?? [])
+        .map((content) => (typeof content?.text === "string" ? content.text : ""))
+        .filter(Boolean)
+        .join("\n");
       return compact({ id, status: item.status === "completed" && item.success !== false ? "done" : "failed", detail: text ? capText(text) : undefined });
     }
     case "webSearch":
@@ -191,7 +218,14 @@ function codexStepResult(item) {
       // Codex reports "completed", or "failed" with a failure such as a used-up limit; result is the image as base64.
       const failed = item.status === "failed" || Boolean(item.failure) || (!item.savedPath && !item.result);
       const note = item.failure?.type === "usageLimitExceeded" ? "image limit reached" : undefined;
-      return compact({ id, status: failed ? "failed" : "done", title: failed ? "Couldn't generate an image" : "Generated an image", note, detail: item.revisedPrompt ? capText(item.revisedPrompt) : undefined, file: filePath(item.savedPath) });
+      return compact({
+        id,
+        status: failed ? "failed" : "done",
+        title: failed ? "Couldn't generate an image" : "Generated an image",
+        note,
+        detail: item.revisedPrompt ? capText(item.revisedPrompt) : undefined,
+        file: filePath(item.savedPath),
+      });
     }
     default:
       return { id, status: item.status === "failed" ? "failed" : "done" };

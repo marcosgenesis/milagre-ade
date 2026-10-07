@@ -47,9 +47,11 @@ export function Select<T extends string>({
     const left = Math.max(INSET, Math.min(trigger.right - width, window.innerWidth - width - INSET));
     const roomBelow = window.innerHeight - trigger.bottom - GAP - INSET;
     const roomAbove = trigger.top - GAP - INSET;
-    setPosition(roomBelow >= MIN_ROOM || roomBelow >= roomAbove
-      ? { left, top: trigger.bottom + GAP, maxHeight: roomBelow }
-      : { left, bottom: window.innerHeight - trigger.top + GAP, maxHeight: roomAbove });
+    setPosition(
+      roomBelow >= MIN_ROOM || roomBelow >= roomAbove
+        ? { left, top: trigger.bottom + GAP, maxHeight: roomBelow }
+        : { left, bottom: window.innerHeight - trigger.top + GAP, maxHeight: roomAbove },
+    );
   }
 
   function close(refocus = true) {
@@ -65,11 +67,19 @@ export function Select<T extends string>({
   useLayoutEffect(() => {
     if (!open) return;
     const rows = panelRef.current?.querySelectorAll<HTMLElement>("[data-picker-row]");
-    const index = Math.max(0, options.findIndex((option) => option.value === value));
+    const index = Math.max(
+      0,
+      options.findIndex((option) => option.value === value),
+    );
     rows?.[index]?.focus({ preventScroll: false });
   }, [open]);
 
-  useDismiss(open, () => close(false), (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)), place);
+  useDismiss(
+    open,
+    () => close(false),
+    (target) => !!(panelRef.current?.contains(target) || triggerRef.current?.contains(target)),
+    place,
+  );
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" || event.key === "Tab") {
@@ -93,29 +103,53 @@ export function Select<T extends string>({
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => { if (open) { close(false); return; } place(); setOpen(true); }}
+        onClick={() => {
+          if (open) {
+            close(false);
+            return;
+          }
+          place();
+          setOpen(true);
+        }}
         onKeyDown={onTriggerKeyDown}
         className={`flex h-8 items-center gap-2 rounded-control border border-line pr-2.5 pl-3 text-[13px] font-medium text-ink transition-colors hover:bg-hover ${open ? "bg-hover" : "bg-surface"}`}
       >
         {selected?.icon}
         <span className="truncate">{selected?.label ?? ""}</span>
-        <span className="text-ink-3"><HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" /></span>
+        <span className="text-ink-3">
+          <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" />
+        </span>
       </button>
-      {open && createPortal(
-        <div ref={panelRef} role="listbox" aria-label={label} onKeyDown={onPanelKeyDown} className="fixed z-50" style={{ left: position.left, top: position.top, bottom: position.bottom, width }}>
-          <PickerPanel style={{ maxHeight: position.maxHeight, transformOrigin: `${position.top === undefined ? "bottom" : "top"} right` }}>
-            {options.map((option, index) => (
-              <Fragment key={option.value}>
-                {option.group && option.group !== options[index - 1]?.group && (
-                  <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{option.group}</div>
-                )}
-                <PickerRow icon={option.icon} label={option.label} description={option.description} selected={option.value === value} onClick={() => choose(option.value)} option />
-              </Fragment>
-            ))}
-          </PickerPanel>
-        </div>,
-        document.body,
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="listbox"
+            aria-label={label}
+            onKeyDown={onPanelKeyDown}
+            className="fixed z-50"
+            style={{ left: position.left, top: position.top, bottom: position.bottom, width }}
+          >
+            <PickerPanel style={{ maxHeight: position.maxHeight, transformOrigin: `${position.top === undefined ? "bottom" : "top"} right` }}>
+              {options.map((option, index) => (
+                <Fragment key={option.value}>
+                  {option.group && option.group !== options[index - 1]?.group && (
+                    <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{option.group}</div>
+                  )}
+                  <PickerRow
+                    icon={option.icon}
+                    label={option.label}
+                    description={option.description}
+                    selected={option.value === value}
+                    onClick={() => choose(option.value)}
+                    option
+                  />
+                </Fragment>
+              ))}
+            </PickerPanel>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

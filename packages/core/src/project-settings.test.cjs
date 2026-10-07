@@ -61,7 +61,8 @@ test("a file that can't be read fails the save and keeps the other projects' pat
 test("saves that overlap all land", async (t) => {
   const { settings } = await store(t);
   await Promise.all(["a", "b", "c", "d"].map((name) => settings.setFilesToCopy(`/work/${name}`, [`${name}.env`])));
-  for (const name of ["a", "b", "c", "d"]) assert.deepEqual(await settings.get(`/work/${name}`), { filesToCopy: [`${name}.env`], setupCommand: "", icon: null });
+  for (const name of ["a", "b", "c", "d"])
+    assert.deepEqual(await settings.get(`/work/${name}`), { filesToCopy: [`${name}.env`], setupCommand: "", icon: null });
 });
 
 test("a setup command is saved per project, trimmed, and removed when empty", async (t) => {

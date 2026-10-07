@@ -17,4 +17,3 @@ export type DiffFilesResult = { isRepo: false; message: string } | { isRepo: tru
 
 /** `patch` is empty when the file is binary or `tooLarge` (over 1 MB). */
 export type DiffFileResult = { patch: string; binary: boolean; tooLarge: boolean };
-

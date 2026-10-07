@@ -26,7 +26,12 @@ test("PR dismissal is independent of other repositories and PRs", () => {
 });
 
 test("blockers are ordered conflicts, requested changes, failed CI, then an outdated branch", () => {
-  assert.deepEqual(pullRequestBlockers({ ...pr, isBehind: true, changesRequested: true, checks: "failed" }), ["conflicts", "changes-requested", "checks-failed", "behind"]);
+  assert.deepEqual(pullRequestBlockers({ ...pr, isBehind: true, changesRequested: true, checks: "failed" }), [
+    "conflicts",
+    "changes-requested",
+    "checks-failed",
+    "behind",
+  ]);
   assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, isBehind: true, checks: "failed" }), ["checks-failed", "behind"]);
   assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, checks: "running" }), [], "Running checks block nothing yet");
   assert.deepEqual(pullRequestBlockers({ ...pr, hasConflicts: false, isBehind: true }), ["behind"]);

@@ -4,7 +4,12 @@ import { loadChatPreferences, saveChatPreferences } from "./chat-preferences.ts"
 
 const memory = () => {
   const data = new Map<string, string>();
-  return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      data.set(key, value);
+    },
+  };
 };
 
 test("remembers isolation and keeps branch choices separate by project", () => {
@@ -19,7 +24,14 @@ test("invalid or inaccessible storage falls back safely", () => {
   const storage = memory();
   storage.setItem("milagre.chat-preferences", '{"isolation":"invalid","projects":{"/a":{"baseBranch":42}}}');
   assert.deepEqual(loadChatPreferences(storage, "/a"), { isolation: "local" });
-  const unavailable = { getItem() { throw Error("blocked"); }, setItem() { throw Error("blocked"); } };
+  const unavailable = {
+    getItem() {
+      throw Error("blocked");
+    },
+    setItem() {
+      throw Error("blocked");
+    },
+  };
   assert.deepEqual(loadChatPreferences(unavailable, "/a"), { isolation: "local" });
   assert.doesNotThrow(() => saveChatPreferences(unavailable, "/a", { isolation: "worktree" }));
 });

@@ -184,8 +184,8 @@ Simulator notification injection bypasses Expo/APNs transport. Live APNs/FCM del
 ```sh
 npm run typecheck:mobile
 npm run lint --workspace @milagre/mobile
-npm run test:mobile
-npm run test:daemon
+npm test -- --workspace mobile
+npm test -- --workspace daemon
 npm run export:ios --workspace @milagre/mobile
 ```
 
@@ -198,7 +198,6 @@ node scripts/check-mobile-providers.cjs --run
 ```
 
 This uses the installed Codex and Claude accounts for one short no-tool prompt each in an isolated temporary Project. It checks the full mobile HTTP/socket/core path, restarts the host and verifies the token, saved Chats, provider session IDs and replies. It is excluded from normal tests and CI because it consumes provider quota. The saved temporary Project path is printed for inspection.
-
 
 ### Android capture packaging
 

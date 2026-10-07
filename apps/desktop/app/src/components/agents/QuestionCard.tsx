@@ -4,7 +4,20 @@ import type { KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentQuestion, QuestionAnswers, QuestionRequest } from "../../model";
-import { advancesOnPick, arrowTab, draftAnswers, draftOf, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "../../lib/question-answers";
+import {
+  advancesOnPick,
+  arrowTab,
+  draftAnswers,
+  draftOf,
+  nextTab,
+  pickOption,
+  primaryAction,
+  primaryEnabled,
+  questionAnswered,
+  sendsOnPick,
+  tabLabel,
+  typeAnswer,
+} from "../../lib/question-answers";
 import type { QuestionDrafts } from "../../lib/question-answers";
 import { SPRING_PRESS, SPRING_SWAP } from "../../lib/ease";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -13,7 +26,12 @@ import { ScrollArea } from "../primitives/ScrollArea";
  * The open chat's oldest question: the agent's options as rows, an answer of the user's own, and Dismiss.
  * Several questions show one at a time, under a tab each.
  */
-export function QuestionCard({ request, waiting, answering, onAnswer }: {
+export function QuestionCard({
+  request,
+  waiting,
+  answering,
+  onAnswer,
+}: {
   request: QuestionRequest;
   /** How many more questions are queued behind this one. */
   waiting: number;
@@ -57,8 +75,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
     if (action === "next") {
       focusPanel.current = true;
       setActive(nextTab(count, active));
-    }
-    else if (answers) onAnswer(answers);
+    } else if (answers) onAnswer(answers);
   }
 
   function handleFieldKeyDown(event: KeyboardEvent<HTMLInputElement>, target: AgentQuestion) {
@@ -84,7 +101,7 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
   useEffect(() => {
     if (!focusPanel.current) return;
     focusPanel.current = false;
-    const controls = panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+    const controls = panelRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)");
     // The picked option, else the first option, else the field when there are no options.
     const target = panelRef.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? controls?.[0];
     target?.focus();
@@ -112,7 +129,9 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
               return (
                 <button
                   key={item.id}
-                  ref={(node) => { tabRefs.current[index] = node; }}
+                  ref={(node) => {
+                    tabRefs.current[index] = node;
+                  }}
                   type="button"
                   role="tab"
                   id={`question-tab-${item.id}`}
@@ -156,7 +175,10 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
                 transition={SPRING_PRESS}
                 className={`flex w-full items-start gap-2.5 rounded-control border px-2.5 py-2 text-left transition-colors disabled:cursor-default ${picked ? "border-line-strong bg-inset" : "border-line bg-surface hover:border-line-strong hover:bg-hover disabled:hover:border-line disabled:hover:bg-surface"}`}
               >
-                <span aria-hidden className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border ${question.multiSelect ? "rounded-[5px]" : "rounded-full"} ${picked ? "border-ink bg-ink text-surface" : "border-line-strong bg-surface"}`}>
+                <span
+                  aria-hidden
+                  className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border ${question.multiSelect ? "rounded-[5px]" : "rounded-full"} ${picked ? "border-ink bg-ink text-surface" : "border-line-strong bg-surface"}`}
+                >
                   {picked && <HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.4} color="currentColor" />}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -191,11 +213,24 @@ export function QuestionCard({ request, waiting, answering, onAnswer }: {
             transition={reduce ? { duration: 0 } : SPRING_SWAP}
             className="flex flex-wrap justify-start gap-2 border-t border-line bg-inset px-4 py-3"
           >
-            <motion.button type="button" onClick={() => onAnswer(null)} whileTap={reduce ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="inline-flex items-center gap-1.5 rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover">
+            <motion.button
+              type="button"
+              onClick={() => onAnswer(null)}
+              whileTap={reduce ? undefined : { scale: 0.97 }}
+              transition={SPRING_PRESS}
+              className="inline-flex items-center gap-1.5 rounded-control border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover"
+            >
               <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} color="currentColor" />
               Dismiss
             </motion.button>
-            <motion.button type="button" disabled={!ready} onClick={advance} whileTap={reduce || !ready ? undefined : { scale: 0.97 }} transition={SPRING_PRESS} className="inline-flex items-center gap-1.5 rounded-control bg-ink px-3 py-2 text-xs font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">
+            <motion.button
+              type="button"
+              disabled={!ready}
+              onClick={advance}
+              whileTap={reduce || !ready ? undefined : { scale: 0.97 }}
+              transition={SPRING_PRESS}
+              className="inline-flex items-center gap-1.5 rounded-control bg-ink px-3 py-2 text-xs font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+            >
               <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} color="currentColor" />
               {action === "next" ? "Next" : count === 1 ? "Send answer" : "Send answers"}
             </motion.button>

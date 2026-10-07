@@ -34,6 +34,7 @@ export function step(index: number, direction: number, count: number): number {
 export function containedRect(box: Rect, naturalWidth: number, naturalHeight: number): Rect | null {
   if (!naturalWidth || !naturalHeight || !box.width || !box.height) return null;
   const scale = Math.min(box.width / naturalWidth, box.height / naturalHeight);
-  const width = naturalWidth * scale, height = naturalHeight * scale;
+  const width = naturalWidth * scale,
+    height = naturalHeight * scale;
   return { left: box.left + (box.width - width) / 2, top: box.top + (box.height - height) / 2, width, height };
 }

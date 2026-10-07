@@ -14,7 +14,10 @@ test("project:reveal only opens the top folder of a checkout", async (t) => {
   execFileSync("/usr/bin/git", ["init", "-q"], { cwd: repo });
   await fs.mkdir(path.join(base, "plain"));
   const opened = [];
-  const open = async (folder) => { opened.push(folder); return ""; };
+  const open = async (folder) => {
+    opened.push(folder);
+    return "";
+  };
 
   await revealFolder(repo, { open });
   assert.deepEqual(opened, [repo]);

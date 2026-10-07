@@ -16,16 +16,22 @@ export function useSkills(projectPath: string, open: boolean) {
       return;
     }
     setLoading(true);
-    window.milagre.listSkills(projectPath).then((catalog) => {
-      if (!cancelled) setResult({ path: projectPath, catalog });
-    }).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "Could not load skills. Reopen the menu to retry.";
-      const warning = message.includes("No handler registered") ? "Restart Milagre to enable skill discovery." : message;
-      if (!cancelled) setResult({ path: projectPath, catalog: { skills: [], warnings: [warning] } });
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
+    window.milagre
+      .listSkills(projectPath)
+      .then((catalog) => {
+        if (!cancelled) setResult({ path: projectPath, catalog });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "Could not load skills. Reopen the menu to retry.";
+        const warning = message.includes("No handler registered") ? "Restart Milagre to enable skill discovery." : message;
+        if (!cancelled) setResult({ path: projectPath, catalog: { skills: [], warnings: [warning] } });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectPath, open]);
 
   const catalog = result?.path === projectPath ? result.catalog : EMPTY_CATALOG;

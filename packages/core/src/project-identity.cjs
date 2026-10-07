@@ -7,10 +7,14 @@ async function git(cwd, ...args) {
   return (await client.text(cwd, args)).trim();
 }
 
-const listedWorktrees = cwd => client.worktreeList(cwd);
+const listedWorktrees = (cwd) => client.worktreeList(cwd);
 
 async function isDirectory(folder) {
-  try { return (await fs.stat(folder)).isDirectory(); } catch { return false; }
+  try {
+    return (await fs.stat(folder)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function activeWorktrees(projectPath) {
@@ -27,7 +31,7 @@ async function resolveProject(openedPath) {
   const top = await fs.realpath(await git(opened, "rev-parse", "--show-toplevel"));
   const commonDir = await client.commonDir(top);
   const main = (await listedWorktrees(top))[0]?.path;
-  if (!main || !await isDirectory(main)) throw new Error("The Project's main checkout is missing.");
+  if (!main || !(await isDirectory(main))) throw new Error("The Project's main checkout is missing.");
   const projectPath = await fs.realpath(main);
   return { id: commonDir, path: projectPath, name: path.basename(projectPath) };
 }

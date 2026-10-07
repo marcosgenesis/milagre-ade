@@ -33,12 +33,21 @@ export function HandoverRow({ provider, blocked, onClick }: { provider: ModelPro
     </button>
   );
   if (blocked === null) return row;
-  return <Tooltip label={blocked} wrap className="w-full cursor-not-allowed">{row}</Tooltip>;
+  return (
+    <Tooltip label={blocked} wrap className="w-full cursor-not-allowed">
+      {row}
+    </Tooltip>
+  );
 }
 
 export function HandoverLinkBar({ to, onOpen }: { to: { id: number; title: string; provider: ModelProvider }; onOpen: (id: number) => void }) {
   return (
-    <button type="button" data-handover-to onClick={() => onOpen(to.id)} className="flex w-full items-center gap-2 rounded-control border border-line px-3 py-2 text-left text-[12px] text-ink-2 hover:bg-hover">
+    <button
+      type="button"
+      data-handover-to
+      onClick={() => onOpen(to.id)}
+      className="flex w-full items-center gap-2 rounded-control border border-line px-3 py-2 text-left text-[12px] text-ink-2 hover:bg-hover"
+    >
       <ProviderLogo provider={to.provider} size={14} />
       <span>Handed over to {providerLabel(to.provider)}</span>
       <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={1.8} color="currentColor" />
@@ -56,17 +65,29 @@ export function HandoverFromLabel({ from, onOpen }: { from: { id: number; title:
 }
 
 /** Above the composer of a handed-over chat before its first message: what stays behind and how the permission mode behaves here. */
-export function HandoverNote({ from, to, permissionMode, onDismiss }: { from: ModelProvider; to: ModelProvider; permissionMode: PermissionMode; onDismiss: () => void }) {
+export function HandoverNote({
+  from,
+  to,
+  permissionMode,
+  onDismiss,
+}: {
+  from: ModelProvider;
+  to: ModelProvider;
+  permissionMode: PermissionMode;
+  onDismiss: () => void;
+}) {
   return (
     <Notice data-handover-note onDismiss={onDismiss}>
       <ul className="flex flex-col gap-1">
-        {handoverNotes({ from, to, permissionMode }).map((line) => <li key={line}>{line}</li>)}
+        {handoverNotes({ from, to, permissionMode }).map((line) => (
+          <li key={line}>{line}</li>
+        ))}
       </ul>
     </Notice>
   );
 }
 
-export const HANDOVER_BRIEF_NAME = "Handover brief.md";
+const HANDOVER_BRIEF_NAME = "Handover brief.md";
 
 /**
  * The handover brief as an attachment: in the composer of a handed-over chat before its first message (it can't be
@@ -92,11 +113,13 @@ export function HandoverBriefChip({ brief, onSave }: { brief: string; onSave?: (
 }
 
 const FOCUSABLE = 'button:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
-const BUTTON_PRIMARY = "inline-flex h-8 items-center gap-1.5 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40";
-const BUTTON_SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-control border border-line bg-surface px-3 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40";
+const BUTTON_PRIMARY =
+  "inline-flex h-8 items-center gap-1.5 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40";
+const BUTTON_SECONDARY =
+  "inline-flex h-8 items-center gap-1.5 rounded-control border border-line bg-surface px-3 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-40";
 
 /** The brief in a modal, as the GitActionsDialog is built: Edit and Preview tabs with Save and Cancel, or Preview alone with Close. */
-export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string; onSave?: (text: string) => Promise<void> | void; onClose: () => void }) {
+function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string; onSave?: (text: string) => Promise<void> | void; onClose: () => void }) {
   const editable = onSave !== undefined;
   const [tab, setTab] = useState<"edit" | "preview">(editable ? "edit" : "preview");
   const [text, setText] = useState(brief);
@@ -110,7 +133,9 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
   useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
-    return () => { if (previous?.isConnected) previous.focus(); };
+    return () => {
+      if (previous?.isConnected) previous.focus();
+    };
   }, []);
 
   // Escape closes the dialog wherever focus is, and is consumed here so it doesn't also stop the chat's turn.
@@ -174,7 +199,9 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
       data-brief-dialog-overlay
       className="fixed inset-0 z-[80] flex items-center justify-center bg-[oklch(0.2_0.01_260/0.32)] p-4 [-webkit-app-region:no-drag]"
       style={{ animation: "fade-in 140ms ease-out both" }}
-      onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
       <div
         ref={panelRef}
@@ -188,14 +215,21 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
         style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both" }}
       >
         <header className="flex items-center gap-3 px-4 pb-2 pt-3.5">
-          <h2 id="brief-dialog-title" className="min-w-0 flex-1 truncate text-[15px] font-semibold">{HANDOVER_BRIEF_NAME}</h2>
+          <h2 id="brief-dialog-title" className="min-w-0 flex-1 truncate text-[15px] font-semibold">
+            {HANDOVER_BRIEF_NAME}
+          </h2>
           {editable && (
             <div role="tablist" aria-label="Brief view" className="flex items-center gap-0.5 rounded-control bg-inset p-0.5">
               {tabButton("edit", "Edit")}
               {tabButton("preview", "Preview")}
             </div>
           )}
-          <button type="button" aria-label="Close" onClick={onClose} className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink">
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          >
             <HugeiconsIcon icon={Cancel01Icon} size={16} strokeWidth={1.8} color="currentColor" />
           </button>
         </header>
@@ -216,14 +250,22 @@ export function HandoverBriefDialog({ brief, onSave, onClose }: { brief: string;
           )}
         </div>
         <footer className="flex items-center gap-2 border-t border-line bg-inset px-4 py-3">
-          <p role={error ? "alert" : undefined} className="min-w-0 flex-1 text-[12px] text-red">{error}</p>
+          <p role={error ? "alert" : undefined} className="min-w-0 flex-1 text-[12px] text-red">
+            {error}
+          </p>
           {editable ? (
             <>
-              <button type="button" data-brief-cancel className={BUTTON_SECONDARY} onClick={onClose} disabled={saving}>Cancel</button>
-              <button type="button" data-brief-save className={BUTTON_PRIMARY} onClick={() => void save()} disabled={saving || !text.trim()}>Save</button>
+              <button type="button" data-brief-cancel className={BUTTON_SECONDARY} onClick={onClose} disabled={saving}>
+                Cancel
+              </button>
+              <button type="button" data-brief-save className={BUTTON_PRIMARY} onClick={() => void save()} disabled={saving || !text.trim()}>
+                Save
+              </button>
             </>
           ) : (
-            <button type="button" data-brief-close className={BUTTON_PRIMARY} onClick={onClose}>Close</button>
+            <button type="button" data-brief-close className={BUTTON_PRIMARY} onClick={onClose}>
+              Close
+            </button>
           )}
         </footer>
       </div>

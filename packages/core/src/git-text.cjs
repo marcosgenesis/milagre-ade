@@ -40,12 +40,29 @@ function section(name, body) {
 }
 
 /** The user turn for the model: the rules, the chat, the tests run, the repo's style, a stat and the diff. */
-function buildGitTextPrompt({ diff = "", stat = "", omitted = [], chatTitle = "", firstMessage = "", recentMessages = [], testCommands = [], recentSubjects = [], branchCommits = [], branch, base, hasChanges = true }) {
+function buildGitTextPrompt({
+  diff = "",
+  stat = "",
+  omitted = [],
+  chatTitle = "",
+  firstMessage = "",
+  recentMessages = [],
+  testCommands = [],
+  recentSubjects = [],
+  branchCommits = [],
+  branch,
+  base,
+  hasChanges = true,
+}) {
   const fullDiff = String(diff ?? "");
-  const shownDiff = fullDiff.length > DIFF_LIMIT
-    ? `${fullDiff.slice(0, DIFF_LIMIT)}\n[The diff is cut off here: ${(fullDiff.length - DIFF_LIMIT).toLocaleString("en-US")} more characters are not shown.]`
-    : fullDiff;
-  const latest = recentMessages.map((message) => cap(message, MESSAGE_LIMIT)).filter(Boolean).slice(-RECENT_MESSAGES);
+  const shownDiff =
+    fullDiff.length > DIFF_LIMIT
+      ? `${fullDiff.slice(0, DIFF_LIMIT)}\n[The diff is cut off here: ${(fullDiff.length - DIFF_LIMIT).toLocaleString("en-US")} more characters are not shown.]`
+      : fullDiff;
+  const latest = recentMessages
+    .map((message) => cap(message, MESSAGE_LIMIT))
+    .filter(Boolean)
+    .slice(-RECENT_MESSAGES);
   const tests = testCommands.length
     ? testCommands.map(({ command, status }) => `- ${command} (${status === "failed" ? "failed" : "passed"})`).join("\n")
     : "No tests were run in this chat.";
@@ -62,16 +79,27 @@ function buildGitTextPrompt({ diff = "", stat = "", omitted = [], chatTitle = ""
     const label = hasChanges ? "Already committed; the new commit covers only <diff>:\n" : "";
     parts.push(section("branch_commits", `${label}${branchCommits.join("\n")}`));
   }
-  if (!hasChanges) parts.push("There is nothing left to commit: the diff below is the branch's committed work, for the pull request. Still fill commitMessage.");
+  if (!hasChanges)
+    parts.push("There is nothing left to commit: the diff below is the branch's committed work, for the pull request. Still fill commitMessage.");
   if (stat) parts.push(section("diff_stat", stat));
   if (omitted.length) {
-    parts.push(section("not_shown", omitted.map(({ path, reason }) => `${path} (${reason === "lockfile" ? "lockfile" : "looks like a secret"}; contents not shown)`).join("\n")));
+    parts.push(
+      section(
+        "not_shown",
+        omitted.map(({ path, reason }) => `${path} (${reason === "lockfile" ? "lockfile" : "looks like a secret"}; contents not shown)`).join("\n"),
+      ),
+    );
   }
   parts.push(section("diff", shownDiff || "(empty)"));
   return parts.join("\n\n");
 }
 
-const subjectOf = (message) => String(message ?? "").trim().split("\n")[0].trim().toLowerCase();
+const subjectOf = (message) =>
+  String(message ?? "")
+    .trim()
+    .split("\n")[0]
+    .trim()
+    .toLowerCase();
 
 /** Whether a generated message's subject repeats one already in the repo or on the branch. */
 function repeatsSubject(message, { recentSubjects = [], branchCommits = [] } = {}) {
@@ -87,7 +115,11 @@ function repeatNote(message) {
 const FOOTER = /^\s*(?:🤖\s*)?(?:generated with\b|co-authored-by:)/i;
 
 function withoutFooter(text) {
-  return text.split("\n").filter((line) => !FOOTER.test(line)).join("\n").trim();
+  return text
+    .split("\n")
+    .filter((line) => !FOOTER.test(line))
+    .join("\n")
+    .trim();
 }
 
 function textField(value, keys) {
@@ -257,7 +289,14 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
       rpc.start();
       await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
       rpc.notify("initialized");
-      const { thread } = await rpc.request("thread/start", { model: CODEX_MODEL, cwd: os.tmpdir(), approvalPolicy: "never", sandbox: "read-only", baseInstructions: system, ephemeral: true });
+      const { thread } = await rpc.request("thread/start", {
+        model: CODEX_MODEL,
+        cwd: os.tmpdir(),
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        baseInstructions: system,
+        ephemeral: true,
+      });
       await rpc.request("turn/start", { threadId: thread?.id, input: [{ type: "text", text: prompt, text_elements: [] }], outputSchema });
       await finished;
       return final ?? streamed;
@@ -268,4 +307,16 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
   };
 }
 
-module.exports = { CLAUDE_MODEL, CODEX_MODEL, DIFF_LIMIT, GENERATION_FAILED, SYSTEM, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText, repeatsSubject };
+module.exports = {
+  CLAUDE_MODEL,
+  CODEX_MODEL,
+  DIFF_LIMIT,
+  GENERATION_FAILED,
+  SYSTEM,
+  buildGitTextPrompt,
+  claudeModel,
+  codexModel,
+  generateGitText,
+  parseGitText,
+  repeatsSubject,
+};

@@ -14,7 +14,9 @@ function chatContext(chat = {}) {
     chatTitle: text(chat.chatTitle, 500),
     firstMessage: text(chat.firstMessage),
     recentMessages: Array.isArray(chat.recentMessages) ? chat.recentMessages.slice(-10).map((message) => text(message)) : [],
-    testCommands: Array.isArray(chat.testCommands) ? chat.testCommands.slice(-20).map((item) => ({ command: text(item?.command, 500), status: item?.status === "failed" ? "failed" : "done" })) : [],
+    testCommands: Array.isArray(chat.testCommands)
+      ? chat.testCommands.slice(-20).map((item) => ({ command: text(item?.command, 500), status: item?.status === "failed" ? "failed" : "done" }))
+      : [],
   };
 }
 
@@ -26,10 +28,22 @@ function chatContext(chat = {}) {
  * folder with that environment. `cli(name)` is main's CLI check: `{ command, problem }`, the path the
  * SDK and Codex start directly, without a shell.
  */
-function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVersion, env = process.env, actions = createGitActions({ env }), diff = createGitDiff({ env }), models, knownFolders } = {}) {
+function registerGitHandlers(
+  ipcMain,
+  {
+    cli,
+    ready = () => undefined,
+    clientVersion,
+    env = process.env,
+    actions = createGitActions({ env }),
+    diff = createGitDiff({ env }),
+    models,
+    knownFolders,
+  } = {},
+) {
   const command = (name) => async () => {
     const status = await cli(name);
-    return status?.problem ? null : status ?? null;
+    return status?.problem ? null : (status ?? null);
   };
   const textModels = models ?? {
     claude: claudeModel({ getCommand: command("claude") }),
@@ -49,7 +63,9 @@ function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVers
 
   ipcMain.handle("git:changes", async (_event, { cwd, base } = {}) => actions.readChanges({ cwd: await folder(cwd), base }));
   ipcMain.handle("git:diff-files", async (_event, { cwd, base, mode } = {}) => diff.listDiffFiles({ cwd: await folder(cwd), base, mode }));
-  ipcMain.handle("git:diff-file", async (_event, { cwd, base, mode, path: file, oldPath, untracked } = {}) => diff.readDiffFile({ cwd: await folder(cwd), base, mode, path: file, oldPath, untracked }));
+  ipcMain.handle("git:diff-file", async (_event, { cwd, base, mode, path: file, oldPath, untracked } = {}) =>
+    diff.readDiffFile({ cwd: await folder(cwd), base, mode, path: file, oldPath, untracked }),
+  );
   ipcMain.handle("git:generate", async (_event, { cwd, base, provider, chat } = {}) => {
     const checked = await folder(cwd);
     try {

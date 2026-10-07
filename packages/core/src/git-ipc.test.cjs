@@ -14,7 +14,14 @@ function register(overrides = {}) {
   };
   const actions = {
     readChanges: record("readChanges", { isRepo: true }),
-    readTextContext: record("readTextContext", { diff: "+new\n", recentSubjects: ["fix: a"], branchCommits: [], branch: "milagre/x", base: "main", hasChanges: true }),
+    readTextContext: record("readTextContext", {
+      diff: "+new\n",
+      recentSubjects: ["fix: a"],
+      branchCommits: [],
+      branch: "milagre/x",
+      base: "main",
+      hasChanges: true,
+    }),
     commit: record("commit", { ok: true, sha: "abc", shortSha: "abc" }),
     push: record("push", { ok: true, branch: "milagre/x", remote: "origin" }),
     openPr: record("openPr", { ok: true, url: "https://github.com/a/b/pull/1", number: 1 }),
@@ -24,8 +31,17 @@ function register(overrides = {}) {
     readDiffFile: record("readDiffFile", { patch: "", binary: false, tooLarge: false }),
   };
   const prompts = [];
-  const models = { claude: async ({ prompt }) => { prompts.push(prompt); return '{"commitMessage":"fix: x","prTitle":"Fix x","prBody":"Fixes x."}'; }, codex: null };
-  registerGitHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, { cli: async () => ({ command: null, problem: "missing" }), actions, diff, models, ...overrides });
+  const models = {
+    claude: async ({ prompt }) => {
+      prompts.push(prompt);
+      return '{"commitMessage":"fix: x","prTitle":"Fix x","prBody":"Fixes x."}';
+    },
+    codex: null,
+  };
+  registerGitHandlers(
+    { handle: (channel, handler) => handlers.set(channel, handler) },
+    { cli: async () => ({ command: null, problem: "missing" }), actions, diff, models, ...overrides },
+  );
   const invoke = (channel, ...args) => handlers.get(channel)({}, ...args);
   return { handlers, calls, invoke, prompts };
 }
@@ -51,7 +67,12 @@ test("the dialog's channels reach the git actions", async () => {
 
 test("git:generate writes from the chat and the folder's diff", async () => {
   const { invoke, prompts } = register();
-  const result = await invoke("git:generate", { cwd: "/repo/wt", base: "main", provider: "claude", chat: { chatTitle: "Fix x", firstMessage: "Please fix x", recentMessages: [], testCommands: [] } });
+  const result = await invoke("git:generate", {
+    cwd: "/repo/wt",
+    base: "main",
+    provider: "claude",
+    chat: { chatTitle: "Fix x", firstMessage: "Please fix x", recentMessages: [], testCommands: [] },
+  });
   assert.deepEqual(result, { ok: true, provider: "claude", commitMessage: "fix: x", prTitle: "Fix x", prBody: "Fixes x." });
   assert.match(prompts[0], /Please fix x/);
   assert.match(prompts[0], /\+new/);
@@ -66,7 +87,9 @@ test("the channels refuse a folder that isn't an absolute path", async () => {
 
 test("the channels wait for the login environment before running git or gh", async () => {
   let release;
-  const ready = new Promise((resolve) => { release = resolve; });
+  const ready = new Promise((resolve) => {
+    release = resolve;
+  });
   const { calls, invoke } = register({ ready: () => ready });
   const pending = invoke("git:push", { cwd: "/repo/wt" });
   await new Promise((resolve) => setImmediate(resolve));

@@ -36,7 +36,11 @@ export default function GlideMenu({
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
-      <span aria-hidden className={`pointer-events-none absolute inset-x-0 z-0 transition-[top,height,opacity] duration-200 ${highlightClassName}`} style={{ top: highlight?.top ?? 0, height: highlight?.height ?? 0, opacity: highlight ? 1 : 0 }} />
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-x-0 z-0 transition-[top,height,opacity] duration-200 ${highlightClassName}`}
+        style={{ top: highlight?.top ?? 0, height: highlight?.height ?? 0, opacity: highlight ? 1 : 0 }}
+      />
       <div className="relative z-10">{children}</div>
     </div>
   );

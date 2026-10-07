@@ -12,13 +12,21 @@ function changed() {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 function load(path: string) {
   if (!path || images.has(path)) return;
   images.set(path, null);
-  window.milagre?.getProjectImage(path).then((src) => { images.set(path, src); changed(); }, () => {});
+  window.milagre?.getProjectImage(path).then(
+    (src) => {
+      images.set(path, src);
+      changed();
+    },
+    () => {},
+  );
 }
 
 export function setProjectImage(path: string, src: string | null) {
@@ -29,6 +37,8 @@ export function setProjectImage(path: string, src: string | null) {
 export function useProjectImages(paths: string[]) {
   useSyncExternalStore(subscribe, () => version);
   const key = paths.join("\n");
-  useEffect(() => { for (const path of key.split("\n")) load(path); }, [key]);
+  useEffect(() => {
+    for (const path of key.split("\n")) load(path);
+  }, [key]);
   return (path: string) => images.get(path) ?? null;
 }

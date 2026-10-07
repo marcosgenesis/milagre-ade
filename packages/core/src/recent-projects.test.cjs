@@ -13,11 +13,13 @@ async function tempDir(t) {
 }
 
 async function folders(base, ...names) {
-  return Promise.all(names.map(async (name) => {
-    const folder = path.join(base, name);
-    await fs.mkdir(folder, { recursive: true });
-    return folder;
-  }));
+  return Promise.all(
+    names.map(async (name) => {
+      const folder = path.join(base, name);
+      await fs.mkdir(folder, { recursive: true });
+      return folder;
+    }),
+  );
 }
 
 function gitRepo(folder) {
@@ -56,7 +58,10 @@ test("opening a listed project again moves it to the top without a second entry"
 
   const list = await recent.add(alpha);
 
-  assert.deepEqual(list.map((entry) => entry.name), ["alpha", "gamma", "beta"]);
+  assert.deepEqual(
+    list.map((entry) => entry.name),
+    ["alpha", "gamma", "beta"],
+  );
   assert.equal(list[0].openedAt, "2026-10-01T10:00:04.000Z");
 });
 
@@ -70,7 +75,10 @@ test("the list keeps the 10 most recent projects", async (t) => {
   const list = await recent.list();
 
   assert.equal(MAX_RECENT, 10);
-  assert.deepEqual(list.map((entry) => entry.name), names.slice(2).reverse());
+  assert.deepEqual(
+    list.map((entry) => entry.name),
+    names.slice(2).reverse(),
+  );
 });
 
 test("a folder that no longer exists is dropped when the list is read, and from the file on the next write", async (t) => {
@@ -82,12 +90,21 @@ test("a folder that no longer exists is dropped when the list is read, and from 
   await fs.rm(alpha, { recursive: true });
   // A file in a folder's place is not a project either.
   await fs.writeFile(path.join(base, "file"), "");
-  await fs.writeFile(file, JSON.stringify([...JSON.parse(await fs.readFile(file, "utf8")), { path: path.join(base, "file"), name: "file", openedAt: "2026-01-01T00:00:00.000Z" }]));
+  await fs.writeFile(
+    file,
+    JSON.stringify([...JSON.parse(await fs.readFile(file, "utf8")), { path: path.join(base, "file"), name: "file", openedAt: "2026-01-01T00:00:00.000Z" }]),
+  );
 
-  assert.deepEqual((await recent.list()).map((entry) => entry.name), ["beta"]);
+  assert.deepEqual(
+    (await recent.list()).map((entry) => entry.name),
+    ["beta"],
+  );
 
   await recent.add(gamma);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name), ["gamma", "beta"]);
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name),
+    ["gamma", "beta"],
+  );
 });
 
 test("a corrupt or odd file reads as an empty list, and the next write replaces it", async (t) => {
@@ -96,22 +113,35 @@ test("a corrupt or odd file reads as an empty list, and the next write replaces 
   const file = path.join(base, "recent-projects.json");
   const recent = createRecentProjects(file, { now: clock() });
 
-  for (const contents of ["{not json", "", "null", "{\"projects\":[]}", "42"]) {
+  for (const contents of ["{not json", "", "null", '{"projects":[]}', "42"]) {
     await fs.writeFile(file, contents);
     assert.deepEqual(await recent.list(), [], contents);
   }
 
   await fs.writeFile(file, "{not json");
-  assert.deepEqual((await recent.add(alpha)).map((entry) => entry.name), ["alpha"]);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name), ["alpha"]);
+  assert.deepEqual(
+    (await recent.add(alpha)).map((entry) => entry.name),
+    ["alpha"],
+  );
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name),
+    ["alpha"],
+  );
 
   // Entries that aren't a project's absolute path are skipped; the rest are kept, once each.
-  await fs.writeFile(file, JSON.stringify([
-    null, "x", { path: "relative/folder", name: "r" }, { path: 7 }, { name: "no path" },
-    { path: beta, name: "beta", openedAt: "2026-01-02T00:00:00.000Z" },
-    { path: beta, name: "beta again", openedAt: "2026-01-01T00:00:00.000Z" },
-    { path: alpha },
-  ]));
+  await fs.writeFile(
+    file,
+    JSON.stringify([
+      null,
+      "x",
+      { path: "relative/folder", name: "r" },
+      { path: 7 },
+      { name: "no path" },
+      { path: beta, name: "beta", openedAt: "2026-01-02T00:00:00.000Z" },
+      { path: beta, name: "beta again", openedAt: "2026-01-01T00:00:00.000Z" },
+      { path: alpha },
+    ]),
+  );
   assert.deepEqual(await recent.list(), [
     { path: beta, name: "beta", openedAt: "2026-01-02T00:00:00.000Z" },
     { path: alpha, name: "alpha", openedAt: "" },
@@ -128,7 +158,10 @@ test("writes are atomic: saves run one at a time and leave no temporary files", 
   await Promise.all(paths.map((folder) => recent.add(folder)));
 
   assert.deepEqual(await fs.readdir(data), ["recent-projects.json"]);
-  assert.deepEqual((await recent.list()).map((entry) => entry.name), [...names].reverse());
+  assert.deepEqual(
+    (await recent.list()).map((entry) => entry.name),
+    [...names].reverse(),
+  );
 });
 
 test("a file that can't be read is never overwritten, and a failed write doesn't block the next one", async (t) => {
@@ -144,8 +177,14 @@ test("a file that can't be read is never overwritten, and a failed write doesn't
   await assert.rejects(recent.add(alpha));
 
   await fs.chmod(file, 0o600);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name), ["beta"]);
-  assert.deepEqual((await recent.add(alpha)).map((entry) => entry.name), ["alpha", "beta"]);
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(file, "utf8")).map((entry) => entry.name),
+    ["beta"],
+  );
+  assert.deepEqual(
+    (await recent.add(alpha)).map((entry) => entry.name),
+    ["alpha", "beta"],
+  );
 });
 
 test("forgetting a project takes it off the list and leaves its folder alone", async (t) => {
@@ -155,13 +194,23 @@ test("forgetting a project takes it off the list and leaves its folder alone", a
   const recent = createRecentProjects(path.join(base, "recent-projects.json"), { now: clock() });
   for (const folder of [alpha, beta]) await recent.add(folder);
 
-  assert.deepEqual((await recent.forget(alpha)).map((entry) => entry.name), ["beta"]);
-  assert.deepEqual((await recent.list()).map((entry) => entry.name), ["beta"]);
+  assert.deepEqual(
+    (await recent.forget(alpha)).map((entry) => entry.name),
+    ["beta"],
+  );
+  assert.deepEqual(
+    (await recent.list()).map((entry) => entry.name),
+    ["beta"],
+  );
   assert.equal(await fs.readFile(path.join(alpha, "notes.txt"), "utf8"), "keep me");
 
   // Anything else the renderer sends changes nothing.
   for (const value of [undefined, 7, "relative", path.join(base, "missing")]) {
-    assert.deepEqual((await recent.forget(value)).map((entry) => entry.name), ["beta"], String(value));
+    assert.deepEqual(
+      (await recent.forget(value)).map((entry) => entry.name),
+      ["beta"],
+      String(value),
+    );
   }
 });
 
@@ -183,7 +232,10 @@ test("a project is remembered under its checkout's top folder, and a folder outs
   for (const folder of [plain, "/", path.join(base, "missing"), "relative", undefined]) {
     assert.equal(await rememberProject(recent, folder), null, String(folder));
   }
-  assert.deepEqual((await recent.list()).map((entry) => entry.path), [other, repo]);
+  assert.deepEqual(
+    (await recent.list()).map((entry) => entry.path),
+    [other, repo],
+  );
 
   // A top folder reached through a symlink keeps the path it was opened by, so the open project's row is checked.
   const link = path.join(base, "repo-link");
@@ -209,7 +261,13 @@ test("project:switch opens only a listed project whose real path is a checkout's
 
   // Listed, but not (or no longer) the top folder of a checkout.
   await fs.mkdir(path.join(repo, "sub"));
-  await fs.writeFile(file, JSON.stringify([{ path: plain, name: "plain", openedAt: "" }, { path: path.join(repo, "sub"), name: "sub", openedAt: "" }]));
+  await fs.writeFile(
+    file,
+    JSON.stringify([
+      { path: plain, name: "plain", openedAt: "" },
+      { path: path.join(repo, "sub"), name: "sub", openedAt: "" },
+    ]),
+  );
   for (const requested of [plain, path.join(repo, "sub")]) {
     await assert.rejects(switchTarget(recent, requested), /That folder isn't a project/, requested);
   }

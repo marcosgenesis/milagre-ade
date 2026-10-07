@@ -4,8 +4,16 @@ import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft02Icon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
+import {
+  ArrowLeft02Icon,
+  InformationCircleIcon,
+  PaintBoardIcon,
+  SecurityCheckIcon,
+  Settings01Icon,
+  SmartphoneIcon,
+  UserMultipleIcon,
+} from "@hugeicons/core-free-icons";
+import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -44,9 +52,28 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
 
 export type SettingsProject = { path: string; name: string };
 
-export function SettingsNav({ section, project, current, onSelect, onSelectProject, onBack }: { section: SettingsSection; project: SettingsProject; current: SettingsProject; onSelect: (section: SettingsSection) => void; onSelectProject: (project: SettingsProject) => void; onBack: () => void }) {
+export function SettingsNav({
+  section,
+  project,
+  current,
+  onSelect,
+  onSelectProject,
+  onBack,
+}: {
+  section: SettingsSection;
+  project: SettingsProject;
+  current: SettingsProject;
+  onSelect: (section: SettingsSection) => void;
+  onSelectProject: (project: SettingsProject) => void;
+  onBack: () => void;
+}) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
-  useEffect(() => { window.milagre.listRecentProjects().then((list) => setRecent(list ?? []), () => {}); }, []);
+  useEffect(() => {
+    window.milagre.listRecentProjects().then(
+      (list) => setRecent(list ?? []),
+      () => {},
+    );
+  }, []);
   const rows = projectRows({ recent, currentPath: current.path, currentName: current.name });
   const imageOf = useProjectImages(rows.map((row) => row.path));
   return (
@@ -68,7 +95,11 @@ export function SettingsNav({ section, project, current, onSelect, onSelectProje
           {rows.map((row) => (
             <RailButton
               key={row.path}
-              icon={<span className="flex size-[18px] items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface"><WorkspaceIcon src={imageOf(row.path)} fallback={row.initial} /></span>}
+              icon={
+                <span className="flex size-[18px] items-center justify-center overflow-hidden rounded-[5px] bg-ink text-[10px] font-semibold text-surface">
+                  <WorkspaceIcon src={imageOf(row.path)} fallback={row.initial} />
+                </span>
+              }
               label={row.name}
               active={section === "project" && project.path === row.path}
               onClick={() => onSelectProject({ path: row.path, name: row.name })}
@@ -111,12 +142,24 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
       onClick={() => onChange(!checked)}
       className={`relative flex h-5 w-8 items-center rounded-full transition-colors duration-150 ${checked ? "bg-ink" : "bg-line-strong"}`}
     >
-      <span className={`absolute left-0.5 size-4 rounded-full bg-surface shadow-card transition-transform duration-150 ${checked ? "translate-x-3" : "translate-x-0"}`} />
+      <span
+        className={`absolute left-0.5 size-4 rounded-full bg-surface shadow-card transition-transform duration-150 ${checked ? "translate-x-3" : "translate-x-0"}`}
+      />
     </button>
   );
 }
 
-function PercentSlider({ label, value, range, onChange }: { label: string; value: number; range: { min: number; max: number; step: number }; onChange: (value: number) => void }) {
+function PercentSlider({
+  label,
+  value,
+  range,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  range: { min: number; max: number; step: number };
+  onChange: (value: number) => void;
+}) {
   return (
     <span className="flex items-center gap-3">
       <RangeSlider label={label} value={value} {...range} formatValueText={(v) => `${v}%`} onValueChange={onChange} className="w-44" />
@@ -130,98 +173,133 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
   const { editors, editor } = useEditors();
   return (
     <>
-    <Group title="Agents">
-      <Row label="Default model" description="Used for new chats; remembers your last selection">
-        <Select
-          label="Default model"
-          width={280}
-          value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
-          onChange={(defaultModelId) => updateSettings({ defaultModelId })}
-          options={PROVIDERS.flatMap((provider) => models.filter((model) => model.provider === provider).map((model) => ({
-            value: model.id,
-            label: model.name,
-            icon: <ProviderLogo provider={provider} size={14} />,
-            group: providerName(provider),
-          })))}
-        />
-      </Row>
-      <Row label="Default permission" description="Used for new chats; remembers your last selection">
-        <Select<PermissionMode>
-          label="Default permission"
-          width={340}
-          value={settings.defaultPermissionMode}
-          onChange={(defaultPermissionMode) => updateSettings({ defaultPermissionMode })}
-          options={PERMISSION_MODES.map((mode) => ({
-            value: mode.id,
-            label: mode.name,
-            description: mode.description,
-            icon: <span className={`flex shrink-0 ${mode.id === "full" ? "text-ink" : mode.id === "auto" ? "text-green" : "text-accent-ink"}`}><Icon icon={SecurityCheckIcon} size={14} /></span>,
-          }))}
-        />
-      </Row>
-      <Row label="TLDR writing" description="Shape Claude and Codex updates and replies with /tldr. Applies on the next turn after the current reply finishes.">
-        <Switch label="TLDR writing" checked={settings.tldrEnabled} onChange={(tldrEnabled) => updateSettings({ tldrEnabled })} />
-      </Row>
-      <Row label="Claude replies">
-        <Select<ClaudeReplies>
-          label="Claude replies"
-          value={settings.claudeReplies}
-          onChange={(claudeReplies) => updateSettings({ claudeReplies })}
-          options={[{ value: "concise", label: "Concise" }, { value: "normal", label: "Normal" }]}
-        />
-      </Row>
-      <Row label="Notify when finished" description="When a turn finishes or fails while you are outside the chat">
-        <Switch label="Notify when finished" checked={settings.notifyOnCompletion} onChange={(notifyOnCompletion) => updateSettings({ notifyOnCompletion })} />
-      </Row>
-      <Row label="Dock badge" description="Count chats with unread replies or waiting for your input">
-        <Switch label="Dock badge" checked={settings.showDockBadge} onChange={(showDockBadge) => updateSettings({ showDockBadge })} />
-      </Row>
-      <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
-        <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
-      </Row>
-    </Group>
-    <Group title="Sidebar">
-      <Row label="Chat order" description="Newest chat first keeps chats in place as replies arrive">
-        <Select<ChatOrder>
-          label="Chat order"
-          value={settings.chatOrder}
-          onChange={(chatOrder) => updateSettings({ chatOrder })}
-          options={[{ value: "created", label: "Newest chat first" }, { value: "recent", label: "Latest message first" }]}
-        />
-      </Row>
-    </Group>
-    <Group title="Editor">
-      <Row label="Open files in" description={editors && editors.length === 0 ? "Install Cursor, VS Code, Zed or another editor to open files and folders" : "Used by file links in replies and tool rows, and by Open in <editor> in the chat menu"}>
-        {editors && editors.length === 0 ? (
-          <span className="text-ink-3">No editor found</span>
-        ) : (
+      <Group title="Agents">
+        <Row label="Default model" description="Used for new chats; remembers your last selection">
           <Select
-            label="Open files in"
-            value={editor?.id ?? ""}
-            onChange={(editorId) => updateSettings({ editorId })}
-            options={(editors ?? []).map((item) => ({ value: item.id, label: item.name }))}
+            label="Default model"
+            width={280}
+            value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
+            onChange={(defaultModelId) => updateSettings({ defaultModelId })}
+            options={PROVIDERS.flatMap((provider) =>
+              models
+                .filter((model) => model.provider === provider)
+                .map((model) => ({
+                  value: model.id,
+                  label: model.name,
+                  icon: <ProviderLogo provider={provider} size={14} />,
+                  group: providerName(provider),
+                })),
+            )}
           />
-        )}
-      </Row>
-    </Group>
-    <Group title="System">
-      <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
-        <Switch label="Keep the Mac awake while agents work" checked={settings.keepAwake} onChange={(keepAwake) => updateSettings({ keepAwake })} />
-      </Row>
-    </Group>
-    <Group title="Plan usage">
-      <Row label="Show" description="Claude and Codex plan limits">
-        <Select<UsageDisplay>
-          label="Show usage as"
-          value={settings.usageDisplay}
-          onChange={(usageDisplay) => updateSettings({ usageDisplay })}
-          options={[{ value: "used", label: "Used" }, { value: "remaining", label: "Remaining" }]}
-        />
-      </Row>
-      <Row label="Show in sidebar" description="Hover a provider for its limits and reset times">
-        <Switch label="Show usage in sidebar" checked={settings.showUsageInSidebar} onChange={(showUsageInSidebar) => updateSettings({ showUsageInSidebar })} />
-      </Row>
-    </Group>
+        </Row>
+        <Row label="Default permission" description="Used for new chats; remembers your last selection">
+          <Select<PermissionMode>
+            label="Default permission"
+            width={340}
+            value={settings.defaultPermissionMode}
+            onChange={(defaultPermissionMode) => updateSettings({ defaultPermissionMode })}
+            options={PERMISSION_MODES.map((mode) => ({
+              value: mode.id,
+              label: mode.name,
+              description: mode.description,
+              icon: (
+                <span className={`flex shrink-0 ${mode.id === "full" ? "text-ink" : mode.id === "auto" ? "text-green" : "text-accent-ink"}`}>
+                  <Icon icon={SecurityCheckIcon} size={14} />
+                </span>
+              ),
+            }))}
+          />
+        </Row>
+        <Row
+          label="TLDR writing"
+          description="Shape Claude and Codex updates and replies with /tldr. Applies on the next turn after the current reply finishes."
+        >
+          <Switch label="TLDR writing" checked={settings.tldrEnabled} onChange={(tldrEnabled) => updateSettings({ tldrEnabled })} />
+        </Row>
+        <Row label="Claude replies">
+          <Select<ClaudeReplies>
+            label="Claude replies"
+            value={settings.claudeReplies}
+            onChange={(claudeReplies) => updateSettings({ claudeReplies })}
+            options={[
+              { value: "concise", label: "Concise" },
+              { value: "normal", label: "Normal" },
+            ]}
+          />
+        </Row>
+        <Row label="Notify when finished" description="When a turn finishes or fails while you are outside the chat">
+          <Switch
+            label="Notify when finished"
+            checked={settings.notifyOnCompletion}
+            onChange={(notifyOnCompletion) => updateSettings({ notifyOnCompletion })}
+          />
+        </Row>
+        <Row label="Dock badge" description="Count chats with unread replies or waiting for your input">
+          <Switch label="Dock badge" checked={settings.showDockBadge} onChange={(showDockBadge) => updateSettings({ showDockBadge })} />
+        </Row>
+        <Row label="Notify when waiting" description="When a chat needs an approval or an answer and Milagre is in the background">
+          <Switch label="Notify when waiting" checked={settings.notifyWhenWaiting} onChange={(notifyWhenWaiting) => updateSettings({ notifyWhenWaiting })} />
+        </Row>
+      </Group>
+      <Group title="Sidebar">
+        <Row label="Chat order" description="Newest chat first keeps chats in place as replies arrive">
+          <Select<ChatOrder>
+            label="Chat order"
+            value={settings.chatOrder}
+            onChange={(chatOrder) => updateSettings({ chatOrder })}
+            options={[
+              { value: "created", label: "Newest chat first" },
+              { value: "recent", label: "Latest message first" },
+            ]}
+          />
+        </Row>
+      </Group>
+      <Group title="Editor">
+        <Row
+          label="Open files in"
+          description={
+            editors && editors.length === 0
+              ? "Install Cursor, VS Code, Zed or another editor to open files and folders"
+              : "Used by file links in replies and tool rows, and by Open in <editor> in the chat menu"
+          }
+        >
+          {editors && editors.length === 0 ? (
+            <span className="text-ink-3">No editor found</span>
+          ) : (
+            <Select
+              label="Open files in"
+              value={editor?.id ?? ""}
+              onChange={(editorId) => updateSettings({ editorId })}
+              options={(editors ?? []).map((item) => ({ value: item.id, label: item.name }))}
+            />
+          )}
+        </Row>
+      </Group>
+      <Group title="System">
+        <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
+          <Switch label="Keep the Mac awake while agents work" checked={settings.keepAwake} onChange={(keepAwake) => updateSettings({ keepAwake })} />
+        </Row>
+      </Group>
+      <Group title="Plan usage">
+        <Row label="Show" description="Claude and Codex plan limits">
+          <Select<UsageDisplay>
+            label="Show usage as"
+            value={settings.usageDisplay}
+            onChange={(usageDisplay) => updateSettings({ usageDisplay })}
+            options={[
+              { value: "used", label: "Used" },
+              { value: "remaining", label: "Remaining" },
+            ]}
+          />
+        </Row>
+        <Row label="Show in sidebar" description="Hover a provider for its limits and reset times">
+          <Switch
+            label="Show usage in sidebar"
+            checked={settings.showUsageInSidebar}
+            onChange={(showUsageInSidebar) => updateSettings({ showUsageInSidebar })}
+          />
+        </Row>
+      </Group>
     </>
   );
 }
@@ -230,36 +308,50 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <>
-    <Group title="Theme">
-      <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
-        <Select<ThemePreference>
-          label="Theme"
-          value={settings.theme}
-          onChange={(theme) => updateSettings({ theme })}
-          options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]}
-        />
-      </Row>
-    </Group>
-    {navigator.platform.startsWith("Mac") && (
-      <Group title="Window">
-        <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
-          <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+      <Group title="Theme">
+        <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
+          <Select<ThemePreference>
+            label="Theme"
+            value={settings.theme}
+            onChange={(theme) => updateSettings({ theme })}
+            options={[
+              { value: "system", label: "System" },
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ]}
+          />
         </Row>
-        {settings.windowTranslucent && (
-          <>
-            <Row label="Window" description="How much of the desktop shows through the window itself.">
-              <PercentSlider label="Window translucency" value={settings.windowTranslucency} range={WINDOW_TRANSLUCENCY_RANGE} onChange={(windowTranslucency) => updateSettings({ windowTranslucency })} />
-            </Row>
-            <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
-              <PercentSlider label="Panel translucency" value={settings.panelTranslucency} range={PANEL_TRANSLUCENCY_RANGE} onChange={(panelTranslucency) => updateSettings({ panelTranslucency })} />
-            </Row>
-            <Row label="Dot grid" description="Keep the dots on the window background.">
-              <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
-            </Row>
-          </>
-        )}
       </Group>
-    )}
+      {navigator.platform.startsWith("Mac") && (
+        <Group title="Window">
+          <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
+            <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+          </Row>
+          {settings.windowTranslucent && (
+            <>
+              <Row label="Window" description="How much of the desktop shows through the window itself.">
+                <PercentSlider
+                  label="Window translucency"
+                  value={settings.windowTranslucency}
+                  range={WINDOW_TRANSLUCENCY_RANGE}
+                  onChange={(windowTranslucency) => updateSettings({ windowTranslucency })}
+                />
+              </Row>
+              <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
+                <PercentSlider
+                  label="Panel translucency"
+                  value={settings.panelTranslucency}
+                  range={PANEL_TRANSLUCENCY_RANGE}
+                  onChange={(panelTranslucency) => updateSettings({ panelTranslucency })}
+                />
+              </Row>
+              <Row label="Dot grid" description="Keep the dots on the window background.">
+                <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
+              </Row>
+            </>
+          )}
+        </Group>
+      )}
     </>
   );
 }
@@ -277,16 +369,29 @@ function usePhoneStatus() {
     let live = true;
     let pushed = false;
     // An update that arrives while the first read is in flight is newer than that read.
-    const off = window.milagre.onPhoneStatus((next) => { pushed = true; setStatus(next); });
-    window.milagre.getPhoneStatus().then((next) => { if (live && !pushed) setStatus(next); }, (error) => {
-      if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
+    const off = window.milagre.onPhoneStatus((next) => {
+      pushed = true;
+      setStatus(next);
     });
-    return () => { live = false; off(); };
+    window.milagre.getPhoneStatus().then(
+      (next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+        if (live && !pushed) setStatus(next);
+      },
+      (error) => {
+        if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
+      },
+    );
+    return () => {
+      live = false;
+      off();
+    };
   }, []);
   return { status, setStatus, loadError };
 }
 
-const SECONDARY_BUTTON = "rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50";
+const SECONDARY_BUTTON =
+  "rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50";
 
 function PhoneSettings() {
   const { status, setStatus, loadError } = usePhoneStatus();
@@ -295,20 +400,30 @@ function PhoneSettings() {
   const [copied, setCopied] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const copyTimer = useRef<number | null>(null);
-  useEffect(() => () => { if (copyTimer.current !== null) window.clearTimeout(copyTimer.current); }, []);
+  useEffect(
+    () => () => {
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    },
+    [],
+  );
 
   const run = (action: () => Promise<PhoneStatus>) => {
     setBusy(true);
     setError(null);
-    action().then(setStatus, (failure) => setError(ipcErrorMessage(failure))).finally(() => setBusy(false));
+    action()
+      .then(setStatus, (failure) => setError(ipcErrorMessage(failure)))
+      .finally(() => setBusy(false));
   };
   const copyLink = () => {
     if (!status?.pairingLink) return;
-    void navigator.clipboard.writeText(status.pairingLink).then(() => {
-      setCopied(true);
-      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-      copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
-    }, () => {});
+    void navigator.clipboard.writeText(status.pairingLink).then(
+      () => {
+        setCopied(true);
+        if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+      },
+      () => {},
+    );
   };
 
   const on = status?.state === "on" && status.qrSvg && status.pairingLink;
@@ -317,8 +432,16 @@ function PhoneSettings() {
   useEffect(() => {
     if (!showingQr) return;
     let live = true;
-    window.milagre.openPhonePairing().then((next) => { if (live) setStatus(next); }, () => {});
-    return () => { live = false; };
+    window.milagre.openPhonePairing().then(
+      (next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+        if (live) setStatus(next);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
   }, [showingQr, setStatus]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -331,86 +454,179 @@ function PhoneSettings() {
   const paired = pairedPhonesLine(status);
   return (
     <>
-    <Group title="Phone access">
-      <Row label="Allow your phone to connect" description={loadError ?? phoneStatusLine(status)}>
-        <Switch label="Allow your phone to connect" checked={status?.enabled === true} onChange={(enabled) => { if (!busy && status) run(() => window.milagre.setPhoneEnabled(enabled)); }} />
-      </Row>
-      {status?.state === "on" && status.remote === "none" && (
-        <p data-phone-local-only className="px-4 py-3 text-[12px] text-ink-3">Only a phone simulator on this Mac can connect. Set up a Cloudflare tunnel with npm run mobile:cloudflare to reach this Mac from any network.</p>
-      )}
-      {status?.state === "error" && status.error && <p data-phone-error className="break-words px-4 py-3 text-[12px] text-red">{status.error}</p>}
-      {error && <p data-phone-action-error className="break-words px-4 py-3 text-[12px] text-red">Couldn't change phone access: {error}</p>}
-    </Group>
-    {on && (
-      <Group title="Pair your phone">
-        <div className="flex items-start gap-5 px-4 py-4">
-          <img data-phone-qr src={phoneQrSrc(status.qrSvg!)} alt="QR code to pair your phone" width={176} height={176} className="size-44 shrink-0 rounded-[10px] bg-white" />
-          <div className="grid min-w-0 gap-3">
-            <div className="grid gap-0.5">
-              <span className="text-[13.5px] font-medium text-ink">Scan with the Milagre app</span>
-              <span className="text-[12px] text-ink-3">Open the app on your phone and point its camera at this code.</span>
-            </div>
-            <div>
-              <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>{copied ? "Copied" : "Copy pairing link"}</button>
-            </div>
-            <p data-phone-warning className="text-[12px] text-ink-2">This code gives access to your agents. Don't share it or post a screenshot of it.</p>
-            {pairing && (
-              <div data-phone-pairing={pairing.open ? "open" : "closed"} className="flex flex-wrap items-center gap-3">
-                <span className="text-[12px] text-ink-3">
-                  {pairing.open ? `New phones can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}` : "Pairing is closed to new phones."}
-                </span>
-                {!pairing.open && <button type="button" disabled={busy} data-phone-allow-pairing onClick={() => run(() => window.milagre.openPhonePairing())} className={SECONDARY_BUTTON}>Allow pairing again</button>}
-              </div>
-            )}
-          </div>
-        </div>
-      </Group>
-    )}
-    {status?.enabled && (
-      <Group title="Access">
-        {paired && (
-          <Row label="Paired phones" description="Milagre tells you when a new phone pairs.">
-            <span data-phone-paired>{paired}</span>
-          </Row>
-        )}
-        <Row label="Reset access" description={confirmReset ? "Phones that already paired stop working and must scan again. This can't be undone." : "Make a new code. Phones that already paired scan again."}>
-          {confirmReset ? (
-            <span className="flex items-center gap-2">
-              <button type="button" onClick={() => setConfirmReset(false)} className={SECONDARY_BUTTON}>Cancel</button>
-              <button type="button" disabled={busy} data-phone-reset-confirm onClick={() => { setConfirmReset(false); run(() => window.milagre.resetPhoneAccess()); }} className="rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50">Reset and disconnect</button>
-            </span>
-          ) : (
-            <button type="button" disabled={busy || status.state === "starting"} onClick={() => setConfirmReset(true)} className={SECONDARY_BUTTON}>Reset access</button>
-          )}
+      <Group title="Phone access">
+        <Row label="Allow your phone to connect" description={loadError ?? phoneStatusLine(status)}>
+          <Switch
+            label="Allow your phone to connect"
+            checked={status?.enabled === true}
+            onChange={(enabled) => {
+              if (!busy && status) run(() => window.milagre.setPhoneEnabled(enabled));
+            }}
+          />
         </Row>
+        {status?.state === "on" && status.remote === "none" && (
+          <p data-phone-local-only className="px-4 py-3 text-[12px] text-ink-3">
+            Only a phone simulator on this Mac can connect. Set up a Cloudflare tunnel with npm run mobile:cloudflare to reach this Mac from any network.
+          </p>
+        )}
+        {status?.state === "error" && status.error && (
+          <p data-phone-error className="break-words px-4 py-3 text-[12px] text-red">
+            {status.error}
+          </p>
+        )}
+        {error && (
+          <p data-phone-action-error className="break-words px-4 py-3 text-[12px] text-red">
+            Couldn't change phone access: {error}
+          </p>
+        )}
       </Group>
-    )}
+      {on && (
+        <Group title="Pair your phone">
+          <div className="flex items-start gap-5 px-4 py-4">
+            <img
+              data-phone-qr
+              src={phoneQrSrc(status.qrSvg!)}
+              alt="QR code to pair your phone"
+              width={176}
+              height={176}
+              className="size-44 shrink-0 rounded-[10px] bg-white"
+            />
+            <div className="grid min-w-0 gap-3">
+              <div className="grid gap-0.5">
+                <span className="text-[13.5px] font-medium text-ink">Scan with the Milagre app</span>
+                <span className="text-[12px] text-ink-3">Open the app on your phone and point its camera at this code.</span>
+              </div>
+              <div>
+                <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>
+                  {copied ? "Copied" : "Copy pairing link"}
+                </button>
+              </div>
+              <p data-phone-warning className="text-[12px] text-ink-2">
+                This code gives access to your agents. Don't share it or post a screenshot of it.
+              </p>
+              {pairing && (
+                <div data-phone-pairing={pairing.open ? "open" : "closed"} className="flex flex-wrap items-center gap-3">
+                  <span className="text-[12px] text-ink-3">
+                    {pairing.open
+                      ? `New phones can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}`
+                      : "Pairing is closed to new phones."}
+                  </span>
+                  {!pairing.open && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      data-phone-allow-pairing
+                      onClick={() => run(() => window.milagre.openPhonePairing())}
+                      className={SECONDARY_BUTTON}
+                    >
+                      Allow pairing again
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </Group>
+      )}
+      {status?.enabled && (
+        <Group title="Access">
+          {paired && (
+            <Row label="Paired phones" description="Milagre tells you when a new phone pairs.">
+              <span data-phone-paired>{paired}</span>
+            </Row>
+          )}
+          <Row
+            label="Reset access"
+            description={
+              confirmReset
+                ? "Phones that already paired stop working and must scan again. This can't be undone."
+                : "Make a new code. Phones that already paired scan again."
+            }
+          >
+            {confirmReset ? (
+              <span className="flex items-center gap-2">
+                <button type="button" onClick={() => setConfirmReset(false)} className={SECONDARY_BUTTON}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-phone-reset-confirm
+                  onClick={() => {
+                    setConfirmReset(false);
+                    run(() => window.milagre.resetPhoneAccess());
+                  }}
+                  className="rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50"
+                >
+                  Reset and disconnect
+                </button>
+              </span>
+            ) : (
+              <button type="button" disabled={busy || status.state === "starting"} onClick={() => setConfirmReset(true)} className={SECONDARY_BUTTON}>
+                Reset access
+              </button>
+            )}
+          </Row>
+        </Group>
+      )}
     </>
   );
 }
 
 function updateDescription(update: UpdateState | null): string {
   switch (update?.status) {
-    case "checking": return "Checking for updates…";
-    case "up-to-date": return "Milagre is up to date.";
-    case "downloading": return `Downloading ${update.version ? `Milagre ${update.version}` : "update"}… ${Math.round(update.progress)}%`;
-    case "downloaded": return `${update.version ? `Milagre ${update.version}` : "The update"} is ready to install.`;
-    case "error": return "Couldn't check for updates. Try again.";
-    case "unavailable": return "Update checks are available in the installed app.";
-    default: return "Check for the latest Milagre release.";
+    case "checking":
+      return "Checking for updates…";
+    case "up-to-date":
+      return "Milagre is up to date.";
+    case "downloading":
+      return `Downloading ${update.version ? `Milagre ${update.version}` : "update"}… ${Math.round(update.progress)}%`;
+    case "downloaded":
+      return `${update.version ? `Milagre ${update.version}` : "The update"} is ready to install.`;
+    case "error":
+      return "Couldn't check for updates. Try again.";
+    case "unavailable":
+      return "Update checks are available in the installed app.";
+    default:
+      return "Check for the latest Milagre release.";
   }
 }
 
-function AboutSettings({ update }: { update: UpdateState | null }) {
+export function AboutSettings({ update }: { update: UpdateState | null }) {
   const [version, setVersion] = useState<string | null>(null);
+  const [channel, setChannel] = useState<ReleaseChannel | null>(null);
   useEffect(() => {
     void window.milagre.getAppVersion().then(setVersion);
+    void window.milagre.getReleaseChannel().then(setChannel);
   }, []);
   const electron = navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1];
   const chrome = navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1];
   return (
     <Group title="Milagre">
-      <Row label="Version"><span className="tabular-nums">{version ?? "…"}</span></Row>
+      <Row label="Version">
+        <span className="tabular-nums">{version ?? "…"}</span>
+      </Row>
+      <Row
+        label="Release channel"
+        description={
+          channel === "beta"
+            ? "Beta gets a build most days main changes. Switch back to Stable any time; you keep the version you have until the next stable release."
+            : "Stable gets releases after they have run on Beta."
+        }
+      >
+        <Select<ReleaseChannel>
+          label="Release channel"
+          value={channel ?? "stable"}
+          onChange={(next) => {
+            setChannel(next);
+            void window.milagre.setReleaseChannel(next);
+          }}
+          options={[
+            { value: "stable", label: "Stable" },
+            { value: "beta", label: "Beta" },
+          ]}
+        />
+      </Row>
       <Row label="Updates" description={updateDescription(update)}>
         <button
           type="button"
@@ -421,7 +637,13 @@ function AboutSettings({ update }: { update: UpdateState | null }) {
           {update?.status === "downloaded" ? "Update and restart" : "Check for updates"}
         </button>
       </Row>
-      {electron && <Row label="Runtime"><span className="tabular-nums">Electron {electron} · Chromium {chrome}</span></Row>}
+      {electron && (
+        <Row label="Runtime">
+          <span className="tabular-nums">
+            Electron {electron} · Chromium {chrome}
+          </span>
+        </Row>
+      )}
       <Row label="License">MIT</Row>
     </Group>
   );
@@ -459,9 +681,13 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   // The preview runs shortly after typing stops; only the latest answer is shown.
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
-    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then((next) => {
-      if (seq === previewSeq.current) setFound(next);
-    }, () => {});
+    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then(
+      (next) => {
+        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+        if (seq === previewSeq.current) setFound(next);
+      },
+      () => {},
+    );
   };
 
   // .worktreeinclude can change in an editor while Settings is open.
@@ -476,14 +702,17 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     setText(null);
     setFound(null);
     setLoadError(null);
-    window.milagre.readFilesToCopy(projectPath).then((saved) => {
-      if (cancelled) return;
-      current.current = saved.filesToCopy.join("\n");
-      setText(current.current);
-      setFound(saved);
-    }, (error) => {
-      if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
-    });
+    window.milagre.readFilesToCopy(projectPath).then(
+      (saved) => {
+        if (cancelled) return;
+        current.current = saved.filesToCopy.join("\n");
+        setText(current.current);
+        setFound(saved);
+      },
+      (error) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+      },
+    );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -508,7 +737,8 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
       <label htmlFor="files-to-copy" className="grid gap-0.5">
         <span className="text-[13.5px] font-medium text-ink">Files to copy</span>
         <span className="text-[12px] text-ink-3">
-          Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for {DEFAULT_FILES_TO_COPY}.
+          Git-ignored files copied from the main checkout into each new worktree, such as env files. One pattern per line, .gitignore syntax. Leave empty for{" "}
+          {DEFAULT_FILES_TO_COPY}.
         </span>
       </label>
       <textarea
@@ -519,22 +749,31 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
         autoCorrect="off"
         readOnly={locked}
         disabled={text === null && !loadError}
-        value={locked ? found.worktreeInclude ?? "" : text ?? ""}
+        value={locked ? (found.worktreeInclude ?? "") : (text ?? "")}
         placeholder={DEFAULT_FILES_TO_COPY}
         onChange={(event) => edit(event.target.value)}
         className={`w-full resize-y rounded-control border border-line px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
       />
-      {locked && <p data-files-to-copy-locked className="text-[12px] text-ink-2">.worktreeinclude in the repo wins. Edit that file to change what is copied.</p>}
+      {locked && (
+        <p data-files-to-copy-locked className="text-[12px] text-ink-2">
+          .worktreeinclude in the repo wins. Edit that file to change what is copied.
+        </p>
+      )}
       {loadError ? (
         <p className="text-[12px] text-red">Couldn't read this project's files: {loadError}</p>
       ) : (
-        <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">{found ? previewSentence(found.matches) : "Checking…"}</p>
+        <p data-files-to-copy-preview className="break-words text-[12px] text-ink-3">
+          {found ? previewSentence(found.matches) : "Checking…"}
+        </p>
       )}
-      {saveError && <p data-files-to-copy-error className="break-words text-[12px] text-red">Couldn't save: {saveError}</p>}
+      {saveError && (
+        <p data-files-to-copy-error className="break-words text-[12px] text-red">
+          Couldn't save: {saveError}
+        </p>
+      )}
     </div>
   );
 }
-
 
 /* ─────────────────────────────────────────────────────────
  * SETUP COMMAND
@@ -555,10 +794,13 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     const next = pending.current;
     pending.current = null;
     if (next === null) return;
-    window.milagre.saveWorktreeSetup(projectPath, next).then((saved) => {
-      setResolved(saved);
-      setError(null);
-    }, (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`));
+    window.milagre.saveWorktreeSetup(projectPath, next).then(
+      (saved) => {
+        setResolved(saved);
+        setError(null);
+      },
+      (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`),
+    );
   };
 
   // .milagre/worktree.json can change in an editor while Settings is open.
@@ -573,13 +815,16 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     setText(null);
     setResolved(null);
     setError(null);
-    window.milagre.readWorktreeSetup(projectPath).then((saved) => {
-      if (cancelled) return;
-      setText(saved.setupCommand);
-      setResolved(saved);
-    }, (failure) => {
-      if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
-    });
+    window.milagre.readWorktreeSetup(projectPath).then(
+      (saved) => {
+        if (cancelled) return;
+        setText(saved.setupCommand);
+        setResolved(saved);
+      },
+      (failure) => {
+        if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
+      },
+    );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -609,14 +854,26 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
         autoCorrect="off"
         readOnly={locked}
         disabled={text === null && !error}
-        value={locked ? resolved.command ?? "" : text ?? ""}
+        value={locked ? (resolved.command ?? "") : (text ?? "")}
         placeholder={locked ? "Nothing runs" : "npm ci"}
         onChange={(event) => edit(event.target.value)}
         className={`h-9 w-full rounded-control border border-line px-3 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus-visible:border-ink-3 ${locked ? "bg-field text-ink-2" : "bg-surface"}`}
       />
-      {locked && <p data-setup-command-locked className="text-[12px] text-ink-2">.milagre/worktree.json in the repo wins. Edit its "setup" to change the command.</p>}
-      {resolved?.note && <p data-setup-command-note className="break-words text-[12px] text-red">{resolved.note}</p>}
-      {error && <p data-setup-command-error className="break-words text-[12px] text-red">{error}</p>}
+      {locked && (
+        <p data-setup-command-locked className="text-[12px] text-ink-2">
+          .milagre/worktree.json in the repo wins. Edit its "setup" to change the command.
+        </p>
+      )}
+      {resolved?.note && (
+        <p data-setup-command-note className="break-words text-[12px] text-red">
+          {resolved.note}
+        </p>
+      )}
+      {error && (
+        <p data-setup-command-error className="break-words text-[12px] text-red">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -641,27 +898,53 @@ function ProjectIconSetting({ project }: { project: SettingsProject }) {
   async function save(icon: () => Promise<string | null>) {
     setBusy(true);
     setError(null);
-    try { setProjectImage(project.path, await window.milagre.setProjectIcon(project.path, await icon())); }
-    catch (failure) { setError(failure instanceof DOMException ? "This file isn't an image Milagre can read." : ipcErrorMessage(failure)); }
-    finally { setBusy(false); }
+    try {
+      setProjectImage(project.path, await window.milagre.setProjectIcon(project.path, await icon()));
+    } catch (failure) {
+      setError(failure instanceof DOMException ? "This file isn't an image Milagre can read." : ipcErrorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <div className="grid gap-2 px-4 py-3">
       <div className="flex items-center gap-4">
-        <span data-project-icon-preview className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-ink text-[16px] font-semibold text-surface"><WorkspaceIcon src={imageOf(project.path)} fallback={projectInitial(project.name)} /></span>
+        <span
+          data-project-icon-preview
+          className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-ink text-[16px] font-semibold text-surface"
+        >
+          <WorkspaceIcon src={imageOf(project.path)} fallback={projectInitial(project.name)} />
+        </span>
         <div className="grid min-w-0 flex-1 gap-0.5">
           <span className="text-[13.5px] font-medium text-ink">Icon</span>
-          <span className="text-[12px] text-ink-3">Shown in the sidebar, the project switcher and on your phone. Reset goes back to the repository's own icon.</span>
+          <span className="text-[12px] text-ink-3">
+            Shown in the sidebar, the project switcher and on your phone. Reset goes back to the repository's own icon.
+          </span>
         </div>
-        <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden data-project-icon-input onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (file) void save(() => iconDataUrl(file));
-        }} />
-        <button type="button" disabled={busy} data-project-icon-choose onClick={() => input.current?.click()} className={SECONDARY_BUTTON}>Choose image</button>
-        <button type="button" disabled={busy} data-project-icon-reset onClick={() => void save(async () => null)} className={SECONDARY_BUTTON}>Reset</button>
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          data-project-icon-input
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void save(() => iconDataUrl(file));
+          }}
+        />
+        <button type="button" disabled={busy} data-project-icon-choose onClick={() => input.current?.click()} className={SECONDARY_BUTTON}>
+          Choose image
+        </button>
+        <button type="button" disabled={busy} data-project-icon-reset onClick={() => void save(async () => null)} className={SECONDARY_BUTTON}>
+          Reset
+        </button>
       </div>
-      {error && <p data-project-icon-error className="break-words text-[12px] text-red">{error}</p>}
+      {error && (
+        <p data-project-icon-error className="break-words text-[12px] text-red">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -680,7 +963,17 @@ function ProjectSettings({ project }: { project: SettingsProject }) {
   );
 }
 
-export function SettingsPanel({ section, project, models, update }: { section: SettingsSection; project: SettingsProject; models: ModelOption[]; update: UpdateState | null }) {
+export function SettingsPanel({
+  section,
+  project,
+  models,
+  update,
+}: {
+  section: SettingsSection;
+  project: SettingsProject;
+  models: ModelOption[];
+  update: UpdateState | null;
+}) {
   const title = section === "project" ? project.name : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">

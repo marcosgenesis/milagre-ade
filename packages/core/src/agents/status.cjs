@@ -32,6 +32,7 @@ function claudeLoggedOut(command, { execFileImpl = execFile, env } = {}) {
           const status = JSON.parse(text.slice(text.indexOf("{")));
           resolve(status.loggedIn === false && status.apiProvider === "firstParty");
         } catch {
+          // oxlint-disable-next-line promise/no-multiple-resolved -- the catch only runs when parsing threw before resolve, and a promise ignores later resolves anyway
           resolve(false);
         }
       });
@@ -50,7 +51,11 @@ async function codexLoggedOut(command, { cwd, env, clientVersion = "0.0.0", crea
   try {
     rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
     rpc.start();
-    await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null }, { timeoutMs: AUTH_TIMEOUT_MS });
+    await rpc.request(
+      "initialize",
+      { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null },
+      { timeoutMs: AUTH_TIMEOUT_MS },
+    );
     rpc.notify("initialized");
     const account = await rpc.request("account/read", { refreshToken: false }, { timeoutMs: ACCOUNT_TIMEOUT_MS });
     return !account.account && account.requiresOpenaiAuth === true;
@@ -72,7 +77,10 @@ async function inspect(name, { cli, loggedOut, cwd, clientVersion }) {
   const status = await cli(name);
   const state = cliState(status);
   if (state) return { state, message: status.problem };
-  const out = name === "codex" ? await loggedOut.codex(status.command, { cwd, clientVersion, ...(status.env ? { env: status.env } : {}) }) : await loggedOut.claude(status.command, status.env ? { env: status.env } : {});
+  const out =
+    name === "codex"
+      ? await loggedOut.codex(status.command, { cwd, clientVersion, ...(status.env ? { env: status.env } : {}) })
+      : await loggedOut.claude(status.command, status.env ? { env: status.env } : {});
   return out ? { state: "logged-out", message: loginMessage(name) } : { state: "ready" };
 }
 
@@ -102,7 +110,9 @@ function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READ
     return { claude, codex };
   };
   // A turn just failed with this provider's login message: a status kept as ready is out of date.
-  check.invalidate = (name) => { cache.delete(name); };
+  check.invalidate = (name) => {
+    cache.delete(name);
+  };
   return check;
 }
 

@@ -26,7 +26,10 @@ test("project image wins over organization and profile; configured icons are sup
   const root = await fixture(t);
   await fs.writeFile(path.join(root, "brand.png"), PNG);
   await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ build: { mac: { icon: "brand.png" } } }));
-  const image = await resolveProjectImage(root, { account: () => assert.fail("Project icons must not require GitHub"), readGit: () => assert.fail("No Git access needed") });
+  const image = await resolveProjectImage(root, {
+    account: () => assert.fail("Project icons must not require GitHub"),
+    readGit: () => assert.fail("No Git access needed"),
+  });
   assert.equal(image, `data:image/png;base64,${PNG.toString("base64")}`);
   await fs.mkdir(path.join(root, ".milagre"));
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="10"/></svg>';
@@ -39,7 +42,10 @@ test("organization avatar wins over the connected user", async (t) => {
   const calls = [];
   const image = await resolveProjectImage(root, {
     readGit: async () => "git@github.com:acme/shop.git",
-    account: async (endpoint) => { calls.push(endpoint); return endpoint === "users/acme" ? photo(1, "Organization") : photo(2); },
+    account: async (endpoint) => {
+      calls.push(endpoint);
+      return endpoint === "users/acme" ? photo(1, "Organization") : photo(2);
+    },
   });
   assert.equal(image, "https://avatars.githubusercontent.com/u/1?v=4&s=80");
   assert.deepEqual(calls, ["users/acme"]);
@@ -56,7 +62,16 @@ test("web favicons are detected before any GitHub lookup", async (t) => {
   header.writeUInt32LE(PNG.length, 14);
   header.writeUInt32LE(22, 18);
   const ico = Buffer.concat([header, PNG]);
-  for (const location of ["favicon.ico", "public/favicon.ico", "app/public/favicon.ico", "app/favicon.ico", "src/app/favicon.ico", "static/favicon.ico", "public/favicon.png", "src/app/icon.png"]) {
+  for (const location of [
+    "favicon.ico",
+    "public/favicon.ico",
+    "app/public/favicon.ico",
+    "app/favicon.ico",
+    "src/app/favicon.ico",
+    "static/favicon.ico",
+    "public/favicon.png",
+    "src/app/icon.png",
+  ]) {
     const root = await fixture(t);
     const file = path.join(root, location);
     await fs.mkdir(path.dirname(file), { recursive: true });
@@ -81,24 +96,29 @@ test("personal repositories use the connected GitHub profile", async (t) => {
   const root = await fixture(t);
   const image = await resolveProjectImage(root, {
     readGit: async () => "https://github.com/owner/shop.git",
-    account: async (endpoint) => endpoint === "user" ? photo(2) : photo(1),
+    account: async (endpoint) => (endpoint === "user" ? photo(2) : photo(1)),
   });
   assert.equal(image, "https://avatars.githubusercontent.com/u/2?v=4&s=80");
 });
 
 test("no Git remote can still use the connected profile; offline results are empty", async (t) => {
   const root = await fixture(t);
-  const readGit = async () => { throw new Error("Not a git repo"); };
+  const readGit = async () => {
+    throw new Error("Not a git repo");
+  };
   assert.equal(await resolveProjectImage(root, { readGit, account: async () => photo(2) }), "https://avatars.githubusercontent.com/u/2?v=4&s=80");
   assert.equal(await resolveProjectImage(root, { readGit, account: async () => null }), null);
 });
 
 test("a personal owner provides the fallback when gh is not authenticated", async (t) => {
   const root = await fixture(t);
-  assert.equal(await resolveProjectImage(root, {
-    readGit: async () => "git@github.com:owner/shop.git",
-    account: async (endpoint) => endpoint === "user" ? null : photo(1),
-  }), "https://avatars.githubusercontent.com/u/1?v=4&s=80");
+  assert.equal(
+    await resolveProjectImage(root, {
+      readGit: async () => "git@github.com:owner/shop.git",
+      account: async (endpoint) => (endpoint === "user" ? null : photo(1)),
+    }),
+    "https://avatars.githubusercontent.com/u/1?v=4&s=80",
+  );
 });
 
 test("ignores image paths outside the project and untrusted avatar URLs", async (t) => {
@@ -107,8 +127,11 @@ test("ignores image paths outside the project and untrusted avatar URLs", async 
   await fs.mkdir(project);
   await fs.writeFile(path.join(root, "private.png"), PNG);
   await fs.writeFile(path.join(project, "package.json"), JSON.stringify({ build: { icon: "../private.png" } }));
-  assert.equal(await resolveProjectImage(project, {
-    readGit: async () => "git@github.com:owner/shop.git",
-    account: async () => ({ type: "User", avatar_url: "http://localhost/private" }),
-  }), null);
+  assert.equal(
+    await resolveProjectImage(project, {
+      readGit: async () => "git@github.com:owner/shop.git",
+      account: async () => ({ type: "User", avatar_url: "http://localhost/private" }),
+    }),
+    null,
+  );
 });

@@ -44,16 +44,24 @@ document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 
-if (process.versions.electron) require("electron").protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
+if (process.versions.electron)
+  require("electron").protocol.registerSchemesAsPrivileged([
+    { scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  ]);
 
 async function browserChecks() {
   const { app, BrowserWindow, protocol, net } = require("electron");
   const { createMediaHandler } = require("../apps/desktop/electron/media.cjs");
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-image-generation-")));
   await app.whenReady();
-  protocol.handle("milagre-media", createMediaHandler((url, options) => net.fetch(url, options)));
+  protocol.handle(
+    "milagre-media",
+    createMediaHandler((url, options) => net.fetch(url, options)),
+  );
   const window = new BrowserWindow({ width: 800, height: 700, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
@@ -85,20 +93,30 @@ async function browserChecks() {
     assert.doesNotMatch(done.text, /mountain landscape/, "the prompt isn't repeated under the image");
     assert.match(await evaluate(`${surface}.querySelector("[role=img]").getAttribute("aria-label")`), /mountain landscape/, "the prompt is the image's label");
     await screenshot("complete");
-    assert.equal(await evaluate('document.querySelectorAll("[data-from=assistant] [aria-label=Attachments]").length'), 0, "durable assistant image copies do not duplicate the reply image as attachments");
+    assert.equal(
+      await evaluate('document.querySelectorAll("[data-from=assistant] [aria-label=Attachments]").length'),
+      0,
+      "durable assistant image copies do not duplicate the reply image as attachments",
+    );
     // Hovering shows the buttons; each acts on the saved file, and so does the right-click menu.
-    const box = await evaluate(`(() => { const r = ${surface}.querySelector("[role=img]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+    const box = await evaluate(
+      `(() => { const r = ${surface}.querySelector("[role=img]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`,
+    );
     window.webContents.sendInputEvent({ type: "mouseMove", x: box.x, y: box.y });
     await waitFor('getComputedStyle(document.querySelector("[aria-label=\'Copy image\']").parentElement.parentElement).opacity === "1"');
     await screenshot("hover-actions");
-    await evaluate('document.querySelector("[aria-label=\'Copy image\']").click()');
+    await evaluate("document.querySelector(\"[aria-label='Copy image']\").click()");
     await waitFor('!!document.querySelector("[aria-label=Copied]")');
-    await evaluate('document.querySelector("[aria-label=\'Download image\']").click()');
+    await evaluate("document.querySelector(\"[aria-label='Download image']\").click()");
     await evaluate(`${surface}.parentElement.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`);
     await waitFor("window.imageCalls.length === 3");
-    assert.deepEqual(await evaluate("window.imageCalls"), [["copy", PHOTO], ["save", PHOTO], ["menu", PHOTO]]);
+    assert.deepEqual(await evaluate("window.imageCalls"), [
+      ["copy", PHOTO],
+      ["save", PHOTO],
+      ["menu", PHOTO],
+    ]);
     // Clicking the image opens it full size, morphing out of its place in the chat, and Escape returns it.
-    await evaluate('document.querySelector("[aria-label=\'Preview generated image\']").click()');
+    await evaluate("document.querySelector(\"[aria-label='Preview generated image']\").click()");
     await waitFor('document.querySelector("dialog[open] img")?.naturalWidth > 0');
     assert.equal(await evaluate(`${surface}.querySelector("img").classList.contains("opacity-0")`), true, "the chat image hides behind the viewer");
     await screenshot("preview");
@@ -111,9 +129,14 @@ async function browserChecks() {
     assert.equal(await evaluate(`${surface}.querySelector("img").classList.contains("opacity-0")`), false);
     await evaluate('window.setFixture("failed")');
     await waitFor(`!${surface} && !!document.querySelector("[data-slot=step][data-status=failed]")`);
-    assert.match(await evaluate('document.querySelector("[data-slot=step][data-status=failed]").textContent'), /Couldn't generate an image.*image limit reached/);
+    assert.match(
+      await evaluate('document.querySelector("[data-slot=step][data-status=failed]").textContent'),
+      /Couldn't generate an image.*image limit reached/,
+    );
     await screenshot("failed");
-    console.log("PASS: a generated image shows outside the activity, generating, then complete with its resolution, copy and download buttons and a right-click menu, a full-size preview on click (the prompt only as its label), or a failed step row with the reason and no image surface");
+    console.log(
+      "PASS: a generated image shows outside the activity, generating, then complete with its resolution, copy and download buttons and a right-click menu, a full-size preview on click (the prompt only as its label), or a failed step row with the reason and no image surface",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -126,19 +149,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "image-generation-fixture",
-      resolveId(id) { if (id === "/__image_generation_fixture.tsx") return id; },
-      load(id) { if (id === "/__image_generation_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__image_generation__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__image_generation_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "image-generation-fixture",
+        resolveId(id) {
+          if (id === "/__image_generation_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__image_generation_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__image_generation__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__image_generation_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -147,14 +179,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__image_generation__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

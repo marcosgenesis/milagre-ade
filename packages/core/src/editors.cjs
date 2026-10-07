@@ -32,17 +32,19 @@ async function exists(fs, target) {
 // The installed editors: an .app in /Applications or ~/Applications, or its CLI on PATH.
 // Each is { id, name, appPath, cli }, with null for what's missing.
 async function detectEditors({ fs = fsp, which = resolveExecutable, home = os.homedir(), platform = process.platform } = {}) {
-  const found = await Promise.all(EDITORS.map(async (editor) => {
-    let appPath = null;
-    for (const dir of platform === "darwin" ? ["/Applications", path.join(home, "Applications")] : []) {
-      const candidate = path.join(dir, editor.app);
-      if (!appPath && await exists(fs, candidate)) appPath = candidate;
-    }
-    let cli = (await which(editor.cli)) || null;
-    // Launched from Finder, PATH may lack the CLI; the app bundle carries its own.
-    if (!cli && appPath && await exists(fs, path.join(appPath, editor.bundleCli))) cli = path.join(appPath, editor.bundleCli);
-    return appPath || cli ? { id: editor.id, name: editor.name, appPath, cli } : null;
-  }));
+  const found = await Promise.all(
+    EDITORS.map(async (editor) => {
+      let appPath = null;
+      for (const dir of platform === "darwin" ? ["/Applications", path.join(home, "Applications")] : []) {
+        const candidate = path.join(dir, editor.app);
+        if (!appPath && (await exists(fs, candidate))) appPath = candidate;
+      }
+      let cli = (await which(editor.cli)) || null;
+      // Launched from Finder, PATH may lack the CLI; the app bundle carries its own.
+      if (!cli && appPath && (await exists(fs, path.join(appPath, editor.bundleCli)))) cli = path.join(appPath, editor.bundleCli);
+      return appPath || cli ? { id: editor.id, name: editor.name, appPath, cli } : null;
+    }),
+  );
   return found.filter(Boolean);
 }
 
@@ -81,8 +83,14 @@ async function resolveInside(root, requested, additionalRoots = []) {
     throw notFound();
   }
   const relative = path.relative(realRoot, real);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    const permitted = await Promise.all(additionalRoots.map(async owned => { const resolved = await fsp.realpath(owned); const within = path.relative(resolved, real); return within !== '..' && !within.startsWith(`..${path.sep}`) && !path.isAbsolute(within); }));
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    const permitted = await Promise.all(
+      additionalRoots.map(async (owned) => {
+        const resolved = await fsp.realpath(owned);
+        const within = path.relative(resolved, real);
+        return within !== ".." && !within.startsWith(`..${path.sep}`) && !path.isAbsolute(within);
+      }),
+    );
     if (!permitted.some(Boolean)) throw outside();
   }
   return { target: real, isDirectory: (await fsp.stat(real)).isDirectory() };
@@ -107,7 +115,12 @@ async function gitTopLevel(directory) {
 function runProgram(file, args) {
   return new Promise((resolve, reject) => {
     const invocation = editorInvocation(file, args);
-    execCommand(invocation?.file ?? file, invocation?.args ?? args, { timeout: 10_000, windowsHide: true, ...(invocation && { env: { ...process.env, ...invocation.env } }) }, (error) => (error ? reject(error) : resolve()));
+    execCommand(
+      invocation?.file ?? file,
+      invocation?.args ?? args,
+      { timeout: 10_000, windowsHide: true, ...(invocation && { env: { ...process.env, ...invocation.env } }) },
+      (error) => (error ? reject(error) : resolve()),
+    );
   });
 }
 

@@ -4,9 +4,12 @@ import type { PhoneStatus } from "../electron";
 export function phoneStatusLine(status: PhoneStatus | null): string {
   if (!status) return "Checking…";
   switch (status.state) {
-    case "off": return "Off";
-    case "starting": return "Starting…";
-    case "error": return status.error || "Phone access stopped.";
+    case "off":
+      return "Off";
+    case "starting":
+      return "Starting…";
+    case "error":
+      return status.error || "Phone access stopped.";
     case "on":
       if (status.remote === "cloudflare" && status.publicUrl) return `Reachable at ${new URL(status.publicUrl).host}`;
       if (status.remote === "relay") {

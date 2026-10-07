@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, useColorScheme } from 'react-native';
-import * as SplashScreen from 'expo-splash-screen';
-import { hex } from './theme';
-import { LoadingLogo } from './loading-logo';
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, StyleSheet, useColorScheme } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
+import { hex } from "./theme";
+import { LoadingLogo } from "./loading-logo";
 
 // The native launch screen shows the assembled mark at this size and spot, so the hand-off is seamless.
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -17,7 +17,9 @@ export function StartupSplash({ ready, onDone }: { ready: boolean; onDone: () =>
   const page = hex(scheme).page;
   const [[fade, shrink]] = useState(() => [new Animated.Value(0), new Animated.Value(0)]);
   const done = useRef(onDone);
-  useEffect(() => { done.current = onDone; }, [onDone]);
+  useEffect(() => {
+    done.current = onDone;
+  }, [onDone]);
   useEffect(() => {
     if (!ready) return;
     // splash-leave and splash-logo-leave run together with their own curves; runs once, so session updates cannot restart it.
@@ -26,9 +28,26 @@ export function StartupSplash({ ready, onDone }: { ready: boolean; onDone: () =>
       Animated.timing(shrink, { toValue: 1, duration: 320, easing: Easing.bezier(0.4, 0, 1, 1), useNativeDriver: true }),
     ]).start(() => done.current());
   }, [ready, fade, shrink]);
-  return <Animated.View onLayout={() => void SplashScreen.hideAsync().catch(() => undefined)} accessibilityRole="progressbar" accessibilityLabel="Loading Milagre" pointerEvents={ready ? 'none' : 'auto'} style={[StyleSheet.absoluteFill, { zIndex: 100, backgroundColor: page, alignItems: 'center', justifyContent: 'center', opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>
-    <Animated.View style={{ transform: [{ scale: shrink.interpolate({ inputRange: [0, 1], outputRange: [1, 0.9] }) }] }}>
-      <LoadingLogo />
+  return (
+    <Animated.View
+      onLayout={() => void SplashScreen.hideAsync().catch(() => undefined)}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Loading Milagre"
+      pointerEvents={ready ? "none" : "auto"}
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          zIndex: 100,
+          backgroundColor: page,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+        },
+      ]}
+    >
+      <Animated.View style={{ transform: [{ scale: shrink.interpolate({ inputRange: [0, 1], outputRange: [1, 0.9] }) }] }}>
+        <LoadingLogo />
+      </Animated.View>
     </Animated.View>
-  </Animated.View>;
+  );
 }

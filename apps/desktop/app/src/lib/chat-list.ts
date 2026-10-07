@@ -5,7 +5,19 @@ export { chatTitle } from "@milagre/shared/chats";
 export type ChatMark = "question" | "waiting" | "delegated" | "running" | "unread" | "idle";
 
 /** `delegated`: a Delegation from another Chat is queued or running here. */
-export function chatMark({ asking = false, waiting, delegated = false, running, unread }: { asking?: boolean; waiting: boolean; delegated?: boolean; running: boolean; unread: boolean }): ChatMark {
+export function chatMark({
+  asking = false,
+  waiting,
+  delegated = false,
+  running,
+  unread,
+}: {
+  asking?: boolean;
+  waiting: boolean;
+  delegated?: boolean;
+  running: boolean;
+  unread: boolean;
+}): ChatMark {
   if (asking) return "question";
   if (waiting) return "waiting";
   if (delegated) return "delegated";
@@ -36,5 +48,10 @@ function trimDecimal(value: number) {
 
 /** The folder name at the end of a path. */
 export function folderName(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  return (
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || path
+  );
 }

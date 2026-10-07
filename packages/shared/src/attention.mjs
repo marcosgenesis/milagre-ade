@@ -3,7 +3,6 @@ import { providerName } from "./providers.mjs";
 // project's chats (see notifications.cjs). Types: attention.d.mts.
 import { chatTitle } from "./chats.mjs";
 
-
 /**
  * The notification for an approval or question a turn waits on, e.g. "shop / fix-login - Claude needs input",
  * or null for any other event.
@@ -29,7 +28,10 @@ export function attentionContext(state, projectName, sessionId) {
   return {
     projectName,
     worktreeName: state.worktrees?.[session.worktree_id]?.name,
-    chatTitle: chatTitle(session, state.messages.filter((message) => message.session_id === session.id)),
+    chatTitle: chatTitle(
+      session,
+      state.messages.filter((message) => message.session_id === session.id),
+    ),
     provider: session.provider,
   };
 }

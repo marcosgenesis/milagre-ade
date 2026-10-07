@@ -9,7 +9,25 @@ const git = createGit().read;
 const DEFAULT_PATTERNS = [".env*"];
 // Dependency and build folders are left out of the walk and the copy: an unanchored pattern such as the default
 // `.env*` would otherwise pick up a dependency's own files (node_modules/bottleneck/.env).
-const EXCLUDED_FOLDERS = ["node_modules", ".git", "vendor/bundle", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".turbo", ".cache", "Pods", ".gradle", ".expo", ".dart_tool", "coverage"];
+const EXCLUDED_FOLDERS = [
+  "node_modules",
+  ".git",
+  "vendor/bundle",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".next",
+  "dist",
+  "build",
+  "target",
+  ".turbo",
+  ".cache",
+  "Pods",
+  ".gradle",
+  ".expo",
+  ".dart_tool",
+  "coverage",
+];
 
 /**
  * The folders to skip for these patterns. A folder comes back in when an anchored pattern (one with a slash
@@ -114,7 +132,9 @@ async function copyFilesToWorktree({ projectPath, worktreePath, setting, limits 
     let bytes = 0;
     for (const file of files) {
       if (copied.length >= maxFiles || bytes + file.size > maxBytes) {
-        notes.push(copied.length >= maxFiles ? `Stopped copying at the ${maxFiles} file cap.` : `Stopped copying at the ${Math.round(maxBytes / (1024 * 1024))} MB cap.`);
+        notes.push(
+          copied.length >= maxFiles ? `Stopped copying at the ${maxFiles} file cap.` : `Stopped copying at the ${Math.round(maxBytes / (1024 * 1024))} MB cap.`,
+        );
         break;
       }
       const target = path.join(worktreePath, file.path);
@@ -145,4 +165,13 @@ async function copyFilesToWorktree({ projectPath, worktreePath, setting, limits 
   return { copied, notes };
 }
 
-module.exports = { COPY_LIMITS, DEFAULT_PATTERNS, EXCLUDED_FOLDERS, excludedFolders, copyFilesToWorktree, findFilesToCopy, previewFilesToCopy, resolvePatterns };
+module.exports = {
+  COPY_LIMITS,
+  DEFAULT_PATTERNS,
+  EXCLUDED_FOLDERS,
+  excludedFolders,
+  copyFilesToWorktree,
+  findFilesToCopy,
+  previewFilesToCopy,
+  resolvePatterns,
+};

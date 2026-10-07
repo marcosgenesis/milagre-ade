@@ -32,7 +32,9 @@ function subscribe(notify: () => void) {
   };
 }
 
-function reset() { setVisible(false); }
+function reset() {
+  setVisible(false);
+}
 function keydown(event: KeyboardEvent) {
   const modifier = isMac ? "Meta" : "Control";
   if (event.key === modifier && !event.repeat && !event.isComposing && !event.altKey && !event.shiftKey && !(isMac ? event.ctrlKey : event.metaKey)) {
@@ -48,5 +50,9 @@ function keyup(event: KeyboardEvent) {
 
 /** Capture-phase listeners also see releases inside dialogs that consume keyboard events. */
 export function useShortcutHints() {
-  return useSyncExternalStore(subscribe, () => visible, () => false);
+  return useSyncExternalStore(
+    subscribe,
+    () => visible,
+    () => false,
+  );
 }

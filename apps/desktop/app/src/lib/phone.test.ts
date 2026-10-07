@@ -7,11 +7,23 @@ test("the status line says what is happening and where the phone can reach this 
   assert.equal(phoneStatusLine({ enabled: false, state: "off", remote: "none" }), "Off");
   assert.equal(phoneStatusLine({ enabled: true, state: "starting", remote: "cloudflare" }), "Starting…");
   assert.equal(phoneStatusLine({ enabled: true, state: "error", remote: "none", error: "Address already in use" }), "Address already in use");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "cloudflare", localUrl: "http://127.0.0.1:8797", publicUrl: "https://mac.example.com" }), "Reachable at mac.example.com");
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "cloudflare", localUrl: "http://127.0.0.1:8797", publicUrl: "https://mac.example.com" }),
+    "Reachable at mac.example.com",
+  );
   assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "none", localUrl: "http://127.0.0.1:8797" }), "This Mac only — 127.0.0.1");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "online", localUrl: "http://127.0.0.1:8797" }), "On, reachable from any network");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "connecting", localUrl: "http://127.0.0.1:8797" }), "On, connecting to the relay…");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "offline", localUrl: "http://127.0.0.1:8797" }), "On, can't reach the relay. Retrying…");
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "online", localUrl: "http://127.0.0.1:8797" }),
+    "On, reachable from any network",
+  );
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "connecting", localUrl: "http://127.0.0.1:8797" }),
+    "On, connecting to the relay…",
+  );
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "offline", localUrl: "http://127.0.0.1:8797" }),
+    "On, can't reach the relay. Retrying…",
+  );
 });
 
 test("the pairing window counts whole minutes up and closes at the deadline", () => {

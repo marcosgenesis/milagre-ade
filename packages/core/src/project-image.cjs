@@ -7,7 +7,15 @@ const { promisify } = require("node:util");
 const execFileAsync = promisify(execFile);
 const client = createGit().read;
 const MAX_BYTES = 5 * 1024 * 1024;
-const MIME_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+const MIME_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
 
 async function git(projectPath, ...args) {
   const { stdout } = await client.checked(projectPath, args);
@@ -23,9 +31,15 @@ async function localImage(projectPath) {
   const extensions = Object.keys(MIME_TYPES);
   const candidates = [
     ...extensions.map((extension) => `.milagre/icon${extension}`),
-    config.build?.mac?.icon, config.build?.icon, config.expo?.icon,
-    ...["logo", "icon", "public/logo", "public/icon", "app/public/logo", "app/public/app-icon", "assets/icon"].flatMap((base) => extensions.map((extension) => `${base}${extension}`)),
-    ...["favicon", "public/favicon", "app/public/favicon", "app/favicon", "src/app/favicon", "static/favicon", "app/icon", "src/app/icon"].flatMap((base) => extensions.map((extension) => `${base}${extension}`)),
+    config.build?.mac?.icon,
+    config.build?.icon,
+    config.expo?.icon,
+    ...["logo", "icon", "public/logo", "public/icon", "app/public/logo", "app/public/app-icon", "assets/icon"].flatMap((base) =>
+      extensions.map((extension) => `${base}${extension}`),
+    ),
+    ...["favicon", "public/favicon", "app/public/favicon", "app/favicon", "src/app/favicon", "static/favicon", "app/icon", "src/app/icon"].flatMap((base) =>
+      extensions.map((extension) => `${base}${extension}`),
+    ),
   ];
   const root = await fs.realpath(projectPath);
   for (const candidate of candidates) {
@@ -53,17 +67,22 @@ function githubOwner(remote) {
 async function githubAccount(endpoint, projectPath) {
   try {
     const { stdout } = await execFileAsync("gh", ["api", "--hostname", "github.com", endpoint, "--jq", "{type,avatar_url}"], {
-      cwd: projectPath, timeout: 4000, maxBuffer: 64 * 1024,
+      cwd: projectPath,
+      timeout: 4000,
+      maxBuffer: 64 * 1024,
     });
     return JSON.parse(stdout);
   } catch {
     if (endpoint === "user") return null; // Authenticated profiles require gh credentials.
     try {
       const response = await fetch(`https://api.github.com/${endpoint}`, {
-        headers: { Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(3000),
+        headers: { Accept: "application/vnd.github+json" },
+        signal: AbortSignal.timeout(3000),
       });
       return response.ok ? await response.json() : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -74,7 +93,9 @@ function avatar(account) {
     if (url.protocol !== "https:" || url.hostname !== "avatars.githubusercontent.com" || url.username || url.password) return null;
     url.searchParams.set("s", "80");
     return url.href;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function resolveProjectImage(projectPath, { account = githubAccount, readGit = git } = {}) {
@@ -83,7 +104,9 @@ async function resolveProjectImage(projectPath, { account = githubAccount, readG
   if (image) return image;
 
   let owner = null;
-  try { owner = githubOwner(await readGit(projectPath, "remote", "get-url", "origin")); } catch {}
+  try {
+    owner = githubOwner(await readGit(projectPath, "remote", "get-url", "origin"));
+  } catch {}
   const ownerAccount = owner ? await account(`users/${owner}`, projectPath) : null;
   if (ownerAccount?.type === "Organization" && avatar(ownerAccount)) return avatar(ownerAccount);
   const profile = avatar(await account("user", projectPath));

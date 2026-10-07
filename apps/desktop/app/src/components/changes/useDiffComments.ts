@@ -51,8 +51,14 @@ export function useDiffComments(chatKey: string | null, changes: Changes) {
       return { key: previous.key, comments };
     });
   }, []);
-  const add = useCallback((comment: Omit<DiffComment, "id" | "createdAt">) => change((all) => [...all, { ...comment, id: crypto.randomUUID(), createdAt: Date.now() }]), [change]);
-  const update = useCallback((id: string, body: string) => change((all) => all.map((comment) => (comment.id === id ? { ...comment, body } : comment))), [change]);
+  const add = useCallback(
+    (comment: Omit<DiffComment, "id" | "createdAt">) => change((all) => [...all, { ...comment, id: crypto.randomUUID(), createdAt: Date.now() }]),
+    [change],
+  );
+  const update = useCallback(
+    (id: string, body: string) => change((all) => all.map((comment) => (comment.id === id ? { ...comment, body } : comment))),
+    [change],
+  );
   const remove = useCallback((id: string) => change((all) => all.filter((comment) => comment.id !== id)), [change]);
   const removeMany = useCallback((ids: string[]) => change((all) => all.filter((comment) => !ids.includes(comment.id))), [change]);
 
@@ -114,19 +120,27 @@ export function useCommentDraft() {
 
   const start = useCallback(({ path, hunk, line, side }: Target, extend: boolean, drag: boolean) => {
     setDraft((current) => {
-      if (extend && current && !current.editing && current.path === path && current.hunk === hunk && current.side === side) return { ...current, head: line, dragging: false };
+      if (extend && current && !current.editing && current.path === path && current.hunk === hunk && current.side === side)
+        return { ...current, head: line, dragging: false };
       text.current = "";
       return { path, hunk, side, anchor: line, head: line, dragging: drag };
     });
   }, []);
   const over = useCallback(({ path, hunk, line, side }: Target) => {
-    setDraft((current) => (current?.dragging && current.path === path && current.hunk === hunk && current.side === side && current.head !== line ? { ...current, head: line } : current));
+    setDraft((current) =>
+      current?.dragging && current.path === path && current.hunk === hunk && current.side === side && current.head !== line
+        ? { ...current, head: line }
+        : current,
+    );
   }, []);
   const edit = useCallback((comment: DiffComment, hunk: number, lines: number[], side: DiffSide | undefined) => {
     text.current = comment.body;
     setDraft({ path: comment.path, hunk, side, anchor: lines[0], head: lines[lines.length - 1], dragging: false, editing: comment.id });
   }, []);
-  const cancel = useCallback(() => { text.current = ""; setDraft(null); }, []);
+  const cancel = useCallback(() => {
+    text.current = "";
+    setDraft(null);
+  }, []);
 
   return { draft, text, start, over, edit, cancel };
 }

@@ -1,28 +1,42 @@
-const { powershell, powershellEnvironment } = require('./private-files.cjs');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { randomUUID } = require('node:crypto');
-const { execFileSync } = require('node:child_process');
+const { powershell, powershellEnvironment } = require("./private-files.cjs");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { randomUUID } = require("node:crypto");
+const { execFileSync } = require("node:child_process");
 
 // When a live process with this pid started, or null when there is none (or it can't be read).
 function processStartTime(pid, { platform = process.platform, execFileSyncImpl = execFileSync } = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
-    if (platform === 'win32') {
+    if (platform === "win32") {
       const script = `[Console]::Write((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o'))`;
-      const started = execFileSyncImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const started = execFileSyncImpl(
+        powershell(),
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+        { env: powershellEnvironment(), encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
       const time = Date.parse(started);
       return Number.isNaN(time) ? null : time;
     }
-    const started = execFileSyncImpl('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const started = execFileSyncImpl("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
     const time = Date.parse(started);
     return Number.isNaN(time) ? null : time;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 function alive(pid) {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return error.code !== 'ESRCH'; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
 }
 
 // A lock is stale only when its owner is certainly gone: no process has its pid, or the one that does started after
@@ -30,8 +44,11 @@ function alive(pid) {
 // that can't be read) counts as live: a live owner's lock is never removed.
 function staleOwner(lockPath) {
   let owner;
-  try { owner = JSON.parse(fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8')); }
-  catch { return null; }
+  try {
+    owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"));
+  } catch {
+    return null;
+  }
   if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) return null;
   if (owner.host !== undefined && owner.host !== os.hostname()) return null;
   const startedAt = Date.parse(owner.processStartedAt ?? owner.startedAt);
@@ -48,10 +65,13 @@ function staleOwner(lockPath) {
 // lock stale can't remove the one the other has just taken. A takeover left behind by a crash expires after a minute.
 function clearStale(lockPath) {
   const takeover = `${lockPath}.takeover`;
-  try { fs.mkdirSync(takeover, { mode: 0o700 }); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    try { if (Date.now() - fs.statSync(takeover).mtimeMs > 60_000) fs.rmdirSync(takeover); } catch {}
+  try {
+    fs.mkdirSync(takeover, { mode: 0o700 });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    try {
+      if (Date.now() - fs.statSync(takeover).mtimeMs > 60_000) fs.rmdirSync(takeover);
+    } catch {}
     return false;
   }
   try {
@@ -60,7 +80,9 @@ function clearStale(lockPath) {
     if (!owner) return false;
     fs.rmSync(lockPath, { recursive: true, force: true });
     return true;
-  } finally { fs.rmdirSync(takeover); }
+  } finally {
+    fs.rmdirSync(takeover);
+  }
 }
 
 // mkdir is the atomic ownership decision. A lock left by an owner that has certainly exited (see staleOwner) is taken
@@ -70,15 +92,23 @@ function acquireOwnership(lockPath) {
   try {
     fs.mkdirSync(lockPath, { mode: 0o700 });
   } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    if (!clearStale(lockPath)) throw new Error(`Milagre state is already owned. Close its other runtime. If it crashed, verify the process in ${path.join(lockPath, 'owner.json')} has exited before removing ${lockPath}.`);
+    if (error.code !== "EEXIST") throw error;
+    if (!clearStale(lockPath))
+      throw new Error(
+        `Milagre state is already owned. Close its other runtime. If it crashed, verify the process in ${path.join(lockPath, "owner.json")} has exited before removing ${lockPath}.`,
+      );
     return acquireOwnership(lockPath);
   }
-  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(),
-    processStartedAt: new Date(performance.timeOrigin).toISOString(), host: os.hostname() };
-  const file = path.join(lockPath, 'owner.json');
+  const owner = {
+    pid: process.pid,
+    token: randomUUID(),
+    startedAt: new Date().toISOString(),
+    processStartedAt: new Date(performance.timeOrigin).toISOString(),
+    host: os.hostname(),
+  };
+  const file = path.join(lockPath, "owner.json");
   try {
-    fs.writeFileSync(file, JSON.stringify(owner, null, 2), { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(file, JSON.stringify(owner, null, 2), { mode: 0o600, flag: "wx" });
   } catch (error) {
     fs.rmSync(lockPath, { recursive: true, force: true });
     throw error;
@@ -88,7 +118,7 @@ function acquireOwnership(lockPath) {
     path: lockPath,
     release() {
       if (released) return;
-      const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const current = JSON.parse(fs.readFileSync(file, "utf8"));
       if (current.token !== owner.token) throw new Error(`Milagre ownership changed: ${lockPath}`);
       fs.unlinkSync(file);
       fs.rmdirSync(lockPath);

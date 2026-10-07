@@ -1,8 +1,8 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { migrateImages, compactSubagents, hydrateSubagents, referencedSidecars, sweepSubagentContent } = require('./project-content.cjs');
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { migrateImages, compactSubagents, hydrateSubagents, referencedSidecars, sweepSubagentContent } = require("./project-content.cjs");
 // ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
-const stateFile = projectPath => path.join(projectPath, '.milagre', 'coordination.json');
+const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 let counter = 0;
 
 // Per project, session/agent -> digest of the transcript sidecar its saved state points at, so a save
@@ -24,9 +24,13 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   const temporary = path.join(directory, `coordination.json.${process.pid}.${++counter}.tmp`);
   try {
     if (durable) {
-      const handle = await fs.open(temporary, 'w');
-      try { await handle.writeFile(contents); await handle.sync(); }
-      finally { await handle.close(); }
+      const handle = await fs.open(temporary, "w");
+      try {
+        await handle.writeFile(contents);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     } else await fs.writeFile(temporary, contents);
     await fs.rename(temporary, stateFile(projectPath));
     if (durable) await syncDirectory(directory);
@@ -34,7 +38,11 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     await fs.rm(temporary, { force: true });
     throw error;
   }
-  if (!settled.has(projectPath) && settled.size >= MAX_PROJECTS) { const oldest = settled.keys().next().value; settled.delete(oldest); swept.delete(oldest); }
+  if (!settled.has(projectPath) && settled.size >= MAX_PROJECTS) {
+    const oldest = settled.keys().next().value;
+    settled.delete(oldest);
+    swept.delete(oldest);
+  }
   settled.set(projectPath, tracker.next);
   // A new sidecar supersedes the one before it; the first save of a run also clears older leftovers.
   if (tracker.wrote || !swept.has(projectPath)) {
@@ -43,12 +51,17 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   }
 }
 async function readProjectState(projectPath) {
-  return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), 'utf8')));
+  return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")));
 }
 /** Makes a rename in `directory` durable. Best effort: a file system that can't sync a folder still saves. */
 async function syncDirectory(directory) {
   let handle;
-  try { handle = await fs.open(directory, 'r'); await handle.sync(); }
-  catch {} finally { await handle?.close().catch(() => {}); }
+  try {
+    handle = await fs.open(directory, "r");
+    await handle.sync();
+  } catch {
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }
 module.exports = { saveProjectState, readProjectState, stateFile, syncDirectory };

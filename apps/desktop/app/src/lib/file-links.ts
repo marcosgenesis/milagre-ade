@@ -9,9 +9,13 @@ export interface FileLinkTarget {
 
 // Extensions that make a bit of inline code read as a file. A list rather than any ".word", so
 // `console.log`, `Math.max` and `example.com` stay code.
-const EXTENSIONS = new Set(("ts tsx js jsx mjs cjs mts cts json jsonc md mdx css scss sass less html htm yml yaml toml ini cfg conf "
-  + "py rb go rs java kt kts swift c h cc cpp hpp cs php sh bash zsh fish sql graphql gql proto lock txt xml svg png jpg jpeg gif webp ico "
-  + "plist gradle vue svelte astro dart lua ex exs hs scala clj tf env csv tsv ipynb").split(" "));
+const EXTENSIONS = new Set(
+  (
+    "ts tsx js jsx mjs cjs mts cts json jsonc md mdx css scss sass less html htm yml yaml toml ini cfg conf " +
+    "py rb go rs java kt kts swift c h cc cpp hpp cs php sh bash zsh fish sql graphql gql proto lock txt xml svg png jpg jpeg gif webp ico " +
+    "plist gradle vue svelte astro dart lua ex exs hs scala clj tf env csv tsv ipynb"
+  ).split(" "),
+);
 const DOTFILES = new Set(["gitignore", "gitattributes", "env", "npmrc", "nvmrc", "prettierrc", "eslintrc", "editorconfig", "dockerignore"]);
 const PATH_CHARS = /^[\w.@+()[\]-]+(\/[\w.@+()[\]-]+)*$/;
 

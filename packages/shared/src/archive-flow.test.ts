@@ -5,7 +5,8 @@ import { archiveChat } from "./archive.mjs";
 import type { ArchiveDeps } from "./archive.mjs";
 import type { ArchivePlan } from "./archive.mjs";
 
-const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}) => ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
+const session = (id: number, worktree_id: number, extra: Partial<AgentSession> = {}) =>
+  ({ id, worktree_id, agent_name: "x", status: "Created", ...extra }) as AgentSession;
 const baseState = (): CoordinatorState => ({
   next_id: 10,
   projects: {},
@@ -56,7 +57,16 @@ function harness(overrides: Partial<ArchiveDeps> = {}, state = baseState()) {
     notify: (message) => notices.push(message),
     ...overrides,
   };
-  return { deps, calls, notices, applied, removals, switchProject: () => { project = "/work/blog"; } };
+  return {
+    deps,
+    calls,
+    notices,
+    applied,
+    removals,
+    switchProject: () => {
+      project = "/work/blog";
+    },
+  };
 }
 
 test("the chat is hidden before anything is removed, then the worktree goes and the state follows", async () => {
@@ -97,15 +107,27 @@ test("no status from the menu, or no base, means nothing is removed", async () =
 test("the turn winds down before the removal is asked for", async () => {
   const order: string[] = [];
   const h = harness({
-    stop: () => new Promise((resolve) => setTimeout(() => { order.push("stopped"); resolve(undefined); }, 10)),
-    remove: async () => { order.push("remove"); },
+    stop: () =>
+      new Promise((resolve) =>
+        setTimeout(() => {
+          order.push("stopped");
+          resolve(undefined);
+        }, 10),
+      ),
+    remove: async () => {
+      order.push("remove");
+    },
   });
   await archiveChat(h.deps, 2, "delete", plan);
   assert.deepEqual(order, ["stopped", "remove"]);
 });
 
 test("a refusal because the worktree changed keeps the worktree and brings the chat back, with a notice", async () => {
-  const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: WORKTREE_CHANGED: /tmp/wt/shop/x-1 changed after it was checked."); } });
+  const h = harness({
+    remove: async () => {
+      throw new Error("Error invoking remote method 'worktree:remove': Error: WORKTREE_CHANGED: /tmp/wt/shop/x-1 changed after it was checked.");
+    },
+  });
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "kept");
   assert.deepEqual(h.notices, ["It changed after you checked, so the chat and its worktree stay."]);
   assert.deepEqual(h.calls, ["stop", "hide", "restore"]);
@@ -113,7 +135,11 @@ test("a refusal because the worktree changed keeps the worktree and brings the c
 });
 
 test("a removal error keeps the worktree and brings the chat back, with git's message", async () => {
-  const h = harness({ remove: async () => { throw new Error("Error invoking remote method 'worktree:remove': Error: fatal: cannot remove a locked working tree"); } });
+  const h = harness({
+    remove: async () => {
+      throw new Error("Error invoking remote method 'worktree:remove': Error: fatal: cannot remove a locked working tree");
+    },
+  });
   assert.equal(await archiveChat(h.deps, 2, "remove", plan), "kept");
   assert.deepEqual(h.notices, ["Couldn't remove the worktree: cannot remove a locked working tree. The chat stays so you can find it."]);
   assert.deepEqual(h.calls, ["stop", "hide", "restore"]);
@@ -145,7 +171,10 @@ test("the hide-only cases stay archived: not Milagre's, shared, or no status", a
 
 test("a project switched to midway keeps its state untouched", async () => {
   const h = harness();
-  h.deps.remove = async () => { h.calls.push("remove"); h.switchProject(); };
+  h.deps.remove = async () => {
+    h.calls.push("remove");
+    h.switchProject();
+  };
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "removed");
   assert.deepEqual(h.calls, ["stop", "hide", "remove"]);
   assert.deepEqual(h.applied, []);
@@ -153,12 +182,23 @@ test("a project switched to midway keeps its state untouched", async () => {
 
 test("an async hide lands before the removal, and an async restore before the notice", async () => {
   const order: string[] = [];
-  const later = (label: string) => () => new Promise<void>((resolve) => setTimeout(() => { order.push(label); resolve(); }, 5));
+  const later = (label: string) => () =>
+    new Promise<void>((resolve) =>
+      setTimeout(() => {
+        order.push(label);
+        resolve();
+      }, 5),
+    );
   const h = harness({
     hide: later("hidden"),
     restore: later("restored"),
-    remove: async () => { order.push("remove"); throw new Error("fatal: busy"); },
-    notify: (message) => { order.push(message); },
+    remove: async () => {
+      order.push("remove");
+      throw new Error("fatal: busy");
+    },
+    notify: (message) => {
+      order.push(message);
+    },
   });
   assert.equal(await archiveChat(h.deps, 2, "delete", plan), "kept");
   assert.deepEqual(order, ["hidden", "remove", "restored", "Couldn't remove the worktree: busy. The chat stays so you can find it."]);

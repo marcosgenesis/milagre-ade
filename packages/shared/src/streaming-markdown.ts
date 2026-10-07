@@ -25,7 +25,10 @@ export function closeOpenMarkdown(text: string): string {
   if (/(^|\s)\*$/.test(text)) return closeOpenMarkdown(text.slice(0, -1));
 
   // Emphasis and code spans never cross a blank line, so only the paragraph being written can hold an open marker.
-  const paragraph = lines.slice(paragraphStart).filter((line) => !THEMATIC_BREAK.test(line)).join("\n");
+  const paragraph = lines
+    .slice(paragraphStart)
+    .filter((line) => !THEMATIC_BREAK.test(line))
+    .join("\n");
   const ticks = paragraph.match(/(?<!`)`(?!`)/g)?.length ?? 0;
   if (ticks % 2 === 1) return text.endsWith("`") ? text.slice(0, -1) : `${text}\``;
   const bold = paragraph.replace(/`[^`]*`/g, "").match(/\*\*/g)?.length ?? 0;

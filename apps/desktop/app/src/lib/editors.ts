@@ -13,10 +13,12 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!requested) {
     requested = true;
-    (window.milagre?.listEditors() ?? Promise.resolve([])).catch(() => [] as EditorInfo[]).then((editors) => {
-      found = editors;
-      listeners.forEach((notify) => notify());
-    });
+    (window.milagre?.listEditors() ?? Promise.resolve([]))
+      .catch(() => [] as EditorInfo[])
+      .then((editors) => {
+        found = editors;
+        listeners.forEach((notify) => notify());
+      });
   }
   return () => listeners.delete(listener);
 }
@@ -38,5 +40,7 @@ export async function openInEditor(root: string, target: { path?: string; line?:
   try {
     const result = await window.milagre.openInEditor({ root, ...target, editor: getSettings().editorId || undefined });
     if (!result.ok) showNotice(result.error.message);
-  } catch (error) { showNotice(ipcErrorMessage(error)); }
+  } catch (error) {
+    showNotice(ipcErrorMessage(error));
+  }
 }

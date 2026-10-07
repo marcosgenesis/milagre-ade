@@ -19,11 +19,14 @@ test("a local chat reveals the project folder", () => {
 });
 
 test("project menu actions", () => {
-  assert.deepEqual(projectMenuActions(true).map((a) => [a.key, a.label]), [
-    ["reveal", "Reveal in Finder"],
-    ["copy-path", "Copy project path"],
-    ["copy-name", "Copy project name"],
-    ["settings", "Project settings"],
-  ]);
+  assert.deepEqual(
+    projectMenuActions(true).map((a) => [a.key, a.label]),
+    [
+      ["reveal", "Reveal in Finder"],
+      ["copy-path", "Copy project path"],
+      ["copy-name", "Copy project name"],
+      ["settings", "Project settings"],
+    ],
+  );
   assert.equal(projectMenuActions(false)[0].label, "Show in file manager");
 });

@@ -19,7 +19,9 @@ function sources(dir: string): string[] {
 
 function offenders(pattern: RegExp) {
   return sources(SRC).flatMap((path) =>
-    readFileSync(path, "utf8").split("\n").flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
+    readFileSync(path, "utf8")
+      .split("\n")
+      .flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
   );
 }
 

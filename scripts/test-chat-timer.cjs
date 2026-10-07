@@ -46,7 +46,9 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-chat-timer-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
@@ -71,19 +73,19 @@ async function browserChecks() {
     await evaluate('window.openChat("b")');
     await waitFor(`(${timer}) === "45.0s"`);
     await screenshot("other-chat");
-    await evaluate('window.openChat(null)');
+    await evaluate("window.openChat(null)");
     await waitFor(`!(${timer})`);
     await evaluate('window.clock = 185000; window.openChat("a")');
     await waitFor(`(${timer}) === "1m 25.0s"`);
     await screenshot("reopened");
-    await evaluate('window.ask(true)');
+    await evaluate("window.ask(true)");
     await delay(50);
     assert.equal(await evaluate(timer), "1m 25.0s", "question waits keep the turn's timer");
-    await evaluate('window.clock = 190000; window.ask(false)');
+    await evaluate("window.clock = 190000; window.ask(false)");
     await waitFor(`(${timer}) === "1m 30.0s"`);
-    await evaluate('window.clock = 250000');
+    await evaluate("window.clock = 250000");
     await waitFor(`(${timer}) === "2m 30.0s"`);
-    await evaluate('window.newTurn()');
+    await evaluate("window.newTurn()");
     await waitFor(`(${timer}) === "0.0s"`);
     await screenshot("new-turn");
     console.log("PASS: timers survive chat switches, remounts, question waits and delayed ticks; new turns reset");
@@ -99,19 +101,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "chat-timer-fixture",
-      resolveId(id) { if (id === "/__chat_timer_fixture.tsx") return id; },
-      load(id) { if (id === "/__chat_timer_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__chat_timer__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_timer_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "chat-timer-fixture",
+        resolveId(id) {
+          if (id === "/__chat_timer_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__chat_timer_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__chat_timer__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__chat_timer_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -120,14 +131,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__chat_timer__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

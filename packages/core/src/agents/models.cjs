@@ -6,15 +6,21 @@ const { CodexRpc } = require("./codex-rpc.cjs");
 // says whether it has a faster, costlier tier: Claude Code's fast mode, or Codex's "priority" service tier.
 
 // "claude-haiku-4-5-20251001" and "claude-opus-5-5[1m]" are the picker's "claude-haiku-4-5" and "claude-opus-5-5".
-const plainId = (id) => String(id ?? "").replace(/\[.*\]$/, "").replace(/-\d{8}$/, "");
+const plainId = (id) =>
+  String(id ?? "")
+    .replace(/\[.*\]$/, "")
+    .replace(/-\d{8}$/, "");
 // Codex ends its descriptions with a period; Claude's and the picker's have none.
-const sentence = (text) => String(text ?? "").trim().replace(/\.$/, "");
+const sentence = (text) =>
+  String(text ?? "")
+    .trim()
+    .replace(/\.$/, "");
 
 // Claude reports no ultracode flag. Ultracode needs a model with the full effort range, so
 // models that offer xhigh are treated as ultracode-capable. supportsFastMode comes only on the
 // models that have it (Opus 5.5, Opus 5 and Opus 4.8 as of Claude Code 2.1.288).
 function claudeCapability(info) {
-  const efforts = info.supportsEffort ? info.supportedEffortLevels ?? [] : [];
+  const efforts = info.supportsEffort ? (info.supportedEffortLevels ?? []) : [];
   return { efforts, ultracode: efforts.includes("xhigh"), fastMode: info.supportsFastMode === true };
 }
 
@@ -37,22 +43,28 @@ const CODEX_FAST_TIER = "priority";
 
 // model/list leaves hidden models out unless asked for them; any that come anyway are dropped.
 function codexModels(entries) {
-  return entries.filter((model) => model?.id && model.hidden !== true).map((model) => ({
-    id: model.id,
-    name: model.displayName || model.id,
-    description: sentence(model.description),
-    recommended: model.isDefault === true,
-    efforts: (model.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort ?? option),
-    ...(model.defaultReasoningEffort ? { defaultEffort: model.defaultReasoningEffort } : {}),
-    ultracode: false,
-    fastMode: (model.serviceTiers ?? []).some((tier) => tier?.id === CODEX_FAST_TIER),
-  }));
+  return entries
+    .filter((model) => model?.id && model.hidden !== true)
+    .map((model) => ({
+      id: model.id,
+      name: model.displayName || model.id,
+      description: sentence(model.description),
+      recommended: model.isDefault === true,
+      efforts: (model.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort ?? option),
+      ...(model.defaultReasoningEffort ? { defaultEffort: model.defaultReasoningEffort } : {}),
+      ultracode: false,
+      fastMode: (model.serviceTiers ?? []).some((tier) => tier?.id === CODEX_FAST_TIER),
+    }));
 }
 
 async function listClaudeModels({ command, env, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   const { query } = await loadSdk();
   // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
-  const idle = { async *[Symbol.asyncIterator]() { await new Promise(() => {}); } };
+  const idle = {
+    async *[Symbol.asyncIterator]() {
+      await new Promise(() => {});
+    },
+  };
   const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command, ...(env ? { env } : {}) } });
   try {
     return claudeModels(await session.supportedModels());
@@ -89,7 +101,11 @@ function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaude
   function lookup(provider) {
     if (!cache.has(provider)) {
       const pending = cli(provider)
-        .then((status) => (status.problem || !status.command ? null : list[provider]({ command: status.command, cwd, clientVersion, ...(status.env ? { env: status.env } : {}) })))
+        .then((status) =>
+          status.problem || !status.command
+            ? null
+            : list[provider]({ command: status.command, cwd, clientVersion, ...(status.env ? { env: status.env } : {}) }),
+        )
         .catch(() => null)
         .then((models) => {
           if (models?.length) return models;
@@ -104,7 +120,7 @@ function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaude
     const [claude, codex] = await Promise.all([lookup("claude"), lookup("codex")]);
     return { claude, codex };
   };
-  read.invalidate = provider => cache.delete(provider);
+  read.invalidate = (provider) => cache.delete(provider);
   return read;
 }
 

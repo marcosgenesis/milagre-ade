@@ -22,12 +22,24 @@ export function handoverModel(selected: ModelOption, provider: ModelProvider, pr
 // Shared with native Chats so both lists hide the same empty chats.
 export { isHandoverChat };
 
-export type HandoverLinks = { to?: { id: number; title: string; provider: ModelProvider }; from?: { id: number; title: string }; pending: boolean; live: boolean };
+export type HandoverLinks = {
+  to?: { id: number; title: string; provider: ModelProvider };
+  from?: { id: number; title: string };
+  pending: boolean;
+  live: boolean;
+};
 
 /** The chats a chat was handed over to and from, by title; a link to a chat no longer in the project is dropped. */
-export function handoverLinks(session: AgentSession | LinkChatSession | undefined, state: { sessions: Record<number, AgentSession | LinkChatSession>; messages: ChatMessage[] }): HandoverLinks {
+export function handoverLinks(
+  session: AgentSession | LinkChatSession | undefined,
+  state: { sessions: Record<number, AgentSession | LinkChatSession>; messages: ChatMessage[] },
+): HandoverLinks {
   const links: HandoverLinks = { pending: Boolean(session?.handoverPending), live: isHandoverChat(session) };
-  const titleOf = (other: AgentSession | LinkChatSession) => chatTitle(other, state.messages.filter((message) => message.session_id === other.id));
+  const titleOf = (other: AgentSession | LinkChatSession) =>
+    chatTitle(
+      other,
+      state.messages.filter((message) => message.session_id === other.id),
+    );
   const to = session?.handedOverTo != null ? state.sessions[session.handedOverTo] : undefined;
   const from = session?.handedOverFrom != null ? state.sessions[session.handedOverFrom] : undefined;
   if (to?.provider) links.to = { id: to.id, title: titleOf(to), provider: to.provider };

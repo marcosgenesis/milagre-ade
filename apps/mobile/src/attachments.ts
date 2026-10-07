@@ -1,12 +1,12 @@
-import type { ImageAttachment } from '@milagre/shared/model';
-import type { Client } from './client';
+import type { ImageAttachment } from "@milagre/shared/model";
+import type { Client } from "./client";
 
 export type Attachment = { id: string; name: string; uri: string; image?: ImageAttachment; base64?: string; path?: string };
 const MAX_ATTACHMENTS = 4;
 export const MAX_PHOTO_BYTES = 160 * 1024;
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export function appendAttachments(current: Attachment[], added: Attachment[]) {
-  if (current.length + added.length > MAX_ATTACHMENTS) throw new Error('Attach up to 4 photos or files per message.');
+  if (current.length + added.length > MAX_ATTACHMENTS) throw new Error("Attach up to 4 photos or files per message.");
   return [...current, ...added];
 }
 export async function prepareAttachments(client: Client, projectPath: string, attachments: Attachment[]) {
@@ -19,5 +19,5 @@ export async function prepareAttachments(client: Client, projectPath: string, at
   return { files, images };
 }
 export function attachmentPrompt(body: string, files: string[]) {
-  return files.length ? `${body || 'Please review the attached files.'}\n\nAttached files:\n${files.join('\n')}` : body || 'Describe the attached images.';
+  return files.length ? `${body || "Please review the attached files."}\n\nAttached files:\n${files.join("\n")}` : body || "Describe the attached images.";
 }

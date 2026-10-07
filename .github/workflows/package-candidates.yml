@@ -11,13 +11,13 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/package-candidates.yml'
-      - 'package*.json'
-      - 'apps/desktop/**'
-      - 'apps/daemon/**'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'distribution/**'
+      - ".github/workflows/package-candidates.yml"
+      - "package*.json"
+      - "apps/desktop/**"
+      - "apps/daemon/**"
+      - "packages/**"
+      - "scripts/**"
+      - "distribution/**"
   pull_request:
     types: [labeled, synchronize, reopened]
 permissions:

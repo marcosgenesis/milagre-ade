@@ -4,7 +4,12 @@ import { ToolApproval, ToolApprovalCode } from "./tool-approval";
 import type { ToolApprovalParameter } from "./tool-approval";
 
 /** The open chat's oldest pending approval, with the exact command or change the agent wants to make. */
-export function PermissionCard({ request, waiting, answering, onAnswer }: {
+export function PermissionCard({
+  request,
+  waiting,
+  answering,
+  onAnswer,
+}: {
   request: PermissionRequest;
   /** How many more requests are queued behind this one. */
   waiting: number;
@@ -20,7 +25,12 @@ export function PermissionCard({ request, waiting, answering, onAnswer }: {
   }
   if (request.command) parameters.push({ id: "command", label: "Command", value: <ToolApprovalCode code={request.command} language="bash" /> });
   if (request.cwd) parameters.push({ id: "cwd", label: "Folder", value: <span className="font-mono">{request.cwd}</span> });
-  if (request.files?.length) parameters.push({ id: "files", label: request.files.length === 1 ? "File" : "Files", value: <span className="whitespace-pre-wrap font-mono">{request.files.join("\n")}</span> });
+  if (request.files?.length)
+    parameters.push({
+      id: "files",
+      label: request.files.length === 1 ? "File" : "Files",
+      value: <span className="whitespace-pre-wrap font-mono">{request.files.join("\n")}</span>,
+    });
   if (request.diff) parameters.push({ id: "diff", label: "Changes", value: <ToolApprovalCode code={request.diff} language="diff" /> });
   if (request.detail) parameters.push({ id: "detail", label: "Details", value: <ToolApprovalCode code={request.detail} language="json" /> });
   if (request.reason) parameters.push({ id: "reason", label: "Reason", value: request.reason });

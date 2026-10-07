@@ -9,7 +9,10 @@ test("the other provider", () => {
 });
 
 test("a running turn blocks handover before a CLI problem does", () => {
-  assert.equal(handoverBlocker({ running: true, cli: "Codex isn't installed." }), "The agent is still running. Stop the turn or wait for it to finish to hand over.");
+  assert.equal(
+    handoverBlocker({ running: true, cli: "Codex isn't installed." }),
+    "The agent is still running. Stop the turn or wait for it to finish to hand over.",
+  );
   assert.equal(handoverBlocker({ running: false, cli: "Codex isn't installed." }), "Codex isn't installed.");
   assert.equal(handoverBlocker({ running: false, cli: null }), null);
 });
@@ -55,9 +58,18 @@ test("the note says what stays behind and how the mode behaves on the new provid
     "Subagents still running in the Codex chat keep running there.",
     "On Claude, Auto applies edits inside this worktree without asking and asks before most commands and anything outside it.",
   ]);
-  assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "ask" })[2], /^On Codex, Ask runs commands in a sandbox that can write to this worktree and temp folders, with no network/);
+  assert.match(
+    handoverNotes({ from: "claude", to: "codex", permissionMode: "ask" })[2],
+    /^On Codex, Ask runs commands in a sandbox that can write to this worktree and temp folders, with no network/,
+  );
   assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "full" })[2], /^On Codex, Full runs commands with no sandbox/);
-  assert.match(handoverNotes({ from: "claude", to: "codex", permissionMode: "auto" })[2], /^On Codex, Auto runs commands in a sandbox that can write to this worktree and temp folders, with no network, and asks before leaving it\.$/);
-  assert.equal(handoverNotes({ from: "codex", to: "claude", permissionMode: "ask" })[2], "On Claude, Ask asks before edits and commands your Claude settings don't already allow.");
+  assert.match(
+    handoverNotes({ from: "claude", to: "codex", permissionMode: "auto" })[2],
+    /^On Codex, Auto runs commands in a sandbox that can write to this worktree and temp folders, with no network, and asks before leaving it\.$/,
+  );
+  assert.equal(
+    handoverNotes({ from: "codex", to: "claude", permissionMode: "ask" })[2],
+    "On Claude, Ask asks before edits and commands your Claude settings don't already allow.",
+  );
   assert.match(handoverNotes({ from: "codex", to: "claude", permissionMode: "full" })[2], /^On Claude, Full skips every approval prompt/);
 });

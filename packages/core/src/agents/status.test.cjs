@@ -10,14 +10,27 @@ const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const fakeRpc = (scenario) => (options) => new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } });
 
 // Recorded from Claude Code 2.1.287: `claude auth status` exits 1 and prints this with an empty CLAUDE_CONFIG_DIR.
-const LOGGED_OUT = JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty", analyticsDisabled: false, projectsDirectory: "/tmp/empty/projects", configDirectory: "/tmp/empty" }, null, 2);
+const LOGGED_OUT = JSON.stringify(
+  {
+    loggedIn: false,
+    authMethod: "none",
+    apiProvider: "firstParty",
+    analyticsDisabled: false,
+    projectsDirectory: "/tmp/empty/projects",
+    configDirectory: "/tmp/empty",
+  },
+  null,
+  2,
+);
 const LOGGED_IN = JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", configDirectory: "/Users/x/.claude" }, null, 2);
 
-const claudeExec = (stdout, error = null, calls = []) => (file, args, options, callback) => {
-  calls.push({ file, args, options });
-  callback(error, stdout, "");
-  return { stdin: { end() {} } };
-};
+const claudeExec =
+  (stdout, error = null, calls = []) =>
+  (file, args, options, callback) => {
+    calls.push({ file, args, options });
+    callback(error, stdout, "");
+    return { stdin: { end() {} } };
+  };
 
 test("Claude: loggedIn false, with the exit code 1 that goes with it, is logged out", async () => {
   const calls = [];
@@ -28,16 +41,32 @@ test("Claude: loggedIn false, with the exit code 1 that goes with it, is logged 
 
 test("Claude: only Anthropic's own login counts, and a notice line before the JSON doesn't hide it", async () => {
   const other = (apiProvider) => JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider });
-  for (const provider of ["bedrock", "vertex", "foundry"]) assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(other(provider), Object.assign(new Error("exit 1"), { code: 1 })) }), false);
+  for (const provider of ["bedrock", "vertex", "foundry"])
+    assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(other(provider), Object.assign(new Error("exit 1"), { code: 1 })) }), false);
   assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(JSON.stringify({ loggedIn: false })) }), false);
-  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec(`Update available: 2.1.300\n${LOGGED_OUT}`, Object.assign(new Error("exit 1"), { code: 1 })) }), true);
+  assert.equal(
+    await claudeLoggedOut("/c/claude", {
+      execFileImpl: claudeExec(`Update available: 2.1.300\n${LOGGED_OUT}`, Object.assign(new Error("exit 1"), { code: 1 })),
+    }),
+    true,
+  );
 });
 
 test("Claude: a check that fails in any other way counts as ready", async () => {
   assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("", Object.assign(new Error("timed out"), { killed: true })) }), false);
-  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("Not logged in · Please run /login", Object.assign(new Error("exit 1"), { code: 1 })) }), false);
-  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("{ \"authMethod\": \"none\" }") }), false);
-  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: () => { throw new Error("spawn EACCES"); } }), false);
+  assert.equal(
+    await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec("Not logged in · Please run /login", Object.assign(new Error("exit 1"), { code: 1 })) }),
+    false,
+  );
+  assert.equal(await claudeLoggedOut("/c/claude", { execFileImpl: claudeExec('{ "authMethod": "none" }') }), false);
+  assert.equal(
+    await claudeLoggedOut("/c/claude", {
+      execFileImpl: () => {
+        throw new Error("spawn EACCES");
+      },
+    }),
+    false,
+  );
 });
 
 test("Codex: no account while OpenAI auth is required is logged out", async () => {
@@ -82,8 +111,14 @@ function statusFor({ statuses, loggedOut, now }) {
     clientVersion: "1.0.0",
     now,
     loggedOut: {
-      claude: async () => { checked.claude += 1; return typeof flags.claude === "function" ? flags.claude() : flags.claude; },
-      codex: async () => { checked.codex += 1; return typeof flags.codex === "function" ? flags.codex() : flags.codex; },
+      claude: async () => {
+        checked.claude += 1;
+        return typeof flags.claude === "function" ? flags.claude() : flags.claude;
+      },
+      codex: async () => {
+        checked.codex += 1;
+        return typeof flags.codex === "function" ? flags.codex() : flags.codex;
+      },
     },
   });
   return { check, asked, checked, flags };
@@ -101,7 +136,10 @@ test("each state, with the message a turn fails with", async () => {
     codex: { state: "ready" },
   });
   const broken = { command: "/bin/codex", version: null, problem: cliBrokenMessage("codex", "/bin/codex", "env: node: No such file or directory") };
-  assert.deepEqual((await statusFor({ statuses: { claude: [GOOD("claude")], codex: [broken] } }).check()).codex, { state: "broken", message: cliBrokenMessage("codex", "/bin/codex", "env: node: No such file or directory") });
+  assert.deepEqual((await statusFor({ statuses: { claude: [GOOD("claude")], codex: [broken] } }).check()).codex, {
+    state: "broken",
+    message: cliBrokenMessage("codex", "/bin/codex", "env: node: No such file or directory"),
+  });
   assert.deepEqual(await statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, loggedOut: { claude: true, codex: true } }).check(), {
     claude: { state: "logged-out", message: loginMessage("claude") },
     codex: { state: "logged-out", message: loginMessage("codex") },
@@ -109,7 +147,10 @@ test("each state, with the message a turn fails with", async () => {
 });
 
 test("the login check is not run for a CLI that doesn't run", async () => {
-  const { check, checked } = statusFor({ statuses: { claude: [{ command: null, version: null, problem: "missing" }], codex: [{ command: "/x", version: null, problem: "broken" }] }, loggedOut: { claude: true, codex: true } });
+  const { check, checked } = statusFor({
+    statuses: { claude: [{ command: null, version: null, problem: "missing" }], codex: [{ command: "/x", version: null, problem: "broken" }] },
+    loggedOut: { claude: true, codex: true },
+  });
   await check();
   assert.deepEqual(checked, { claude: 0, codex: 0 });
 });
@@ -129,7 +170,11 @@ test("a ready status is kept for 5 minutes", async () => {
 
 test("a problem is looked at again on every call, and fixing it shows at once", async () => {
   const clock = 5;
-  const { check, asked, flags } = statusFor({ statuses: { claude: [GOOD("claude")], codex: [{ command: null, version: null, problem: "missing" }, GOOD("codex")] }, loggedOut: { claude: true }, now: () => clock });
+  const { check, asked, flags } = statusFor({
+    statuses: { claude: [GOOD("claude")], codex: [{ command: null, version: null, problem: "missing" }, GOOD("codex")] },
+    loggedOut: { claude: true },
+    now: () => clock,
+  });
   assert.equal((await check()).claude.state, "logged-out");
   assert.equal((await check()).claude.state, "logged-out");
   assert.deepEqual((await check()).codex, { state: "ready" });
@@ -141,9 +186,21 @@ test("a problem is looked at again on every call, and fixing it shows at once", 
 });
 
 test("a login check that blows up counts as ready, and so does a CLI check that throws", async () => {
-  const boom = statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, loggedOut: { claude: () => { throw new Error("boom"); } } });
+  const boom = statusFor({
+    statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] },
+    loggedOut: {
+      claude: () => {
+        throw new Error("boom");
+      },
+    },
+  });
   assert.deepEqual(await boom.check(), { claude: { state: "ready" }, codex: { state: "ready" } });
-  const check = createCliStatus({ cli: async () => { throw new Error("cli check failed"); }, loggedOut: { claude: async () => true, codex: async () => true } });
+  const check = createCliStatus({
+    cli: async () => {
+      throw new Error("cli check failed");
+    },
+    loggedOut: { claude: async () => true, codex: async () => true },
+  });
   assert.deepEqual(await check(), { claude: { state: "ready" }, codex: { state: "ready" } });
 });
 
@@ -156,16 +213,24 @@ test("concurrent callers share one lookup", async () => {
 test("a logged-out Claude is a CLI with a problem for the model lookup, so its degraded list isn't kept", async () => {
   const cli = async (name) => ({ command: `/bin/${name}`, version: "9.9.9" });
   let state = "logged-out";
-  const status = async () => ({ claude: { state, ...(state === "logged-out" ? { message: loginMessage("claude") } : {}) }, codex: { state: "logged-out", message: loginMessage("codex") } });
+  const status = async () => ({
+    claude: { state, ...(state === "logged-out" ? { message: loginMessage("claude") } : {}) },
+    codex: { state: "logged-out", message: loginMessage("codex") },
+  });
   const wrapped = cliWhenLoggedIn(cli, status);
   assert.deepEqual(await wrapped("claude"), { command: "/bin/claude", version: "9.9.9", problem: loginMessage("claude") });
   // Codex lists its models whether or not it is logged in.
   assert.deepEqual(await wrapped("codex"), { command: "/bin/codex", version: "9.9.9" });
   state = "ready";
   assert.deepEqual(await wrapped("claude"), { command: "/bin/claude", version: "9.9.9" });
-  const broken = cliWhenLoggedIn(async () => ({ command: null, version: null, problem: "missing" }), async () => assert.fail("not asked for a CLI that's missing"));
+  const broken = cliWhenLoggedIn(
+    async () => ({ command: null, version: null, problem: "missing" }),
+    async () => assert.fail("not asked for a CLI that's missing"),
+  );
   assert.equal((await broken("claude")).problem, "missing");
-  const failing = cliWhenLoggedIn(cli, async () => { throw new Error("boom"); });
+  const failing = cliWhenLoggedIn(cli, async () => {
+    throw new Error("boom");
+  });
   assert.deepEqual(await failing("claude"), { command: "/bin/claude", version: "9.9.9" });
 });
 
@@ -182,7 +247,9 @@ test("invalidate forgets a ready status, so the next call looks again", async ()
 
 test("a lookup that finishes after invalidate doesn't delete the newer entry", async () => {
   let release;
-  const gate = new Promise((resolve) => { release = resolve; });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
   let calls = 0;
   const check = createCliStatus({
     cli: async (name) => {

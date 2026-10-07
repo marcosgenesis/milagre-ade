@@ -6,7 +6,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export const PROVIDER_NAMES = Object.fromEntries(PROVIDERS.map(provider => [provider, providerName(provider)])) as Record<ModelProvider, string>;
+export const PROVIDER_NAMES = Object.fromEntries(PROVIDERS.map((provider) => [provider, providerName(provider)])) as Record<ModelProvider, string>;
 
 export type UsageTone = "normal" | "warning" | "critical";
 

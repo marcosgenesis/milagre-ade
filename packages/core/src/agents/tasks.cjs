@@ -65,7 +65,10 @@ function applyToolResult(map, call, block, structured) {
   if (call.name === "TaskList") {
     if (!Array.isArray(structured?.tasks)) return null;
     // The list doesn't carry activeForm, so keep what we know of a task that is still there.
-    return replace(map, structured.tasks.flatMap((item) => (text(item?.subject) ? [task(item.id, text(item.subject), item.status, map.get(String(item.id))?.activeForm)] : [])));
+    return replace(
+      map,
+      structured.tasks.flatMap((item) => (text(item?.subject) ? [task(item.id, text(item.subject), item.status, map.get(String(item.id))?.activeForm)] : [])),
+    );
   }
   if (call.name !== "TaskCreate") return null;
   const subject = text(call.input?.subject);

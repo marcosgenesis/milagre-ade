@@ -1,9 +1,9 @@
 const { createAccounts } = require("./accounts.cjs");
-const { createLinkStore } = require('./link-store.cjs');
-const { createLinkWorkspaces } = require('./link-workspaces.cjs');
-const { createChatScopes } = require('./chat-scopes.cjs');
-const { registerLinkRuntime } = require('./link-runtime.cjs');
-const { isLinkScopeKey, scopeFromKey, scopeKey } = require('@milagre/shared/chat-scopes');
+const { createLinkStore } = require("./link-store.cjs");
+const { createLinkWorkspaces } = require("./link-workspaces.cjs");
+const { createChatScopes } = require("./chat-scopes.cjs");
+const { registerLinkRuntime } = require("./link-runtime.cjs");
+const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
@@ -73,7 +73,10 @@ function createRuntime(options) {
   function track(work, set = active) {
     const task = Promise.resolve().then(work);
     set.add(task);
-    task.then(() => set.delete(task), () => set.delete(task));
+    task.then(
+      () => set.delete(task),
+      () => set.delete(task),
+    );
     return task;
   }
   function accept(work) {
@@ -83,10 +86,13 @@ function createRuntime(options) {
   async function ownProject(projectPath) {
     if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("An absolute Project path is required");
     const real = realpathSync(projectPath);
-    const checkAlias = existing => {
+    const checkAlias = (existing) => {
       if (existing.openedAs !== projectPath) throw new Error(`Project is already open as ${existing.openedAs}`);
     };
-    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    if (projectOwners.has(real)) {
+      checkAlias(projectOwners.get(real));
+      return;
+    }
     let common;
     try {
       common = await git.commonDir(real);
@@ -94,7 +100,10 @@ function createRuntime(options) {
       if (error.code !== 128 || !/not a git repository/i.test(error.stderr ?? "")) throw error;
     }
     // Another open of this path may have finished while git was running.
-    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    if (projectOwners.has(real)) {
+      checkAlias(projectOwners.get(real));
+      return;
+    }
     let repositoryOwner;
     if (common && !repositoryOwners.has(common)) repositoryOwner = acquireOwnership(path.join(common, "milagre-runtime.lock"));
     try {
@@ -107,23 +116,28 @@ function createRuntime(options) {
     }
   }
   const handlers = new Map();
-  const commands = { handle(name, handler) {
-    if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
-    handlers.set(name, handler);
-  } };
+  const commands = {
+    handle(name, handler) {
+      if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
+      handlers.set(name, handler);
+    },
+  };
   const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
   const simulators = createChatSimulators({
     simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
     file: path.join(dataDir, "simulator-attachments.json"),
-    validateChat: async chatId => {
-      const scope = projectOfKey(chatId), id = sessionIdFromKey(chatId);
-      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id]) throw new Error("Open an existing Chat before attaching a simulator.");
+    validateChat: async (chatId) => {
+      const scope = projectOfKey(chatId),
+        id = sessionIdFromKey(chatId);
+      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+        throw new Error("Open an existing Chat before attaching a simulator.");
     },
   });
-  for (const method of ["list", "attach", "detach"]) commands.handle(`simulator:${method}`, (context, request) => {
-    if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
-    return simulators[method](request);
-  });
+  for (const method of ["list", "attach", "detach"])
+    commands.handle(`simulator:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
+      return simulators[method](request);
+    });
   for (const method of ["open", "offer", "status", "control", "input", "close"]) {
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -131,24 +145,36 @@ function createRuntime(options) {
     });
   }
   const searchFiles = createFileSearch();
-  const environmentReady = options.environmentReady ?? loadLoginEnvironment().then(({ source }) => {
-    if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
-  }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
+  const environmentReady =
+    options.environmentReady ??
+    loadLoginEnvironment().then(
+      ({ source }) => {
+        if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
+      },
+      (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message),
+    );
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
   const accountUsage = new Map();
   function usageForAccounts() {
-    const claude = accounts.selected("claude"), codex = accounts.selected("codex");
+    const claude = accounts.selected("claude"),
+      codex = accounts.selected("codex");
     const key = `${claude}-${codex}`;
     if (!accountUsage.has(key)) {
       const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
-      accountUsage.set(key, { key, store, read: createUsageReader({ ready: () => environmentReady, store,
-        readClaude: async () => {
-          const env = accounts.environment("claude", claude);
-          return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
-        },
-        readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
-      }) });
+      accountUsage.set(key, {
+        key,
+        store,
+        read: createUsageReader({
+          ready: () => environmentReady,
+          store,
+          readClaude: async () => {
+            const env = accounts.environment("claude", claude);
+            return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
+          },
+          readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
+        }),
+      });
     }
     return accountUsage.get(key);
   }
@@ -189,7 +215,7 @@ function createRuntime(options) {
   // Bringing chats back never stops a repository from opening: any failure leaves the files and keeps the stored state.
   async function withWorktreeChats(projectPath, stored, discovered) {
     try {
-      if (discovered.length < 2 || await fs.realpath(discovered[0].path).catch(() => null) !== projectPath) return stored;
+      if (discovered.length < 2 || (await fs.realpath(discovered[0].path).catch(() => null)) !== projectPath) return stored;
       const { state, restored } = await migrateWorktreeChats({
         projectPath,
         state: stored ?? emptyState(projectName(projectPath)),
@@ -217,9 +243,19 @@ function createRuntime(options) {
     save: saveProjectState,
   });
 
-  const scopeStates = createChatScopes({ projects: states, links: linkStore, validateLink: async id => { const members = await linkWorkspaces.membersAvailable(await linkRuntime.definition(id)); for (const member of members) await ownProject(member.path); } });
+  const scopeStates = createChatScopes({
+    projects: states,
+    links: linkStore,
+    validateLink: async (id) => {
+      const members = await linkWorkspaces.membersAvailable(await linkRuntime.definition(id));
+      for (const member of members) await ownProject(member.path);
+    },
+  });
   function broadcastProjectState(projectPath, state) {
-    if (isLinkScopeKey(projectPath)) { emit('link:state', { linkId: scopeFromKey(projectPath).linkId, state }); return; }
+    if (isLinkScopeKey(projectPath)) {
+      emit("link:state", { linkId: scopeFromKey(projectPath).linkId, state });
+      return;
+    }
     emit("project:state", { path: projectPath, state });
   }
 
@@ -264,15 +300,15 @@ function createRuntime(options) {
   }
 
   commands.handle("attachment:preview", async (_event, file) => {
-    const snapshots = await Promise.all(scopeStates.projects().map(project => scopeStates.get(project)));
-    const attached = snapshots.flatMap(state => (state.messages || []).flatMap(message => message.files || []));
-    return require('./attachment-preview.cjs').readAttachment(file, scopeStates.worktreePaths(), attached);
+    const snapshots = await Promise.all(scopeStates.projects().map((project) => scopeStates.get(project)));
+    const attached = snapshots.flatMap((state) => (state.messages || []).flatMap((message) => message.files || []));
+    return require("./attachment-preview.cjs").readAttachment(file, scopeStates.worktreePaths(), attached);
   });
   commands.handle("project:files", async (_event, root, query) => {
     if (!scopeStates.worktreePaths().includes(root) && !scopeStates.workspacePaths().includes(root)) throw new Error("Choose an open project's worktree.");
     if (scopeStates.workspacePaths().includes(root)) {
       const roots = await linkRuntime.workspace(root);
-      return (await Promise.all(roots.map(async member => (await searchFiles(member.worktreePath, query)).map(file => `${member.alias}/${file}`)))).flat();
+      return (await Promise.all(roots.map(async (member) => (await searchFiles(member.worktreePath, query)).map((file) => `${member.alias}/${file}`)))).flat();
     }
     return searchFiles(root, query);
   });
@@ -281,11 +317,17 @@ function createRuntime(options) {
   async function knownFolder(folder) {
     if (typeof folder !== "string" || !path.isAbsolute(folder)) throw new Error("An absolute Project path is required");
     if (states.has(folder) || scopeStates.worktreePaths().includes(folder) || scopeStates.workspacePaths().includes(folder)) return;
-    if ((await recentProjects().list()).some(item => item.path === folder)) return;
+    if ((await recentProjects().list()).some((item) => item.path === folder)) return;
     throw new Error("Open this project in Milagre first.");
   }
-  commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
-  commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
+  commands.handle("skills:list", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    return discoverSkills(projectPath);
+  });
+  commands.handle("project:branches", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    return listBranches(projectPath);
+  });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
   commands.handle("project:image", async (_event, projectPath) => {
     await knownFolder(projectPath);
@@ -330,7 +372,8 @@ function createRuntime(options) {
     const earlier = removals.get(key);
     const removal = (async () => {
       const before = earlier ? await earlier.catch(() => null) : null;
-      if (before?.removed && !worktreeAt(await states.get(projectPath), worktreePath)) return { removed: false, alreadyRemoved: true, branch: before.branch, branchDeleted: false };
+      if (before?.removed && !worktreeAt(await states.get(projectPath), worktreePath))
+        return { removed: false, alreadyRemoved: true, branch: before.branch, branchDeleted: false };
       return removeOwnWorktree({ worktreePath, projectPath, chatId, seen, force: Boolean(force) });
     })();
     removals.set(key, removal);
@@ -360,7 +403,9 @@ function createRuntime(options) {
         const own = typeof chatId === "string" && projectOfKey(chatId) === projectPath ? state.sessions[sessionIdFromKey(chatId)] : undefined;
         if (!own || own.worktree_id !== worktree.id) throw new Error("That chat isn't on this worktree, so the worktree is kept.");
       }
-      const others = Object.values(state.sessions).filter((session) => session.worktree_id === worktree.id && !session.archived && `${projectPath}#${session.id}` !== chatId);
+      const others = Object.values(state.sessions).filter(
+        (session) => session.worktree_id === worktree.id && !session.archived && `${projectPath}#${session.id}` !== chatId,
+      );
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
@@ -408,7 +453,10 @@ function createRuntime(options) {
     const { setupCommand } = await projectSettings().get(projectPath);
     return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
   }
-  commands.handle("worktree-setup:read", async (_event, projectPath) => { await knownFolder(projectPath); return readSetupCommand(projectPath); });
+  commands.handle("worktree-setup:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    return readSetupCommand(projectPath);
+  });
   commands.handle("worktree-setup:save", async (_event, projectPath, command) => {
     await knownFolder(projectPath);
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
@@ -454,7 +502,10 @@ function createRuntime(options) {
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
   commands.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
-    return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
+    return diffs.refresh(
+      projectPath,
+      worktreeIds.filter((id) => Number.isInteger(id)),
+    );
   });
   const readPullRequest = options.readPullRequest ?? createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
@@ -475,7 +526,8 @@ function createRuntime(options) {
     keepAwake.observe(chatId, event);
     void notifyIfWaiting(chatId, event).catch(() => {});
     if (!isLinkScopeKey(projectOfKey(chatId))) diffs.observe(chatId, event);
-    if (!isLinkScopeKey(projectOfKey(chatId))) void track(() => linked.observe(chatId, event), background).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
+    if (!isLinkScopeKey(projectOfKey(chatId)))
+      void track(() => linked.observe(chatId, event), background).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
     // A turn that just failed on a login problem makes a "ready" picker status out of date.
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
@@ -484,9 +536,9 @@ function createRuntime(options) {
   }
 
   const agents = new SessionManager({
-    createSession: options.createSession ?? ((provider, options) => (provider === "codex"
-      ? new CodexSession({ ...options, clientVersion: version })
-      : new ClaudeSession(options))),
+    createSession:
+      options.createSession ??
+      ((provider, options) => (provider === "codex" ? new CodexSession({ ...options, clientVersion: version }) : new ClaudeSession(options))),
     linkedFor: (chatId) => linked.forChat(chatId),
     onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
     onTurnStarted: () => ports.wake(),
@@ -504,7 +556,7 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
-    isRunning: () => [...agents.sessions.values()].some(entry => entry.session.turnActive),
+    isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
     roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
     publish: (next) => {
       emit("agent:ports", next);
@@ -554,7 +606,7 @@ function createRuntime(options) {
 
   const chats = new ChatHost({
     states: scopeStates,
-    startTurn: request => track(() => startAgentTurn(request), starting),
+    startTurn: (request) => track(() => startAgentTurn(request), starting),
     readSubagents: async ({ cwd, agents }) => {
       const cli = await agentCli("codex");
       return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
@@ -566,10 +618,29 @@ function createRuntime(options) {
     isChatFocused: options.isChatFocused,
     handoverTools: {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
-      brief: ({ cwd, worktrees, ...input }) => generateBrief({
-        ...input,
-        changedFiles: async () => worktrees ? (await Promise.all(worktrees.map(async member => (await git.text(member.worktreePath, ["status", "--porcelain"])).split("\n").filter(Boolean).map(line => `${member.alias}/${line.slice(3)}`)))).flat() : (await git.text(cwd, ["status", "--porcelain"])).split("\n").filter(Boolean).map((line) => line.slice(3)),
-      }, { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: version })) }),
+      brief: ({ cwd, worktrees, ...input }) =>
+        generateBrief(
+          {
+            ...input,
+            changedFiles: async () =>
+              worktrees
+                ? (
+                    await Promise.all(
+                      worktrees.map(async (member) =>
+                        (await git.text(member.worktreePath, ["status", "--porcelain"]))
+                          .split("\n")
+                          .filter(Boolean)
+                          .map((line) => `${member.alias}/${line.slice(3)}`),
+                      ),
+                    )
+                  ).flat()
+                : (await git.text(cwd, ["status", "--porcelain"]))
+                    .split("\n")
+                    .filter(Boolean)
+                    .map((line) => line.slice(3)),
+          },
+          { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: version })) },
+        ),
     },
   });
 
@@ -578,26 +649,40 @@ function createRuntime(options) {
 
   // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
   const baseCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
-  const accounts = createAccounts({ dataDir, cli: baseCli, ready: () => environmentReady, changed(provider) {
-    agentCliStatus.invalidate?.(provider);
-    agentModels.invalidate?.(provider);
-    emit("accounts:changed", {});
-  } });
-  const agentCli = async provider => ({ ...await baseCli(provider), env: accounts.environment(provider), accountId: accounts.selected(provider) });
-  agentCli.invalidate = provider => baseCli.invalidate?.(provider);
+  const accounts = createAccounts({
+    dataDir,
+    cli: baseCli,
+    ready: () => environmentReady,
+    changed(provider) {
+      agentCliStatus.invalidate?.(provider);
+      agentModels.invalidate?.(provider);
+      emit("accounts:changed", {});
+    },
+  });
+  const agentCli = async (provider) => ({ ...(await baseCli(provider)), env: accounts.environment(provider), accountId: accounts.selected(provider) });
+  agentCli.invalidate = (provider) => baseCli.invalidate?.(provider);
   commands.handle("accounts:list", (_event, refresh) => accounts.list(refresh === true));
   let accountMutation = Promise.resolve();
-  for (const method of ["add", "select", "login", "cancel", "remove"]) commands.handle(`accounts:${method}`, (_event, provider, value) => {
-    const pending = accountMutation.then(() => accounts[method](provider, value));
-    accountMutation = pending.catch(() => {});
-    return pending;
-  });
+  for (const method of ["add", "select", "login", "cancel", "remove"])
+    commands.handle(`accounts:${method}`, (_event, provider, value) => {
+      const pending = accountMutation.then(() => accounts[method](provider, value));
+      accountMutation = pending.catch(() => {});
+      return pending;
+    });
 
   const titleModels = options.titleModels ?? createChatTitleModels({ cli: agentCli, clientVersion: version });
-  const chatTitles = new ChatTitles({ states: scopeStates, update: updateProject, generate: request => generateChatTitle(request, { models: titleModels }) });
+  const chatTitles = new ChatTitles({ states: scopeStates, update: updateProject, generate: (request) => generateChatTitle(request, { models: titleModels }) });
 
-  commands.handle("usage:read", async () => { if (options.readUsage) return options.readUsage(); await environmentReady; const usage = usageForAccounts(); return { ...await usage.read(), accountKey: usage.key }; });
-  commands.handle("usage:cached", () => { const usage = usageForAccounts(); return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key }; });
+  commands.handle("usage:read", async () => {
+    if (options.readUsage) return options.readUsage();
+    await environmentReady;
+    const usage = usageForAccounts();
+    return { ...(await usage.read()), accountKey: usage.key };
+  });
+  commands.handle("usage:cached", () => {
+    const usage = usageForAccounts();
+    return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key };
+  });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
   // environment is in (gh from a Finder launch). Its one-shot text call starts the CLI agentCli found.
@@ -625,10 +710,18 @@ function createRuntime(options) {
     if (!scopeStates.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
     return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
   });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
+  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) =>
+    scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined,
+  );
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
-  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
-  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
+  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) =>
+    scopeStates.has(projectPath)
+      ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {})
+      : undefined,
+  );
+  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) =>
+    scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined,
+  );
   // What the "Commit and open PR" dialog did, as a line in its chat.
   commands.handle("chat:git-note", (_event, chatId, body) => {
     if (typeof chatId !== "string" || typeof body !== "string" || !scopeStates.has(projectOfKey(chatId))) return undefined;
@@ -660,7 +753,8 @@ function createRuntime(options) {
     return { ...result, status: status[provider] };
   });
 
-  const agentModels = options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
+  const agentModels =
+    options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
   commands.handle("agent:models", () => agentModels());
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
@@ -673,7 +767,10 @@ function createRuntime(options) {
 
   // The answers show in the chat as the user's message (`summary`), and are taken back if they don't reach the agent.
   commands.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
-    const messageId = answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId)) ? await chats.recordAnswers(chatId, summary) : null;
+    const messageId =
+      answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId))
+        ? await chats.recordAnswers(chatId, summary)
+        : null;
     try {
       const accepted = await agents.answerQuestion(chatId, requestId, answers);
       if (!accepted && messageId !== null) await chats.takeBack(chatId, messageId);
@@ -686,11 +783,17 @@ function createRuntime(options) {
 
   commands.handle("agent:set-permission-mode", (_event, { chatId, mode }) => agents.setPermissionMode(chatId, mode));
 
-
   async function notifyIfWaiting(chatId, event) {
     const projectPath = projectOfKey(chatId);
     if (!options.notifyWaiting || !scopeStates.has(projectPath) || !("requestId" in event)) return;
-    const notice = attentionNotice(event, attentionContext(await scopeStates.get(projectPath), (isLinkScopeKey(projectPath) ? (await linkRuntime.definition(scopeFromKey(projectPath).linkId)).name : projectName(projectPath)), sessionIdFromKey(chatId)));
+    const notice = attentionNotice(
+      event,
+      attentionContext(
+        await scopeStates.get(projectPath),
+        isLinkScopeKey(projectPath) ? (await linkRuntime.definition(scopeFromKey(projectPath).linkId)).name : projectName(projectPath),
+        sessionIdFromKey(chatId),
+      ),
+    );
     if (notice) options.notifyWaiting({ chatId, requestId: event.requestId, ...notice });
   }
 
@@ -698,33 +801,61 @@ function createRuntime(options) {
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
   let registryStore = null;
-  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json"), options.registryRoots ? { roots: options.registryRoots } : {}));
+  const projectRegistry = () =>
+    (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json"), options.registryRoots ? { roots: options.registryRoots } : {}));
   async function canvasActiveWorktrees() {
     const projects = await projectRegistry().list();
-    return Object.fromEntries(await Promise.all(projects.map(async project => [
-      project.id,
-      (await activeWorktrees(project.path)).map(worktree => worktree.path),
-    ])));
+    return Object.fromEntries(
+      await Promise.all(projects.map(async (project) => [project.id, (await activeWorktrees(project.path)).map((worktree) => worktree.path)])),
+    );
   }
   // Links whose Worktree endpoint went away are dropped, with what was waiting to travel along them.
   async function pruneLinks(active) {
-    for (const link of await projectRegistry().pruneLinks(active ?? await canvasActiveWorktrees())) await linked.linkRemoved(link.id);
+    for (const link of await projectRegistry().pruneLinks(active ?? (await canvasActiveWorktrees()))) await linked.linkRemoved(link.id);
   }
   // A linked Project not open yet is opened here (ownership, reconciled Worktrees, interrupted turns), as the
   // canvas opens every Project it shows.
   async function linkedState(projectPath) {
-    if (isLinkScopeKey(projectPath)) return linkStore.get(projectPath.slice('milagre-link:'.length));
+    if (isLinkScopeKey(projectPath)) return linkStore.get(projectPath.slice("milagre-link:".length));
     if (states.has(projectPath)) {
       const cached = await states.get(projectPath);
-      const known = new Set(Object.values(cached.worktrees).map(worktree => worktree.path));
-      const missingReference = linkStore.ids().some(id => Object.values(linkStore.cached(id)?.sessions ?? {}).some(session => session.worktrees.some(member => member.projectPath === projectPath && !known.has(member.worktreePath))));
+      const known = new Set(Object.values(cached.worktrees).map((worktree) => worktree.path));
+      const missingReference = linkStore
+        .ids()
+        .some((id) =>
+          Object.values(linkStore.cached(id)?.sessions ?? {}).some((session) =>
+            session.worktrees.some((member) => member.projectPath === projectPath && !known.has(member.worktreePath)),
+          ),
+        );
       if (!missingReference) return cached;
     }
     return (await readProject(projectPath)).state;
   }
-  const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit, extraTools: chatId => simulatorToolDefinitions(chatId, simulators) });
-  const linkWorkspaces = createLinkWorkspaces({ store: linkStore, registry: projectRegistry(), ownProject, root: options.worktreeRoot ?? DEFAULT_WORKTREE_ROOT, getSettings: projectPath => projectSettings().get(projectPath) });
-  const linkRuntime = registerLinkRuntime({ commands, registry: projectRegistry, store: linkStore, workspaces: linkWorkspaces, chats, broadcast: broadcastProjectState, titles: chatTitles });
+  const linked = createLinkedWorktrees({
+    dataDir,
+    registry: projectRegistry,
+    project: linkedState,
+    chats,
+    agents,
+    emit,
+    extraTools: (chatId) => simulatorToolDefinitions(chatId, simulators),
+  });
+  const linkWorkspaces = createLinkWorkspaces({
+    store: linkStore,
+    registry: projectRegistry(),
+    ownProject,
+    root: options.worktreeRoot ?? DEFAULT_WORKTREE_ROOT,
+    getSettings: (projectPath) => projectSettings().get(projectPath),
+  });
+  const linkRuntime = registerLinkRuntime({
+    commands,
+    registry: projectRegistry,
+    store: linkStore,
+    workspaces: linkWorkspaces,
+    chats,
+    broadcast: broadcastProjectState,
+    titles: chatTitles,
+  });
   commands.handle("linked:snapshot", () => linked.snapshot());
   commands.handle("linked:stop-negotiation", (_event, id) => (typeof id === "string" ? linked.stop({ negotiationId: id }) : undefined));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
@@ -760,7 +891,9 @@ function createRuntime(options) {
         const stored = states.has(projectPath) ? null : await readRawState(projectPath);
         if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
         await readProject(projectPath);
-      } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }
+      } catch (error) {
+        console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message);
+      }
     }
   }
   commands.handle("project:registry", () => projectRegistry().list());
@@ -769,7 +902,7 @@ function createRuntime(options) {
     const projects = await projectRegistry().list();
     await pruneLinks(await canvasActiveWorktrees());
     const registry = await projectRegistry().snapshot();
-    const statesByPath = await Promise.all(projects.map(async project => ({ path: project.path, state: (await readProject(project.path)).state })));
+    const statesByPath = await Promise.all(projects.map(async (project) => ({ path: project.path, state: (await readProject(project.path)).state })));
     return { ...registry, states: statesByPath };
   });
   commands.handle("canvas:link-add", async (_event, a, b) => {
@@ -783,7 +916,7 @@ function createRuntime(options) {
   });
   commands.handle("canvas:worktree-position", (_event, id, worktreePath, position) => projectRegistry().setWorktreePosition(id, worktreePath, position));
   commands.handle("canvas:open-project", async (_event, requested) => {
-    if (!(await projectRegistry().list()).some(project => project.path === requested)) throw new Error("Project is not in the registry.");
+    if (!(await projectRegistry().list()).some((project) => project.path === requested)) throw new Error("Project is not in the registry.");
     return openProject(requested);
   });
   commands.handle("project:recent", () => recentProjects().list());
@@ -802,7 +935,6 @@ function createRuntime(options) {
   // The phone's project search: Git repositories under the home folder, matched by name (see project-finder.cjs).
   const projectFinder = createProjectFinder(options.projectSearchRoot || require("node:os").homedir());
   commands.handle("project:find", (_event, query) => projectFinder.search(typeof query === "string" ? query.slice(0, 200) : ""));
-
 
   function close() {
     closing = true;
@@ -827,11 +959,11 @@ function createRuntime(options) {
       await states.close();
       await linkStore.close();
       await linked.close();
-      await Promise.all([usageStore.idle(), ...[...accountUsage.values()].map(item => item.store.idle())]);
+      await Promise.all([usageStore.idle(), ...[...accountUsage.values()].map((item) => item.store.idle())]);
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();
-    })().catch(error => {
+    })().catch((error) => {
       // Retain ownership and unsaved memory until the host reports the error and
       // retries. A rejected Promise must not permanently disable that retry.
       closed = undefined;
@@ -849,15 +981,28 @@ function createRuntime(options) {
         return handlers.get(method)(context, ...args);
       });
     },
-    disconnect: clientId => simulators.disconnect(clientId),
+    disconnect: (clientId) => simulators.disconnect(clientId),
     openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
     // Synchronous capture: the socket serializes this before another event can
     // mutate state, so its event watermark and run sequence describe one instant.
-    snapshot: () => ({ links: linkStore.ids().map(linkId => ({ linkId, state: linkStore.has(linkId) ? linkStore.cached(linkId) : undefined })), projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
-    focused: (view) => accept(() => { diffs.focused(view ? view.projectPath : shownProjectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
-    flush: async () => { await Promise.allSettled([...active]); await scopeStates.flush(); await usageStore.idle(); },
+    snapshot: () => ({
+      links: linkStore.ids().map((linkId) => ({ linkId, state: linkStore.has(linkId) ? linkStore.cached(linkId) : undefined })),
+      projects: states.projects().map((projectPath) => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })),
+      runs: chats.snapshot(),
+      ports: ports.snapshot(),
+    }),
+    focused: (view) =>
+      accept(() => {
+        diffs.focused(view ? view.projectPath : shownProjectPath);
+        return readOpenChat(view ? view.chatId : chats.openChat);
+      }),
+    flush: async () => {
+      await Promise.allSettled([...active]);
+      await scopeStates.flush();
+      await usageStore.idle();
+    },
     close,
   };
 }

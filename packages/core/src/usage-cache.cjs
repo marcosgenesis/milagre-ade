@@ -31,10 +31,9 @@ function cleanBlocked(blocked) {
 function load(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return Object.fromEntries(PROVIDERS.map((provider) => [
-      provider,
-      { last: cleanLast(parsed?.[provider]?.last), blocked: cleanBlocked(parsed?.[provider]?.blocked) },
-    ]));
+    return Object.fromEntries(
+      PROVIDERS.map((provider) => [provider, { last: cleanLast(parsed?.[provider]?.last), blocked: cleanBlocked(parsed?.[provider]?.blocked) }]),
+    );
   } catch {
     return emptyState();
   }

@@ -20,7 +20,12 @@ function InlineCode({ children }: { children?: ReactNode }) {
   const target = opener ? fileLinkTarget(text) : null;
   if (!opener || !target) return <code className={CODE_CLASS}>{children}</code>;
   return (
-    <button type="button" title={opener.title} onClick={() => opener.open(target.path, target.line)} className={`${CODE_CLASS} cursor-pointer text-left decoration-ink-3 underline-offset-2 hover:underline`}>
+    <button
+      type="button"
+      title={opener.title}
+      onClick={() => opener.open(target.path, target.line)}
+      className={`${CODE_CLASS} cursor-pointer text-left decoration-ink-3 underline-offset-2 hover:underline`}
+    >
       {children}
     </button>
   );
@@ -35,21 +40,43 @@ const components: Components = {
   },
   code: InlineCode,
   a({ href, children }) {
-    return <a href={href} title={href} target="_blank" rel="noreferrer" className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2 hover:decoration-accent-ink">{children}</a>;
+    return (
+      <a
+        href={href}
+        title={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2 hover:decoration-accent-ink"
+      >
+        {children}
+      </a>
+    );
   },
   // Remote images in a reply would load without asking; show them as links instead.
   img({ src, alt }) {
     const href = typeof src === "string" ? src : undefined;
-    return <a href={href} title={href} target="_blank" rel="noreferrer" className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2">{alt || href || "image"}</a>;
+    return (
+      <a href={href} title={href} target="_blank" rel="noreferrer" className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2">
+        {alt || href || "image"}
+      </a>
+    );
   },
   table({ children }) {
-    return <div className="my-2 overflow-x-auto"><table>{children}</table></div>;
+    return (
+      <div className="my-2 overflow-x-auto">
+        <table>{children}</table>
+      </div>
+    );
   },
 };
 
 // Parsed output of one block of text; memoized so a block that stopped changing never parses again.
 const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
 });
 
 const WRAPPER = "markdown break-words [overflow-wrap:anywhere]";
@@ -71,9 +98,9 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ text }: { tex
   const blocks = splitStreamingBlocks(text);
   return (
     <div className={WRAPPER}>
-      {blocks.map((block, index) => index === blocks.length - 1
-        ? <MarkdownBody key={index} text={closeOpenMarkdown(block)} />
-        : <MarkdownBody key={index} text={block} />)}
+      {blocks.map((block, index) =>
+        index === blocks.length - 1 ? <MarkdownBody key={index} text={closeOpenMarkdown(block)} /> : <MarkdownBody key={index} text={block} />,
+      )}
     </div>
   );
 });

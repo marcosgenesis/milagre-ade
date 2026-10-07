@@ -2,7 +2,23 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 // Folders a scan never enters: system and media folders in the home, dependency and build output, anything hidden.
-const SKIP = new Set(["Library", "Applications", "Pictures", "Movies", "Music", "Public", "node_modules", "bower_components", "vendor", "Pods", "DerivedData", "build", "dist", "target", ".git"]);
+const SKIP = new Set([
+  "Library",
+  "Applications",
+  "Pictures",
+  "Movies",
+  "Music",
+  "Public",
+  "node_modules",
+  "bower_components",
+  "vendor",
+  "Pods",
+  "DerivedData",
+  "build",
+  "dist",
+  "target",
+  ".git",
+]);
 const MAX_DEPTH = 5;
 const MAX_FOLDERS = 20000;
 const TIME_BUDGET_MS = 2500;
@@ -24,8 +40,15 @@ async function scanRepositories(root, { now = Date.now, readdir = fs.readdir } =
     for (const { folder, depth } of queue) {
       if (++seen > MAX_FOLDERS || now() - started >= TIME_BUDGET_MS) break;
       let entries;
-      try { entries = await readdir(folder, { withFileTypes: true }); } catch { continue; }
-      if (entries.some(entry => entry.name === ".git")) { found.push({ path: folder, name: path.basename(folder) }); continue; }
+      try {
+        entries = await readdir(folder, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      if (entries.some((entry) => entry.name === ".git")) {
+        found.push({ path: folder, name: path.basename(folder) });
+        continue;
+      }
       if (depth >= MAX_DEPTH) continue;
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
@@ -39,7 +62,9 @@ async function scanRepositories(root, { now = Date.now, readdir = fs.readdir } =
 
 /** Repositories whose name (or, failing that, path) holds the query: name prefixes first, then shorter paths. */
 function rankRepositories(repositories, query, limit = LIMIT) {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = String(query || "")
+    .trim()
+    .toLowerCase();
   const score = (repo) => {
     const name = repo.name.toLowerCase();
     if (!needle) return 0;
@@ -49,9 +74,12 @@ function rankRepositories(repositories, query, limit = LIMIT) {
     if (repo.path.toLowerCase().includes(needle)) return 3;
     return -1;
   };
-  return repositories.map(repo => ({ repo, rank: score(repo) })).filter(item => item.rank >= 0)
+  return repositories
+    .map((repo) => ({ repo, rank: score(repo) }))
+    .filter((item) => item.rank >= 0)
     .sort((a, b) => a.rank - b.rank || a.repo.path.length - b.repo.path.length || a.repo.path.localeCompare(b.repo.path))
-    .slice(0, limit).map(item => item.repo);
+    .slice(0, limit)
+    .map((item) => item.repo);
 }
 
 /** A cached scan of `root`: searching while typing reuses one walk for a minute. */
@@ -60,7 +88,10 @@ function createProjectFinder(root, { now = Date.now, scan = scanRepositories } =
   return {
     async search(query) {
       if (!cache || now() - cache.at > CACHE_MS) cache = { at: now(), repositories: scan(root) };
-      const repositories = await cache.repositories.catch((error) => { cache = null; throw error; });
+      const repositories = await cache.repositories.catch((error) => {
+        cache = null;
+        throw error;
+      });
       return rankRepositories(repositories, query);
     },
   };

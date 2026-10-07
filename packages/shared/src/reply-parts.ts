@@ -35,7 +35,10 @@ export type ActivityEntry = { type: "text"; text: string } | { type: "step"; ste
 export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; answer: string } {
   const setup = allSteps.filter((step) => step.kind === "setup");
   const images = allSteps.filter((step) => step.kind === "image");
-  const parts = replyParts(body, allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image"));
+  const parts = replyParts(
+    body,
+    allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image"),
+  );
   const answerIndex = parts.map((part) => part.type).lastIndexOf("text");
   const activity = parts.flatMap((part, index): ActivityEntry[] => {
     if (index === answerIndex) return [];
@@ -52,7 +55,7 @@ export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup:
 export function unspokenThought(activity: ActivityEntry[], answer: string): string {
   if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
   const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
-  return thought?.type === "step" ? thought.step.detail?.trim() ?? "" : "";
+  return thought?.type === "step" ? (thought.step.detail?.trim() ?? "") : "";
 }
 
 const count = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
@@ -87,5 +90,8 @@ export function activitySummary(all: ChatStep[]): { text: string; failed: number
 
 /** A step title split into plain text and code: "Ran `npm test`" → "Ran ", then the code "npm test". */
 export function titleSpans(title: string): Array<{ text: string; code: boolean }> {
-  return title.split("`").map((text, index) => ({ text, code: index % 2 === 1 })).filter((span) => span.text);
+  return title
+    .split("`")
+    .map((text, index) => ({ text, code: index % 2 === 1 }))
+    .filter((span) => span.text);
 }

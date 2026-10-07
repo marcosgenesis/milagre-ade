@@ -6,7 +6,7 @@ const FLICK = 500;
 
 /** Progress under the finger, kept inside what the gesture may reach. */
 export function dragTo(from: number, translation: number, width: number, min: number, max: number) {
-  'worklet';
+  "worklet";
   return Math.min(max, Math.max(min, from + translation / width));
 }
 
@@ -15,7 +15,7 @@ export function dragTo(from: number, translation: number, width: number, min: nu
  * it goes once a third has been pulled back or on a flick away.
  */
 export function settle(from: number, progress: number, velocity: number) {
-  'worklet';
+  "worklet";
   if (from === 0) {
     const side = Math.sign(progress);
     const toward = velocity * side;

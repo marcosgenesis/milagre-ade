@@ -8,14 +8,18 @@ import { TaskTrack } from "./agents/TaskTrack";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  ArrowDown01Icon,
-  GitBranchIcon,
-  GitForkIcon,
-  GitPullRequestIcon,
-  LaptopIcon,
-} from "@hugeicons/core-free-icons";
-import type { AgentCliStatus, EffortLevel, ModelCapability, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import { ArrowDown01Icon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, LaptopIcon } from "@hugeicons/core-free-icons";
+import type {
+  AgentCliStatus,
+  EffortLevel,
+  ModelCapability,
+  ChatMessage as AppChatMessage,
+  ChatStep,
+  Isolation,
+  ModelOption,
+  ModelProvider,
+  PermissionMode,
+} from "../model";
 import { FindBar } from "./FindBar";
 import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";
@@ -55,23 +59,49 @@ function UserBody({ body }: { body: string }) {
   const parts = useMemo(() => splitFences(body), [body]);
   return (
     <div className="break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
-      {parts.map((part, index) => part.kind === "text"
-        ? <Fragment key={index}>{part.text}</Fragment>
-        : <div key={index} className="whitespace-normal"><CodeBlock code={part.code} fence={part.fence || undefined} diff /></div>)}
+      {parts.map((part, index) =>
+        part.kind === "text" ? (
+          <Fragment key={index}>{part.text}</Fragment>
+        ) : (
+          <div key={index} className="whitespace-normal">
+            <CodeBlock code={part.code} fence={part.fence || undefined} diff />
+          </div>
+        ),
+      )}
     </div>
   );
 }
 
-function ReplyContent({ body, steps, streaming, asking = false, waitingStepIds }: { body: string; steps: ChatStep[]; streaming: boolean; asking?: boolean; waitingStepIds: string[] }) {
+function ReplyContent({
+  body,
+  steps,
+  streaming,
+  asking = false,
+  waitingStepIds,
+}: {
+  body: string;
+  steps: ChatStep[];
+  streaming: boolean;
+  asking?: boolean;
+  waitingStepIds: string[];
+}) {
   const { setup, activity, images, answer } = replyActivity(body, steps);
   const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
   return (
     <>
-      {setup.map((step) => <StepRow key={step.id} step={step} />)}
+      {setup.map((step) => (
+        <StepRow key={step.id} step={step} />
+      ))}
       <ActivityBlock entries={activity} streaming={streaming} waitingStepIds={waitingStepIds} />
-      {images.map((step) => <GeneratedImage key={step.id} step={step} />)}
+      {images.map((step) => (
+        <GeneratedImage key={step.id} step={step} />
+      ))}
       {answer.trim() && <div data-slot="message-content">{streaming ? <StreamingMarkdown text={answer} /> : <Markdown text={answer} />}</div>}
-      {thought && <div data-slot="message-thought" className="text-ink-2"><Markdown text={thought} /></div>}
+      {thought && (
+        <div data-slot="message-thought" className="text-ink-2">
+          <Markdown text={thought} />
+        </div>
+      )}
     </>
   );
 }
@@ -111,11 +141,7 @@ const MessageSection = memo(function MessageSection({
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
-  const showUpdateButton = Boolean(
-    outdatedProvider &&
-    onUpdateCli &&
-    (isCurrentlyOutdated || updatingCli === outdatedProvider)
-  );
+  const showUpdateButton = Boolean(outdatedProvider && onUpdateCli && (isCurrentlyOutdated || updatingCli === outdatedProvider));
   const steps = message.steps ?? [];
   return (
     <article
@@ -128,15 +154,27 @@ const MessageSection = memo(function MessageSection({
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
-      <div className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}>
-        <Attachments images={isUser ? message.images : message.images?.filter(image => !image.sourcePath)} files={message.files} leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />} />
+      <div
+        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
+      >
+        <Attachments
+          images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)}
+          files={message.files}
+          leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />}
+        />
         {isUser ? (
-          message.body.trim() ? <UserBody body={message.body} /> : null
+          message.body.trim() ? (
+            <UserBody body={message.body} />
+          ) : null
         ) : recommendation ? (
           <>
             <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
             <div className={recommendation.intro ? "mt-2" : undefined}>
-              <RecommendationCard question={recommendation.question} options={recommendation.options} onSelect={(option) => onRecommendationSelect(option.label)} />
+              <RecommendationCard
+                question={recommendation.question}
+                options={recommendation.options}
+                onSelect={(option) => onRecommendationSelect(option.label)}
+              />
             </div>
           </>
         ) : (
@@ -168,13 +206,39 @@ const MessageSection = memo(function MessageSection({
 
 // Background turns and draft edits must not rebuild a long, unchanged transcript.
 const MessageTranscript = memo(function MessageTranscript({
-  messages, pendingMessageId, isSending, streamingText, streamingSteps, asking, waitingStepIds,
-  onRecommendationSelect, onUpdateCli, updatingCli, cliStatus, onOpenLinkedChat, findOpen,
-}: Pick<ChatComposerProps, "messages" | "pendingMessageId" | "isSending" | "streamingText" | "streamingSteps" | "asking" | "waitingStepIds" | "onRecommendationSelect" | "onUpdateCli" | "updatingCli" | "cliStatus" | "onOpenLinkedChat" | "findOpen">) {
+  messages,
+  pendingMessageId,
+  isSending,
+  streamingText,
+  streamingSteps,
+  asking,
+  waitingStepIds,
+  onRecommendationSelect,
+  onUpdateCli,
+  updatingCli,
+  cliStatus,
+  onOpenLinkedChat,
+  findOpen,
+}: Pick<
+  ChatComposerProps,
+  | "messages"
+  | "pendingMessageId"
+  | "isSending"
+  | "streamingText"
+  | "streamingSteps"
+  | "asking"
+  | "waitingStepIds"
+  | "onRecommendationSelect"
+  | "onUpdateCli"
+  | "updatingCli"
+  | "cliStatus"
+  | "onOpenLinkedChat"
+  | "findOpen"
+>) {
   const chatId = messages[0]?.session_id ?? "new";
   // The messages a chat opens with don't animate in; later ones do. A new chat's first message counts as later.
   const openingMessages = useRef<{ chat: number | string; ids: Set<number> } | null>(null);
-  if (!openingMessages.current) openingMessages.current = { chat: chatId, ids: new Set(messages.map(message => message.id)) };
+  if (!openingMessages.current) openingMessages.current = { chat: chatId, ids: new Set(messages.map((message) => message.id)) };
   if (openingMessages.current.chat !== chatId) {
     openingMessages.current = { chat: chatId, ids: openingMessages.current.chat === "new" ? new Set() : new Set(messages.map((message) => message.id)) };
   }
@@ -183,7 +247,10 @@ const MessageTranscript = memo(function MessageTranscript({
   let firstId = page.chat === chatId ? page.firstId : messages[Math.max(0, messages.length - 40)]?.id;
   if (findOpen) firstId = messages[0]?.id;
   if (page.chat !== chatId || page.firstId !== firstId) setPage({ chat: chatId, firstId });
-  const start = Math.max(0, messages.findIndex(message => message.id === firstId));
+  const start = Math.max(
+    0,
+    messages.findIndex((message) => message.id === firstId),
+  );
   const earlierButton = useRef<HTMLButtonElement>(null);
   const anchor = useRef<{ element: HTMLElement; top: number; viewport: HTMLElement } | null>(null);
   useLayoutEffect(() => {
@@ -208,39 +275,51 @@ const MessageTranscript = memo(function MessageTranscript({
     if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
     setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
   }
-  const streamingMessage: AppChatMessage | undefined = isSending && (streamingText || streamingSteps?.length)
-    ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
-    : undefined;
+  const streamingMessage: AppChatMessage | undefined =
+    isSending && (streamingText || streamingSteps?.length)
+      ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
+      : undefined;
   const transcript = messages.slice(start);
   if (streamingMessage) {
-    const pendingIndex = transcript.findIndex(message => message.id === pendingMessageId);
+    const pendingIndex = transcript.findIndex((message) => message.id === pendingMessageId);
     transcript.splice(pendingIndex < 0 ? transcript.length : pendingIndex, 0, streamingMessage);
   }
 
   const openingIds = openingMessages.current.ids;
-  return <>
-    {start > 0 && <button ref={earlierButton} type="button" onClick={showEarlier} className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover">Show earlier messages ({start})</button>}
-    {transcript.map((message) => (
-      <MessageSection
-        key={message.clientMessageId ?? message.id}
-        message={message}
-        isUser={message.role === "user"}
-        onRecommendationSelect={onRecommendationSelect}
-        onUpdateCli={onUpdateCli}
-        updatingCli={updatingCli}
-        cliStatus={cliStatus}
-        streaming={message === streamingMessage}
-        asking={message === streamingMessage && asking}
-        waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
-        animate={!message.clientMessageId && !openingIds.has(message.id)}
-        onOpenChat={onOpenLinkedChat}
-      />
-          ))}
-  </>;
+  return (
+    <>
+      {start > 0 && (
+        <button
+          ref={earlierButton}
+          type="button"
+          onClick={showEarlier}
+          className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover"
+        >
+          Show earlier messages ({start})
+        </button>
+      )}
+      {transcript.map((message) => (
+        <MessageSection
+          key={message.clientMessageId ?? message.id}
+          message={message}
+          isUser={message.role === "user"}
+          onRecommendationSelect={onRecommendationSelect}
+          onUpdateCli={onUpdateCli}
+          updatingCli={updatingCli}
+          cliStatus={cliStatus}
+          streaming={message === streamingMessage}
+          asking={message === streamingMessage && asking}
+          waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
+          animate={!message.clientMessageId && !openingIds.has(message.id)}
+          onOpenChat={onOpenLinkedChat}
+        />
+      ))}
+    </>
+  );
 });
 
 interface ChatComposerProps {
-  scopeKind?: 'project' | 'link';
+  scopeKind?: "project" | "link";
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
   findSignal?: number;
@@ -333,17 +412,36 @@ const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon
 
 function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: string; open: boolean; onClick: (trigger: HTMLElement) => void }) {
   return (
-    <button type="button" aria-expanded={open} onClick={(event) => onClick(event.currentTarget)} className={`flex h-7 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-2"}`}>
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={(event) => onClick(event.currentTarget)}
+      className={`flex h-7 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-2"}`}
+    >
       <Icon icon={icon} size={14} />
       {label}
-      <span className="text-ink-3"><Icon icon={ArrowDown01Icon} size={12} /></span>
+      <span className="text-ink-3">
+        <Icon icon={ArrowDown01Icon} size={12} />
+      </span>
     </button>
   );
 }
 
-type NewChatHeaderProps = Pick<ChatComposerProps, "worktrees" | "selectedWorktreeId" | "onWorktreeChange" | "isolation" | "onIsolationChange" | "branches" | "baseBranch" | "onBaseBranchChange">;
+type NewChatHeaderProps = Pick<
+  ChatComposerProps,
+  "worktrees" | "selectedWorktreeId" | "onWorktreeChange" | "isolation" | "onIsolationChange" | "branches" | "baseBranch" | "onBaseBranchChange"
+>;
 
-function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolation, onIsolationChange, branches, baseBranch, onBaseBranchChange }: NewChatHeaderProps) {
+function NewChatHeader({
+  worktrees,
+  selectedWorktreeId,
+  onWorktreeChange,
+  isolation,
+  onIsolationChange,
+  branches,
+  baseBranch,
+  onBaseBranchChange,
+}: NewChatHeaderProps) {
   const [menu, setMenu] = useState<"isolation" | "branch" | null>(null);
   const [query, setQuery] = useState("");
   const [popover, setPopover] = useState({ left: 0, maxHeight: 480 });
@@ -351,9 +449,20 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
   const isolationOption = ISOLATIONS.find((option) => option.id === isolation) ?? ISOLATIONS[0];
   const search = query.trim().toLowerCase();
   // Local runs in an existing checkout; a new worktree branches from any local branch.
-  const branchRows = isolation === "local"
-    ? worktrees.filter((worktree) => worktree.name.toLowerCase().includes(search)).map((worktree) => ({ key: String(worktree.id), name: worktree.name, description: worktree.path.split("/").filter(Boolean).pop(), selected: worktree.id === selected?.id, choose: () => onWorktreeChange(worktree.id) }))
-    : branches.filter((branch) => branch.toLowerCase().includes(search)).map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
+  const branchRows =
+    isolation === "local"
+      ? worktrees
+          .filter((worktree) => worktree.name.toLowerCase().includes(search))
+          .map((worktree) => ({
+            key: String(worktree.id),
+            name: worktree.name,
+            description: worktree.path.split("/").filter(Boolean).pop(),
+            selected: worktree.id === selected?.id,
+            choose: () => onWorktreeChange(worktree.id),
+          }))
+      : branches
+          .filter((branch) => branch.toLowerCase().includes(search))
+          .map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
 
   const lastTrigger = useRef<HTMLElement | null>(null);
   function place(trigger: HTMLElement) {
@@ -363,7 +472,14 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
     setPopover({ left: button.left - (row?.left ?? button.left), maxHeight: window.innerHeight - button.bottom - 24 });
   }
 
-  useDismiss(menu !== null, () => setMenu(null), (target) => !!target.closest("[data-picker-panel], [data-new-chat-pickers] button[aria-expanded]"), () => { if (lastTrigger.current) place(lastTrigger.current); });
+  useDismiss(
+    menu !== null,
+    () => setMenu(null),
+    (target) => !!target.closest("[data-picker-panel], [data-new-chat-pickers] button[aria-expanded]"),
+    () => {
+      if (lastTrigger.current) place(lastTrigger.current);
+    },
+  );
 
   function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
     place(trigger);
@@ -385,13 +501,33 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
       {selected && (
         <div data-new-chat-pickers className="relative mt-4 mb-2.5 -ml-1.5 flex items-center gap-1">
           <Tooltip label="Choose the isolation level">
-            <ChipButton icon={isolationOption.icon} label={isolationOption.name} open={menu === "isolation"} onClick={(trigger) => toggle("isolation", trigger.parentElement ?? trigger)} />
+            <ChipButton
+              icon={isolationOption.icon}
+              label={isolationOption.name}
+              open={menu === "isolation"}
+              onClick={(trigger) => toggle("isolation", trigger.parentElement ?? trigger)}
+            />
           </Tooltip>
-          <ChipButton icon={GitBranchIcon} label={isolation === "local" ? selected.name : baseBranch} open={menu === "branch"} onClick={(trigger) => toggle("branch", trigger)} />
+          <ChipButton
+            icon={GitBranchIcon}
+            label={isolation === "local" ? selected.name : baseBranch}
+            open={menu === "branch"}
+            onClick={(trigger) => toggle("branch", trigger)}
+          />
           {menu === "isolation" && (
             <PickerPanel title="Isolation" className="absolute top-[calc(100%+0.375rem)] w-[320px]" style={popoverStyle}>
               {ISOLATIONS.map((option) => (
-                <PickerRow key={option.id} icon={<Icon icon={option.icon} size={14} />} label={option.name} description={option.description} selected={option.id === isolation} onClick={() => { onIsolationChange(option.id); close(); }} />
+                <PickerRow
+                  key={option.id}
+                  icon={<Icon icon={option.icon} size={14} />}
+                  label={option.name}
+                  description={option.description}
+                  selected={option.id === isolation}
+                  onClick={() => {
+                    onIsolationChange(option.id);
+                    close();
+                  }}
+                />
               ))}
             </PickerPanel>
           )}
@@ -406,11 +542,24 @@ function NewChatHeader({ worktrees, selectedWorktreeId, onWorktreeChange, isolat
               className="absolute top-[calc(100%+0.375rem)] w-[320px]"
               style={popoverStyle}
               onKeyDown={(event) => {
-                if (event.key === "Escape") { event.preventDefault(); close(); }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  close();
+                }
               }}
             >
               {branchRows.map((row) => (
-                <PickerRow key={row.key} icon={<Icon icon={GitBranchIcon} size={14} />} label={row.name} description={row.description} selected={row.selected} onClick={() => { row.choose(); close(); }} />
+                <PickerRow
+                  key={row.key}
+                  icon={<Icon icon={GitBranchIcon} size={14} />}
+                  label={row.name}
+                  description={row.description}
+                  selected={row.selected}
+                  onClick={() => {
+                    row.choose();
+                    close();
+                  }}
+                />
               ))}
             </PickerPanel>
           )}
@@ -520,123 +669,197 @@ export function ChatComposer({
     <div
       ref={root}
       className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
-      onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+      onDragOver={(event) => {
+        if (Array.from(event.dataTransfer.types).includes("Files")) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }}
       onDrop={handleFileDrop}
     >
-      <SubagentCanvas key={`canvas-${chatId}`} opened={canvasOpened} agents={subagents} working={isSending} waiting={waitingForSubagents} onClose={closeCanvas} />
+      <SubagentCanvas
+        key={`canvas-${chatId}`}
+        opened={canvasOpened}
+        agents={subagents}
+        working={isSending}
+        waiting={waitingForSubagents}
+        onClose={closeCanvas}
+      />
       <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
-      {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
-      {!isNewChat && <div aria-hidden data-busy={isSending || undefined} className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`} />}
-      {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
-      {!isNewChat && <div className="relative flex min-h-0 flex-1 flex-col">
-      <MessageScroller
-        key={messages[0]?.session_id ?? "new"}
-        navigation="rail"
-        followOutput
-        smooth
-        busy={isSending}
-        className="min-h-0 flex-1"
-        // The find bar floats over the top of the chat, so the first message moves below it while it is open.
-        // The chip row floats over the bottom blur, so the last message can scroll clear of it.
-        viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-10`}
-        contentClassName="min-h-full"
-        // Streamed text isn't in the key: the scroller follows the content's growth itself, once per layout.
-        autoScrollKey={`${messages.length}-${isSending}-${streamingSteps?.length ?? 0}`}
-        viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
-      >
-        <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-          {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
-          <MessageTranscript
-            findOpen={findOpen} messages={messages} pendingMessageId={pendingMessageId} isSending={isSending}
-            streamingText={streamingText} streamingSteps={streamingSteps} asking={asking} waitingStepIds={waitingStepIds}
-            onRecommendationSelect={onRecommendationSelect} onUpdateCli={onUpdateCli} updatingCli={updatingCli}
-            cliStatus={cliStatus} onOpenLinkedChat={onOpenLinkedChat}
+        {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
+        {!isNewChat && (
+          <div
+            aria-hidden
+            data-busy={isSending || undefined}
+            className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`}
           />
+        )}
+        {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
+        {!isNewChat && (
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <MessageScroller
+              key={messages[0]?.session_id ?? "new"}
+              navigation="rail"
+              followOutput
+              smooth
+              busy={isSending}
+              className="min-h-0 flex-1"
+              // The find bar floats over the top of the chat, so the first message moves below it while it is open.
+              // The chip row floats over the bottom blur, so the last message can scroll clear of it.
+              viewportClassName={`${findOpen ? "pt-12" : "pt-4"} pb-10`}
+              contentClassName="min-h-full"
+              // Streamed text isn't in the key: the scroller follows the content's growth itself, once per layout.
+              autoScrollKey={`${messages.length}-${isSending}-${streamingSteps?.length ?? 0}`}
+              viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
+            >
+              <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
+                {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
+                <MessageTranscript
+                  findOpen={findOpen}
+                  messages={messages}
+                  pendingMessageId={pendingMessageId}
+                  isSending={isSending}
+                  streamingText={streamingText}
+                  streamingSteps={streamingSteps}
+                  asking={asking}
+                  waitingStepIds={waitingStepIds}
+                  onRecommendationSelect={onRecommendationSelect}
+                  onUpdateCli={onUpdateCli}
+                  updatingCli={updatingCli}
+                  cliStatus={cliStatus}
+                  onOpenLinkedChat={onOpenLinkedChat}
+                />
 
-          {isSending && (
-            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-              <ThinkingIndicator startedAt={runStartedAt} label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
+                {isSending && (
+                  <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+                    <ThinkingIndicator startedAt={runStartedAt} label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
+                  </div>
+                )}
+                {handover?.pending && (
+                  <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
+                    <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
+                  </div>
+                )}
+                {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
+                {resume && !isSending && (
+                  <div data-resume-bar className="flex w-full items-center gap-3 rounded-control border border-line px-3 py-2 text-[12px] text-ink-2">
+                    <span className="min-w-0 flex-1">Milagre closed while this chat was working.</span>
+                    <button
+                      type="button"
+                      onClick={resume.onContinue}
+                      disabled={sendBlocked}
+                      className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                )}
+              </div>
+            </MessageScroller>
+            {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
+            <div aria-hidden data-busy={isSending || undefined} className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20">
+              <div />
+              <div />
             </div>
+          </div>
+        )}
+        <div
+          className={`mx-auto flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden ${isNewChat ? "mb-2" : "pointer-events-none relative z-20 -mt-[38px] mb-3.5 [&>*]:pointer-events-auto"}`}
+        >
+          {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right.
+            Its tint is translucent, so a surface backing keeps the messages under the row from showing through. */}
+          {!isNewChat && pullRequestAction && (
+            <span className="mr-auto rounded-full bg-surface">
+              <button
+                type="button"
+                onClick={pullRequestAction.onRun}
+                disabled={sendBlocked || isSending || imageDraft.loading}
+                className={`inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  pullRequestAction.tone === "orange"
+                    ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
+                    : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"
+                }`}
+              >
+                <Icon icon={GitPullRequestIcon} size={14} />
+                {pullRequestAction.label}
+              </button>
+            </span>
           )}
-          {handover?.pending && (
-            <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-              <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
-            </div>
+          <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
+          <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+          {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && (
+            <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />
           )}
-          {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
-          {resume && !isSending && (
-            <div data-resume-bar className="flex w-full items-center gap-3 rounded-control border border-line px-3 py-2 text-[12px] text-ink-2">
-              <span className="min-w-0 flex-1">Milagre closed while this chat was working.</span>
-              <button type="button" onClick={resume.onContinue} disabled={sendBlocked} className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40">Continue</button>
-            </div>
+          <SubagentTrack
+            key={chatId}
+            agents={subagents}
+            provider={lockedProvider ?? selectedModel.provider}
+            onOpenCanvas={() => setCanvasChat(chatId)}
+            onArchiveFinished={onArchiveFinishedSubagents}
+            onArchive={onArchiveSubagent}
+          />
+        </div>
+
+        <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
+          {isNewChat && scopeKind !== "link" && (
+            <NewChatHeader
+              worktrees={worktrees}
+              selectedWorktreeId={selectedWorktreeId}
+              onWorktreeChange={onWorktreeChange}
+              isolation={isolation}
+              onIsolationChange={onIsolationChange}
+              branches={branches}
+              baseBranch={baseBranch}
+              onBaseBranchChange={onBaseBranchChange}
+            />
+          )}
+          {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
+          {showHandoverNote && lockedProvider && (
+            <HandoverNote
+              from={otherProvider(lockedProvider)}
+              to={lockedProvider}
+              permissionMode={permissionMode}
+              onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])}
+            />
+          )}
+          {approval && <div className="mb-2 w-full">{approval}</div>}
+          <PromptComposer
+            imageDraft={imageDraft}
+            projectPath={projectPath}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onSend={onSend}
+            onStop={onStop}
+            sendBlocked={sendBlocked}
+            running={isSending}
+            lockedProvider={lockedProvider}
+            onHandover={onHandover}
+            canHandover={canHandover}
+            handoverBrief={handoverBrief}
+            models={models}
+            cliStatus={cliStatus}
+            onModelPickerOpen={onModelPickerOpen}
+            onUpdateCli={onUpdateCli}
+            updatingCli={updatingCli}
+            selectedModel={selectedModel}
+            onModelChange={onModelChange}
+            capability={capability}
+            effort={effort}
+            onEffortChange={onEffortChange}
+            ultracode={ultracode}
+            onUltracodeChange={onUltracodeChange}
+            fastMode={fastMode}
+            onFastModeChange={onFastModeChange}
+            permissionMode={permissionMode}
+            onPermissionModeChange={onPermissionModeChange}
+            alwaysExpanded={isNewChat}
+          />
+          {newChatError && (
+            <p role="alert" className="mt-2 px-1 text-[12px] text-red">
+              {newChatError}
+            </p>
           )}
         </div>
-      </MessageScroller>
-      {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
-      <div aria-hidden data-busy={isSending || undefined} className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"><div /><div /></div>
-      </div>}
-      <div className={`mx-auto flex w-full max-w-3xl shrink-0 items-center justify-end gap-2 px-3 empty:hidden ${isNewChat ? "mb-2" : "pointer-events-none relative z-20 -mt-[38px] mb-3.5 [&>*]:pointer-events-auto"}`}>
-        {/* The PR fix sits at the left of the composer's chip row; the chat's ports, to-dos and subagents at the right.
-            Its tint is translucent, so a surface backing keeps the messages under the row from showing through. */}
-        {!isNewChat && pullRequestAction && (
-          <span className="mr-auto rounded-full bg-surface">
-          <button
-            type="button"
-            onClick={pullRequestAction.onRun}
-            disabled={sendBlocked || isSending || imageDraft.loading}
-            className={`inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 ${pullRequestAction.tone === "orange"
-              ? "border-orange/20 bg-orange/5 text-orange hover:bg-orange/10 focus-visible:outline-orange"
-              : "border-red/20 bg-red/5 text-red hover:bg-red/10 focus-visible:outline-red"}`}
-          >
-            <Icon icon={GitPullRequestIcon} size={14} />
-            {pullRequestAction.label}
-          </button>
-          </span>
-        )}
-        <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
-        <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
-        {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />}
-        <SubagentTrack key={chatId} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onOpenCanvas={() => setCanvasChat(chatId)} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
-      </div>
-
-      <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
-        {isNewChat && scopeKind !== 'link' && <NewChatHeader worktrees={worktrees} selectedWorktreeId={selectedWorktreeId} onWorktreeChange={onWorktreeChange} isolation={isolation} onIsolationChange={onIsolationChange} branches={branches} baseBranch={baseBranch} onBaseBranchChange={onBaseBranchChange} />}
-        {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
-        {showHandoverNote && lockedProvider && <HandoverNote from={otherProvider(lockedProvider)} to={lockedProvider} permissionMode={permissionMode} onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])} />}
-        {approval && <div className="mb-2 w-full">{approval}</div>}
-        <PromptComposer
-          imageDraft={imageDraft}
-          projectPath={projectPath}
-          draft={draft}
-          onDraftChange={onDraftChange}
-          onSend={onSend}
-          onStop={onStop}
-          sendBlocked={sendBlocked}
-          running={isSending}
-          lockedProvider={lockedProvider}
-          onHandover={onHandover}
-          canHandover={canHandover}
-          handoverBrief={handoverBrief}
-          models={models}
-          cliStatus={cliStatus}
-          onModelPickerOpen={onModelPickerOpen}
-          onUpdateCli={onUpdateCli}
-          updatingCli={updatingCli}
-          selectedModel={selectedModel}
-          onModelChange={onModelChange}
-          capability={capability}
-          effort={effort}
-          onEffortChange={onEffortChange}
-          ultracode={ultracode}
-          onUltracodeChange={onUltracodeChange}
-          fastMode={fastMode}
-          onFastModeChange={onFastModeChange}
-          permissionMode={permissionMode}
-          onPermissionModeChange={onPermissionModeChange}
-          alwaysExpanded={isNewChat}
-        />
-        {newChatError && <p role="alert" className="mt-2 px-1 text-[12px] text-red">{newChatError}</p>}
-      </div>
       </div>
     </div>
   );

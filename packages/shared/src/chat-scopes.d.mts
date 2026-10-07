@@ -1,4 +1,4 @@
-import type { ChatScope } from './model.ts';
+import type { ChatScope } from "./model.ts";
 export function validLinkId(id: unknown): id is string;
 export function isLinkScopeKey(key: unknown): key is string;
 export function scopeKey(scope: ChatScope): string;

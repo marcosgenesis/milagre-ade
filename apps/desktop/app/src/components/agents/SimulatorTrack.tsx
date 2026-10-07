@@ -10,6 +10,7 @@ import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
+import { useSidePanel } from "./PanelToggles";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --simulator-dock.
 const DOCK_WIDTH = 400;
@@ -111,15 +112,18 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
     }
   };
   const attachedCount = list.attached?.length ?? 0;
-  if (!api || !list.supported || !attachedCount) return null;
-  const open = () => {
+  const sole = list.devices.length === 1 ? list.devices[0] : null;
+  const open = useCallback(() => {
     if (opened) {
       close();
       return;
     }
-    setSelected(list.devices.length === 1 ? list.devices[0] : null);
+    setSelected(sole ?? null);
     setOpened(true);
-  };
+  }, [opened, close, sole]);
+  // The window's top-right corner offers the simulator too, while this Chat has one attached.
+  useSidePanel("simulator", api && list.supported && attachedCount ? { open: opened, toggle: open } : null);
+  if (!api || !list.supported || !attachedCount) return null;
   return (
     <div className="flex" data-slot="simulator-track">
       <Tooltip label="Simulators attached to this Chat" align="end">

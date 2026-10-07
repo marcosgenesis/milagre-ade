@@ -7,6 +7,7 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
+import { PanelToggles } from "/src/components/agents/PanelToggles";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
@@ -71,7 +72,7 @@ function Fixture() {
   </div>;
 }
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root")).render(<Fixture />);
+createRoot(document.getElementById("root")).render(<><Fixture /><PanelToggles right={12} /></>);
 `;
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
@@ -124,10 +125,17 @@ async function browserChecks() {
     await click("[data-slot=simulator-track] button");
     await evaluate('window.attachedIds=[]; document.dispatchEvent(new Event("visibilitychange"))');
     await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no corner button without an attached simulator");
     await screenshot("no-attachments");
     await evaluate('window.attachedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
     await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
     assert.equal(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), false, "reattaching must not reopen the viewer");
+    // The corner button shows while a simulator is attached, and opens the same list as the pill.
+    await waitFor('!!document.querySelector("[data-panel-toggle=simulator]")');
+    await click("[data-panel-toggle=simulator]");
+    await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
+    await click("[data-panel-toggle=simulator]");
+    await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
     await screenshot("composer-dark");
     await click("[data-slot=simulator-track] button");
     await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');

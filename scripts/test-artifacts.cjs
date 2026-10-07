@@ -27,6 +27,7 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
+import { PanelToggles } from "/src/components/agents/PanelToggles";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
@@ -81,7 +82,7 @@ function Fixture() {
   </div></main>{changes && <div data-changes-slot style={{ width: 300, flexShrink: 0 }} />}</div>;
 }
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root")).render(<Fixture />);
+createRoot(document.getElementById("root")).render(<><Fixture /><PanelToggles right={12} /></>);
 `;
 
 async function browserChecks() {
@@ -257,6 +258,15 @@ async function browserChecks() {
     );
     await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]") && !${dock}.querySelector("[data-slot=artifact-send]")`);
     assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "sent comments leave the canvas");
+
+    // The corner button shows while the Chat has designs, and closes and reopens the canvas.
+    const toggle = 'document.querySelector("[data-panel-toggle=designs]")';
+    assert.equal(await evaluate(`${toggle}.getAttribute("aria-pressed")`), "true");
+    assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no simulator button without a simulator");
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!${dock} && ${toggle}.getAttribute("aria-pressed") === "false"`);
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!!${dock} && ${dock}.querySelectorAll("[data-slot=artifact-frame]").length === 2`);
 
     // The git changes panel opens at the window's right edge: the design docks beside it instead of covering it.
     await evaluate("window.setChanges(true)");

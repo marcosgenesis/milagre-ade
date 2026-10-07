@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EASE_OUT } from "../../lib/ease";
@@ -17,6 +17,7 @@ import { chosenDesign, designFeedbackMessage } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 import { DESIGNS_EXPANDED, useDockArea } from "./dock-area";
+import { useSidePanel } from "./PanelToggles";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
@@ -228,6 +229,9 @@ export function ArtifactsProvider({
     }),
     [chatId, latest],
   );
+  // The window's top-right corner offers the designs too, while this Chat has any.
+  const toggleDesigns = useCallback(() => (opened ? setOpenedIn(null) : value.openAll([...latest.values()])), [opened, value, latest]);
+  useSidePanel("designs", chatId && latest.size ? { open: !!opened, toggle: toggleDesigns } : null);
   // The canvas belongs to the chat: while something else takes the chat's place, it steps aside and comes back with it.
   const [anchor, chatShown] = useShown();
   return (

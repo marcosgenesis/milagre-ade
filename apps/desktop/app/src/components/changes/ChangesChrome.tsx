@@ -122,10 +122,10 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
 export type AttentionItem = { key: string; project: string; title?: string; asking: boolean; waitingFor?: string };
 
 /**
- * Top right, left of the changes toggle when it shows. One waiting chat opens on click; several open a menu
+ * Top right, left of the panel buttons when they show (the changes toggle, and a Chat's designs and simulator). One waiting chat opens on click; several open a menu
  * that lists each, oldest first, so you pick where to go.
  */
-export function AttentionButton({ label, items, offset, onOpen }: { label: string; items: AttentionItem[]; offset: boolean; onOpen: (key: string) => void }) {
+export function AttentionButton({ label, items, offset, onOpen }: { label: string; items: AttentionItem[]; offset: number; onOpen: (key: string) => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const many = items.length > 1;
@@ -143,8 +143,9 @@ export function AttentionButton({ label, items, offset, onOpen }: { label: strin
   return (
     <div
       data-attention
-      className={`fixed top-[14px] z-[60] [-webkit-app-region:no-drag] ${offset ? "right-12" : "right-3"}`}
-      style={{ animation: "fade-in 160ms ease-out" }}
+      className="fixed top-[14px] z-[60] [-webkit-app-region:no-drag]"
+      // Left of the buttons in the corner: `offset` is how many there are, 36px each.
+      style={{ right: 12 + offset * 36, animation: "fade-in 160ms ease-out" }}
     >
       <button
         ref={trigger}

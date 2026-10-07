@@ -67,6 +67,7 @@ const METHODS = new Set([
   "worktree:pull-request",
   "project:branches",
   "skills:list",
+  "skills:read",
   "worktree:create",
   "git:diff-files",
   "git:diff-file",

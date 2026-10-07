@@ -1,5 +1,6 @@
 import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
+import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
   InformationCircleIcon,
+  MagicWand01Icon,
   PaintBoardIcon,
   SecurityCheckIcon,
   Settings01Icon,
@@ -41,13 +43,14 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
   { key: "accounts", label: "Accounts", icon: UserMultipleIcon },
   { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
+  { key: "skills", label: "Skills", icon: MagicWand01Icon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
@@ -997,6 +1000,12 @@ export function SettingsPanel({
           <ProjectAccountsSettings projectPath={accountScope ?? project?.path} onManageAccounts={() => onSectionChange?.("accounts")} />
         )}
         {section === "appearance" && <AppearanceSettings />}
+        {section === "skills" &&
+          (project ? (
+            <SkillsSettings key={project.path} projectPath={project.path} />
+          ) : (
+            <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
+          ))}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} />}

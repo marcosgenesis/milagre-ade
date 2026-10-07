@@ -483,8 +483,15 @@ export interface SkillOption {
   provider: string;
 }
 
+/** A skill discovery skipped because an earlier one has the same name; `shadowedBy` is the winner's path. */
+export interface ShadowedSkill extends SkillOption {
+  shadowedBy: string;
+}
+
 export interface SkillCatalog {
   skills: SkillOption[];
+  /** Absent from an older host. */
+  shadowed?: ShadowedSkill[];
   warnings: string[];
 }
 

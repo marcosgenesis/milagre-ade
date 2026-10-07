@@ -195,6 +195,10 @@ test("the phone can load the real skill catalog for its project", async (t) => {
     "bundled skills reach the phone",
   );
   assert.equal((await rpc("skills:list", [os.homedir()])).status, 409, "the daemon still requires a known folder");
+  const skill = catalog.skills.find((item) => item.name === "phone-skill");
+  const read = await rpc("skills:read", [project, skill.path]);
+  assert.equal(read.status, 200);
+  assert.ok((await read.json()).result.includes("Do the work."), "the phone reads a listed SKILL.md");
 });
 
 test("HTTP guard rejects unauthorized, cross-origin, malformed and unsupported requests", async (t) => {

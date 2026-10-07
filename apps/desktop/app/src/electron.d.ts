@@ -108,6 +108,12 @@ declare global {
       readAttachment: (file: string) => Promise<{ text: string; binary: boolean; truncated: boolean }>;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
+      /** The text of a SKILL.md the catalog listed (a shadowed one included), up to 256 KiB. */
+      readSkill: (projectPath: string, file: string) => Promise<string>;
+      /** Opens a listed SKILL.md in an editor, wherever it lives (user skills are outside any checkout). */
+      openSkill: (request: { projectPath: string; file: string; editor?: string }) => Promise<Result<null>>;
+      /** Shows a listed SKILL.md in the file manager. */
+      revealSkill: (projectPath: string, file: string) => Promise<void>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
       /** Saves a chosen icon (an image data URL), or null to go back to the repository's own; returns the icon now shown. */

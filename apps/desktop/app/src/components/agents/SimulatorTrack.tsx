@@ -9,7 +9,7 @@ import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
-import { useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
+import { dockLayer, useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 
@@ -254,7 +254,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                 data-slot="simulator-popover"
                 data-docked
                 style={{ top: dock?.top ?? 40, right: (dock?.right ?? 0) + 12, bottom: dock?.bottom ?? 12 }}
-                className="fixed z-50 focus:outline-none"
+                className="fixed z-[42] focus:outline-none"
                 panelClassName="overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised"
               >
                 {panelContent}
@@ -281,7 +281,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
               </motion.div>
             ))}
         </AnimatePresence>,
-        document.body,
+        dockLayer(),
       )}
     </div>
   );

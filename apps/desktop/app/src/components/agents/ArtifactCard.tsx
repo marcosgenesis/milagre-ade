@@ -16,7 +16,7 @@ import {
 import { chosenDesign, designFeedbackMessage, parseDesignFeedback, type DesignComment } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
-import { DESIGNS_EXPANDED, useDockArea } from "./dock-area";
+import { DESIGNS_EXPANDED, dockLayer, useDockArea } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
@@ -554,7 +554,7 @@ function ArtifactDock({
               bottom: area?.bottom ?? 12,
             }
       }
-      className="fixed z-40"
+      className="fixed z-[41]"
       panelClassName="overflow-hidden rounded-window bg-surface text-ink shadow-card"
     >
       <header className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-2">
@@ -650,6 +650,6 @@ function ArtifactDock({
         <div className="min-h-0 flex-1 bg-canvas" />
       )}
     </DockSlide>,
-    document.body,
+    dockLayer(),
   );
 }

@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
  * Where the panels docked beside the chat go: the workspace between the sidebar and the git changes panel, which an
  * expanded design fills; `right`, how much of the window's right edge the changes panel takes, so the docks sit to its
  * left and it stays the rightmost; and `top` and `bottom`, the sidebar card's, so every panel lines up with it.
- * From the right: the changes panel, a docked simulator, then the designs.
+ * From the right: the changes panel, a docked simulator, then the designs. Each sits under the panels right of it, so
+ * one sliding in or out passes under its neighbours: designs z-[41], simulator z-[42], changes panel z-[43], all under
+ * the window's top strip (z-50).
  */
 export function useDockArea() {
   const [area, setArea] = useState<{ left: number; right: number; width: number; top: number; bottom: number } | null>(null);
@@ -46,4 +48,13 @@ export function useCloseWhenDesignsExpand(close: () => void) {
     window.addEventListener(DESIGNS_EXPANDED, close);
     return () => window.removeEventListener(DESIGNS_EXPANDED, close);
   }, [close]);
+}
+
+/**
+ * Where the docked panels render: in the app's own stacking context (DotBackground's), beside the git changes panel,
+ * so their z-indexes order them against it. Rendered at the body, the whole app would count as one layer to them, and
+ * they would slide over the changes panel. The body where there is no app around them (the Electron checks).
+ */
+export function dockLayer(): HTMLElement {
+  return document.querySelector<HTMLElement>("[data-dock-layer]") ?? document.body;
 }

@@ -115,25 +115,26 @@ function startLanHost({
       ws.on("error", () => {});
     });
   });
-  const pinger = setInterval(() => {
-    for (const ws of sockets.values()) {
-      if (!alive.has(ws)) {
-        ws.terminate();
-        continue;
-      }
-      alive.delete(ws);
-      try {
-        ws.ping();
-      } catch {
-        ws.terminate();
-      }
-    }
-  }, pingMs);
-  pinger.unref();
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, hostname, () => {
       server.off("error", reject);
+      // Only a host that is listening has sockets to watch: a failed listen must leave no timer behind.
+      const pinger = setInterval(() => {
+        for (const ws of sockets.values()) {
+          if (!alive.has(ws)) {
+            ws.terminate();
+            continue;
+          }
+          alive.delete(ws);
+          try {
+            ws.ping();
+          } catch {
+            ws.terminate();
+          }
+        }
+      }, pingMs);
+      pinger.unref();
       resolve({
         port: server.address().port,
         async close() {

@@ -157,3 +157,39 @@ test("closing the host with a request in flight resolves and leaves nothing runn
   await host.close();
   bridge.release();
 });
+
+test("a port that is taken rejects without leaving a liveness timer behind", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const identity = await readIdentity(dir);
+  const phones = createPhones(dir);
+  await phones.load();
+  const taken = net.createServer();
+  await new Promise((resolve) => taken.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => taken.close(resolve)));
+  const created = [];
+  const cleared = [];
+  const { setInterval: realSet, clearInterval: realClear } = globalThis;
+  globalThis.setInterval = (...args) => {
+    const timer = realSet(...args);
+    created.push(timer);
+    return timer;
+  };
+  globalThis.clearInterval = (timer) => {
+    cleared.push(timer);
+    realClear(timer);
+  };
+  try {
+    await assert.rejects(
+      startLanHost({ port: taken.address().port, hostname: "127.0.0.1", identity, phones, token: "a".repeat(64), bridgeUrl: "http://127.0.0.1:1" }),
+      { code: "EADDRINUSE" },
+    );
+  } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
+  }
+  assert.deepEqual(
+    created.filter((timer) => !cleared.includes(timer)),
+    [],
+  );
+});

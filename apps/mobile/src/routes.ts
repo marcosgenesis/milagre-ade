@@ -10,7 +10,7 @@ export type RouteSupervisor = {
   current(): ActiveRoute;
   /** Moves to the best route that works now: a LAN endpoint if one answers and opens, else the paired route. */
   check(): Promise<ActiveRoute>;
-  /** The app is going to the background: closes the LAN socket and keeps the route, which reopens on next use. */
+  /** The app is going to the background: closes the LAN socket and falls back to the paired route; the next check reopens it. */
   suspend(): void;
   subscribe(listener: (route: ActiveRoute) => void): () => void;
   close(): void;
@@ -56,40 +56,59 @@ export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: R
     if (previous.kind === "lan") closeQuietly(previous.transport);
   }
 
+  /** Falls back to the paired route and, unless the supervisor is closed, tries the advertised endpoints again. */
+  function lost() {
+    set(PRIMARY);
+    if (!closed) void supervisor.check().catch(() => {});
+  }
+
   async function walk(): Promise<ActiveRoute> {
     const route = lan();
     if (active.kind === "lan") {
-      const { endpoint } = active;
-      const still = route?.endpoints.includes(endpoint) && (await probe(endpoint, route.hostId).catch(() => false));
+      const current = active;
+      const { endpoint } = current;
+      const answered = route?.endpoints.includes(endpoint) && (await probe(endpoint, route.hostId).catch(() => false));
       if (closed) return active;
-      if (still) return active;
-      set(PRIMARY);
+      if (answered) {
+        // A socket that answers its probe can still be dead: the supervisor only counts it once its hello has finished.
+        const ready = await current.transport.ready().then(
+          () => true,
+          () => false,
+        );
+        if (closed) return active;
+        if (ready) {
+          if (active === current) return active;
+        } else held.set(endpoint, now() + HOLD_MS);
+      }
+      // `active` is no longer `current` when the socket was lost while this walk was probing.
+      if (active === current) set(PRIMARY);
     }
     if (!route) return active;
     const candidates = route.endpoints.filter((endpoint) => (held.get(endpoint) ?? 0) <= now());
     const probes = candidates.map((endpoint) => probe(endpoint, route.hostId).catch(() => false));
     for (const [index, endpoint] of candidates.entries()) {
       if (!(await probes[index]) || closed) continue;
-      let transport: RelayTransport;
+      let opened: RelayTransport | undefined;
       try {
-        transport = await openLan(endpoint, route, () => {
-          if (active.kind === "lan" && active.endpoint === endpoint) set(PRIMARY);
+        opened = await openLan(endpoint, route, () => {
+          // Only the transport that was opened for this callback can demote the route: a replaced one reports late.
+          if (opened && active.kind === "lan" && active.transport === opened) lost();
         });
       } catch {
         held.set(endpoint, now() + HOLD_MS);
         continue;
       }
       if (closed) {
-        closeQuietly(transport);
+        closeQuietly(opened);
         return active;
       }
-      set({ kind: "lan", endpoint, transport });
+      set({ kind: "lan", endpoint, transport: opened });
       return active;
     }
     return active;
   }
 
-  return {
+  const supervisor: RouteSupervisor = {
     current: () => active,
     check() {
       if (closed) return Promise.resolve(active);
@@ -99,7 +118,7 @@ export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: R
       return walking;
     },
     suspend() {
-      if (active.kind === "lan") closeQuietly(active.transport);
+      set(PRIMARY);
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -113,4 +132,5 @@ export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: R
       if (previous.kind === "lan") closeQuietly(previous.transport);
     },
   };
+  return supervisor;
 }

@@ -4,6 +4,7 @@ import { createRouteSupervisor, HOLD_MS } from "./routes.ts";
 import type { RelayTransport } from "./relay-transport.ts";
 import type { LanRoute } from "./lan-route.ts";
 
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const A = "ws://192.168.1.20:8798";
 const B = "ws://10.0.0.7:8798";
 const route = (endpoints = [A, B]): LanRoute => ({
@@ -33,6 +34,10 @@ function harness(options: HarnessOptions = {}) {
     opened: [] as string[],
     closed: [] as string[],
     lost: new Map<string, () => void>(),
+    /** Every onLost callback ever handed out, per endpoint, oldest first. */
+    losts: new Map<string, (() => void)[]>(),
+    /** Endpoints whose transport refuses to finish its hello when asked to be ready. */
+    notReady: new Set<string>(),
   };
   const supervisor = createRouteSupervisor({
     lan: () => state.lan,
@@ -45,7 +50,11 @@ function harness(options: HarnessOptions = {}) {
       state.opened.push(endpoint);
       if (state.opens[endpoint] === false) throw new Error("hello refused");
       state.lost.set(endpoint, onLost);
+      state.losts.set(endpoint, [...(state.losts.get(endpoint) ?? []), onLost]);
       return {
+        ready: async () => {
+          if (state.notReady.has(endpoint)) throw new Error("hello refused");
+        },
         close: () => {
           state.closed.push(endpoint);
           if (closeThrows) throw new Error("close failed");
@@ -117,14 +126,78 @@ test("a probe answered by another Mac (hostId mismatch) is not a route", async (
   assert.deepEqual(state.opened, []);
 });
 
-test("suspend closes the LAN socket but keeps the route; concurrent checks share one walk", async () => {
+test("suspend closes the LAN socket and demotes to primary at once; the next check re-promotes; concurrent checks share one walk", async () => {
   const { supervisor, state } = harness({ lan: route([A]) });
   await Promise.all([supervisor.check(), supervisor.check()]);
   assert.deepEqual(state.opened, [A]);
+  const seen: string[] = [];
+  supervisor.subscribe((next) => seen.push(next.kind));
   supervisor.suspend();
   assert.deepEqual(state.closed, [A]);
-  assert.equal(supervisor.current().kind, "lan");
+  assert.equal(supervisor.current().kind, "primary", "a suspended route must not stay active on a closed transport");
+  assert.deepEqual(seen, ["primary"]);
   assert.equal((await supervisor.check()).kind, "lan");
+  assert.deepEqual(state.opened, [A, A], "suspend holds nothing: the endpoint is opened again");
+  supervisor.suspend();
+  supervisor.suspend();
+  assert.deepEqual(seen, ["primary", "lan", "primary"]);
+});
+
+test("on LAN, a probe that passes but a transport that cannot become ready holds the endpoint and falls back", async () => {
+  const { supervisor, state, clock } = harness({ lan: route([A]) });
+  await supervisor.check();
+  state.notReady.add(A);
+  assert.equal((await supervisor.check()).kind, "primary");
+  assert.deepEqual(state.closed, [A]);
+  state.notReady.delete(A);
+  assert.equal((await supervisor.check()).kind, "primary", "held for five minutes");
+  assert.deepEqual(state.opened, [A]);
+  clock.now = HOLD_MS;
+  assert.equal((await supervisor.check()).kind, "lan");
+});
+
+test("on LAN, a transport that cannot become ready moves the route to the next endpoint in the same walk", async () => {
+  const { supervisor, state } = harness({ lan: route([A, B]) });
+  await supervisor.check();
+  const first = supervisor.current();
+  assert.equal(first.kind === "lan" && first.endpoint, A);
+  state.notReady.add(A);
+  const active = await supervisor.check();
+  assert.equal(active.kind === "lan" && active.endpoint, B);
+});
+
+test("a stale loss from a replaced transport on the same endpoint does not demote the new one", async () => {
+  const { supervisor, state } = harness({ lan: route([A]) });
+  await supervisor.check();
+  supervisor.suspend();
+  await supervisor.check();
+  const [stale, current] = state.losts.get(A)!;
+  assert.equal(supervisor.current().kind, "lan");
+  stale();
+  assert.equal(supervisor.current().kind, "lan", "the old transport's loss is not the new transport's");
+  current();
+  assert.equal(supervisor.current().kind, "primary");
+});
+
+test("a loss with two endpoints starts a walk that moves to the other one at once", async () => {
+  const { supervisor, state } = harness({ lan: route([A, B]) });
+  const first = await supervisor.check();
+  assert.equal(first.kind === "lan" && first.endpoint, A);
+  state.answers[A] = false;
+  state.lost.get(A)!();
+  await settle();
+  const active = supervisor.current();
+  assert.equal(active.kind === "lan" && active.endpoint, B);
+  assert.deepEqual(state.opened, [A, B]);
+});
+
+test("a loss after close() starts no walk", async () => {
+  const { supervisor, state } = harness({ lan: route([A]) });
+  await supervisor.check();
+  supervisor.close();
+  state.lost.get(A)!();
+  await settle();
+  assert.deepEqual(state.opened, [A]);
 });
 
 test("close() drops the LAN socket, and a walk still in flight opens nothing", async () => {

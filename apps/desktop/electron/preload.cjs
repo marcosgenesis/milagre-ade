@@ -15,6 +15,9 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("simulator:input", request),
     close: (request) => ipcRenderer.invoke("simulator:close", request),
   },
+  artifacts: {
+    get: (request) => ipcRenderer.invoke("artifact:get", request),
+  },
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
   onRuntimeConnection: (callback) => {

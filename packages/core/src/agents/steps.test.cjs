@@ -328,3 +328,39 @@ test("command output keeps its end when it's long", () => {
   const capped = capOutput(`${"a".repeat(5_000)}${"b".repeat(20_000)}`);
   assert.equal(capped, `… truncated\n${"b".repeat(20_000)}`);
 });
+
+test("Milagre's artifact_show is a design card, from either agent", () => {
+  assert.deepEqual(claudeStep("t9", "mcp__milagre__artifact_show", { title: "Login screen", html: "<p>x</p>" }), {
+    id: "t9",
+    kind: "artifact",
+    title: "Showed `Login screen`",
+  });
+  const result = '{"id":"a1b2","title":"Login screen","version":2,"versions":2}';
+  assert.deepEqual(claudeStepResult({ id: "t9", name: "mcp__milagre__artifact_show", input: {} }, ok([{ type: "text", text: result }])), {
+    id: "t9",
+    status: "done",
+    artifact: { id: "a1b2", version: 2, title: "Login screen" },
+  });
+  assert.deepEqual(claudeStepResult({ id: "t9", name: "mcp__milagre__artifact_show", input: {} }, ok("Open an existing Chat", { is_error: true })), {
+    id: "t9",
+    status: "failed",
+    detail: "Open an existing Chat",
+  });
+
+  const call = {
+    type: "mcpToolCall",
+    id: "exec-9",
+    server: "milagre",
+    tool: "artifact_show",
+    status: "inProgress",
+    arguments: { title: "Login screen" },
+    result: null,
+    error: null,
+  };
+  assert.deepEqual(codexStep(call), { id: "exec-9", kind: "artifact", title: "Showed `Login screen`" });
+  assert.deepEqual(codexStepResult({ ...call, status: "completed", result: { content: [{ type: "text", text: result }] } }), {
+    id: "exec-9",
+    status: "done",
+    artifact: { id: "a1b2", version: 2, title: "Login screen" },
+  });
+});

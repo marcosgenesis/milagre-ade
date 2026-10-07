@@ -11,6 +11,7 @@ import { Markdown } from "./markdown";
 import { Icon } from "./icons";
 import { ActivityTitle } from "./activity-item";
 import { ToolRow } from "./tool-row";
+import { ArtifactCard } from "./artifact";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
 import { colors, styles } from "./ui";
@@ -184,12 +185,15 @@ export const ChatReply = memo(function ChatReply({
   onActivity,
   media,
   basePath,
+  chatId,
 }: {
   message?: ChatMessage;
   run?: AgentRun;
   onActivity: (message: string) => void;
   media: MediaSource;
   basePath?: string;
+  /** The Chat's key, to open the designs its replies showed. */
+  chatId?: string;
 }) {
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");
@@ -238,6 +242,9 @@ export const ChatReply = memo(function ChatReply({
           <ToolRow step={step} live={!!run} waiting={waiting} onPress={openActivity} />
           <GeneratedImage step={step} media={savedMedia} />
         </View>
+      ))}
+      {reply.artifacts.map((step) => (
+        <ArtifactCard key={step.id} step={step} chatId={chatId} />
       ))}
       {!!answer && <Markdown text={answer} streaming={!!run} media={savedMedia} basePath={basePath} />}
       {run?.tasks?.length ? (

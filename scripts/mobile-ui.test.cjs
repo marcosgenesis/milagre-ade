@@ -3805,3 +3805,89 @@ test("mobile Ports sheet stops only this Chat's process and refuses another host
   await settle();
   assert.deepEqual(calls, []);
 });
+
+function artifactHost(client, pushes = []) {
+  const react = hookHost({ effects: true }),
+    files = new Map();
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value) {
+      files.set(this.uri, value);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "artifact.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "expo-router": { router: { back() {}, push: (route) => pushes.push(route) } },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./ui": { CircleButton: "CircleButton", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestArtifactWebView = ArtifactWebView;",
+  );
+  return {
+    files,
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+
+test("a design card opens its Chat's design full screen; a new Chat's card can't", () => {
+  const pushes = [];
+  const h = artifactHost({ url: "mac" }, pushes);
+  const step = { id: "s1", kind: "artifact", title: "Showed `Login`", status: "done", artifact: { id: "login", version: 2, title: "Login" } };
+  const card = h.render("ArtifactCard", { step, chatId: "/p#7" });
+  card.props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(pushes)), [{ pathname: "/artifact-sheet", params: { hostId: "mac", chatId: "/p#7", id: "login", version: "2" } }]);
+  assert.equal(h.render("ArtifactCard", { step, chatId: "/p#new:1" }).props.disabled, true);
+});
+
+test("the design sheet loads the version it opened under the design policy, in a cached file it removes", async () => {
+  const calls = [];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      calls.push([method, args]);
+      return { id: "login", version: 1, latest: 2, versions: 2, title: "Login", html: "<html><head></head><body>hi</body></html>" };
+    },
+  };
+  const h = artifactHost(client);
+  h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  await settle();
+  const tree = h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["artifact:get", [{ chatId: "/p#7", id: "login", version: 1 }]]]);
+  const view = find(tree, (node) => node.props?.html);
+  assert.ok(view, "the design shows once loaded");
+  const web = artifactHost(client);
+  web.render("TestArtifactWebView", { html: view.props.html });
+  const frame = web.render("TestArtifactWebView", { html: view.props.html });
+  assert.equal(frame.type, "DomWebView");
+  assert.equal(frame.props.useExpoModulesBridge, false);
+  assert.match(web.files.get(frame.props.source.uri), /<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'/);
+  web.cleanup();
+  assert.equal(web.files.size, 0);
+  h.cleanup();
+});

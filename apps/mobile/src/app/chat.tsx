@@ -603,7 +603,9 @@ export default function ChatScreen() {
   );
   const question = run?.questions[0];
   const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
-  const liveReply = run ? <ChatReply key="run" run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /> : null;
+  const liveReply = run ? (
+    <ChatReply key="run" run={run} media={media} basePath={worktree?.path || project.path} chatId={chatId} onActivity={openActivity} />
+  ) : null;
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
@@ -689,7 +691,7 @@ export default function ChatScreen() {
                 }
               }}
             >
-              <ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />
+              <ChatReply message={message} media={media} basePath={worktree?.path || project.path} chatId={chatId} onActivity={openActivity} />
             </View>,
           ])}
           {!pendingInput && liveReply}

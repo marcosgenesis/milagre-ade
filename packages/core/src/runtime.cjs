@@ -122,16 +122,20 @@ function createRuntime(options) {
     },
   };
   const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const existingChat = (action) => async (chatId) => {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+      throw new Error(`Open an existing Chat before ${action}.`);
+  };
   const simulators = createChatSimulators({
     simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
     file: path.join(dataDir, "simulator-attachments.json"),
-    validateChat: async (chatId) => {
-      const scope = projectOfKey(chatId),
-        id = sessionIdFromKey(chatId);
-      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
-        throw new Error("Open an existing Chat before attaching a simulator.");
-    },
+    validateChat: existingChat("attaching a simulator"),
   });
+  const { createChatArtifacts, artifactToolDefinitions } = require("./chat-artifacts.cjs");
+  const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
+  commands.handle("artifact:get", (_context, request) => artifacts.get(request));
   for (const method of ["list", "attach", "detach"])
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -861,7 +865,7 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => simulatorToolDefinitions(chatId, simulators),
+    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
   });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
@@ -1023,7 +1027,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      await simulators.close();
+      await Promise.all([simulators.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

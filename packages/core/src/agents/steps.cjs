@@ -4,7 +4,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
 // its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
 // { id, status, title?, detail?, durationMs? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image"
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image" | "artifact"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
 //   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
 //           the title shows only its name, and the renderer opens it in an editor from here
@@ -14,6 +14,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // A title given at the end replaces the first one, for agents that only know it then.
 // A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
 // An image step is an image the agent generated: it ends with the image's file and the prompt it was made from as its detail.
+// An artifact step is a design the agent showed with artifact_show: it ends with the artifact it made ({ id, version, title }).
 
 // Command output keeps its end, where results and errors are (capOutput); diffs and other details keep their start.
 const { MAX_OUTPUT, capOutput } = require("@milagre/shared/agent-runs");
@@ -50,6 +51,22 @@ function blocksText(content) {
     .join("\n");
 }
 
+// --- Artifacts ---
+
+// Milagre's own artifact_show tool is a design the Chat shows as a card, not a generic tool row.
+const isArtifactTool = (server, tool) => server === "milagre" && tool === "artifact_show";
+const artifactStep = (step, title) => step("artifact", `Showed ${code(title || "a design")}`);
+
+// The artifact a finished artifact_show made, from its result text.
+function artifactRef(text) {
+  try {
+    const { id, version, title } = JSON.parse(text);
+    return typeof id === "string" && Number.isInteger(version) && typeof title === "string" ? { id, version, title } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // --- Thinking ---
 
 const thinkingStep = (id) => ({ id: String(id), kind: "thinking", title: "Thinking" });
@@ -81,6 +98,7 @@ function claudeStep(id, name, input = {}) {
   if (CLAUDE_AGENT_TOOLS.has(name)) return step("other", `Ran an agent: ${input.description || "a subtask"}`);
   if (name === "TodoWrite") return step("other", "Updated the to-do list");
   const mcp = /^mcp__(.+?)__(.+)$/.exec(String(name));
+  if (mcp && isArtifactTool(mcp[1], mcp[2])) return artifactStep(step, input.title);
   if (mcp) return step("other", `Used ${code(mcp[2])} from ${mcp[1]}`);
   return step("other", `Used ${name}`);
 }
@@ -106,6 +124,7 @@ function claudeStepResult(call, block, structured) {
   if (name === "Bash") return end({ detail: capOutput(`$ ${input.command ?? ""}\n${text}`) });
   if (failed) return end({ detail: text ? capText(text) : undefined });
   if (name === "Read") return end();
+  if (name === "mcp__milagre__artifact_show") return end({ artifact: artifactRef(text) });
   if (CLAUDE_EDIT_TOOLS.has(name) || name === "Write") return end({ detail: patchDiff(structured) ?? claudeEditDiff(name, input) });
   if (CLAUDE_AGENT_TOOLS.has(name) && structured?.status === "async_launched") return end({ title: `Started an agent: ${input.description || "a subtask"}` });
   if (CLAUDE_AGENT_TOOLS.has(name) && Array.isArray(structured?.content)) return end({ detail: capText(blocksText(structured.content)) || undefined });
@@ -163,6 +182,7 @@ function codexStep(item) {
     case "fileChange":
       return step("edit", changeTitle(item.changes ?? []), undefined, item.changes?.length === 1 ? item.changes[0].path : undefined);
     case "mcpToolCall":
+      if (isArtifactTool(item.server, item.tool)) return artifactStep(step, item.arguments?.title);
       return step("other", `Used ${code(item.tool)} from ${item.server}`);
     case "dynamicToolCall":
       return step("other", `Used ${code(item.tool)}`);
@@ -200,12 +220,16 @@ function codexStepResult(item) {
         detail: changes.length ? codexChangesDiff(changes) : undefined,
       });
     }
-    case "mcpToolCall":
+    case "mcpToolCall": {
+      const done = item.status === "completed" && !item.error;
+      const text = blocksText(item.result?.content);
+      if (done && isArtifactTool(item.server, item.tool)) return compact({ id, status: "done", artifact: artifactRef(text) });
       return compact({
         id,
         status: item.status === "completed" ? "done" : "failed",
-        detail: capText(item.error?.message ?? blocksText(item.result?.content)) || undefined,
+        detail: capText(item.error?.message ?? text) || undefined,
       });
+    }
     case "dynamicToolCall": {
       const text = (item.contentItems ?? [])
         .map((content) => (typeof content?.text === "string" ? content.text : ""))

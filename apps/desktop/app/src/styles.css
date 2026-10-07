@@ -244,10 +244,10 @@ html[data-popover-open] .title-drag {
   -webkit-app-region: no-drag;
 }
 
-/* A docked simulator (SimulatorTrack) sits in this space beside the chat. */
+/* A docked simulator (SimulatorTrack) and an open design (ArtifactCard) sit in this space beside the chat. */
 [data-workspace-main],
 [data-chat-pane] {
-  margin-right: var(--simulator-dock, 0px);
+  margin-right: calc(var(--simulator-dock, 0px) + var(--artifact-dock, 0px));
 }
 
 html {

@@ -137,7 +137,8 @@ function createGit({ execFile = execute, env = process.env, platform = process.p
           .split("\0\0")
           .filter(Boolean)
           .map((block) => block.split("\0"));
-      if (!/unknown switch .z.|usage: git worktree/i.test(result.stderr)) throw new GitError(result);
+      // 129 is Git's usage-error exit code, whatever language its message is in.
+      if (result.code !== 129 && !/unknown switch .z.|usage: git worktree/i.test(result.stderr)) throw new GitError(result);
       nulSeparated = false;
     }
     const output = await text(cwd, ["worktree", "list", "--porcelain"]);

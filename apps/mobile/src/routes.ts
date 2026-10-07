@@ -5,7 +5,7 @@ export const PROBE_TIMEOUT = 2_500;
 /** An endpoint that answered its probe but would not open waits this long before it is tried again. */
 export const HOLD_MS = 5 * 60_000;
 
-export type ActiveRoute = { kind: "primary" } | { kind: "lan"; endpoint: string; transport: RelayTransport };
+type ActiveRoute = { kind: "primary" } | { kind: "lan"; endpoint: string; transport: RelayTransport };
 export type RouteSupervisor = {
   current(): ActiveRoute;
   /** Moves to the best route that works now: a LAN endpoint if one answers and opens, else the paired route. */

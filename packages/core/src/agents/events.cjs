@@ -26,6 +26,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
+    "Designs: when the user asks to see a UI, screen, mockup or visual design, show it with milagre artifact_show as one self-contained HTML document, which the Chat shows as a card the user can open beside it on desktop or phone. To revise a design, show it again with the same id.",
     ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }

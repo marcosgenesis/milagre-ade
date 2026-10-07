@@ -5,7 +5,7 @@ export type RecentProject = { path: string; name: string; openedAt: string };
 export type ProjectRow = { path: string; name: string; initial: string; current: boolean };
 
 /** The letter shown for a project without an avatar. */
-function projectInitial(name: string): string {
+export function projectInitial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || "M";
 }
 

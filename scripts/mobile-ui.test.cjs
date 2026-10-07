@@ -407,7 +407,21 @@ test("a broken Markdown image leaves a browser link, and unsafe sources never lo
 const snapshot = (projectPath) => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
 const relayRuntime = { name: "relay runtime" };
-function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
+/** The LAN route wiring, stubbed: no native modules, every computer stays on its paired route. Calls are recorded when asked. */
+const routesNative = ({ learned = [], forgotten = [] } = {}) => ({
+  lanRoutes: {
+    set() {},
+    forget: (id) => forgotten.push(id),
+    checkAll() {},
+    subscribe: () => () => {},
+    kind: () => "remote",
+    view: () => ({ current: () => null, subscribe: () => () => {} }),
+  },
+  learnRoutes: async (client, host) => {
+    learned.push([client.url, host]);
+  },
+});
+function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [], learned = [] } = {}) {
   client.recentScopes ??= () => client.call("project:recent");
   client.open ??= async (owner) => {
     await client.call("project:open", [owner]);
@@ -428,6 +442,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
         },
       },
       "./relay-native": { relayRuntime },
+      "./routes-native": routesNative({ learned }),
       "./live": require("../apps/mobile/src/live.ts"),
       "./hosts-native": {
         savedHosts: {
@@ -464,14 +479,20 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
 
 test("pairing through the relay builds the client from the pairing and saves the relay link", async () => {
   const created = [],
-    saved = [];
+    saved = [],
+    learned = [];
   const relay = { url: "wss://relay.milagre.cloud", hostId: "H".repeat(22), key: "K".repeat(43) };
-  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async (method) => (method === "project:recent" ? [] : {}) }, { created, saved });
+  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async (method) => (method === "project:recent" ? [] : {}) }, { created, saved, learned });
   const pairing = { address: `relay://${relay.hostId}`, token: "a".repeat(64), name: "", relay };
   assert.equal(await render().connect(pairing), true);
   assert.equal(created[0][0], pairing);
   assert.equal(created[0][3], relayRuntime);
   assert.deepEqual(JSON.parse(JSON.stringify(saved)), [{ name: "Mac", address: `relay://${relay.hostId}`, token: "a".repeat(64), relay }]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(learned)),
+    [[`relay://${relay.hostId}`, { token: "a".repeat(64), relay }]],
+    "asks the Mac for its LAN route after connecting",
+  );
   assert.equal(render().hostName, "Mac");
 });
 
@@ -2020,6 +2041,7 @@ function pushHost(t, initial = "index") {
       "expo-router": { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
       "./client": {},
       "./relay-native": { relayRuntime: {} },
+      "./routes-native": routesNative(),
       "./hosts-native": { savedHosts: { list: async () => [host] } },
       "./session": { useSession: () => session },
       "./push-controller": require("../apps/mobile/src/push-controller.ts"),
@@ -2630,6 +2652,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
       },
     },
     "./phone-identity": { phoneIdentity: async () => identity, phoneRandom },
+    "./routes-native": routesNative(),
   });
   const link = (hostId, key = "K".repeat(43)) => ({ url: "wss://relay.milagre.cloud", hostId, key });
   const a = await relayRuntime.transport({ relay: link("A".repeat(22)), token: "a".repeat(64) });
@@ -2700,6 +2723,7 @@ test("refreshing saved hosts during startup cannot cancel the claimed auto-open"
     "../confirm-store": { confirmSheet() {} },
     "../client": {},
     "../relay-native": {},
+    "../routes-native": routesNative(),
     "../icons": { Icon: "Icon" },
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll" },
   });

@@ -105,6 +105,10 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** Shown in the chat list's Pinned section, above the rest, in `pin_order`. */
+  pinned?: boolean;
+  /** Where a pinned chat sits among the pinned ones, lowest first. Kept when unpinned; only read while pinned. */
+  pin_order?: number;
   /** The chat this one was handed over to, on the other provider. */
   handedOverTo?: number;
   /** The chat this one was handed over from. */
@@ -479,8 +483,15 @@ export interface SkillOption {
   provider: string;
 }
 
+/** A skill discovery skipped because an earlier one has the same name; `shadowedBy` is the winner's path. */
+export interface ShadowedSkill extends SkillOption {
+  shadowedBy: string;
+}
+
 export interface SkillCatalog {
   skills: SkillOption[];
+  /** Absent from an older host. */
+  shadowed?: ShadowedSkill[];
   warnings: string[];
 }
 
@@ -509,6 +520,8 @@ export interface UsageSnapshot {
 
 /** Provider identities only. Credentials stay with the CLI on the connected computer. */
 export type ProviderAccount = {
+  /** An explicit assignment whose saved profile was removed. */
+  missing?: boolean;
   id: string;
   provider: ModelProvider;
   label: string;
@@ -524,3 +537,10 @@ export interface TranscriptState {
   messages: ChatMessage[];
 }
 export type LinkSendRequest = Omit<ChatSendRequest, "projectPath" | "worktreeId"> & { linkId: string; operationId: string };
+
+/** Host-local account assignments; null follows the computer selection. */
+export type ProjectAccountScope = { key: string; name: string; kind: "project" | "link"; projects: { id: string; path: string; name: string }[] };
+export type ProjectAccountsSnapshot = {
+  scopeKey: string;
+  providers: { provider: ModelProvider; accountId: string | null; effectiveId: string; defaultId: string; accounts: ProviderAccount[] }[];
+};

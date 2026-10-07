@@ -55,19 +55,25 @@ export default function Layout() {
                     }}
                   >
                     <Stack.Screen name="index" options={{ title: "Computers" }} />
+                    <Stack.Screen name="project-accounts" options={{ title: "Project Accounts" }} />
+                    <Stack.Screen name="accounts" options={{ title: "Accounts" }} />
                     <Stack.Screen name="settings" options={{ title: "Settings" }} />
                     <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="confirm-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
                     <Stack.Screen name="usage" options={{ title: "Plan usage" }} />
+                    <Stack.Screen name="skills" options={{ title: "Skills" }} />
+                    <Stack.Screen name="skill" options={{ title: "Skill" }} />
                     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="pair" options={{ title: "Pairing" }} />
                     <Stack.Screen name="projects" options={{ title: "Projects" }} />
+                    <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                     <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="chat" options={{ title: "Chat" }} />
                     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 0 }} />
+                    <Stack.Screen name="ports-sheet" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     <Stack.Screen name="simulator-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     <Stack.Screen

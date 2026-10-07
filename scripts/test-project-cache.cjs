@@ -111,6 +111,7 @@ const stubs = {
   "./project-search": "export const ProjectSearch = () => null;",
   "./chat-actions": "export const chatMenu = () => []; export const runChatAction = async () => {};",
   "./confirm-store": "export const confirm = async () => true;",
+  "./attention": "export const AttentionDot = () => null; export const useAttention = () => [];",
 };
 
 async function browserChecks() {

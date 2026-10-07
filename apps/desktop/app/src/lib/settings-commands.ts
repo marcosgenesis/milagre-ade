@@ -33,6 +33,7 @@ export function settingsCommands(settings: AppSettings, update: (patch: Partial<
         ["notifyOnCompletion", "Notify when finished", "notifications completion"],
         ["notifyWhenWaiting", "Notify when waiting", "notifications approval questions"],
         ["showDockBadge", "Dock badge", "unread count"],
+        ["showAttentionButton", "Attention button", "other projects waiting approval questions"],
         ["keepAwake", "Keep awake while agents work", "sleep"],
       ] as const
     ).flatMap(([key, label, keywords]) => [

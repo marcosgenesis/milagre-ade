@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AccountsSnapshot, ModelProvider } from "@milagre/shared/model";
-import { providerName } from "@milagre/shared/providers";
+import { accountType, providerName } from "@milagre/shared/providers";
 import { ProviderLogo } from "./ProviderLogo";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { CheckmarkCircle02Icon, CircleIcon, Delete02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { Briefcase01Icon, UserIcon, UserMultipleIcon, CheckmarkCircle02Icon, CircleIcon, Delete02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 
-const button = "rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover disabled:opacity-40";
+const button =
+  "rounded-lg border border-line cursor-pointer disabled:cursor-default px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover disabled:opacity-40";
 
 export function AccountsSettings() {
   const [snapshot, setSnapshot] = useState<AccountsSnapshot | null>(null);
@@ -50,7 +51,7 @@ export function AccountsSettings() {
     <div className="mt-6 grid gap-5" data-accounts-settings>
       <div className="flex items-start justify-between gap-6">
         <p className="max-w-[430px] text-[13px] leading-5 text-ink-3">
-          Click an account to switch across your Projects. Running replies keep their account until they finish.
+          Choose the computer default for each provider. Projects and Links can choose a different account in Project Accounts.
         </p>
         <button
           className={button}
@@ -94,6 +95,8 @@ export function AccountsSettings() {
           <div className="grid gap-2 p-3" role="group" aria-label={`${providerName(group.provider)} accounts`}>
             {group.accounts.map((account) => {
               const selected = group.selectedId === account.id;
+              const type = accountType(account.plan);
+              const typeIcon = type === "Business" ? Briefcase01Icon : type === "Team" ? UserMultipleIcon : UserIcon;
               return (
                 <div
                   key={account.id}
@@ -108,7 +111,7 @@ export function AccountsSettings() {
                     onClick={() => {
                       if (!selected) void act("select", group.provider, account.id);
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-3.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-2 disabled:cursor-default"
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-3 py-3.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-2 disabled:cursor-default"
                   >
                     <HugeiconsIcon
                       icon={selected ? CheckmarkCircle02Icon : CircleIcon}
@@ -119,12 +122,16 @@ export function AccountsSettings() {
                     <span className="min-w-0 space-y-1">
                       <span className="flex items-center gap-2">
                         <span className="truncate text-[13.5px] font-medium">{account.email || account.label}</span>
-                        {selected && <span className="shrink-0 text-[11px] text-ink-2">Active</span>}
+                        {type && (
+                          <span title={`${type} account`} role="img" aria-label={`${type} account`} className="flex shrink-0 text-ink-3">
+                            <HugeiconsIcon icon={typeIcon} size={15} aria-hidden="true" />
+                          </span>
+                        )}
+                        {selected && <span className="shrink-0 text-[11px] text-ink-2">Default</span>}
                       </span>
                       <span className="block text-[12px] text-ink-3">
                         {[
-                          account.email ? account.label : null,
-                          account.plan,
+                          account.email && account.label !== account.email ? account.label : null,
                           account.state === "signed-out" ? "Not signed in" : account.state === "unknown" ? "Not checked" : null,
                         ]
                           .filter(Boolean)

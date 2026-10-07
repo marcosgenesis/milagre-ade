@@ -20,6 +20,8 @@ import {
   LinkSquare02Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
+  PinIcon,
+  PinOffIcon,
   ShieldAlertIcon,
   SourceCodeIcon,
   Tick02Icon,
@@ -69,12 +71,17 @@ export type SidebarRecent = {
   mark?: ChatMark;
   /** Whether the chat is unread, whatever its mark shows. */
   unread?: boolean;
+  /** In the Pinned section, at `pinOrder` among the pinned chats. */
+  pinned?: boolean;
+  pinOrder?: number;
   details?: ChatDetails;
 };
 
 export type ChatRowActions = {
   onRename?: (id: string, title: string) => void;
   onMarkUnread?: (id: string, unread: boolean) => void;
+  /** Pins the chat at `order` among the pinned chats (the end when left out), or unpins it (null). */
+  onPin?: (id: string, order?: number | null) => void;
   onReveal?: (id: string) => void;
   onOpenInEditor?: (id: string) => void;
   /** Opens the chat with its "Commit and open PR" dialog. */
@@ -161,6 +168,7 @@ export const ChatRow = memo(function ChatRow({
   onPick,
   actions,
   shortcutHint,
+  dragging = false,
 }: {
   item: SidebarRecent;
   active: boolean;
@@ -168,6 +176,8 @@ export const ChatRow = memo(function ChatRow({
   onPick: (item: SidebarRecent) => void;
   actions: ChatRowActions;
   shortcutHint?: string;
+  /** The row is being dragged to a new place. */
+  dragging?: boolean;
 }) {
   const [archiving, setArchiving] = useState(false);
   const archivePending = useRef(false);
@@ -193,8 +203,8 @@ export const ChatRow = memo(function ChatRow({
   };
   const showCardSoon = () => {
     clearHover();
-    // Back on the row from the card: the card stays as it is.
-    if (menu || renaming || card) return;
+    // Back on the row from the card: the card stays as it is. A chat being dragged over the row doesn't open it.
+    if (menu || renaming || card || document.documentElement.hasAttribute("data-chat-drag")) return;
     hoverTimer.current = window.setTimeout(() => {
       const row = rowRef.current;
       if (!row) return;
@@ -224,7 +234,8 @@ export const ChatRow = memo(function ChatRow({
     <>
       <div
         ref={rowRef}
-        className="group/row relative"
+        data-chat-id={item.id}
+        className={`group/row relative ${dragging ? "opacity-50" : ""}`}
         onPointerEnter={showCardSoon}
         onPointerLeave={hideCardSoon}
         onPointerDown={hideCard}
@@ -745,6 +756,9 @@ function ChatMenu({
       onSelect: run(() => actions.onCommit?.(item.id)),
       disabled: !actions.onCommit || !details.path,
     },
+    item.pinned
+      ? { key: "unpin", label: "Unpin", icon: PinOffIcon, onSelect: run(() => actions.onPin?.(item.id, null)), disabled: !actions.onPin }
+      : { key: "pin", label: "Pin", icon: PinIcon, onSelect: run(() => actions.onPin?.(item.id)), disabled: !actions.onPin },
     "divider",
     ...archiveItems,
   ];

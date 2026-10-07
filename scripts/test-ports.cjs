@@ -62,8 +62,8 @@ async function realProcessCheck() {
     const net = require("node:net");
     // Like an MCP server: a direct child in the agent's own group, listening.
     spawn(process.execPath, ["-e", "require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)"], { stdio: "ignore" });
-    // Like a Bash tool call: a shell in its own group that backgrounds a server and exits.
-    spawn("/bin/zsh", ["-c", "nohup " + JSON.stringify(process.execPath) + " -e \\"require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)\\" >/dev/null 2>&1 &"], { detached: true, stdio: "ignore" });
+    // Like a Bash tool call: a shell in its own group that starts and waits for a server.
+    spawn("/bin/zsh", ["-c", "nohup " + JSON.stringify(process.execPath) + " -e \\"require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)\\" >/dev/null 2>&1 & wait"], { detached: true, stdio: "ignore" });
     setInterval(() => {}, 1000);
   `;
   const fs = require("node:fs");
@@ -71,7 +71,7 @@ async function realProcessCheck() {
   const agent = spawn(process.execPath, ["-e", agentSource], { cwd, detached: true, stdio: "ignore" });
   let roots = new Map([
     ["/fixture#1", { pid: agent.pid, cwd }],
-    ["/other#2", { pid: 999999, cwd: path.dirname(cwd) + "/another-worktree" }],
+    ["/other#2", { pid: 999999, cwd }],
   ]);
   const published = [];
   const watcher = new PortWatcher({ roots: () => roots, publish: (ports) => published.push(ports), pollMs: 60_000 });
@@ -83,11 +83,12 @@ async function realProcessCheck() {
       ports = watcher.snapshot()["/fixture#1"];
     }
     assert.ok(ports, "The backgrounded server's port shows for the chat");
-    assert.equal(watcher.snapshot()["/other#2"], undefined, "Another worktree's chat doesn't get it");
+    assert.equal(watcher.snapshot()["/other#2"], undefined, "Another Chat in the same Worktree does not get it");
     assert.equal(ports.length, 1, `Only the command's server counts, not the agent's own child: ${JSON.stringify(ports)}`);
     assert.equal(ports[0].address, "127.0.0.1");
     // The agent stops (its session closed); the orphaned server still belongs to the chat until it stops.
     const server = ports[0].pid;
+    process.kill(watcher.processes.get(server).pgid, "SIGKILL");
     process.kill(-agent.pid, "SIGKILL");
     roots = new Map();
     await delay(300);

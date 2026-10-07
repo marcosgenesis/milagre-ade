@@ -3,7 +3,8 @@ import type { SkillCatalog } from "../model";
 
 const EMPTY_CATALOG: SkillCatalog = { skills: [], warnings: [] };
 
-export function useSkills(projectPath: string, open: boolean) {
+// `revision` reads the disk again when it changes (Settings > Skills > Reload).
+export function useSkills(projectPath: string, open: boolean, revision = 0) {
   const [result, setResult] = useState<{ path: string; catalog: SkillCatalog } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -32,8 +33,8 @@ export function useSkills(projectPath: string, open: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [projectPath, open]);
+  }, [projectPath, open, revision]);
 
   const catalog = result?.path === projectPath ? result.catalog : EMPTY_CATALOG;
-  return { skills: catalog.skills, warnings: catalog.warnings, loading };
+  return { skills: catalog.skills, shadowed: catalog.shadowed ?? [], warnings: catalog.warnings, loading };
 }

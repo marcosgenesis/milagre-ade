@@ -129,7 +129,7 @@ function relayLive(path: string, { onSignal, onStatus }: LiveOptions, through: P
           } catch {
             return;
           }
-          if (type === "runs" || type === "project") onSignal(type);
+          if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
         },
         onStatus,
       );
@@ -331,6 +331,8 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     preview: (projectPath: string) => request<ProjectPreview | Snapshot>("/snapshot?projectPath=" + encodeURIComponent(projectPath) + "&view=chats"),
     /** Just the Project's streaming turns: what a live "runs" signal fetches instead of the whole snapshot. */
     runs: (projectPath: string) => request<Runs>("/runs?projectPath=" + encodeURIComponent(projectPath)),
+    /** Chat keys, in every Project, whose turn waits on an approval or question. */
+    attention: () => request<string[]>("/attention"),
     /** The Project's live socket, through the same tunnel and Access headers as every request, or through the relay. */
     live: (projectPath: string, options: LiveOptions) => {
       const path = `/live?projectPath=${encodeURIComponent(projectPath)}`;

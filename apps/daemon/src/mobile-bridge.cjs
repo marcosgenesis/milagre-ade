@@ -10,6 +10,7 @@ const zlib = require("node:zlib");
 const { WebSocketServer, WebSocket } = require("ws");
 const { chatInProject } = require("@milagre/shared/agent-runs");
 const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
+const { chatsNeedingAttention } = require("@milagre/shared/attention");
 const { connect } = require("./client.cjs");
 const { createConfinement } = require("./confine.cjs");
 
@@ -25,7 +26,10 @@ const METHODS = new Set([
   "project:forget",
   "project:find",
   "project:image",
+  "project:set-icon",
   "chat:runs",
+  "chat:ports",
+  "agent:stop-port",
   "simulator:list",
   "simulator:attach",
   "simulator:detach",
@@ -44,6 +48,9 @@ const METHODS = new Set([
   "chat:resume",
   "agent:interrupt",
   "agent:respond-permission",
+  "accounts:scopes",
+  "accounts:scope",
+  "accounts:assign",
   "accounts:list",
   "accounts:add",
   "accounts:select",
@@ -63,6 +70,7 @@ const METHODS = new Set([
   "worktree:pull-request",
   "project:branches",
   "skills:list",
+  "skills:read",
   "worktree:create",
   "git:diff-files",
   "git:diff-file",
@@ -314,9 +322,12 @@ async function startMobileBridge({
     entry.timer = setTimeout(() => {
       entry.timer = null;
       // A snapshot carries the runs too, so "project" covers "runs".
-      const type = entry.kinds.has("project") ? "project" : "runs";
+      const types = [];
+      if (entry.kinds.has("accounts")) types.push("accounts");
+      if (entry.kinds.has("project")) types.push("project");
+      else if (entry.kinds.has("runs")) types.push("runs");
       entry.kinds.clear();
-      if (entry.socket.readyState === WebSocket.OPEN) entry.socket.send(JSON.stringify({ type }));
+      if (entry.socket.readyState === WebSocket.OPEN) for (const type of types) entry.socket.send(JSON.stringify({ type }));
     }, delay);
   }
   function drop(entry) {
@@ -357,6 +368,7 @@ async function startMobileBridge({
   }
   client.on("event", ({ channel, payload } = {}) => {
     for (const entry of live) {
+      if (channel === "accounts:changed" && !confine) signal(entry, "accounts", 0);
       if (
         (channel === "project:state" && payload?.path === entry.projectPath) ||
         (channel === "link:state" && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)
@@ -492,6 +504,12 @@ async function startMobileBridge({
           reply(200, { result: runsForPhone(projectRuns(await client.call("chat:runs"), projectPath)) }, { etag: true });
           return;
         }
+        // The chat keys, in every Project, whose turn waits on the user: a few bytes the phone polls for its attention dots.
+        // A confined phone only opens its one Project, so it gets none.
+        if (req.method === "GET" && target.pathname === "/attention") {
+          reply(200, { result: confine ? [] : chatsNeedingAttention((await client.call("chat:runs")).runs) }, { etag: true });
+          return;
+        }
         if (req.method === "GET" && target.pathname === "/message") {
           const scope = await readScope(target.searchParams.get("projectPath"));
           const message = (scope.link ?? scope.project).state.messages.find((item) => item.id === Number(target.searchParams.get("id")));
@@ -579,7 +597,12 @@ async function startMobileBridge({
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };
             // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
-            if (request.method === "project:image" && typeof result === "string" && result.length > MAX_PROJECT_IMAGE) result = null;
+            if (
+              (request.method === "project:image" || request.method === "project:set-icon") &&
+              typeof result === "string" &&
+              result.length > MAX_PROJECT_IMAGE
+            )
+              result = null;
           }
         } else throw failure(404, "Unknown endpoint");
         reply(200, { result: result ?? null });

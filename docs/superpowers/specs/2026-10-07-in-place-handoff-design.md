@@ -28,15 +28,14 @@ parks a model-written brief in its composer for review.
 `AgentSession`:
 
 - `provider`: the provider currently in use (now changeable). Doc comment updated.
-- `native_session_id` is replaced by `native_sessions?: Partial<Record<ModelProvider, string>>`.
-- New `seen_through?: Partial<Record<ModelProvider, number>>`: the id of the last message that provider saw,
-  either as its own turn or inside a brief.
+- `native_session_id` keeps its meaning: the native session of the current `provider`. About 20 files and tests
+  read it, so it is not renamed.
+- New `native_sessions?: Partial<Record<ModelProvider, string>>` parks the session ids of the providers the chat
+  is not on right now. On a switch, the current id moves into the map under the old provider, and the target's
+  parked id (if any) becomes `native_session_id`. No migration: old chats simply have no parked ids.
 - `handedOverFrom`, `handedOverTo`, `handoverPending`, `handoverDraft` stay readable on old data and are no longer
-  written. Old linked chats render as two ordinary chats.
-
-Migration on load (wherever project state is normalized): a session with `native_session_id` and `provider`
-gets `native_sessions = { [provider]: native_session_id }`, and `seen_through[provider]` = its last message id.
-The old field is dropped on the next write.
+  written. Old linked chats render as two ordinary chats. A leftover `handoverDraft` is still sent with that
+  chat's first message, as today, but has no UI.
 
 `ChatContext` gains:
 
@@ -55,13 +54,15 @@ The literal `"handover"` context stays in the union for old notes.
 
 `ChatMessage.handoverBrief` is no longer written; the brief lives on the divider.
 
-## Reducer (`packages/shared/src/agent-runs.mjs`)
+## Where a provider stopped reading
 
-- `session-started { nativeId }` writes `native_sessions[turn provider]`.
-- `session-reset` clears only `native_sessions[turn provider]`.
-- When a turn completes, set `seen_through[turn provider]` to the id of its last message.
-- `lastUserModel` is unchanged. Add `lastTurnProvider(state, sessionId)`, the provider of the last
-  non-handoff turn, which decides whether a send is a switch.
+No new field. The dividers already record every switch. The catch-up for provider P covers the messages after
+the last divider whose `from.provider` is P (the point where P was switched away). If there is none, or P has no
+parked session id, P gets a brief of the whole chat. The reducer (`agent-runs.mjs`) is unchanged: `session-started`
+and `session-reset` act on `native_session_id`, which is always the current provider's.
+
+`lastTurnProvider(state, sessionId)` (new, `packages/shared/src/handoff.mjs`): the `to.provider` of the chat's
+last divider, else `session.provider` if the chat has any message, else undefined.
 
 ## Send flow (`packages/core/src/agents/chat-host.cjs`)
 
@@ -71,24 +72,28 @@ New behavior, when the session has messages and `request.provider !== lastTurnPr
 
 1. In the same state update that stages the user message, append the divider message first:
    `role: "assistant"`, `body: ""`, `context: { kind: "handoff", from, to, status: "preparing" }`. Then append
-   the user message. Set `session.provider` to the target. The run is marked running at this point, so the
+   the user message. Set `session.provider` to the target, park the current `native_session_id` under the old
+   provider in `native_sessions`, and make the target's parked id (or none) the new `native_session_id`. The run is marked running at this point, so the
    composer shows the stop button and a second send queues as usual.
 2. `send()` returns as it does today. The rest runs as the start of the turn:
    a. `writeTranscript` (existing, `handover.cjs`) writes the whole chat to the handovers directory.
    b. `generateBrief` (existing) runs with the source provider's small model on the messages after
-      `seen_through[target]` (whole chat if unset). For a catch-up, the system prompt says the reader already
+      the catch-up start (see "Where a provider stopped reading"). For a catch-up, the system prompt says the reader already
       knows everything before that point. 30s timeout and the existing git-status fallback brief.
    c. Update the divider to `status: "done"`, `brief`, `transcriptPath`.
-   d. `startTurn` with `prompt = brief + "\n\n" + typed text` and `resumeId: native_sessions[target]`.
-3. If the user stops the turn while it's preparing, abort the brief, mark the divider `failed`, and end the turn as
+   d. `startTurn` with `prompt = brief + "\n\n" + typed text` and `resumeId` = the new `native_session_id`.
+3. If the user stops the turn while it's preparing (`agent:interrupt` calls the new `chats.cancelHandoff(chatId)`
+   first, because no session of the target provider is running yet), abort the brief, mark the divider `failed`, and end the turn as
    `cancelled`. The user message stays, as with any cancelled turn.
-4. If a resume fails (the existing `session-reset` path), clear `seen_through[target]`, regenerate the brief for
-   the whole chat, and retry the turn once on a fresh session.
+4. If a resume fails, the existing path runs unchanged: `session-reset` clears `native_session_id` and the turn
+   fails with "Send your message again to continue in a fresh session." The next send sees a chat that has a
+   completed assistant reply but no native session for its provider, and restores context: it adds a divider with
+   `from.provider === to.provider` (label "Context restored") and a whole-chat brief.
 
 Same-provider model changes keep working as today: no divider, `setModel` / per-turn `model`.
 
-`SessionManager` (`session-manager.cjs:56-102`) already restarts on a provider change. It must take `resumeId`
-from the turn instead of assuming one id per chat. The `sameChat` key includes the provider.
+`SessionManager` (`session-manager.cjs:56-102`) needs no change: its `sameChat` key includes the provider, and on
+a provider change it closes the old session and starts the new one with the `resumeId` the turn passes.
 
 Recovery (`recoverHandovers`, `:570-580`): it is replaced by a startup pass that marks any divider still
 `preparing` as `failed`. The interrupted turn is already handled by the existing quit/resume logic (PR #118).
@@ -126,17 +131,16 @@ Removed: `handover()`, `completeHandover()`, `settleHandover()`, `setHandoverDra
 | --- | --- |
 | Target CLI missing or signed out | Tab disabled with the existing tooltip / reason. |
 | Brief model fails or times out | Fallback brief (last request + `git status` files), divider still `done`. |
-| Resume of the target's old session fails | Fresh session with a whole-chat brief, one retry. |
+| Resume of the target's old session fails | Turn fails as today; the next send restores context with a whole-chat brief. |
 | User stops during preparing | Divider `failed`, turn `cancelled`. |
 | Quit during preparing | Divider `failed` on next launch; the turn follows quit/resume rules. |
 
 ## Testing
 
 - `packages/core/src/agents/chat-host.test.cjs`: first switch (whole-chat brief, fresh session); switch back
-  (catch-up range, resume id from `native_sessions`); same-provider model change adds no divider; resume failure
-  retries with a whole-chat brief; stop while preparing.
-- `agent-runs` reducer tests: `native_sessions`, `seen_through`, per-provider `session-reset`.
-- State migration test from `native_session_id`.
+  (catch-up range, resume id from `native_sessions`); same-provider model change adds no divider; the send after
+  a failed resume restores context; stop while preparing.
+- `packages/shared/src/handoff.test.ts`: `lastTurnProvider` and the catch-up range.
 - `apps/desktop/app/src/lib/handover.test.ts`: updated for the reduced helpers.
 - `scripts/test-handover.cjs`: rewritten for the Electron in-place switch, saving screenshots of the preparing
   and done divider and the brief popover.

@@ -38,12 +38,19 @@ function harness(options: HarnessOptions = {}) {
     losts: new Map<string, (() => void)[]>(),
     /** Endpoints whose transport refuses to finish its hello when asked to be ready. */
     notReady: new Set<string>(),
+    /** Held back until released: the next probe waits on it (once), so a test can act while a walk is probing. */
+    gate: undefined as Promise<void> | undefined,
+    /** Every transport ever opened. A closed one that is asked to be ready reopens, like RelayTransport. */
+    transports: [] as { endpoint: string; transport: RelayTransport; open: boolean; readyCalls: number }[],
   };
   const supervisor = createRouteSupervisor({
     lan: () => state.lan,
     probe: async (endpoint, hostId) => {
       state.probed.push(endpoint);
       assert.equal(hostId, "H".repeat(22));
+      const gate = state.gate;
+      state.gate = undefined;
+      if (gate) await gate;
       return state.answers[endpoint] ?? false;
     },
     openLan: async (endpoint, _lan, onLost) => {
@@ -51,15 +58,21 @@ function harness(options: HarnessOptions = {}) {
       if (state.opens[endpoint] === false) throw new Error("hello refused");
       state.lost.set(endpoint, onLost);
       state.losts.set(endpoint, [...(state.losts.get(endpoint) ?? []), onLost]);
-      return {
+      const record = { endpoint, transport: undefined as unknown as RelayTransport, open: true, readyCalls: 0 };
+      record.transport = {
         ready: async () => {
+          record.readyCalls += 1;
+          record.open = true;
           if (state.notReady.has(endpoint)) throw new Error("hello refused");
         },
         close: () => {
+          record.open = false;
           state.closed.push(endpoint);
           if (closeThrows) throw new Error("close failed");
         },
       } as unknown as RelayTransport;
+      state.transports.push(record);
+      return record.transport;
     },
     now: () => clock.now,
   });
@@ -250,3 +263,33 @@ test("a listener that re-subscribes itself during notification is called once pe
   state.lost.get(A)!();
   assert.equal(calls, 2);
 });
+
+for (const [demotion, demote] of [
+  ["suspend()", (h: ReturnType<typeof harness>) => h.supervisor.suspend()],
+  ["a socket loss", (h: ReturnType<typeof harness>) => h.state.lost.get(A)!()],
+] as const) {
+  for (const readyFails of [false, true]) {
+    test(`${demotion} while the active endpoint is probing: the closed transport is not asked to be ready, the endpoint is not held, nothing leaks (ready ${readyFails ? "fails" : "succeeds"})`, async () => {
+      const h = harness({ lan: route([A]) });
+      await h.supervisor.check();
+      const [first] = h.state.transports;
+      let release!: () => void;
+      h.state.gate = new Promise<void>((resolve) => (release = resolve));
+      if (readyFails) h.state.notReady.add(A);
+      const walking = h.supervisor.check();
+      await settle();
+      demote(h);
+      assert.equal(h.supervisor.current().kind, "primary");
+      assert.equal(first.open, false);
+      release();
+      const active = await walking;
+      assert.equal(first.readyCalls, 0, "a transport that was already closed is not reopened by ready()");
+      assert.equal(active.kind, "lan", "the endpoint is not penalised: the same walk promotes it again");
+      assert.equal(h.state.transports.length, 2);
+      for (const { transport, open } of h.state.transports) {
+        if (transport !== (active.kind === "lan" ? active.transport : undefined)) assert.equal(open, false, "only the active transport stays open");
+      }
+      assert.equal(h.state.transports[1].open, true);
+    });
+  }
+}

@@ -69,19 +69,24 @@ export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: R
       const { endpoint } = current;
       const answered = route?.endpoints.includes(endpoint) && (await probe(endpoint, route.hostId).catch(() => false));
       if (closed) return active;
-      if (answered) {
-        // A socket that answers its probe can still be dead: the supervisor only counts it once its hello has finished.
-        const ready = await current.transport.ready().then(
-          () => true,
-          () => false,
-        );
-        if (closed) return active;
-        if (ready) {
-          if (active === current) return active;
-        } else held.set(endpoint, now() + HOLD_MS);
+      // Demoted while probing (suspend or a lost socket): that transport is closed, and ready() would reopen it.
+      // The endpoint did nothing wrong, so it is neither asked nor held; the walk below tries it like any other.
+      if (active === current) {
+        if (answered) {
+          // A socket that answers its probe can still be dead: the supervisor only counts it once its hello has finished.
+          const ready = await current.transport.ready().then(
+            () => true,
+            () => false,
+          );
+          if (closed) return active;
+          // Demoted during ready() too: its failure is the demotion's doing, not the endpoint's.
+          if (active === current) {
+            if (ready) return active;
+            held.set(endpoint, now() + HOLD_MS);
+          }
+        }
+        if (active === current) set(PRIMARY);
       }
-      // `active` is no longer `current` when the socket was lost while this walk was probing.
-      if (active === current) set(PRIMARY);
     }
     if (!route) return active;
     const candidates = route.endpoints.filter((endpoint) => (held.get(endpoint) ?? 0) <= now());

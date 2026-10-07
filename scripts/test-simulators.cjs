@@ -12,11 +12,12 @@ import "/src/styles.css";
 const noop = () => {};
 window.deviceCount = 3;
 window.attachedIds = [0,1];
+window.stoppedIds = [];
 window.simulatorCalls = [];
 window.simulatorClosed = [];
 const device = i => i === 0 ? {id:'device-0',name:'iPhone 17',platform:'ios',version:'27'} : {id:'device-'+i,name:i===1?'Pixel 9':'Other Chat device',platform:'android',version:'16'};
 window.milagre = { simulators: {
- list: async ({chatId}) => ({chatId,devices:window.attachedIds.map(device),attached:window.attachedIds.map(device),available:Array.from({length:window.deviceCount},(_,i)=>i).filter(i=>!window.attachedIds.includes(i)).map(device),supported:true}),
+ list: async ({chatId}) => ({chatId,devices:window.attachedIds.filter(i=>!window.stoppedIds.includes(i)).map(device),attached:window.attachedIds.map(device),available:Array.from({length:window.deviceCount},(_,i)=>i).filter(i=>!window.attachedIds.includes(i)).map(device),supported:true}),
  attach: async ({chatId,deviceId}) => {window.attachedIds.push(Number(deviceId.split('-')[1]));return window.milagre.simulators.list({chatId});},
  detach: async ({chatId,deviceId}) => {window.attachedIds=window.attachedIds.filter(i=>device(i).id!==deviceId);return window.milagre.simulators.list({chatId});},
  open: async args => { window.simulatorCalls.push(args); return {viewerId:'view-'+window.simulatorCalls.length,device:device(Number(args.deviceId.split('-')[1])),iceServers:[]}; },
@@ -120,6 +121,13 @@ async function browserChecks() {
     await screenshot("new-chat");
     await evaluate("window.setMessageCount(2)");
     await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
+    await click("[data-slot=simulator-track] button");
+    await evaluate('window.attachedIds=[]; document.dispatchEvent(new Event("visibilitychange"))');
+    await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    await screenshot("no-attachments");
+    await evaluate('window.attachedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
+    await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), false, "reattaching must not reopen the viewer");
     await screenshot("composer-dark");
     await click("[data-slot=simulator-track] button");
     await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
@@ -172,6 +180,18 @@ async function browserChecks() {
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
+    await evaluate('window.stoppedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
+    await click("[data-slot=simulator-track] button");
+    await waitFor('document.querySelector("[data-slot=simulator-popover]")?.textContent.includes("Stopped")');
+    assert.equal(
+      await evaluate('document.querySelector("[data-slot=simulator-track] button").getAttribute("aria-label")'),
+      "Simulators, 2 attached to this Chat",
+    );
+    await click('[aria-label="Detach iPhone 17 from Chat"]');
+    await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("1")');
+    await click('[aria-label="Detach Pixel 9 from Chat"]');
+    await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    await screenshot("last-detached");
     console.log(
       "PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots",
     );

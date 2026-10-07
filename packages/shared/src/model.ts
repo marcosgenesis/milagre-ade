@@ -105,6 +105,10 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** Shown in the chat list's Pinned section, above the rest, in `pin_order`. */
+  pinned?: boolean;
+  /** Where a pinned chat sits among the pinned ones, lowest first. Kept when unpinned; only read while pinned. */
+  pin_order?: number;
   /** The chat this one was handed over to, on the other provider. */
   handedOverTo?: number;
   /** The chat this one was handed over from. */

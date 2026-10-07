@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { PortWatcher, adoptOrphans, chatPorts, chatProcesses, parseCwds, parseLsof, parsePs } = require("./ports.cjs");
+const { PortWatcher, chatPorts, chatProcesses, parseLsof, parsePs } = require("./ports.cjs");
 
 // The agent (100) leads group 100 with its MCP server (101); its command shells lead their own groups.
 const PS = `
@@ -76,6 +76,36 @@ test("a server that outlived its shell and its agent stays with the chat until i
   assert.equal(groups.size, 0);
 });
 
+test("Chats sharing a Worktree never acquire each other's orphaned ports", async (t) => {
+  let ps = PS;
+  const roots = new Map([
+    ["/repo#1", { pid: 100, cwd: "/repo" }],
+    ["/repo#2", { pid: 200, cwd: "/repo" }],
+  ]);
+  const signals = [];
+  const watcher = new PortWatcher({
+    roots: () => roots,
+    publish() {},
+    kill: (...args) => signals.push(args),
+    exec: async (command, args) => (command === "ps" ? ps : args.includes("cwd") ? "p111\nn/repo/web\np300\nn/repo/web\n" : LSOF + "p300\ncnode\nn*:9000\n"),
+  });
+  t.after(() => watcher.close());
+  await watcher.poll();
+  ps = PS.replace(/^.*\b11[012]\b.*$/gm, "") + "111 1 110 node\n300 1 299 node\n";
+  await watcher.poll({ fresh: true });
+  assert.deepEqual(
+    watcher.snapshot()["/repo#1"].map((p) => p.port),
+    [5173, 24678],
+  );
+  assert.deepEqual(
+    watcher.snapshot()["/repo#2"].map((p) => p.port),
+    [8000],
+  );
+  assert.equal(await watcher.stopPort("/repo#2", 111), false);
+  assert.equal(await watcher.stopPort("/repo#2", 300), false);
+  assert.deepEqual(signals, []);
+});
+
 test("the watcher publishes changes and stops once nothing runs", async () => {
   let roots = new Map([["/a#1", { pid: 100 }]]);
   let ps = PS;
@@ -105,27 +135,6 @@ test("the watcher publishes changes and stops once nothing runs", async () => {
   calls.length = 0;
   await watcher.poll();
   assert.deepEqual(calls, [], "nothing to watch runs nothing");
-});
-
-test("a server whose shell exited unseen is adopted by the chats in its worktree", () => {
-  // npm (300) and the server it started (301) were left by a shell (299) that is gone.
-  const ps = parsePs(PS + "  300     1   299 npm\n  301   300   299 node\n  400     1   399 node\n");
-  const cwds = parseCwds(["p300", "fcwd", "n/repo/worktree/web", "p400", "fcwd", "n/elsewhere", ""].join("\n"));
-  assert.deepEqual(
-    [...cwds],
-    [
-      [300, "/repo/worktree/web"],
-      [400, "/elsewhere"],
-    ],
-  );
-  const groups = new Map();
-  const roots = new Map([
-    ["/a#1", { pid: 100, cwd: "/repo/worktree" }],
-    ["/b#2", { pid: 200, cwd: "/repo/worktree-two" }],
-  ]);
-  adoptOrphans(ps, cwds, roots, groups);
-  assert.deepEqual([...groups], [["/a#1", new Set([299])]]);
-  assert.deepEqual([...chatProcesses(ps, roots, groups).get("/a#1")].sort(), [110, 111, 112, 300, 301]);
 });
 
 test("stopping a port ends its command's group, and only a pid the chat shows", async () => {

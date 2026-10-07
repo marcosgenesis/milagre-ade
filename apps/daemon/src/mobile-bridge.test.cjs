@@ -864,6 +864,13 @@ test("a live socket signals runs and state changes of its Project only, and /run
   );
   assert.equal((await request("/runs?projectPath=relative")).status, 400);
   assert.equal((await fetch(bridge.url + "/runs?projectPath=" + encodeURIComponent(project))).status, 401);
+  // A question puts the chat on the attention list every Project's phone view polls.
+  assert.deepEqual((await (await request("/attention")).json()).result, []);
+  session.emit({ type: "question-request", requestId: "question-1", questions: [{ question: "Which branch?" }] });
+  let attention = [];
+  for (const start = Date.now(); !attention.length && Date.now() - start < 3000; await delay(10))
+    attention = (await (await request("/attention")).json()).result;
+  assert.deepEqual(attention, [`${project}#${chat}`]);
 
   // The turn's end saves its reply: one prompt "project" signal, so the reply never disappears between fetches.
   const started = Date.now();
@@ -1058,6 +1065,17 @@ test("drawer snapshots are marked and cached separately from full snapshots", as
   assert.equal(preview.project.state.sessions[chat.id].title, "Drawer chat");
   assert.equal((await (await request(route)).json()).result.previewOnly, undefined);
   assert.equal((await request(route + "&view=chats", { headers: { "if-none-match": response.headers.get("etag") } })).status, 304);
+});
+
+test("phone port RPCs preserve Chat scope and cannot stop an unowned process", async (t) => {
+  const f = await fixture(t);
+  const chatId = f.project + "#1";
+  const list = await f.rpc("chat:ports", [chatId]);
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).result, { chatId, ports: [] });
+  const stop = await f.rpc("agent:stop-port", [chatId, process.pid]);
+  assert.equal(stop.status, 200);
+  assert.equal((await stop.json()).result, false);
 });
 
 test("account assignment changes notify live phones independently of Project state signals", async (t) => {

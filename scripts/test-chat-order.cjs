@@ -19,7 +19,7 @@ const chats = [
   { id: "2", label: "if a session creates multiple worktrees", ids: [10, 12] },
   { id: "3", label: "lets start creating a diff viewer", ids: [20, 30] },
   { id: "4", label: "currently the chats are reordering", ids: [35, 36] },
-].map((chat) => ({ ...chat, sessionMessages: chat.ids.map((id) => ({ id })) }));
+].map((chat) => ({ ...chat, session: {}, sessionMessages: chat.ids.map((id) => ({ id })) }));
 function Fixture() {
   const { chatOrder } = useSettings();
   const recents = orderChats(chats, chatOrder).map(({ id, label }) => ({ id, label }));

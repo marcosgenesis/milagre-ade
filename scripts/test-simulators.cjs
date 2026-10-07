@@ -137,8 +137,13 @@ async function browserChecks() {
     await click('[data-simulator-device="device-0"]');
     await waitFor("window.simulatorCalls.length===1");
     await waitFor('document.querySelector("[data-slot=simulator-frame]")');
-    await click('[aria-label="Dock simulator to the right"]');
+    // A device's viewer docks beside the chat on its own; there is no undocked viewer.
     await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.docked==="true"');
+    assert.equal(
+      await evaluate('!!document.querySelector(\'[aria-label="Dock simulator to the right"], [aria-label="Undock simulator"]\')'),
+      false,
+      "no dock toggle",
+    );
     assert.ok(
       await evaluate(
         '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
@@ -158,19 +163,9 @@ async function browserChecks() {
     await screenshot("docked-light");
     await evaluate("window.setDark(true)");
     await waitFor(footerMatches);
-    await click('[aria-label="Undock simulator"]');
-    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "undocking returns the space");
-    window.setContentSize(390, 500);
-    await delay(200);
-    assert.ok(
-      await evaluate(
-        '(()=>{const r=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()',
-      ),
-      "viewer fits short/narrow window",
-    );
-    await screenshot("viewer-narrow");
     await click('[aria-label="Close simulator"]');
     await waitFor('!document.querySelector("[data-slot=simulator-popover]") && window.simulatorClosed.length>0');
+    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "closing returns the space");
     window.setContentSize(1000, 800);
     await evaluate("window.setDark(false)");
     await screenshot("composer-light");
@@ -209,7 +204,7 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
     await screenshot("last-detached");
     console.log(
-      "PASS: icon/count and composer placement, on-demand capture, chooser, dock/undock, narrow layout, close cleanup, Escape, light/dark screenshots",
+      "PASS: icon/count and composer placement, on-demand capture, chooser, the viewer docked beside the chat, close cleanup, Escape, light/dark screenshots",
     );
     app.exit(0);
   } catch (error) {

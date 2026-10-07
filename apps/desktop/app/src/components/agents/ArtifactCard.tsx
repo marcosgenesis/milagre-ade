@@ -14,47 +14,13 @@ import {
 import { chosenDesign, designFeedbackMessage } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
+import { DESIGNS_EXPANDED, useDockArea } from "./dock-area";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
 const DOCK_WIDTH = 560;
 // Narrower than this beside the dock, the chat is no use: the canvas takes the whole workspace instead.
 const MIN_CHAT_WIDTH = 420;
-
-/**
- * The workspace between the sidebar and the git changes panel, which an expanded design fills; `right` is how much of
- * the window's right edge the changes panel takes, so the design docks beside it rather than over it.
- */
-function useWorkspaceArea() {
-  const [area, setArea] = useState<{ left: number; right: number; width: number; top: number; bottom: number } | null>(null);
-  useEffect(() => {
-    const main = document.querySelector<HTMLElement>("[data-workspace-main]") ?? document.querySelector<HTMLElement>("[data-chat-pane]");
-    if (!main) return;
-    // The workspace's own width, without the space a dock reserves in it. The changes panel opening narrows <main>.
-    const measure = () => {
-      const rect = main.getBoundingClientRect();
-      const right = document.querySelector("[data-changes-slot]")?.getBoundingClientRect().width ?? 0;
-      // Lined up with the sidebar's card, top and bottom.
-      const sidebar = document.querySelector("aside[aria-label='Workspace navigation']")?.getBoundingClientRect();
-      setArea({
-        left: rect.left,
-        right,
-        width: window.innerWidth - rect.left - right,
-        top: sidebar?.top ?? 40,
-        bottom: sidebar ? window.innerHeight - sidebar.bottom : 12,
-      });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(main);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
-  return area;
-}
 
 /** Whether the element is laid out: false while an ancestor hides it (the diff, settings or canvas in place of the chat). */
 function useShown() {
@@ -302,7 +268,7 @@ function ArtifactDock({
   onClose: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const area = useWorkspaceArea();
+  const area = useDockArea();
   const cramped = !!area && area.width - DOCK_WIDTH - 12 < MIN_CHAT_WIDTH;
   const full = expanded || cramped;
   const canvas = useRef<CanvasHandle>(null);
@@ -442,7 +408,11 @@ function ArtifactDock({
               type="button"
               aria-label={expanded ? "Show the chat beside the designs" : "Fill the window with the designs"}
               aria-pressed={expanded}
-              onClick={() => setExpanded((value) => !value)}
+              onClick={() => {
+                // Filling the workspace, the designs take the room of the other side panels: they close.
+                if (!expanded) window.dispatchEvent(new Event(DESIGNS_EXPANDED));
+                setExpanded(!expanded);
+              }}
               className={icon}
             >
               <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={16} aria-hidden />

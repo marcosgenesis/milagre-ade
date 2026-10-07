@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SidebarRight01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
 import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme } from "@milagre/shared/simulator-receiver";
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
+import { useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --simulator-dock.
 const DOCK_WIDTH = 400;
@@ -19,19 +20,21 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   const panelId = useId();
   const revision = useRef(0);
   const [list, setList] = useState<SimulatorList>({ devices: [], supported: true });
-  const [opened, setOpened] = useState(false),
-    [docked, setDocked] = useState(false);
+  const [opened, setOpened] = useState(false);
   const [selected, setSelected] = useState<SimulatorDevice | null>(null);
+  // A device's viewer always docks beside the chat; the device list is a popover over its pill.
+  const docked = !!selected;
   const [loading, setLoading] = useState(true);
   const [attaching, setAttaching] = useState(false),
     [busy, setBusy] = useState(false);
   const close = useCallback(() => {
     setOpened(false);
-    setDocked(false);
     setSelected(null);
     setAttaching(false);
   }, []);
   // Docked, the viewer is a side panel: pressing the chat or focusing the iframe must not dismiss it.
+  const dock = useDockArea();
+  useCloseWhenDesignsExpand(close);
   const bounds = useAnchoredPopover({
     opened: opened && !docked,
     setOpened: (value) => {
@@ -143,7 +146,12 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
               tabIndex={-1}
               data-slot="simulator-popover"
               data-docked={docked || undefined}
-              style={docked ? { top: 40, right: 12, bottom: 12, width: DOCK_WIDTH } : { ...bounds, height: selected ? 650 : undefined }}
+              // Docked, it lines up with the sidebar's card and sits left of the git changes panel.
+              style={
+                docked
+                  ? { top: dock?.top ?? 40, right: (dock?.right ?? 0) + 12, bottom: dock?.bottom ?? 12, width: DOCK_WIDTH }
+                  : { ...bounds, height: selected ? 650 : undefined }
+              }
               className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
             >
               <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
@@ -180,19 +188,6 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                   )}
                   {!selected && <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>}
                 </div>
-                {selected && (
-                  <Tooltip label={docked ? "Undock simulator" : "Dock simulator to the right"}>
-                    <button
-                      type="button"
-                      aria-label={docked ? "Undock simulator" : "Dock simulator to the right"}
-                      aria-pressed={docked}
-                      onClick={() => setDocked((value) => !value)}
-                      className={`rounded p-1 hover:bg-hover ${docked ? "text-accent" : "text-ink-2"}`}
-                    >
-                      <HugeiconsIcon icon={SidebarRight01Icon} size={16} aria-hidden />
-                    </button>
-                  </Tooltip>
-                )}
                 <Tooltip label="Close simulator">
                   <button type="button" aria-label="Close simulator" onClick={close} className="rounded p-1 text-ink-2 hover:bg-hover">
                     <HugeiconsIcon icon={Cancel01Icon} size={16} aria-hidden />

@@ -2,6 +2,7 @@ import { isTurnEnd } from "@milagre/shared/agent-runs";
 import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../../electron";
 import { useDiffFiles } from "./useDiffFiles";
+import { useCloseWhenDesignsExpand } from "../agents/dock-area";
 
 export type Changes = ReturnType<typeof useChanges>;
 
@@ -36,6 +37,8 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   }, [shown, chatId, refresh]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
+  const hide = useCallback(() => setOpen(false), []);
+  useCloseWhenDesignsExpand(hide);
   const closeDiff = useCallback(() => setDiffChatId(null), []);
   const selectFile = useCallback(
     (path: string) => {

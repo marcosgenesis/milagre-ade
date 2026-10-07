@@ -267,9 +267,11 @@ async function browserChecks() {
     await waitFor(`Math.round(window.innerWidth - ${dock}.getBoundingClientRect().right) === 12`);
 
     // The design can fill the workspace beside the sidebar, covering the chat, and go back beside it.
+    await evaluate('window.expandedEvents = 0; window.addEventListener("milagre:designs-expanded", () => window.expandedEvents++)');
     await evaluate(`${dock}.querySelector("[aria-label='Fill the window with the designs']").click()`);
     await waitFor(`${dock}.dataset.full === "true" && Math.round(${dock}.getBoundingClientRect().left) === 260`);
     assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "a full design reserves nothing");
+    assert.equal(await evaluate("window.expandedEvents"), 1, "expanding asks the other side panels to close");
     await screenshot("expanded");
     await evaluate(`${dock}.querySelector("[aria-label='Show the chat beside the designs']").click()`);
     await waitFor(`!${dock}.dataset.full`);

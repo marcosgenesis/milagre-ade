@@ -2,7 +2,7 @@ const { ChatImages } = require("../chat-images.cjs");
 const { storeImages } = require("../project-content.cjs");
 const { ipcErrorMessage } = require("@milagre/shared/result");
 const { applyAgentEvent, chatKey, isTurnEnd, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
-const { patchSession } = require("@milagre/shared/project-edits");
+const { archiveFinishedSubagents, patchSession } = require("@milagre/shared/project-edits");
 const { chatTitle } = require("@milagre/shared/chats");
 const { renderTranscript, providerName } = require("./handover.cjs");
 
@@ -166,7 +166,8 @@ class ChatHost {
           const visible = this.isChatFocused ? this.isChatFocused(chatId) : chatId === this.openChat && this.isFocused();
           const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
           const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
-          const recorded = isTurnEnd(event) ? this.withNotes(next, chatId) : next;
+          // Subagents that ended during the turn are archived with it, so the track only lists what is still running.
+          const recorded = isTurnEnd(event) ? this.withNotes(archiveFinishedSubagents(next, sessionId), chatId) : next;
           const previousIds = new Set(state.messages.map((message) => message.id));
           added = recorded.messages.filter((message) => !previousIds.has(message.id) && message.role === "assistant");
           return recorded;

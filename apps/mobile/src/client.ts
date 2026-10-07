@@ -263,9 +263,12 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     const loading = (async () => {
       const found = await runtime!.files.find(name);
       if (found) return { uri: found };
-      const through = carrier();
-      if (!through) throw new Error(LOST);
-      const response = await inTurn(() => timed(timeoutMs, (signal) => overRelay(through, "GET", mediaRoute(projectPath, path), {}, undefined, signal)));
+      // The carrier is chosen when the request starts: a route that switched while this waited its turn is not the one to use.
+      const response = await inTurn(async () => {
+        const through = carrier();
+        if (!through) throw new Error(LOST);
+        return timed(timeoutMs, (signal) => overRelay(through, "GET", mediaRoute(projectPath, path), {}, undefined, signal));
+      });
       if (response.status !== 200) throw new Error("Could not load this image from your Mac.");
       return { uri: await runtime!.files.write(name, response.body) };
     })();

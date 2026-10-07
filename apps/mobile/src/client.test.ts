@@ -557,3 +557,22 @@ test("images of a Cloudflare computer stay URLs while the LAN is down", () => {
   const client = createClient(cloudflareHost, fetch, 30000, { ...lan.runtime, lan: () => view });
   assert.deepEqual(client.image("/p", "/p/a.png"), client.media("/p", "/p/a.png"));
 });
+
+test("an image queued behind four others rides the route that is current when it starts, not when it was asked for", async () => {
+  const held: (() => void)[] = [];
+  const lan = fakeRelay(() => new Promise<RelayResponse>((resolve) => held.push(() => resolve({ status: 200, headers: {}, body: new Uint8Array([1]) }))));
+  const relay = fakeRelay(() => ({ status: 200, headers: {}, body: new Uint8Array([2]) }));
+  const { view } = lanView(lan.transport);
+  const client = createClient(relayHost, fetch, 30000, { ...relay.runtime, lan: () => view });
+  const loads = Array.from({ length: 5 }, (_, i) => client.mediaFile("/p", `/p/${i}.png`));
+  await settle();
+  assert.equal(lan.sent.length, 4);
+  view.switch(null);
+  held[0]();
+  await settle();
+  assert.equal(lan.sent.length, 4, "the fifth image must not start on the LAN transport that was replaced");
+  assert.equal(relay.sent.length, 1);
+  assert.match(relay.sent[0].path, /%2Fp%2F4\.png/);
+  held.slice(1).forEach((release) => release());
+  await Promise.all(loads);
+});

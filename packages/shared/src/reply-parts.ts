@@ -49,13 +49,21 @@ export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup:
 }
 
 /**
- * What a reply that never wrote an answer concluded: its last thinking, when the agent kept it all
- * there. Shown under the fold so the answer isn't hidden in a step the user rarely opens.
+ * What a reply concluded without writing it: its last thinking, when no text came after it (the agent
+ * kept its findings there, then asked a question or ended the turn). Shown under the answer so it isn't
+ * hidden in a step the user rarely opens.
  */
-export function unspokenThought(activity: ActivityEntry[], answer: string): string {
-  if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
-  const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
-  return thought?.type === "step" ? (thought.step.detail?.trim() ?? "") : "";
+export function unspokenThought(body: string, steps: ChatStep[] = []): string {
+  const parts = replyParts(
+    body,
+    steps.filter((step) => step.kind !== "setup" && step.kind !== "image"),
+  );
+  for (const part of [...parts].reverse()) {
+    if (part.type === "text") return "";
+    const thought = [...part.steps].reverse().find((step) => step.kind === "thinking" && step.status !== "running" && step.detail?.trim());
+    if (thought) return thought.detail?.trim() ?? "";
+  }
+  return "";
 }
 
 const count = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));

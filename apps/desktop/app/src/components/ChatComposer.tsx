@@ -86,7 +86,7 @@ function ReplyContent({
   waitingStepIds: string[];
 }) {
   const { setup, activity, images, answer } = replyActivity(body, steps);
-  const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
+  const thought = !streaming || asking ? unspokenThought(body, steps) : "";
   return (
     <>
       {setup.map((step) => (

@@ -412,6 +412,9 @@ a {
 /* The prompt is a floating control, not a raised card. Keep its elevation
  * close to the surface so the lower edge does not read as a second bar. */
 .promptbar-surface {
+  background: color-mix(in oklab, var(--surface) 76%, transparent);
+  backdrop-filter: blur(var(--blur-chip));
+  -webkit-backdrop-filter: blur(var(--blur-chip));
   box-shadow:
     0 1px 2px oklch(0.24 0.008 258 / 0.045),
     0 3px 9px oklch(0.24 0.008 258 / 0.055);
@@ -589,7 +592,7 @@ a:focus-visible .animated-underline::after {
 /* The sidebar is one persistent 224–420px tree clipped by a 52px shell.
  * Every rail glyph remains centered at x=26 in both states. */
 /* Progressive blur where content scrolls under a window edge. One masked blur leaves a crisp copy showing
- * through wherever its mask is half on, so four blurs that double in strength (1, 2, 4, 8px) stack up
+ * through wherever its mask is half on, so four blurs that double in strength stack up
  * instead, each switched on a step closer to the edge. The last child is the page-colored tint.
  * --blur-dir points from the content toward the edge; the blur starts at --blur-start and is at full
  * strength from --blur-end on. */
@@ -629,31 +632,29 @@ a:focus-visible .animated-underline::after {
   display: none;
 }
 
-/* The top of a scrolled chat, under the window-drag strip: full blur by the upper third. */
+/* Blur builds across the whole overlay toward the window edge. */
 .chat-top-blur {
+  --blur-edge: 0.5px;
   --blur-dir: to top;
   --blur-start: 0%;
-  --blur-end: 65%;
+  --blur-end: 100%;
 }
 .chat-top-blur > :last-child {
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 70%, transparent), transparent);
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 12%, transparent), transparent);
 }
 .chat-top-blur[data-busy] > :last-child {
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 88%, transparent), transparent);
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 20%, transparent), transparent);
 }
 
-/* The bottom of the chat, under the chips and down to the composer. The text fades into the page over the
- * whole height and blurs only in the lower half, so it softens all the way down instead of cutting off. */
+/* The bottom mirrors the top: blur and tint grow gradually toward the composer. */
 .chat-bottom-blur {
+  --blur-edge: 0.5px;
   --blur-dir: to bottom;
-  --blur-start: 40%;
-  --blur-end: 80%;
+  --blur-start: 0%;
+  --blur-end: 100%;
 }
 .chat-bottom-blur > :last-child {
-  background: linear-gradient(to top, var(--page) 5%, color-mix(in oklab, var(--page) 70%, transparent) 40%, transparent);
-}
-.chat-bottom-blur[data-busy] > :last-child {
-  background: linear-gradient(to top, var(--page) 15%, color-mix(in oklab, var(--page) 80%, transparent) 50%, transparent);
+  background: linear-gradient(to top, color-mix(in oklab, var(--page) 12%, transparent), transparent);
 }
 
 /* Messages far off screen skip layout and paint; the size of the last render stands in, so scrolling stays steady.

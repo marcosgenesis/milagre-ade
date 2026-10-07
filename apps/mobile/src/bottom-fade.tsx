@@ -1,30 +1,30 @@
 import { StyleSheet, View, useColorScheme } from "react-native";
-import { BlurView } from "expo-blur";
+import { ProgressiveBlurView } from "@sbaiahmed1/react-native-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import MaskedView from "@react-native-masked-view/masked-view";
 import { hex } from "./theme";
 
 /**
- * Desktop's chat-bottom-blur (styles.css): content blurs and fades into the page at a screen edge.
- * A backdrop blur masked to the outer part of the strip, then a page-colored gradient on top.
+ * Desktop's .progressive-blur (styles.css): content softens into the page at a screen edge. A native variable blur,
+ * whose radius grows toward the edge, so no crisp copy shows through the way it does under one masked blur. The blur
+ * builds up over `ramp` points from the open side; past that everything sits under the full blur and a near-opaque
+ * page-colored tint.
  */
-export function EdgeFade({ edge, height, blur = true }: { edge: "top" | "bottom"; height: number; blur?: boolean }) {
+export function EdgeFade({ edge, height, ramp }: { edge: "top" | "bottom"; height: number; ramp: number }) {
   const scheme = useColorScheme();
   const page = hex(scheme).page;
+  const end = Math.min(1, ramp / height);
   // Gradients run from the open side toward the screen edge.
   const flip = edge === "top" ? { start: { x: 0, y: 1 }, end: { x: 0, y: 0 } } : {};
   return (
     <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, [edge]: 0, height }}>
-      {blur && (
-        <MaskedView
-          style={StyleSheet.absoluteFill}
-          maskElement={<LinearGradient {...flip} colors={["transparent", "#000"]} locations={[0.4, 0.8]} style={StyleSheet.absoluteFill} />}
-        >
-          <BlurView intensity={18} tint={scheme === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-        </MaskedView>
-      )}
-      <LinearGradient {...flip} colors={[`${page}00`, `${page}b3`, page]} locations={[0, 0.6, 0.95]} style={StyleSheet.absoluteFill} />
+      <ProgressiveBlurView
+        direction={edge === "top" ? "blurredTopClearBottom" : "blurredBottomClearTop"}
+        startOffset={1 - end}
+        blurAmount={20}
+        style={StyleSheet.absoluteFill}
+      />
+      <LinearGradient {...flip} colors={[`${page}00`, `${page}cc`, page]} locations={[0, end, 1]} style={StyleSheet.absoluteFill} />
     </View>
   );
 }
-export const BottomFade = ({ height }: { height: number }) => <EdgeFade edge="bottom" height={height} />;
+export const BottomFade = ({ height }: { height: number }) => <EdgeFade edge="bottom" height={height} ramp={48} />;

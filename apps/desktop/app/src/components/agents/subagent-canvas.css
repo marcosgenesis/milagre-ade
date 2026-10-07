@@ -37,18 +37,28 @@
     linear-gradient(to bottom, transparent, #000 var(--subagent-edge-size), #000 calc(100% - var(--subagent-edge-size)), transparent);
   mask-composite: intersect;
 }
-/* Fade the entire surface so the blurred edge never leaves a crisp, clipped copy underneath. */
+/* The surface fades out at its edges, so the blurred edge never leaves a crisp, clipped copy underneath.
+ * Two blurs build it up progressively: a light one over the whole edge, a full one over its outer half. */
+.subagent-canvas-surface::before,
 .subagent-canvas-surface::after {
+  --edge: var(--subagent-edge-size);
   content: "";
   position: absolute;
   z-index: 3;
   inset: 0;
   pointer-events: none;
+  mask-image:
+    linear-gradient(to right, #000, transparent var(--edge)), linear-gradient(to left, #000, transparent var(--edge)),
+    linear-gradient(to bottom, #000, transparent var(--edge)), linear-gradient(to top, #000, transparent var(--edge));
+}
+.subagent-canvas-surface::before {
+  backdrop-filter: blur(calc(var(--blur-edge) * 0.5));
+  -webkit-backdrop-filter: blur(calc(var(--blur-edge) * 0.5));
+}
+.subagent-canvas-surface::after {
+  --edge: calc(var(--subagent-edge-size) / 2);
   backdrop-filter: blur(var(--blur-edge));
   -webkit-backdrop-filter: blur(var(--blur-edge));
-  mask-image:
-    linear-gradient(to right, #000, transparent var(--subagent-edge-size)), linear-gradient(to left, #000, transparent var(--subagent-edge-size)),
-    linear-gradient(to bottom, #000, transparent var(--subagent-edge-size)), linear-gradient(to top, #000, transparent var(--subagent-edge-size));
 }
 .subagent-canvas-surface:focus-visible {
   outline: none;

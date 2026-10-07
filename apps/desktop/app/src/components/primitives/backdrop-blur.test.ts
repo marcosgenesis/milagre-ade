@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import test from "node:test";
 
 // Backdrop blur comes in three strengths, the --blur-overlay, --blur-chip and --blur-edge tokens (see docs/agents/ui.md).
+// A progressive blur scales --blur-edge per layer, as calc(var(--blur-edge) * ...).
 const SRC = join(import.meta.dirname, "..", "..");
 
 function sources(dir: string): string[] {
@@ -25,7 +26,7 @@ function offenders(pattern: RegExp) {
 test("backdrop blur uses a blur token", () => {
   assert.deepEqual(offenders(/backdrop-blur(?!-(overlay|chip|edge)\b)/), [], "Use backdrop-blur-overlay, -chip or -edge");
   assert.deepEqual(
-    offenders(/backdrop-filter:\s*blur\((?!var\(--blur-(overlay|chip|edge)\))/),
+    offenders(/backdrop-filter:\s*blur\((?!var\(--blur-(overlay|chip|edge)\)|calc\(var\(--blur-edge\) \* )/),
     [],
     "Use blur(var(--blur-overlay)), (--blur-chip) or (--blur-edge)",
   );

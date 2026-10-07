@@ -686,13 +686,16 @@ export function ChatComposer({
         onClose={closeCanvas}
       />
       <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
-        {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
+        {/* Messages scrolled past the top soften into a progressive blur under the window-drag strip. The layers fade,
+          not the wrapper: a wrapper below full opacity would cut the layers' blur off from the messages behind it. */}
         {!isNewChat && (
           <div
             aria-hidden
             data-busy={isSending || undefined}
-            className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`}
-          />
+            className={`chat-top-blur progressive-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 [&>*]:transition-opacity [&>*]:duration-200 ${scrolled ? "" : "[&>*]:opacity-0"}`}
+          >
+            <ProgressiveBlurLayers />
+          </div>
         )}
         {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
         {!isNewChat && (
@@ -757,9 +760,12 @@ export function ChatComposer({
               </div>
             </MessageScroller>
             {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
-            <div aria-hidden data-busy={isSending || undefined} className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20">
-              <div />
-              <div />
+            <div
+              aria-hidden
+              data-busy={isSending || undefined}
+              className="chat-bottom-blur progressive-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"
+            >
+              <ProgressiveBlurLayers />
             </div>
           </div>
         )}
@@ -862,5 +868,18 @@ export function ChatComposer({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The four blur layers and the tint of a `.progressive-blur` (styles.css). */
+function ProgressiveBlurLayers() {
+  return (
+    <>
+      <div />
+      <div />
+      <div />
+      <div />
+      <div />
+    </>
   );
 }

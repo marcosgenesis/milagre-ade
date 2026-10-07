@@ -64,6 +64,7 @@ const PATHS = Object.freeze({
   "project:find": none,
   "project:image": ([projectPath]) => [projectPath],
   "project:set-icon": ([projectPath]) => [projectPath],
+  "project:set-hidden": ([projectPath]) => [projectPath],
   "chat:runs": none,
   "chat:ports": ([chatId]) => [chatProject(chatId)],
   "agent:stop-port": ([chatId]) => [chatProject(chatId)],

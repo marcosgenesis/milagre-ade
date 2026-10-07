@@ -71,6 +71,18 @@ function createProjectSettings(file) {
       const entry = (await read({ strict: false })).projects[path.resolve(projectPath)] ?? {};
       return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand), icon: normalizeIcon(entry.icon) };
     },
+    // The Projects kept out of the desktop sidebar and the phone's Projects list.
+    async hiddenPaths() {
+      const { projects } = await read({ strict: false });
+      return new Set(Object.keys(projects).filter((key) => projects[key]?.hidden === true));
+    },
+    async setHidden(projectPath, hidden) {
+      await update(projectPath, (entry) => {
+        if (hidden === true) entry.hidden = true;
+        else delete entry.hidden;
+      });
+      return { hidden: hidden === true };
+    },
     // An empty list removes the setting, which brings the default back.
     async setFilesToCopy(projectPath, filesToCopy) {
       const lines = normalizeFilesToCopy(filesToCopy);

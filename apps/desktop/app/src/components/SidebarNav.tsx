@@ -45,6 +45,9 @@ import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
 import type { ProjectLink } from "@/electron";
 import { ipcErrorMessage } from "@milagre/shared/result";
+import { useSettings } from "../lib/settings";
+import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
+import { scopeChats, useScopeStates } from "../lib/sidebar-scopes";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -123,9 +126,78 @@ type SidebarNavProps = {
   /** Plan usage, shown above the footer buttons in both the expanded and collapsed sidebar. */
   usage?: ReactNode;
   variant?: string;
+  /** Chat keys with a turn streaming, and with one waiting on the user, joined by newlines (one string keeps memo cheap). */
+  runningKeys?: string;
+  waitingKeys?: string;
+  /** Of those waiting, the chats whose next card is a question. */
+  askingKeys?: string;
+  /** Opens a chat of another Project (its path) or Link (`milagre-link:` key) from the all-Projects sidebar. */
+  onOpenScopeChat?: (scopeKey: string, id: string) => void;
 };
 
 const NO_CHAT_ACTIONS: ChatRowActions = {};
+const NEVER_ACTIVE = () => false;
+const showAllPaths = (enabled: boolean, scopes: Array<{ key: string; link: unknown }>) =>
+  enabled ? scopes.filter((scope) => !scope.link).map((scope) => scope.key) : NO_PATHS;
+// Groups of the all-Projects sidebar the user folded, by Project path or Link key; the rest stay open.
+const CLOSED_SCOPES_KEY = "milagre.sidebarClosedScopes";
+function readClosedScopes(): string[] {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(CLOSED_SCOPES_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A Project or Link heading in the all-Projects sidebar: folds its chats; the trailing button starts a chat here or opens that one. */
+function ScopeHeader({
+  name,
+  icon,
+  open,
+  current,
+  attention,
+  onToggle,
+  onAction,
+}: {
+  name: string;
+  icon: ReactNode;
+  open: boolean;
+  current: boolean;
+  attention: boolean;
+  onToggle: () => void;
+  onAction: () => void;
+}) {
+  return (
+    <div className="group/scope relative mx-2 flex h-8 items-center">
+      <button
+        type="button"
+        data-scope-toggle
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-9 text-left hover:bg-hover-2"
+      >
+        <span className="flex h-5 shrink-0 items-center justify-center text-ink">{icon}</span>
+        <span className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>{name}</span>
+        {attention && <AttentionDot />}
+        <span className={`flex shrink-0 text-ink-3 transition-transform duration-150 ${open ? "" : "-rotate-90"}`}>
+          <IconChevronDownSmall size={14} />
+        </span>
+      </button>
+      <Tooltip label={current ? "New chat" : `Open ${name}`} shortcut={current ? "⌘N" : undefined} align="end" className="absolute right-0">
+        <button
+          type="button"
+          data-scope-action
+          aria-label={current ? "New chat" : `Open ${name}`}
+          onClick={onAction}
+          className={`${CHATS_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+        >
+          {current ? <IconPlusMedium size={16} /> : <HugeIcon icon={FolderOpenIcon} size={15} />}
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
 const NO_PATHS: string[] = [];
 
 function AttentionDot({ className = "" }: { className?: string }) {
@@ -454,7 +526,13 @@ export default memo(function SidebarNav({
   recents = DEFAULT_RECENTS,
   chatActions = NO_CHAT_ACTIONS,
   usage,
+  runningKeys = "",
+  waitingKeys = "",
+  askingKeys = "",
+  onOpenScopeChat,
 }: SidebarNavProps) {
+  const { sidebarAllProjects, chatOrder } = useSettings();
+  const [listsChanged, setListsChanged] = useState(0);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
   const autoCollapsed = useRef(collapsed);
@@ -495,7 +573,7 @@ export default memo(function SidebarNav({
     void window.milagre
       ?.listNamedLinks?.()
       .then((links) => {
-        if (live) setNamedLinks(links);
+        if (live) setNamedLinks(Array.isArray(links) ? links : []);
       })
       .catch(() => {});
     void window.milagre
@@ -507,7 +585,87 @@ export default memo(function SidebarNav({
     return () => {
       live = false;
     };
-  }, [projectPath, workspaceOpen, selectedLink?.id]);
+  }, [projectPath, workspaceOpen, selectedLink?.id, sidebarAllProjects, listsChanged]);
+  useEffect(() => {
+    const changed = () => setListsChanged((count) => count + 1);
+    window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
+    return () => window.removeEventListener(RECENT_PROJECTS_CHANGED, changed);
+  }, []);
+
+  // Every recent Project the user didn't hide, then every Link, like the phone's list. The open one is always there.
+  const currentKey = selectedLink ? `milagre-link:${selectedLink.id}` : (projectPath ?? "");
+  const scopes = [
+    ...projects
+      .filter((row) => row.current || !recentProjects.find((project) => project.path === row.path)?.hidden)
+      .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null })),
+    ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link })),
+  ];
+  const scopeImage = useProjectImages(showAllPaths(sidebarAllProjects, scopes));
+  const showAll = sidebarAllProjects && !collapsed;
+  const scopeStates = useScopeStates(
+    showAll,
+    scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
+  );
+  const marks = useMemo(
+    () => ({
+      running: new Set(runningKeys.split("\n").filter(Boolean)),
+      waiting: new Set(waitingKeys.split("\n").filter(Boolean)),
+      asking: new Set(askingKeys.split("\n").filter(Boolean)),
+    }),
+    [runningKeys, waitingKeys, askingKeys],
+  );
+  // Another Project's or Link's chats can be pinned from here; the row menu's other actions stay with the open one.
+  // One object per scope, so its rows keep their memo.
+  const scopeActions = useRef(new Map<string, ChatRowActions>());
+  const actionsFor = (key: string) => {
+    let actions = scopeActions.current.get(key);
+    if (!actions) {
+      actions = {
+        onPin: (id, order) =>
+          void window.milagre
+            .patchChat(key, Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order })
+            .catch(() => {}),
+      };
+      scopeActions.current.set(key, actions);
+    }
+    return actions;
+  };
+  const scopePickers = useRef(new Map<string, (item: SidebarRecent) => void>());
+  const pickerFor = (key: string) => {
+    let pick = scopePickers.current.get(key);
+    if (!pick) {
+      pick = (item) => openScope.current(key, item.id);
+      scopePickers.current.set(key, pick);
+    }
+    return pick;
+  };
+  const openScope = useRef((key: string, id: string) => onOpenScopeChat?.(key, id));
+  openScope.current = (key: string, id: string) => onOpenScopeChat?.(key, id);
+  const groups = showAll
+    ? scopes.map((scope) => {
+        const current = scope.key === currentKey;
+        const state = scopeStates[scope.key];
+        const rows = current ? recents : state ? scopeChats(scope.key, state, chatOrder, marks) : [];
+        const list = current
+          ? {
+              isActive: (item: SidebarRecent) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle),
+              collapsed: false,
+              actions: chatActions,
+              showHints,
+              onPick: pickChat,
+              linkProjectId: !selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null,
+            }
+          : { isActive: NEVER_ACTIVE, collapsed: false, actions: actionsFor(scope.key), showHints: false, onPick: pickerFor(scope.key), linkProjectId: null };
+        return { scope, current, state, list, pinned: rows.filter((row) => row.pinned), rest: rows.filter((row) => !row.pinned) };
+      })
+    : [];
+  const [closedScopes, setClosedScopes] = useState(readClosedScopes);
+  const toggleScope = (key: string) =>
+    setClosedScopes((previous) => {
+      const next = previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key];
+      window.localStorage.setItem(CLOSED_SCOPES_KEY, JSON.stringify(next));
+      return next;
+    });
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
@@ -731,33 +889,95 @@ export default memo(function SidebarNav({
                 </button>
               </Tooltip>
             )}
-            <ChatList
-              recents={recents}
-              isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
-              collapsed={collapsed}
-              actions={chatActions}
-              showHints={showHints}
-              onPick={pickChat}
-              linkProjectId={!selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null}
-              header={
-                <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
-                  <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
-                  <Tooltip label="New chat" shortcut="⌘N" align="end">
-                    <button
-                      type="button"
-                      aria-label="New chat"
-                      onClick={() => {
-                        if (activeTitle === undefined) setDemoActiveTitle(null);
-                        onNewChat?.();
-                      }}
-                      className={CHATS_HEADER_BUTTON}
-                    >
-                      <IconPlusMedium size={16} />
-                    </button>
-                  </Tooltip>
-                </div>
-              }
-            />
+            {showAll ? (
+              <>
+                {/* Pinned chats of every Project and Link sit on top, like the single-project sidebar; each group lists the rest. */}
+                {groups.some((group) => group.pinned.length > 0) && (
+                  <div data-all-pinned className="mb-2">
+                    <p className="sidebar-copy mx-2 mb-1 h-8 pl-2 text-[12.5px] font-medium leading-8 text-ink-3">Pinned</p>
+                    {groups
+                      .filter((group) => group.pinned.length > 0)
+                      .map((group) => (
+                        <div key={group.scope.key} data-pinned-scope={group.scope.key}>
+                          <ChatList recents={group.pinned} {...group.list} pinnedHeader={false} header={null} />
+                        </div>
+                      ))}
+                  </div>
+                )}
+                {groups.map(({ scope, current, state, rest, pinned, list }, index) => {
+                  const open = !closedScopes.includes(scope.key);
+                  return (
+                    <section key={scope.key} data-sidebar-scope={scope.key} aria-label={scope.name} className="mb-2">
+                      {scope.link && !scopes[index - 1]?.link && (
+                        <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
+                      )}
+                      <ScopeHeader
+                        name={scope.name}
+                        icon={
+                          scope.link ? (
+                            <ProjectAvatarStack
+                              projects={scope.link.projectIds.map(
+                                (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
+                              )}
+                            />
+                          ) : (
+                            <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+                              <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
+                            </span>
+                          )
+                        }
+                        open={open}
+                        current={current}
+                        attention={!current && attentionPaths.includes(scope.key)}
+                        onToggle={() => toggleScope(scope.key)}
+                        onAction={
+                          current
+                            ? () => {
+                                if (activeTitle === undefined) setDemoActiveTitle(null);
+                                onNewChat?.();
+                              }
+                            : () => (scope.link ? onSwitchLink?.(scope.link.id) : onSwitchProject?.(scope.key))
+                        }
+                      />
+                      {open &&
+                        (rest.length > 0 ? (
+                          <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
+                        ) : pinned.length > 0 ? null : (
+                          <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                        ))}
+                    </section>
+                  );
+                })}
+              </>
+            ) : (
+              <ChatList
+                recents={recents}
+                isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
+                collapsed={collapsed}
+                actions={chatActions}
+                showHints={showHints}
+                onPick={pickChat}
+                linkProjectId={!selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null}
+                header={
+                  <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
+                    <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
+                    <Tooltip label="New chat" shortcut="⌘N" align="end">
+                      <button
+                        type="button"
+                        aria-label="New chat"
+                        onClick={() => {
+                          if (activeTitle === undefined) setDemoActiveTitle(null);
+                          onNewChat?.();
+                        }}
+                        className={CHATS_HEADER_BUTTON}
+                      >
+                        <IconPlusMedium size={16} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                }
+              />
+            )}
           </ScrollArea>
 
           {usage && <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>{usage}</div>}
@@ -838,6 +1058,8 @@ function ChatList({
   onPick,
   linkProjectId,
   header,
+  pinnedHeader = true,
+  hintOffset = 0,
 }: {
   recents: SidebarRecent[];
   isActive: (item: SidebarRecent) => boolean;
@@ -849,6 +1071,10 @@ function ChatList({
   linkProjectId: string | null;
   /** The "Chats" header, between the pinned chats and the rest. */
   header: ReactNode;
+  /** False when the caller shows one Pinned heading over several lists (the all-Projects sidebar). */
+  pinnedHeader?: boolean;
+  /** Where this list's ⌘1–9 hints start, when its chats follow others in the same Project. */
+  hintOffset?: number;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<ChatDrag | null>(null);
@@ -1184,7 +1410,7 @@ function ChatList({
       active={isActive(item)}
       collapsed={collapsed}
       actions={rowActions}
-      shortcutHint={showHints && index < 9 ? `${shortcutModifier}${index + 1}` : undefined}
+      shortcutHint={showHints && hintOffset + index < 9 ? `${shortcutModifier}${hintOffset + index + 1}` : undefined}
       onPick={onPick}
       dragging={drag?.id === item.id}
     />
@@ -1192,7 +1418,7 @@ function ChatList({
 
   return (
     <div ref={listRef} data-chat-list className="relative" onPointerDown={startPointer} onKeyDown={keyDown} onKeyUp={keyUp}>
-      {(pinned.length > 0 || drag) && !collapsed && (
+      {pinnedHeader && (pinned.length > 0 || drag) && !collapsed && (
         <div className="sidebar-copy mx-2 mb-1 flex h-8 items-center pl-2">
           <span className="text-[12.5px] font-medium text-ink-3">Pinned</span>
         </div>

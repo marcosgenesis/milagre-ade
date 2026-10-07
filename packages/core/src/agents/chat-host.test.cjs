@@ -801,6 +801,22 @@ test("streaming child updates publish only the child, never save, and late reade
   assert.equal(saved.get(ALPHA).sessions[sent.sessionId].subagents[0].transcript[0].text, "Working on it");
 });
 
+test("subagents that finished are archived when the turn ends, and ones still running stay", async (t) => {
+  const { host, manager, states, saved } = harness();
+  t.after(() => manager.closeAll());
+  const sent = await host.send(message(ALPHA, "review"));
+  const chatId = `${ALPHA}#${sent.sessionId}`;
+  const child = (id, status) => ({ id, title: id, status, startedAt: 1, updatedAt: 2, transcript: [] });
+  await host.receive(chatId, { type: "subagent-update", agent: child("done", "completed") });
+  await host.receive(chatId, { type: "subagent-update", agent: child("broke", "failed") });
+  await host.receive(chatId, { type: "subagent-update", agent: child("busy", "running") });
+  assert.ok((await states.get(ALPHA)).sessions[sent.sessionId].subagents.every((agent) => !agent.archived));
+  await host.receive(chatId, { type: "turn-completed" });
+  await states.flush();
+  const archived = Object.fromEntries(saved.get(ALPHA).sessions[sent.sessionId].subagents.map((agent) => [agent.id, Boolean(agent.archived)]));
+  assert.deepEqual(archived, { done: true, broke: true, busy: false });
+});
+
 test("sending an image stores its bytes before the provider starts and keeps original provider input", async (t) => {
   const fs = require("node:fs/promises");
   const path = require("node:path");

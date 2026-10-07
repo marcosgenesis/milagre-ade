@@ -1,10 +1,10 @@
-import MarkdownIt from 'markdown-it';
-import { closeOpenMarkdown } from '@milagre/shared/streaming-markdown';
+import MarkdownIt from "markdown-it";
+import { closeOpenMarkdown } from "@milagre/shared/streaming-markdown";
 
 const markdown = new MarkdownIt({ html: false, linkify: false, breaks: true });
 const validateLink = markdown.validateLink.bind(markdown);
 // A file URI in an image is resolved through the paired computer, never opened on the phone.
-markdown.validateLink = url => /^file:/i.test(url) || validateLink(url);
+markdown.validateLink = (url) => /^file:/i.test(url) || validateLink(url);
 export function markdownTokens(text: string, streaming = false) {
   return markdown.parse(streaming ? closeOpenMarkdown(text) : text, {});
 }
@@ -15,20 +15,26 @@ export function markdownTokens(text: string, streaming = false) {
 export function markdownChunks(text: string): string[] {
   const chunks: string[] = [];
   let current: string[] = [];
-  let fence = '';
+  let fence = "";
   let blank = false;
-  for (const line of text.split('\n')) {
+  for (const line of text.split("\n")) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (!fence && blank && current.length && /^\S/.test(line)) { chunks.push(current.join('\n')); current = []; }
+    if (!fence && blank && current.length && /^\S/.test(line)) {
+      chunks.push(current.join("\n"));
+      current = [];
+    }
     current.push(line);
     if (marker && !fence) fence = marker[0];
-    else if (marker && marker[0] === fence) fence = '';
-    blank = !fence && line.trim() === '';
+    else if (marker && marker[0] === fence) fence = "";
+    blank = !fence && line.trim() === "";
   }
-  if (current.length) chunks.push(current.join('\n'));
+  if (current.length) chunks.push(current.join("\n"));
   return chunks;
 }
 export function safeLink(href: string): string | null {
-  try { return ['https:', 'http:', 'mailto:'].includes(new URL(href).protocol) ? href : null; }
-  catch { return null; }
+  try {
+    return ["https:", "http:", "mailto:"].includes(new URL(href).protocol) ? href : null;
+  } catch {
+    return null;
+  }
 }

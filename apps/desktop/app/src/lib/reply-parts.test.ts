@@ -3,7 +3,13 @@ import test from "node:test";
 import type { ChatStep } from "../model";
 import { activitySummary, replyActivity, replyParts, titleSpans, unspokenThought } from "./reply-parts.ts";
 
-const step = (id: string, offset?: number): ChatStep => ({ id, kind: "shell", title: `Ran \`${id}\``, status: "done", ...(offset === undefined ? {} : { offset }) });
+const step = (id: string, offset?: number): ChatStep => ({
+  id,
+  kind: "shell",
+  title: `Ran \`${id}\``,
+  status: "done",
+  ...(offset === undefined ? {} : { offset }),
+});
 
 test("steps sit between the text around them, in order", () => {
   const body = "Checking.\n\nNow editing.\n\nDone.";
@@ -23,21 +29,46 @@ test("a reply without steps is its text; steps alone are one group", () => {
 });
 
 test("whitespace between steps doesn't split their group", () => {
-  assert.deepEqual(replyParts("Go.\n\n", [step("a", 3), step("b", 5)]), [{ type: "text", text: "Go." }, { type: "steps", steps: [step("a", 3), step("b", 5)] }]);
+  assert.deepEqual(replyParts("Go.\n\n", [step("a", 3), step("b", 5)]), [
+    { type: "text", text: "Go." },
+    { type: "steps", steps: [step("a", 3), step("b", 5)] },
+  ]);
 });
 
 test("offsets past the text, missing or out of order still keep every step once", () => {
-  assert.deepEqual(replyParts("Hi", [step("a", 99), step("b")]), [{ type: "text", text: "Hi" }, { type: "steps", steps: [step("a", 99), step("b")] }]);
-  assert.deepEqual(replyParts("abcdef", [step("a", 4), step("b", 1)]), [{ type: "text", text: "abcd" }, { type: "steps", steps: [step("a", 4), step("b", 1)] }, { type: "text", text: "ef" }]);
+  assert.deepEqual(replyParts("Hi", [step("a", 99), step("b")]), [
+    { type: "text", text: "Hi" },
+    { type: "steps", steps: [step("a", 99), step("b")] },
+  ]);
+  assert.deepEqual(replyParts("abcdef", [step("a", 4), step("b", 1)]), [
+    { type: "text", text: "abcd" },
+    { type: "steps", steps: [step("a", 4), step("b", 1)] },
+    { type: "text", text: "ef" },
+  ]);
 });
 
 test("titles split into text and code", () => {
-  assert.deepEqual(titleSpans("Ran `npm test`"), [{ text: "Ran ", code: false }, { text: "npm test", code: true }]);
-  assert.deepEqual(titleSpans("Searched for `greet` in `src`"), [{ text: "Searched for ", code: false }, { text: "greet", code: true }, { text: " in ", code: false }, { text: "src", code: true }]);
+  assert.deepEqual(titleSpans("Ran `npm test`"), [
+    { text: "Ran ", code: false },
+    { text: "npm test", code: true },
+  ]);
+  assert.deepEqual(titleSpans("Searched for `greet` in `src`"), [
+    { text: "Searched for ", code: false },
+    { text: "greet", code: true },
+    { text: " in ", code: false },
+    { text: "src", code: true },
+  ]);
   assert.deepEqual(titleSpans("Updated the to-do list"), [{ text: "Updated the to-do list", code: false }]);
 });
 
-const thought = (id: string, offset: number, durationMs?: number): ChatStep => ({ id, kind: "thinking", title: "Thought", status: "done", offset, ...(durationMs === undefined ? {} : { durationMs }) });
+const thought = (id: string, offset: number, durationMs?: number): ChatStep => ({
+  id,
+  kind: "thinking",
+  title: "Thought",
+  status: "done",
+  offset,
+  ...(durationMs === undefined ? {} : { durationMs }),
+});
 
 test("a reply's last text is its answer; everything before it is activity, in order", () => {
   const body = "Checking.\n\nNow editing.\n\nDone.";
@@ -61,25 +92,45 @@ test("a reply without steps is all answer; steps alone are all activity", () => 
 });
 
 test("text before steps that end the reply is still its answer", () => {
-  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), { setup: [], activity: [{ type: "step", step: step("a", 15) }], images: [], answer: "Running it now." });
+  assert.deepEqual(replyActivity("Running it now.", [step("a", 15)]), {
+    setup: [],
+    activity: [{ type: "step", step: step("a", 15) }],
+    images: [],
+    answer: "Running it now.",
+  });
 });
 
 test("the summary counts thinking time, files, searches, commands and tools", () => {
   const steps: ChatStep[] = [
-    thought("t1", 0, 4_000), thought("t2", 0, 8_400),
-    { id: "r1", kind: "read", title: "Read `a.ts`", status: "done" }, { id: "r2", kind: "read", title: "Read `b.ts`", status: "done" }, { id: "r3", kind: "read", title: "Read `a.ts`", status: "done" },
+    thought("t1", 0, 4_000),
+    thought("t2", 0, 8_400),
+    { id: "r1", kind: "read", title: "Read `a.ts`", status: "done" },
+    { id: "r2", kind: "read", title: "Read `b.ts`", status: "done" },
+    { id: "r3", kind: "read", title: "Read `a.ts`", status: "done" },
     { id: "s1", kind: "search", title: "Searched for `x`", status: "done" },
-    { id: "e1", kind: "edit", title: "Edited `a.ts`", status: "done" }, { id: "e2", kind: "edit", title: "Edited `a.ts`", status: "done" },
-    { id: "c1", kind: "shell", title: "Ran `npm test`", status: "failed" }, { id: "c2", kind: "shell", title: "Ran `npm test`", status: "done" },
+    { id: "e1", kind: "edit", title: "Edited `a.ts`", status: "done" },
+    { id: "e2", kind: "edit", title: "Edited `a.ts`", status: "done" },
+    { id: "c1", kind: "shell", title: "Ran `npm test`", status: "failed" },
+    { id: "c2", kind: "shell", title: "Ran `npm test`", status: "done" },
     { id: "o1", kind: "other", title: "Used `x`", status: "done" },
   ];
-  assert.deepEqual(activitySummary(steps), { text: "Thought for 12s · read 2 files · searched once · edited 1 file · ran 2 commands · used 1 tool", failed: 1 });
+  assert.deepEqual(activitySummary(steps), {
+    text: "Thought for 12s · read 2 files · searched once · edited 1 file · ran 2 commands · used 1 tool",
+    failed: 1,
+  });
 });
 
 test("the summary starts with a capital and leaves out what didn't happen", () => {
   assert.deepEqual(activitySummary([step("a"), step("b")]), { text: "Ran 2 commands", failed: 0 });
   assert.deepEqual(activitySummary([thought("t", 0)]), { text: "Thought", failed: 0 });
-  assert.deepEqual(activitySummary([thought("t", 0, 75_000), { id: "s", kind: "search", title: "x", status: "done" }, { id: "s2", kind: "search", title: "y", status: "done" }]), { text: "Thought for 1m 15s · searched 2 times", failed: 0 });
+  assert.deepEqual(
+    activitySummary([
+      thought("t", 0, 75_000),
+      { id: "s", kind: "search", title: "x", status: "done" },
+      { id: "s2", kind: "search", title: "y", status: "done" },
+    ]),
+    { text: "Thought for 1m 15s · searched 2 times", failed: 0 },
+  );
 });
 
 test("a reply that only thought surfaces its last thinking; one that wrote anything doesn't", () => {
@@ -93,13 +144,23 @@ test("a reply that only thought surfaces its last thinking; one that wrote anyth
   assert.equal(unspokenThought(replyActivity("", [step("a", 0)]).activity, ""), "");
 });
 
-const setupStep = (status: ChatStep["status"] = "done"): ChatStep => ({ id: "setup", kind: "setup", title: "Ran setup `npm ci`", note: "3s", status, offset: 0 });
+const setupStep = (status: ChatStep["status"] = "done"): ChatStep => ({
+  id: "setup",
+  kind: "setup",
+  title: "Ran setup `npm ci`",
+  note: "3s",
+  status,
+  offset: 0,
+});
 
 test("the worktree setup is pulled out of the activity and left out of its summary", () => {
   const steps = [setupStep(), thought("t", 0, 4_000), step("a", 0)];
   assert.deepEqual(replyActivity("Done.", steps), {
     setup: [setupStep()],
-    activity: [{ type: "step", step: thought("t", 0, 4_000) }, { type: "step", step: step("a", 0) }],
+    activity: [
+      { type: "step", step: thought("t", 0, 4_000) },
+      { type: "step", step: step("a", 0) },
+    ],
     images: [],
     answer: "Done.",
   });

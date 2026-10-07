@@ -1,7 +1,20 @@
 {
   "name": "@milagre/mobile",
   "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "main": "expo-router/entry",
+  "scripts": {
+    "postinstall": "cd ../.. && patch-package --patch-dir apps/mobile/patches",
+    "start": "node ../../scripts/start-mobile.cjs",
+    "android": "node ../../scripts/start-mobile.cjs --android",
+    "ios": "node ../../scripts/start-mobile.cjs --ios",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts",
+    "export:ios": "expo export --platform ios",
+    "lint": "eslint .",
+    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
+  },
   "dependencies": {
     "@expo/ui": "~57.0.21",
     "@hugeicons/core-free-icons": "^4.3.5",
@@ -46,18 +59,5 @@
     "eslint-config-expo": "~57.0.2",
     "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
-  },
-  "scripts": {
-    "postinstall": "cd ../.. && patch-package --patch-dir apps/mobile/patches",
-    "start": "node ../../scripts/start-mobile.cjs",
-    "android": "node ../../scripts/start-mobile.cjs --android",
-    "ios": "node ../../scripts/start-mobile.cjs --ios",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts",
-    "export:ios": "expo export --platform ios",
-    "lint": "eslint .",
-    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
-  },
-  "private": true,
-  "type": "module"
+  }
 }

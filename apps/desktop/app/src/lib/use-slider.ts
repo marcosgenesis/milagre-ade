@@ -32,44 +32,68 @@ export function useSlider({ value, onValueChange, min = 0, max = 100, step = 1, 
 
   const commit = useCallback((next: number) => onValueChange(snapSliderValue(next, low, high, stride)), [onValueChange, low, high, stride]);
 
-  const commitFromX = useCallback((clientX: number) => {
-    const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return;
-    commit(low + clamp((clientX - rect.left) / rect.width, 0, 1) * (high - low));
-  }, [commit, low, high]);
+  const commitFromX = useCallback(
+    (clientX: number) => {
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      commit(low + clamp((clientX - rect.left) / rect.width, 0, 1) * (high - low));
+    },
+    [commit, low, high],
+  );
 
-  const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (disabled) return;
-    draggingRef.current = true;
-    setDragging(true);
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* the pointer is already gone; the drag still runs */ }
-    handleRef.current?.focus({ preventScroll: true });
-    commitFromX(event.clientX);
-  }, [disabled, commitFromX]);
+  const onPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (disabled) return;
+      draggingRef.current = true;
+      setDragging(true);
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        /* the pointer is already gone; the drag still runs */
+      }
+      handleRef.current?.focus({ preventScroll: true });
+      commitFromX(event.clientX);
+    },
+    [disabled, commitFromX],
+  );
 
-  const onPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (draggingRef.current && !disabled) commitFromX(event.clientX);
-  }, [disabled, commitFromX]);
+  const onPointerMove = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (draggingRef.current && !disabled) commitFromX(event.clientX);
+    },
+    [disabled, commitFromX],
+  );
 
   const endDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    try { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    try {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      /* already released */
+    }
     draggingRef.current = false;
     setDragging(false);
   }, []);
 
-  const onKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
-    if (disabled) return;
-    const next: Record<string, number> = {
-      ArrowRight: current + stride, ArrowUp: current + stride,
-      ArrowLeft: current - stride, ArrowDown: current - stride,
-      PageUp: current + stride * 10, PageDown: current - stride * 10,
-      Home: low, End: high,
-    };
-    if (event.key in next) {
-      event.preventDefault();
-      commit(next[event.key]);
-    }
-  }, [disabled, current, stride, low, high, commit]);
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (disabled) return;
+      const next: Record<string, number> = {
+        ArrowRight: current + stride,
+        ArrowUp: current + stride,
+        ArrowLeft: current - stride,
+        ArrowDown: current - stride,
+        PageUp: current + stride * 10,
+        PageDown: current - stride * 10,
+        Home: low,
+        End: high,
+      };
+      if (event.key in next) {
+        event.preventDefault();
+        commit(next[event.key]);
+      }
+    },
+    [disabled, current, stride, low, high, commit],
+  );
 
   return {
     current,
@@ -82,7 +106,9 @@ export function useSlider({ value, onValueChange, min = 0, max = 100, step = 1, 
     trackProps: { ref: trackRef, onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag, onLostPointerCapture: endDrag },
     /** ARIA and keyboard props for the focusable handle. */
     handleProps: {
-      ref: (node: HTMLElement | null) => { handleRef.current = node; },
+      ref: (node: HTMLElement | null) => {
+        handleRef.current = node;
+      },
       role: "slider" as const,
       tabIndex: disabled ? -1 : 0,
       "aria-label": label,

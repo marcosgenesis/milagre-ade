@@ -23,7 +23,9 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   const diffOpen = shown && chatId !== null && diffChatId === chatId;
 
   // Hiding the panel closes the diff; reopening it starts on the chat.
-  useEffect(() => { if (!shown) setDiffChatId(null); }, [shown]);
+  useEffect(() => {
+    if (!shown) setDiffChatId(null);
+  }, [shown]);
 
   useEffect(() => {
     if (!shown || !chatId) return;
@@ -35,10 +37,13 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
   const closeDiff = useCallback(() => setDiffChatId(null), []);
-  const selectFile = useCallback((path: string) => {
-    setDiffChatId(chatId);
-    setScrollTarget((previous) => ({ path, nonce: (previous?.nonce ?? 0) + 1 }));
-  }, [chatId]);
+  const selectFile = useCallback(
+    (path: string) => {
+      setDiffChatId(chatId);
+      setScrollTarget((previous) => ({ path, nonce: (previous?.nonce ?? 0) + 1 }));
+    },
+    [chatId],
+  );
 
   return { open: shown, toggle, diffOpen, closeDiff, mode, setMode, scrollTarget, activePath: diffOpen ? scrollTarget?.path : undefined, selectFile, ...files };
 }

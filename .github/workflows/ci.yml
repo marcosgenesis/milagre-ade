@@ -58,6 +58,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Format check
+        run: npm run format:check
       - name: Dead code
         run: npm run knip
       - name: Typecheck mobile

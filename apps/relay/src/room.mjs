@@ -1,9 +1,11 @@
-import nacl from 'tweetnacl';
-import { hostIdOf, b64url, fromB64url } from '@milagre/shared/relay-crypto';
+import nacl from "tweetnacl";
+import { hostIdOf, b64url, fromB64url } from "@milagre/shared/relay-crypto";
 
 const MAX_FRAME = 1024 * 1024;
 export const MAX_PHONES = 16;
-const OPEN = 1, DATA = 2, CLOSE = 3;
+const OPEN = 1,
+  DATA = 2,
+  CLOSE = 3;
 
 export function frame(type, conn, payload = new Uint8Array()) {
   const out = new Uint8Array(9 + payload.length);
@@ -17,11 +19,16 @@ export function unframe(bytes) {
   return { type: view[0], conn: new DataView(view.buffer, view.byteOffset).getBigUint64(1), payload: view.slice(9) };
 }
 
-const TOO_BIG = Symbol('too-big');
+const TOO_BIG = Symbol("too-big");
 // Brand check that works across realms (`instanceof ArrayBuffer` does not) and cannot be faked by a toStringTag.
-const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength').get;
+const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get;
 function isArrayBuffer(data) {
-  try { bufferLength.call(data); return true; } catch { return false; }
+  try {
+    bufferLength.call(data);
+    return true;
+  } catch {
+    return false;
+  }
 }
 /** Binary payloads only, never copied: null for text and anything that is not an ArrayBuffer or a view, TOO_BIG past `max` bytes. */
 function toBytes(data, max) {
@@ -44,65 +51,120 @@ function toBytes(data, max) {
  *   { role: 'phone', conn: '<decimal>' }                a phone and its connection number
  */
 export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8Array(32)), mark = () => {} }) {
-  let host = null, pending = null, challenge = null, next = 0n; // host: the proven Mac; pending: a newcomer still proving its key
+  let host = null,
+    pending = null,
+    challenge = null,
+    next = 0n; // host: the proven Mac; pending: a newcomer still proving its key
   const phones = new Map(); // conn -> socket
   const connOf = new Map(); // socket -> conn
   // A mark that fails (a socket already gone) only costs that socket its restore.
-  const note = (socket, state) => { try { mark(socket, state); } catch { /* socket already gone */ } };
-  const noteHost = () => note(host, { role: 'host', next: next.toString() });
-  const drop = (socket, code, reason) => { note(socket, null); try { socket.close(code, reason); } catch { /* already closed */ } };
-  const proves = data => {
+  const note = (socket, state) => {
     try {
-      if ((typeof data === 'string' ? data.length : data.byteLength) > 4096) return false;
-      const proof = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
-      const key = proof?.t === 'proof' ? fromB64url(String(proof.key)) : null;
-      return !!key && key.length === 32 && hostIdOf(key) === id && nacl.sign.detached.verify(challenge, fromB64url(String(proof.sig)), key);
-    } catch { return false; /* malformed proof */ }
+      mark(socket, state);
+    } catch {
+      /* socket already gone */
+    }
   };
-  const dropPhones = () => { for (const phone of phones.values()) drop(phone, 4410, 'host-gone'); phones.clear(); connOf.clear(); };
+  const noteHost = () => note(host, { role: "host", next: next.toString() });
+  const drop = (socket, code, reason) => {
+    note(socket, null);
+    try {
+      socket.close(code, reason);
+    } catch {
+      /* already closed */
+    }
+  };
+  const proves = (data) => {
+    try {
+      if ((typeof data === "string" ? data.length : data.byteLength) > 4096) return false;
+      const proof = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data));
+      const key = proof?.t === "proof" ? fromB64url(String(proof.key)) : null;
+      return !!key && key.length === 32 && hostIdOf(key) === id && nacl.sign.detached.verify(challenge, fromB64url(String(proof.sig)), key);
+    } catch {
+      return false; /* malformed proof */
+    }
+  };
+  const dropPhones = () => {
+    for (const phone of phones.values()) drop(phone, 4410, "host-gone");
+    phones.clear();
+    connOf.clear();
+  };
   // A send throws once a socket is closing. Every send is guarded, and a failed one counts as that socket closing.
-  const sent = (socket, data) => { try { socket.send(data); return true; } catch { return false; } };
-  const hostGone = () => { const old = host; host = null; dropPhones(); if (old) drop(old, 1011, 'send-failed'); };
-  const toHost = data => { if (host && !sent(host, data)) hostGone(); };
+  const sent = (socket, data) => {
+    try {
+      socket.send(data);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const hostGone = () => {
+    const old = host;
+    host = null;
+    dropPhones();
+    if (old) drop(old, 1011, "send-failed");
+  };
+  const toHost = (data) => {
+    if (host && !sent(host, data)) hostGone();
+  };
   const phoneRefusal = () => {
-    if (!host) return { code: 4404, reason: 'host-offline' };
-    if (phones.size >= MAX_PHONES) return { code: 4429, reason: 'too-many-phones' };
+    if (!host) return { code: 4404, reason: "host-offline" };
+    if (phones.size >= MAX_PHONES) return { code: 4429, reason: "too-many-phones" };
     return null;
   };
-  const forgetPhone = (conn, socket) => { phones.delete(conn); connOf.delete(socket); note(socket, null); };
+  const forgetPhone = (conn, socket) => {
+    phones.delete(conn);
+    connOf.delete(socket);
+    note(socket, null);
+  };
   return {
     /** A new Mac socket waits as pending: the current host and its phones are untouched until the proof verifies. */
     hostOpened(socket) {
-      if (pending) drop(pending, 4409, 'replaced');
-      pending = socket; challenge = nonce();
-      note(socket, { role: 'pending', challenge: b64url(challenge) });
-      if (!sent(socket, JSON.stringify({ t: 'challenge', nonce: b64url(challenge) }))) { pending = null; drop(socket, 1011, 'send-failed'); }
+      if (pending) drop(pending, 4409, "replaced");
+      pending = socket;
+      challenge = nonce();
+      note(socket, { role: "pending", challenge: b64url(challenge) });
+      if (!sent(socket, JSON.stringify({ t: "challenge", nonce: b64url(challenge) }))) {
+        pending = null;
+        drop(socket, 1011, "send-failed");
+      }
     },
     hostMessage(socket, data) {
       if (socket === pending) {
-        if (!proves(data)) { pending = null; return drop(socket, 4403, 'bad-proof'); }
-        if (host) drop(host, 4409, 'replaced');
+        if (!proves(data)) {
+          pending = null;
+          return drop(socket, 4403, "bad-proof");
+        }
+        if (host) drop(host, 4409, "replaced");
         dropPhones();
-        host = socket; pending = null;
+        host = socket;
+        pending = null;
         noteHost();
-        return toHost(JSON.stringify({ t: 'ready' }));
+        return toHost(JSON.stringify({ t: "ready" }));
       }
-      if (socket !== host) return drop(socket, 4409, 'replaced');
+      if (socket !== host) return drop(socket, 4409, "replaced");
       const bytes = toBytes(data, MAX_FRAME + 9);
-      if (bytes === TOO_BIG) return drop(socket, 1009, 'too-big');
-      if (!bytes || bytes.byteLength < 9) return drop(socket, 1003, 'bad-frame');
+      if (bytes === TOO_BIG) return drop(socket, 1009, "too-big");
+      if (!bytes || bytes.byteLength < 9) return drop(socket, 1003, "bad-frame");
       const { type, conn, payload } = unframe(bytes);
       const phone = phones.get(conn);
       if (!phone) return;
       if (type === DATA) {
         if (sent(phone, payload)) return;
         forgetPhone(conn, phone);
-        drop(phone, 1011, 'send-failed');
+        drop(phone, 1011, "send-failed");
         toHost(frame(CLOSE, conn));
-      } else if (type === CLOSE) { forgetPhone(conn, phone); drop(phone, 1000, 'closed-by-host'); }
+      } else if (type === CLOSE) {
+        forgetPhone(conn, phone);
+        drop(phone, 1000, "closed-by-host");
+      }
     },
     hostClosed(socket) {
-      if (socket === pending) { pending = null; note(socket, null); return; }
+      if (socket === pending) {
+        pending = null;
+        note(socket, null);
+        return;
+      }
       if (socket !== host) return;
       host = null;
       note(socket, null);
@@ -112,12 +174,20 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
     phoneRefusal,
     phoneOpened(socket) {
       const refusal = phoneRefusal();
-      if (refusal) { drop(socket, refusal.code, refusal.reason); return null; }
+      if (refusal) {
+        drop(socket, refusal.code, refusal.reason);
+        return null;
+      }
       const conn = ++next;
       // The phone takes a slot only once the Mac has heard about it.
-      if (!sent(host, frame(OPEN, conn))) { hostGone(); drop(socket, 4404, 'host-offline'); return null; }
-      phones.set(conn, socket); connOf.set(socket, conn);
-      note(socket, { role: 'phone', conn: conn.toString() });
+      if (!sent(host, frame(OPEN, conn))) {
+        hostGone();
+        drop(socket, 4404, "host-offline");
+        return null;
+      }
+      phones.set(conn, socket);
+      connOf.set(socket, conn);
+      note(socket, { role: "phone", conn: conn.toString() });
       noteHost();
       return conn;
     },
@@ -125,8 +195,8 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
       const conn = connOf.get(socket);
       if (conn === undefined || !host) return;
       const bytes = toBytes(data, MAX_FRAME);
-      if (bytes === TOO_BIG) return drop(socket, 1009, 'too-big');
-      if (!bytes) return drop(socket, 1003, 'binary-only');
+      if (bytes === TOO_BIG) return drop(socket, 1009, "too-big");
+      if (!bytes) return drop(socket, 1003, "binary-only");
       toHost(frame(DATA, conn, bytes));
     },
     phoneClosed(socket) {
@@ -141,23 +211,37 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
      * already replaced. A socket with no usable mark is closed, since the room cannot route it.
      */
     restore(entries) {
-      const hosts = [], pendings = [], restored = [];
+      const hosts = [],
+        pendings = [],
+        restored = [];
       for (const { socket, state } of entries) {
         const role = state?.role;
-        if (role === 'host' && decimal(state.next) !== null) hosts.push({ socket, next: decimal(state.next) });
-        else if (role === 'pending' && nonceOf(state.challenge)) pendings.push({ socket, challenge: nonceOf(state.challenge) });
-        else if (role === 'phone' && decimal(state.conn)) restored.push({ socket, conn: decimal(state.conn) });
-        else drop(socket, 1011, 'lost-state');
+        if (role === "host" && decimal(state.next) !== null) hosts.push({ socket, next: decimal(state.next) });
+        else if (role === "pending" && nonceOf(state.challenge)) pendings.push({ socket, challenge: nonceOf(state.challenge) });
+        else if (role === "phone" && decimal(state.conn)) restored.push({ socket, conn: decimal(state.conn) });
+        else drop(socket, 1011, "lost-state");
       }
-      const kept = hosts.pop(), waiting = pendings.pop();
-      for (const { socket } of [...hosts, ...pendings]) drop(socket, 4409, 'replaced');
-      if (waiting) { pending = waiting.socket; challenge = waiting.challenge; }
-      if (!kept) { for (const { socket } of restored) drop(socket, 4410, 'host-gone'); return; }
-      host = kept.socket; next = kept.next;
+      const kept = hosts.pop(),
+        waiting = pendings.pop();
+      for (const { socket } of [...hosts, ...pendings]) drop(socket, 4409, "replaced");
+      if (waiting) {
+        pending = waiting.socket;
+        challenge = waiting.challenge;
+      }
+      if (!kept) {
+        for (const { socket } of restored) drop(socket, 4410, "host-gone");
+        return;
+      }
+      host = kept.socket;
+      next = kept.next;
       for (const { socket, conn } of restored) {
         const twin = phones.get(conn);
-        if (twin) { connOf.delete(twin); drop(twin, 1011, 'lost-state'); } // two phones on one conn: the later mark wins
-        phones.set(conn, socket); connOf.set(socket, conn);
+        if (twin) {
+          connOf.delete(twin);
+          drop(twin, 1011, "lost-state");
+        } // two phones on one conn: the later mark wins
+        phones.set(conn, socket);
+        connOf.set(socket, conn);
         if (conn > next) next = conn;
       }
       if (next !== kept.next) noteHost();
@@ -167,14 +251,16 @@ export function createRoom({ id, nonce = () => crypto.getRandomValues(new Uint8A
 
 /** A u64 counter written as a decimal string in a mark, or null. */
 function decimal(text) {
-  if (typeof text !== 'string' || !/^\d{1,20}$/.test(text)) return null;
+  if (typeof text !== "string" || !/^\d{1,20}$/.test(text)) return null;
   const value = BigInt(text);
   return value <= 0xffffffffffffffffn ? value : null;
 }
 /** A 32-byte challenge from a mark, or null. */
 function nonceOf(text) {
   try {
-    const bytes = typeof text === 'string' ? fromB64url(text) : null;
+    const bytes = typeof text === "string" ? fromB64url(text) : null;
     return bytes?.length === 32 ? bytes : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

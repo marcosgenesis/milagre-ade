@@ -255,18 +255,25 @@ export function ImageGeneration({
           </AnimatePresence>
 
           {status === "complete" && actions ? (
-            <div className="absolute right-2 bottom-2 z-10 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/media:opacity-100 focus-within:opacity-100">{actions}</div>
+            <div className="absolute right-2 bottom-2 z-10 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/media:opacity-100 focus-within:opacity-100">
+              {actions}
+            </div>
           ) : null}
 
           {resolution ? (
-            <span className="absolute top-2 right-2 z-10 rounded-full bg-surface/75 px-2 py-0.5 font-mono text-[10px] tabular-nums text-ink-2">{resolution}</span>
+            <span className="absolute top-2 right-2 z-10 rounded-full bg-surface/75 px-2 py-0.5 font-mono text-[10px] tabular-nums text-ink-2">
+              {resolution}
+            </span>
           ) : null}
         </div>
 
         {showStatus || prompt ? (
           <div className="mt-2 text-left">
             {showStatus ? (
-              <div aria-live="polite" className={cx("flex min-h-5 items-center gap-2 text-[12.5px] font-medium text-ink", status === "error" && "text-red", statusClassName)}>
+              <div
+                aria-live="polite"
+                className={cx("flex min-h-5 items-center gap-2 text-[12.5px] font-medium text-ink", status === "error" && "text-red", statusClassName)}
+              >
                 <DitherMark status={status} reduce={reduce} />
                 <AnimatePresence mode="popLayout" initial={false}>
                   <motion.span
@@ -281,7 +288,11 @@ export function ImageGeneration({
                 </AnimatePresence>
               </div>
             ) : null}
-            {prompt ? <div className="mt-0.5 truncate text-[12px] text-ink-3" title={prompt}>"{prompt}"</div> : null}
+            {prompt ? (
+              <div className="mt-0.5 truncate text-[12px] text-ink-3" title={prompt}>
+                "{prompt}"
+              </div>
+            ) : null}
           </div>
         ) : null}
 

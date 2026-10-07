@@ -6,10 +6,6 @@
     "noUnusedParameters": true,
     "noUnusedLocals": true,
     "allowImportingTsExtensions": true,
-    "types": [
-      "react",
-      "react-native",
-      "node"
-    ]
+    "types": ["react", "react-native", "node"]
   }
 }

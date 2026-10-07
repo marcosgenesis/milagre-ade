@@ -8,7 +8,13 @@ import { useScrollFade } from "../../lib/use-scroll-fade";
  * column) or a class. Inside another scroller (tool output in the transcript), pass `chainScroll` so the wheel moves
  * on to the outer one once this one reaches its end.
  */
-export function ScrollArea({ as: Tag = "div", ref, chainScroll = false, className = "", ...props }: HTMLAttributes<HTMLElement> & {
+export function ScrollArea({
+  as: Tag = "div",
+  ref,
+  chainScroll = false,
+  className = "",
+  ...props
+}: HTMLAttributes<HTMLElement> & {
   as?: "div" | "ul" | "ol";
   ref?: Ref<HTMLElement>;
   chainScroll?: boolean;

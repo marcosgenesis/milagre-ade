@@ -26,14 +26,23 @@ function fakeShell(script) {
 function fakeTimers() {
   const timers = [];
   return {
-    setTimeoutImpl: (callback) => { const timer = { callback, cleared: false }; timers.push(timer); return timer; },
-    clearTimeoutImpl: (timer) => { timer.cleared = true; },
+    setTimeoutImpl: (callback) => {
+      const timer = { callback, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeoutImpl: (timer) => {
+      timer.cleared = true;
+    },
     fire: () => timers.filter((timer) => !timer.cleared).forEach((timer) => timer.callback()),
     timers,
   };
 }
 
-const envBlock = (vars) => Object.entries(vars).map(([key, value]) => `${key}=${value}\0`).join("");
+const envBlock = (vars) =>
+  Object.entries(vars)
+    .map(([key, value]) => `${key}=${value}\0`)
+    .join("");
 
 test("returns the first path which reports", async () => {
   const execFileImpl = (file, args, options, callback) => callback(null, "/opt/homebrew/bin/codex\n/usr/local/bin/codex\n");
@@ -63,7 +72,13 @@ test("gives up on a shell that hangs, and kills its process group", async () => 
   const { spawnImpl } = fakeShell(() => {});
   const killed = [];
   const timers = fakeTimers();
-  const promise = readLoginShellEnv({ shell: "/bin/bash", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  const promise = readLoginShellEnv({
+    shell: "/bin/bash",
+    spawnImpl,
+    killGroup: (pid) => killed.push(pid),
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+  });
   timers.fire();
   const env = await promise;
   assert.equal(env, null);
@@ -98,12 +113,21 @@ test("reads PATH from a real bash login shell", async () => {
 });
 
 test("merges PATH lists in order, without duplicates or empty entries", () => {
-  assert.equal(mergePath("/opt/homebrew/bin:/usr/bin::/bin", "/usr/bin:/bin:/usr/sbin:/sbin", ["/Users/x/.local/bin", "/opt/homebrew/bin"]), "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin");
+  assert.equal(
+    mergePath("/opt/homebrew/bin:/usr/bin::/bin", "/usr/bin:/bin:/usr/sbin:/sbin", ["/Users/x/.local/bin", "/opt/homebrew/bin"]),
+    "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin",
+  );
   assert.equal(mergePath(undefined, "/usr/bin:/bin", []), "/usr/bin:/bin");
 });
 
 test("lists the install folders that exist, with nvm's default node", () => {
-  const present = new Set(["/Users/x/.local/bin", "/opt/homebrew/bin", "/Users/x/.nvm/versions/node", "/Users/x/.nvm/versions/node/v24.13.0/bin", "/Users/x/.bun/bin"]);
+  const present = new Set([
+    "/Users/x/.local/bin",
+    "/opt/homebrew/bin",
+    "/Users/x/.nvm/versions/node",
+    "/Users/x/.nvm/versions/node/v24.13.0/bin",
+    "/Users/x/.bun/bin",
+  ]);
   const deps = (alias) => ({
     exists: (dir) => present.has(dir),
     readdir: () => ["v22.22.0", "v24.2.0", "v24.13.0", ".DS_Store"],
@@ -112,7 +136,12 @@ test("lists the install folders that exist, with nvm's default node", () => {
       return `${alias}\n`;
     },
   });
-  assert.deepEqual(installDirs("/Users/x", deps("24")), ["/Users/x/.local/bin", "/opt/homebrew/bin", "/Users/x/.nvm/versions/node/v24.13.0/bin", "/Users/x/.bun/bin"]);
+  assert.deepEqual(installDirs("/Users/x", deps("24")), [
+    "/Users/x/.local/bin",
+    "/opt/homebrew/bin",
+    "/Users/x/.nvm/versions/node/v24.13.0/bin",
+    "/Users/x/.bun/bin",
+  ]);
   present.add("/Users/x/.nvm/versions/node/v22.22.0/bin");
   assert.ok(installDirs("/Users/x", deps("v22.22.0")).includes("/Users/x/.nvm/versions/node/v22.22.0/bin"));
   assert.ok(installDirs("/Users/x", deps("lts/*")).includes("/Users/x/.nvm/versions/node/v24.13.0/bin"));
@@ -124,9 +153,27 @@ test("fills in what the app lacks from the login shell, and puts the shell's PAT
   const asked = [];
   const readShellEnv = async (options) => {
     asked.push(options.shell);
-    return { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: "/elsewhere", TMPDIR: "/tmp/", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "key", PWD: "/Users/x", OLDPWD: "/", SHLVL: "2", _: "/usr/bin/env", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" };
+    return {
+      PATH: "/opt/homebrew/bin:/usr/bin:/bin",
+      HOME: "/elsewhere",
+      TMPDIR: "/tmp/",
+      LANG: "en_US.UTF-8",
+      ANTHROPIC_API_KEY: "key",
+      PWD: "/Users/x",
+      OLDPWD: "/",
+      SHLVL: "2",
+      _: "/usr/bin/env",
+      ELECTRON_RUN_AS_NODE: "1",
+      ELECTRON_NO_ATTACH_CONSOLE: "1",
+    };
   };
-  const result = await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"] });
+  const result = await loadLoginEnvironment({
+    target,
+    platform: "darwin",
+    home: "/Users/x",
+    readShellEnv,
+    dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"],
+  });
   assert.deepEqual(result, { source: "shell" });
   assert.deepEqual(asked, ["/bin/zsh"]);
   assert.deepEqual(target, {
@@ -141,12 +188,21 @@ test("fills in what the app lacks from the login shell, and puts the shell's PAT
 
 test("falls back to the install folders when the shell gives nothing, and fills Windows install folders", async () => {
   const target = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", SHELL: "/bin/zsh" };
-  const result = await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv: async () => null, dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"] });
+  const result = await loadLoginEnvironment({
+    target,
+    platform: "darwin",
+    home: "/Users/x",
+    readShellEnv: async () => null,
+    dirs: () => ["/Users/x/.local/bin", "/opt/homebrew/bin"],
+  });
   assert.deepEqual(result, { source: "fallback" });
   assert.equal(target.PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin:/opt/homebrew/bin");
 
   const windows = { PATH: "C:\\Windows" };
-  assert.deepEqual(await loadLoginEnvironment({ target: windows, platform: "win32", dirs: () => [], readShellEnv: async () => assert.fail("no shell on Windows") }), { source: "fallback" });
+  assert.deepEqual(
+    await loadLoginEnvironment({ target: windows, platform: "win32", dirs: () => [], readShellEnv: async () => assert.fail("no shell on Windows") }),
+    { source: "fallback" },
+  );
   assert.deepEqual(windows, { PATH: "C:\\Windows" });
 });
 
@@ -156,7 +212,13 @@ test("a shell that hangs after printing the environment is still killed at the t
   });
   const killed = [];
   const timers = fakeTimers();
-  const env = await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  const env = await readLoginShellEnv({
+    shell: "/bin/zsh",
+    spawnImpl,
+    killGroup: (pid) => killed.push(pid),
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+  });
   // The environment is in, and the timer is still armed: the shell hasn't ended.
   assert.deepEqual(env, { PATH: "/opt/homebrew/bin:/usr/bin" });
   assert.equal(timers.timers.length, 1);
@@ -173,7 +235,13 @@ test("a shell that ends in time is not killed", async () => {
   });
   const killed = [];
   const timers = fakeTimers();
-  await readLoginShellEnv({ shell: "/bin/zsh", spawnImpl, killGroup: (pid) => killed.push(pid), setTimeoutImpl: timers.setTimeoutImpl, clearTimeoutImpl: timers.clearTimeoutImpl });
+  await readLoginShellEnv({
+    shell: "/bin/zsh",
+    spawnImpl,
+    killGroup: (pid) => killed.push(pid),
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+  });
   // Its end disarmed the timer, so a late firing does nothing.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(timers.timers[0].cleared, true);
@@ -185,7 +253,10 @@ test("an app started from a terminal keeps its own PATH first, and the shell's c
   const target = { PATH: "/Users/x/proj/.venv/bin:/Users/x/.nvm/versions/node/v22.0.0/bin:/usr/bin:/bin", HOME: "/Users/x", SHELL: "/bin/zsh" };
   const readShellEnv = async () => ({ PATH: "/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/usr/bin:/bin" });
   await loadLoginEnvironment({ target, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin"] });
-  assert.equal(target.PATH, "/Users/x/proj/.venv/bin:/Users/x/.nvm/versions/node/v22.0.0/bin:/usr/bin:/bin:/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/Users/x/.local/bin");
+  assert.equal(
+    target.PATH,
+    "/Users/x/proj/.venv/bin:/Users/x/.nvm/versions/node/v22.0.0/bin:/usr/bin:/bin:/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/Users/x/.local/bin",
+  );
   const finder = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: "/Users/x", SHELL: "/bin/zsh" };
   await loadLoginEnvironment({ target: finder, platform: "darwin", home: "/Users/x", readShellEnv, dirs: () => ["/Users/x/.local/bin"] });
   assert.equal(finder.PATH, "/opt/homebrew/bin:/Users/x/.nvm/versions/node/v24.13.0/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/x/.local/bin");

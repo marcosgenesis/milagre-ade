@@ -26,9 +26,10 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 1200, height: 500, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   // Moves carry leftButtonDown, or Chromium reads them as the button already released.
-  const mouse = (type, x, y) => window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
+  const mouse = (type, x, y) =>
+    window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -37,16 +38,22 @@ async function browserChecks() {
     throw new Error(`Timed out: ${source}`);
   }
   const width = () => evaluate('document.querySelector("aside").getBoundingClientRect().width');
-  const handle = () => evaluate('(() => { const r = document.querySelector("[aria-label=\\"Resize sidebar\\"]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()');
-  const drag = async dx => {
+  const handle = () =>
+    evaluate(
+      '(() => { const r = document.querySelector("[aria-label=\\"Resize sidebar\\"]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()',
+    );
+  const drag = async (dx) => {
     const { x, y } = await handle();
     mouse("mouseMove", x, y);
     mouse("mouseDown", x, y);
-    for (let i = 1; i <= 10; i++) { mouse("mouseMove", x + Math.round(dx * i / 10), y); await delay(16); }
+    for (let i = 1; i <= 10; i++) {
+      mouse("mouseMove", x + Math.round((dx * i) / 10), y);
+      await delay(16);
+    }
     mouse("mouseUp", x + dx, y);
     await delay(400);
   };
-  const screenshot = async name => {
+  const screenshot = async (name) => {
     const image = await window.webContents.capturePage({ x: 0, y: 0, width: 640, height: 500 });
     require("node:fs").writeFileSync(path.join(require("node:os").tmpdir(), `milagre-sidebar-${name}.png`), image.toPNG());
   };
@@ -62,7 +69,10 @@ async function browserChecks() {
       // Mid-drag, so the edge line shows.
       const { x, y } = await handle();
       mouse("mouseDown", x, y);
-      for (let i = 1; i <= 10; i++) { mouse("mouseMove", x + i * 8, y); await delay(16); }
+      for (let i = 1; i <= 10; i++) {
+        mouse("mouseMove", x + i * 8, y);
+        await delay(16);
+      }
       await delay(100);
       await screenshot("dragging");
       mouse("mouseUp", x + 80, y);
@@ -115,19 +125,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "sidebar-resize-fixture",
-      resolveId(id) { if (id === "/__sidebar_resize_fixture.tsx") return id; },
-      load(id) { if (id === "/__sidebar_resize_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__sidebar_resize__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__sidebar_resize_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "sidebar-resize-fixture",
+        resolveId(id) {
+          if (id === "/__sidebar_resize_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__sidebar_resize_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__sidebar_resize__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__sidebar_resize_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -136,13 +155,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__sidebar_resize__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

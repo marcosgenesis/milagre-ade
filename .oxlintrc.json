@@ -1,13 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript",
-    "react",
-    "import",
-    "promise",
-    "unicorn",
-    "oxc"
-  ],
+  "plugins": ["typescript", "react", "import", "promise", "unicorn", "oxc"],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -21,11 +14,7 @@
     "import/no-unassigned-import": [
       "error",
       {
-        "allow": [
-          "**/*.css",
-          "react-native-get-random-values",
-          "expo-router/entry"
-        ]
+        "allow": ["**/*.css", "react-native-get-random-values", "expo-router/entry"]
       }
     ],
     "no-console": "off",
@@ -45,21 +34,10 @@
     "eslint/preserve-caught-error": "warn",
     "no-await-in-loop": "off"
   },
-  "ignorePatterns": [
-    "**/dist/**",
-    "**/release/**",
-    "**/.expo/**",
-    "apps/mobile/ios/**",
-    "apps/mobile/android/**",
-    "squashfs-root/**",
-    "docs/**"
-  ],
+  "ignorePatterns": ["**/dist/**", "**/release/**", "**/.expo/**", "apps/mobile/ios/**", "apps/mobile/android/**", "squashfs-root/**", "docs/**"],
   "overrides": [
     {
-      "files": [
-        "**/*.test.*",
-        "scripts/test-*.cjs"
-      ],
+      "files": ["**/*.test.*", "scripts/test-*.cjs"],
       "rules": {
         "no-shadow": "off"
       }

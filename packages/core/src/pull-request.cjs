@@ -11,7 +11,10 @@ const PR_REF = /^(?:\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/;
 const MAX_REFS = 20;
 
 const execOptions = (cwd) => ({
-  cwd, encoding: "utf8", timeout: 15_000, maxBuffer: 1024 * 1024,
+  cwd,
+  encoding: "utf8",
+  timeout: 15_000,
+  maxBuffer: 1024 * 1024,
   env: { ...process.env, GH_PROMPT_DISABLED: "1" },
 });
 
@@ -51,18 +54,22 @@ function createPullRequestReader({ exec = execFileAsync, now = Date.now, ttlMs =
   function batchFor(cwd, repo) {
     const hit = batches.get(repo);
     if (hit && now() - hit.at < ttlMs) return hit.read;
-    const read = exec("gh", ["pr", "list", "--state", "all", "--limit", String(BATCH_LIMIT), "--json", `${FIELDS},headRefName`], batchOptions(cwd)).then(({ stdout }) => {
-      const list = JSON.parse(stdout);
-      if (!Array.isArray(list)) throw new Error("Unexpected gh output");
-      // Newest first, so the first PR seen for a branch is its latest, as `--head <branch> --limit 1` returns.
-      const byBranch = new Map();
-      for (const pr of list) if (typeof pr?.headRefName === "string" && !byBranch.has(pr.headRefName)) byBranch.set(pr.headRefName, pr);
-      return { byBranch, truncated: list.length >= BATCH_LIMIT };
-    });
+    const read = exec("gh", ["pr", "list", "--state", "all", "--limit", String(BATCH_LIMIT), "--json", `${FIELDS},headRefName`], batchOptions(cwd)).then(
+      ({ stdout }) => {
+        const list = JSON.parse(stdout);
+        if (!Array.isArray(list)) throw new Error("Unexpected gh output");
+        // Newest first, so the first PR seen for a branch is its latest, as `--head <branch> --limit 1` returns.
+        const byBranch = new Map();
+        for (const pr of list) if (typeof pr?.headRefName === "string" && !byBranch.has(pr.headRefName)) byBranch.set(pr.headRefName, pr);
+        return { byBranch, truncated: list.length >= BATCH_LIMIT };
+      },
+    );
     batches.set(repo, { at: now(), read });
     if (batches.size > 50) batches.delete(batches.keys().next().value);
     // A failed read isn't kept: the next call retries rather than serving the failure.
-    read.catch(() => { if (batches.get(repo)?.read === read) batches.delete(repo); });
+    read.catch(() => {
+      if (batches.get(repo)?.read === read) batches.delete(repo);
+    });
     return read;
   }
   return async function readPullRequestBatched(cwd) {
@@ -88,15 +95,17 @@ function createPullRequestReader({ exec = execFileAsync, now = Date.now, ttlMs =
 /** The PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */
 async function readPullRequests(cwd, refs, exec = execFileAsync) {
   if (!Array.isArray(refs)) return [];
-  return Promise.all(refs.slice(0, MAX_REFS).map(async (ref) => {
-    if (typeof ref !== "string" || !PR_REF.test(ref)) return null;
-    try {
-      const { stdout } = await exec("gh", ["pr", "view", ref, "--json", FIELDS], execOptions(cwd));
-      return toPullRequest(JSON.parse(stdout));
-    } catch {
-      return null;
-    }
-  }));
+  return Promise.all(
+    refs.slice(0, MAX_REFS).map(async (ref) => {
+      if (typeof ref !== "string" || !PR_REF.test(ref)) return null;
+      try {
+        const { stdout } = await exec("gh", ["pr", "view", ref, "--json", FIELDS], execOptions(cwd));
+        return toPullRequest(JSON.parse(stdout));
+      } catch {
+        return null;
+      }
+    }),
+  );
 }
 
 function toPullRequest(pr) {
@@ -112,7 +121,18 @@ function toPullRequest(pr) {
   const isBehind = pr.state === "OPEN" && pr.mergeStateStatus === "BEHIND";
   const changesRequested = pr.state === "OPEN" && pr.reviewDecision === "CHANGES_REQUESTED";
   const checks = pr.state === "OPEN" ? checksState(pr.statusCheckRollup) : undefined;
-  return { number: pr.number, url: url.href, state: pr.state, title: typeof pr.title === "string" ? pr.title : "", readyToMerge, hasConflicts, conflictStatusKnown, isBehind, changesRequested, ...(checks && { checks }) };
+  return {
+    number: pr.number,
+    url: url.href,
+    state: pr.state,
+    title: typeof pr.title === "string" ? pr.title : "",
+    readyToMerge,
+    hasConflicts,
+    conflictStatusKnown,
+    isBehind,
+    changesRequested,
+    ...(checks && { checks }),
+  };
 }
 
 // GitHub counts these check-run conclusions and commit-status states against the PR, as its merge box does.

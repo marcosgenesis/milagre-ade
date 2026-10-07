@@ -5,13 +5,23 @@ const { externalUrl, guardNavigation } = require("./links.cjs");
 
 function fakeContents() {
   const contents = new EventEmitter();
-  contents.setWindowOpenHandler = (handler) => { contents.openHandler = handler; };
+  contents.setWindowOpenHandler = (handler) => {
+    contents.openHandler = handler;
+  };
   return contents;
 }
 
 function navigate(contents, url) {
   let prevented = false;
-  contents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, url);
+  contents.emit(
+    "will-navigate",
+    {
+      preventDefault: () => {
+        prevented = true;
+      },
+    },
+    url,
+  );
   return prevented;
 }
 
@@ -50,7 +60,10 @@ test("the window never navigates away from the app", () => {
 test("a packaged app may only reload its own page", () => {
   const opened = [];
   const contents = fakeContents();
-  guardNavigation(contents, { appUrl: "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html", openExternal: (url) => opened.push(url) });
+  guardNavigation(contents, {
+    appUrl: "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html",
+    openExternal: (url) => opened.push(url),
+  });
   assert.equal(navigate(contents, "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html#chat"), false);
   assert.equal(navigate(contents, "file:///Users/me/notes.html"), true);
   assert.deepEqual(opened, []);

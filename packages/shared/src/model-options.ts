@@ -50,4 +50,3 @@ export const MODEL_CATALOG: ModelOption[] = [
   { id: "claude-opus-4-6", name: "Opus 4.6", provider: "claude", description: "Best for everyday, complex tasks" },
   { id: "claude-sonnet-4-6", name: "Sonnet 4.6", provider: "claude", description: "Efficient for routine tasks" },
 ];
-

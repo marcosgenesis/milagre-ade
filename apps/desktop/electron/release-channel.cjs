@@ -30,5 +30,5 @@ function configureUpdater(autoUpdater, channel) {
   autoUpdater.allowDowngrade = false;
 }
 /** @param {any} error */
-const isChannelNotPublished = error => error?.code === "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND";
+const isChannelNotPublished = (error) => error?.code === "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND";
 module.exports = { createReleaseChannelStore, configureUpdater, isChannelNotPublished };

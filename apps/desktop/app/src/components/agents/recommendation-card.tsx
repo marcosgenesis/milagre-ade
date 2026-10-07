@@ -10,7 +10,9 @@ interface RecommendationCardProps {
 function RecommendedBars() {
   return (
     <span className="flex items-end gap-0.5 text-green" aria-hidden="true">
-      {[0, 1, 2].map((bar) => <span key={bar} className="w-1 rounded-full bg-current" style={{ height: `${8 + bar * 3}px` }} />)}
+      {[0, 1, 2].map((bar) => (
+        <span key={bar} className="w-1 rounded-full bg-current" style={{ height: `${8 + bar * 3}px` }} />
+      ))}
     </span>
   );
 }
@@ -27,14 +29,25 @@ export function RecommendationCard({ question, options, onSelect }: Recommendati
     <>
       <div className="grid gap-1">
         {visible.map((option) => (
-          <button key={option.id} type="button" onClick={() => onSelect(option)} className="flex items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover">
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onSelect(option)}
+            className="flex items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover"
+          >
             <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{option.label}</span>
           </button>
         ))}
       </div>
       {others.length > 2 && (
         <div className="mt-2 flex items-center justify-end gap-2">
-          <button type="button" onClick={() => setShowAlternatives((current) => !current)} className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hover">{showAlternatives ? "Hide alternatives" : "Alternatives"}</button>
+          <button
+            type="button"
+            onClick={() => setShowAlternatives((current) => !current)}
+            className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hover"
+          >
+            {showAlternatives ? "Hide alternatives" : "Alternatives"}
+          </button>
         </div>
       )}
     </>
@@ -44,7 +57,11 @@ export function RecommendationCard({ question, options, onSelect }: Recommendati
       <div className="px-3.5 pb-3 pt-3">
         <p className="text-[13px] font-medium leading-5 text-ink">{question}</p>
         {recommendation && (
-          <button type="button" onClick={() => onSelect(recommendation)} className="mt-2.5 flex w-full items-start gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover">
+          <button
+            type="button"
+            onClick={() => onSelect(recommendation)}
+            className="mt-2.5 flex w-full items-start gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left transition-colors hover:bg-hover"
+          >
             <RecommendedBars />
             <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{recommendation.label}</span>
             <span className="shrink-0 text-[11px] font-medium text-green">Recommended</span>

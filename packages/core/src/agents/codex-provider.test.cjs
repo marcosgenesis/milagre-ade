@@ -31,7 +31,11 @@ function codex(t, { scenario = "reply", resumeId, tldrEnabled, linked, command =
 const ended = (events, count = 1) => waitUntil(() => events.filter(isTerminal).length >= count);
 const received = async (session) => (await session.rpc.request("fake/received")).received;
 const asked = (events) => waitUntil(() => events.some((event) => event.type === "permission-request"));
-const replyText = (events) => events.filter((event) => event.type === "text-delta").map((event) => event.text).join("");
+const replyText = (events) =>
+  events
+    .filter((event) => event.type === "text-delta")
+    .map((event) => event.text)
+    .join("");
 
 test("streams a reply and keeps one thread across turns", async (t) => {
   const { session, events } = codex(t);
@@ -88,7 +92,10 @@ test("Ask asks about untrusted commands, Auto only about leaving the sandbox", a
   await session.startTurn({ ...TURN, permissionMode: "auto" });
   await ended(events, 2);
   const turnStarts = (await received(session)).filter((message) => message.method === "turn/start").map((message) => message.params);
-  assert.deepEqual(turnStarts.map((params) => params.approvalPolicy), ["untrusted", "on-request"]);
+  assert.deepEqual(
+    turnStarts.map((params) => params.approvalPolicy),
+    ["untrusted", "on-request"],
+  );
   for (const params of turnStarts) {
     assert.equal(params.sandboxPolicy.type, "workspaceWrite");
     assert.deepEqual(params.sandboxPolicy.writableRoots, [os.tmpdir()]);
@@ -102,7 +109,10 @@ test("resumes a saved thread without announcing it again", async (t) => {
   const resume = (await received(session)).find((message) => message.method === "thread/resume").params;
   assert.equal(resume.threadId, "thread-9");
   assert.deepEqual(resume.config, { features: { default_mode_request_user_input: true } });
-  assert.equal(events.some((event) => event.type === "session-started"), false);
+  assert.equal(
+    events.some((event) => event.type === "session-started"),
+    false,
+  );
   assert.equal(session.nativeId, "thread-9");
 });
 
@@ -129,7 +139,10 @@ test("cancels before Codex has started the turn", async (t) => {
   await pending;
   await ended(events);
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
-  assert.equal((await received(session)).some((message) => message.method === "turn/start"), false);
+  assert.equal(
+    (await received(session)).some((message) => message.method === "turn/start"),
+    false,
+  );
 });
 
 test("reports a failed turn and a crashed process", async (t) => {
@@ -149,13 +162,28 @@ test("asks before running a command and passes the answer back", async (t) => {
   const { session, events } = codex(t, { scenario: "approval" });
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await asked(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true, stepId: "cmd-1",
-  });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-request"),
+    {
+      type: "permission-request",
+      requestId: "srv-1",
+      kind: "command",
+      tool: "Shell",
+      title: "Run this command?",
+      command: "rm -rf build",
+      cwd: "/repo",
+      reason: "Clean the build",
+      allowForChat: true,
+      stepId: "cmd-1",
+    },
+  );
   assert.equal(session.respondToPermission("srv-1", "allow-for-chat"), true);
   await ended(events);
   assert.equal(replyText(events), "decision:acceptForSession");
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "allow-for-chat" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "srv-1", decision: "allow-for-chat" },
+  );
 });
 
 test("switching to Full mid-turn approves the waiting command", async (t) => {
@@ -165,7 +193,10 @@ test("switching to Full mid-turn approves the waiting command", async (t) => {
   session.setPermissionMode("full");
   await ended(events);
   assert.equal(replyText(events), "decision:accept");
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "allow" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "srv-1", decision: "allow" },
+  );
 });
 
 test("switching to Auto mid-turn leaves a waiting command to the user", async (t) => {
@@ -191,9 +222,21 @@ test("file changes show the diff Codex is about to apply", async (t) => {
   const { session, events } = codex(t, { scenario: "file-approval" });
   await session.startTurn(TURN);
   await asked(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "srv-1", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true, stepId: "patch-1",
-  });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-request"),
+    {
+      type: "permission-request",
+      requestId: "srv-1",
+      kind: "edit",
+      tool: "Edit files",
+      title: "Edit notes.txt?",
+      files: ["/repo/notes.txt"],
+      diff: "--- /repo/notes.txt\n+hello\n",
+      reason: "Write notes",
+      allowForChat: true,
+      stepId: "patch-1",
+    },
+  );
   session.respondToPermission("srv-1", "allow");
   await ended(events);
   assert.equal(replyText(events), "decision:accept");
@@ -205,7 +248,10 @@ test("interrupting cancels a pending approval", async (t) => {
   await asked(events);
   await session.interrupt();
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" },
+  );
   assert.equal(replyText(events), "decision:cancel");
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
 });
@@ -214,8 +260,14 @@ test("a request Codex withdraws is dropped without an answer", async (t) => {
   const { session, events } = codex(t, { scenario: "withdrawn" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" });
-  assert.equal((await received(session)).some((message) => message.id === "srv-1"), false);
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "srv-1", decision: "cancelled" },
+  );
+  assert.equal(
+    (await received(session)).some((message) => message.id === "srv-1"),
+    false,
+  );
   assert.equal(session.respondToPermission("srv-1", "allow"), false);
 });
 
@@ -224,7 +276,10 @@ test("extra sandbox permissions are declined", async (t) => {
   await session.startTurn(TURN);
   await ended(events);
   assert.equal(replyText(events), 'answer:{"permissions":{},"scope":"turn"}');
-  assert.equal(events.some((event) => event.type === "permission-request"), false);
+  assert.equal(
+    events.some((event) => event.type === "permission-request"),
+    false,
+  );
 });
 
 test("passes images as local files and removes them afterwards", async (t) => {
@@ -289,7 +344,10 @@ test("keeps the saved thread when resuming fails without an answer", async (t) =
   const { session, events } = codex(t, { scenario: "resume-exit", resumeId: "thread-9" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.equal(
+    events.some((event) => event.type === "session-reset"),
+    false,
+  );
   assert.equal(events.at(-1).type, "turn-failed");
   assert.equal(session.nativeId, "thread-9");
 });
@@ -314,7 +372,10 @@ test("a steer Codex refuses starts the next turn once this one ends", async (t) 
   const late = await session.startTurn({ ...TURN, prompt: "too late" });
   await ended(events, 2);
   assert.deepEqual(late, { turnId: "turn-2", steered: false });
-  assert.deepEqual(events.filter((event) => event.type === "turn-started").map((event) => event.turnId), ["turn-1", "turn-2"]);
+  assert.deepEqual(
+    events.filter((event) => event.type === "turn-started").map((event) => event.turnId),
+    ["turn-1", "turn-2"],
+  );
   const types = events.map((event) => event.type);
   assert.ok(types.indexOf("turn-completed") < types.lastIndexOf("turn-started"));
   const starts = (await received(session)).filter((message) => message.method === "turn/start");
@@ -348,17 +409,26 @@ test("a turn's end settles even when a new turn starts during its cleanup", asyn
   await session.startTurn(TURN);
   const firstEnded = session.turnEnded;
   let settled = false;
-  void firstEnded.then(() => { settled = true; });
+  void firstEnded.then(() => {
+    settled = true;
+  });
   // Hold the first turn's finishTurn on a pending image cleanup, so a new turn can start inside it.
   let release;
-  session.imageSets.push({ cleanup: () => new Promise((resolve) => { release = resolve; }) });
+  session.imageSets.push({
+    cleanup: () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  });
   await session.interrupt();
   await waitUntil(() => release);
   assert.equal(session.turnActive, false);
   await session.startTurn(TURN);
   const secondEnded = session.turnEnded;
   let secondSettled = false;
-  void secondEnded.then(() => { secondSettled = true; });
+  void secondEnded.then(() => {
+    secondSettled = true;
+  });
   release();
   await waitUntil(() => settled);
   assert.notEqual(firstEnded, secondEnded);
@@ -389,7 +459,10 @@ test("a message sent while Stop closes the session is handed back as sessionClos
   await assert.rejects(session.startTurn({ ...TURN, prompt: "Next" }), (error) => error.sessionClosed === true);
   await stopping;
   assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
-  assert.equal(events.some((event) => event.type === "turn-failed"), false);
+  assert.equal(
+    events.some((event) => event.type === "turn-failed"),
+    false,
+  );
   assert.equal(session.closed, true);
 });
 
@@ -405,7 +478,10 @@ test("an approval requested after the turn was stopped is cancelled at once", as
     if (!answer) await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.deepEqual(answer.result, { decision: "cancel" });
-  assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
+  assert.equal(
+    events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"),
+    false,
+  );
   assert.equal(session.permissions.size, 0);
 });
 
@@ -440,7 +516,10 @@ test("a command still running when the turn is stopped gets no step-completed", 
   await waitUntil(() => events.some((event) => event.type === "step-started"));
   await session.interrupt();
   await ended(events);
-  assert.equal(events.some((event) => event.type === "step-completed"), false);
+  assert.equal(
+    events.some((event) => event.type === "step-completed"),
+    false,
+  );
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
   assert.equal(session.state.steps.size, 0);
 });
@@ -470,15 +549,34 @@ test("Codex's question becomes a card, and the answers go back per question id",
   const { session, events } = codex(t, { scenario: "question" });
   await session.startTurn(TURN);
   await questioned(events);
-  assert.deepEqual(events.find((event) => event.type === "question-request"), {
-    type: "question-request",
-    requestId: "srv-q",
-    questions: [{ id: "color", header: "Color", question: "Which color?", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false, allowOther: true, secret: false }],
-  });
+  assert.deepEqual(
+    events.find((event) => event.type === "question-request"),
+    {
+      type: "question-request",
+      requestId: "srv-q",
+      questions: [
+        {
+          id: "color",
+          header: "Color",
+          question: "Which color?",
+          options: [
+            { label: "Red", description: "Warm" },
+            { label: "Green", description: "Calm" },
+          ],
+          multiSelect: false,
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    },
+  );
   assert.equal(session.answerQuestion("srv-q", { color: ["Green"] }), true);
   await ended(events);
   assert.equal(replyText(events), 'answer:{"answers":{"color":{"answers":["Green"]}}}');
-  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "answered" });
+  assert.deepEqual(
+    events.find((event) => event.type === "question-resolved"),
+    { type: "question-resolved", requestId: "srv-q", outcome: "answered" },
+  );
 });
 
 test("dismissing Codex's question sends no answers", async (t) => {
@@ -497,7 +595,10 @@ test("interrupting cancels Codex's open question", async (t) => {
   await questioned(events);
   await session.interrupt();
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" });
+  assert.deepEqual(
+    events.find((event) => event.type === "question-resolved"),
+    { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" },
+  );
   assert.equal(replyText(events), 'answer:{"answers":{}}');
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
   assert.equal(session.answerQuestion("srv-q", { color: ["Green"] }), false);
@@ -507,8 +608,14 @@ test("a question Codex withdraws is dropped without an answer", async (t) => {
   const { session, events } = codex(t, { scenario: "question-withdrawn" });
   await session.startTurn(TURN);
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" });
-  assert.equal((await received(session)).some((message) => message.id === "srv-q"), false);
+  assert.deepEqual(
+    events.find((event) => event.type === "question-resolved"),
+    { type: "question-resolved", requestId: "srv-q", outcome: "cancelled" },
+  );
+  assert.equal(
+    (await received(session)).some((message) => message.id === "srv-q"),
+    false,
+  );
   assert.equal(session.answerQuestion("srv-q", null), false);
 });
 
@@ -532,7 +639,10 @@ test("a question asked after the turn was stopped gets no answers at once", asyn
   await session.interrupt();
   await ended(events);
   assert.deepEqual((await replyTo(session, "srv-late")).result, { answers: {} });
-  assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
+  assert.equal(
+    events.some((event) => event.type === "question-request" || event.type === "question-resolved"),
+    false,
+  );
   assert.equal(session.questions.size, 0);
 });
 
@@ -545,11 +655,13 @@ test("threads start and resume without the question tool when Codex rejects the 
     assert.equal(calls.length, 2);
     assert.equal(calls[0].params.config !== undefined, true);
     assert.equal("config" in calls[1].params, false);
-    assert.equal(events.some((event) => event.type === "session-reset"), false);
+    assert.equal(
+      events.some((event) => event.type === "session-reset"),
+      false,
+    );
     assert.deepEqual(events.at(-1), { type: "turn-completed" });
   }
 });
-
 
 test("a Chat's linked tools reach Codex as an MCP server in the thread config; a Codex that refuses it makes the Chat receive-only", async (t) => {
   const reported = [];
@@ -558,13 +670,20 @@ test("a Chat's linked tools reach Codex as an MCP server in the thread config; a
   await session.startTurn(TURN);
   await ended(events);
   const start = (await received(session)).find((message) => message.method === "thread/start").params;
-  assert.deepEqual(start.config, { features: { default_mode_request_user_input: true }, mcp_servers: { milagre: { url: "http://127.0.0.1:1234/mcp/abc", tool_timeout_sec: 86400 } } });
+  assert.deepEqual(start.config, {
+    features: { default_mode_request_user_input: true },
+    mcp_servers: { milagre: { url: "http://127.0.0.1:1234/mcp/abc", tool_timeout_sec: 86400 } },
+  });
   assert.deepEqual(reported, [true]);
   const rejecting = codex(t, { scenario: "reject-config", linked });
   await rejecting.session.startTurn(TURN);
   await ended(rejecting.events);
   const attempts = (await received(rejecting.session)).filter((message) => message.method === "thread/start").map((message) => message.params.config);
-  assert.deepEqual(attempts, [start.config, { features: { default_mode_request_user_input: true } }, undefined], "the MCP server goes first, the whole config last");
+  assert.deepEqual(
+    attempts,
+    [start.config, { features: { default_mode_request_user_input: true } }, undefined],
+    "the MCP server goes first, the whole config last",
+  );
   assert.deepEqual(reported, [true, false]);
   assert.deepEqual(rejecting.events.at(-1), { type: "turn-completed" });
 });
@@ -594,20 +713,38 @@ test("after a login failure the next message starts a fresh app-server that resu
     send: (chatId, event) => sent.push(event),
     createSession: (provider, options) => {
       const scenario = sessions.length === 0 ? "unauthorized" : "reply";
-      const session = new CodexSession({ ...options, cwd: os.tmpdir(), clientVersion: "test", createRpc: (rpcOptions) => new CodexRpc({ ...rpcOptions, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } }) });
+      const session = new CodexSession({
+        ...options,
+        cwd: os.tmpdir(),
+        clientVersion: "test",
+        createRpc: (rpcOptions) => new CodexRpc({ ...rpcOptions, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } }),
+      });
       sessions.push(session);
       return session;
     },
   });
   t.after(() => Promise.all(sessions.map((session) => session.close())));
-  const request = { chatId: "chat-1", provider: "codex", cwd: os.tmpdir(), command: process.execPath, prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto", resumeId: "thread-1" };
+  const request = {
+    chatId: "chat-1",
+    provider: "codex",
+    cwd: os.tmpdir(),
+    command: process.execPath,
+    prompt: "Hi",
+    images: [],
+    model: "gpt-6-sol",
+    permissionMode: "auto",
+    resumeId: "thread-1",
+  };
   await manager.startTurn(request);
   await waitUntil(() => sent.some((event) => event.login) && sessions[0].closed);
   await manager.startTurn(request);
   await waitUntil(() => sent.filter(isTerminal).length === 2);
   assert.equal(sessions.length, 2);
   assert.deepEqual(sent.at(-1), { type: "turn-completed" });
-  assert.equal(sent.some((event) => event.message === RESUME_FAILED_MESSAGE), false);
+  assert.equal(
+    sent.some((event) => event.message === RESUME_FAILED_MESSAGE),
+    false,
+  );
 });
 
 test("a crashed Codex's failure is one of Milagre's own messages", async (t) => {
@@ -616,7 +753,6 @@ test("a crashed Codex's failure is one of Milagre's own messages", async (t) => 
   await ended(events);
   assert.equal(events.at(-1).notice, true);
 });
-
 
 test("TLDR can be disabled when starting or resuming Codex", async (t) => {
   for (const resumeId of [undefined, "thread-existing"]) {
@@ -631,39 +767,79 @@ test("TLDR can be disabled when starting or resuming Codex", async (t) => {
 });
 
 function childPoller(request) {
- const events=[];const session=new CodexSession({emit:e=>events.push(e)});
- session.state.threadId='parent';session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:1,transcript:[]}]]);
- session.rpc={request};return {session,events};
+  const events = [];
+  const session = new CodexSession({ emit: (e) => events.push(e) });
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: 1, transcript: [] }]]);
+  session.rpc = { request };
+  return { session, events };
 }
 
-test('reads paginated child history without resuming and keeps completion separate from parent',async()=>{
- const {session,events}=childPoller(async(method,params)=>{
-  if(method==='thread/read'){assert.deepEqual(params,{threadId:'child'});return {thread:{id:'child',status:{type:'idle'}}};}
-  assert.equal(method,'thread/turns/list');assert.equal(params.itemsView,'full');assert.equal(params.sortDirection,'desc');
-  return {data:[{id:'t',status:'completed',items:[{id:'m',type:'agentMessage',text:'Paged result'}]}],nextCursor:null,backwardsCursor:'anchor-t'};
- });
- await session.refreshSubagents();assert.equal(events.some(e=>e.type==='turn-completed'),false);
- const child=events.filter(e=>e.type==='subagent-update').at(-1).agent;
- assert.equal(child.status,'completed');assert.equal(child.transcript[0].text,'Paged result');
+test("reads paginated child history without resuming and keeps completion separate from parent", async () => {
+  const { session, events } = childPoller(async (method, params) => {
+    if (method === "thread/read") {
+      assert.deepEqual(params, { threadId: "child" });
+      return { thread: { id: "child", status: { type: "idle" } } };
+    }
+    assert.equal(method, "thread/turns/list");
+    assert.equal(params.itemsView, "full");
+    assert.equal(params.sortDirection, "desc");
+    return {
+      data: [{ id: "t", status: "completed", items: [{ id: "m", type: "agentMessage", text: "Paged result" }] }],
+      nextCursor: null,
+      backwardsCursor: "anchor-t",
+    };
+  });
+  await session.refreshSubagents();
+  assert.equal(
+    events.some((e) => e.type === "turn-completed"),
+    false,
+  );
+  const child = events.filter((e) => e.type === "subagent-update").at(-1).agent;
+  assert.equal(child.status, "completed");
+  assert.equal(child.transcript[0].text, "Paged result");
 });
 
-test('child polling starts at the last turn, follows pages and updates active items with the same id',async()=>{
- let round=0;const calls=[];
- const turn=(id,text,status='completed')=>({id,status,items:[{id:'message-'+id,type:'agentMessage',text}]});
- const {session,events}=childPoller(async(method,params)=>{
-  assert.ok(!params.includeTurns);if(method==='thread/read')return {thread:{id:'child',status:{type:'active'}}};
-  assert.equal(method,'thread/turns/list');calls.push(params);
-  if(params.sortDirection==='desc')return {data:[turn(round===2?'t3':'t1',round===0?'Partial':'Complete',round===0?'inProgress':'completed')],backwardsCursor:round===2?'anchor-3':'anchor-1',nextCursor:null};
-  assert.equal(params.sortDirection,'asc');assert.equal(params.cursor,round===3?'anchor-3':params.cursor);
-  if(params.cursor==='page-2')return {data:[turn('t3','Third')],nextCursor:null};
-  assert.equal(params.cursor,round===3?'anchor-3':'anchor-1');
-  return {data:round===1?[turn('t1','Complete')]:round===2?[turn('t1','Complete'),turn('t2','Second')]:[turn('t3','Third')],nextCursor:round===2?'page-2':null};
- });
- await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Partial');
- round=1;await session.refreshSubagents();assert.equal(events.at(-1).agent.transcript[0].text,'Complete');
- round=2;await session.refreshSubagents();assert.deepEqual(events.at(-1).agent.transcript.map(x=>x.text),['Complete','Second','Third']);
- const count=events.length;round=3;await session.refreshSubagents();assert.equal(events.length,count,'unchanged completed ids emit nothing');
- assert.ok(calls.some(p=>p.cursor==='page-2'));
+test("child polling starts at the last turn, follows pages and updates active items with the same id", async () => {
+  let round = 0;
+  const calls = [];
+  const turn = (id, text, status = "completed") => ({ id, status, items: [{ id: "message-" + id, type: "agentMessage", text }] });
+  const { session, events } = childPoller(async (method, params) => {
+    assert.ok(!params.includeTurns);
+    if (method === "thread/read") return { thread: { id: "child", status: { type: "active" } } };
+    assert.equal(method, "thread/turns/list");
+    calls.push(params);
+    if (params.sortDirection === "desc")
+      return {
+        data: [turn(round === 2 ? "t3" : "t1", round === 0 ? "Partial" : "Complete", round === 0 ? "inProgress" : "completed")],
+        backwardsCursor: round === 2 ? "anchor-3" : "anchor-1",
+        nextCursor: null,
+      };
+    assert.equal(params.sortDirection, "asc");
+    assert.equal(params.cursor, round === 3 ? "anchor-3" : params.cursor);
+    if (params.cursor === "page-2") return { data: [turn("t3", "Third")], nextCursor: null };
+    assert.equal(params.cursor, round === 3 ? "anchor-3" : "anchor-1");
+    return {
+      data: round === 1 ? [turn("t1", "Complete")] : round === 2 ? [turn("t1", "Complete"), turn("t2", "Second")] : [turn("t3", "Third")],
+      nextCursor: round === 2 ? "page-2" : null,
+    };
+  });
+  await session.refreshSubagents();
+  assert.equal(events.at(-1).agent.transcript[0].text, "Partial");
+  round = 1;
+  await session.refreshSubagents();
+  assert.equal(events.at(-1).agent.transcript[0].text, "Complete");
+  round = 2;
+  await session.refreshSubagents();
+  assert.deepEqual(
+    events.at(-1).agent.transcript.map((x) => x.text),
+    ["Complete", "Second", "Third"],
+  );
+  const count = events.length;
+  round = 3;
+  await session.refreshSubagents();
+  assert.equal(events.length, count, "unchanged completed ids emit nothing");
+  assert.ok(calls.some((p) => p.cursor === "page-2"));
 });
 
 test("a generated image Codex didn't save is written out from its base64", () => {
@@ -682,277 +858,424 @@ test("a generated image Codex didn't save is written out from its base64", () =>
 
 // Canvas lifecycle fixtures expose the same paginated contract as live child polling.
 function childSnapshotRpc(snapshot, onRead = () => {}) {
- return {close:async()=>{},request:async(method,params)=>{
-  assert.equal(params.threadId,'child');
-  assert.ok(!params.includeTurns);
-  const thread=structuredClone(snapshot());
-  if(method==='thread/read'){onRead();return {thread:{...thread,turns:[]}};}
-  assert.equal(method,'thread/turns/list');
-  return {data:[...thread.turns].reverse(),nextCursor:null};
- }};
+  return {
+    close: async () => {},
+    request: async (method, params) => {
+      assert.equal(params.threadId, "child");
+      assert.ok(!params.includeTurns);
+      const thread = structuredClone(snapshot());
+      if (method === "thread/read") {
+        onRead();
+        return { thread: { ...thread, turns: [] } };
+      }
+      assert.equal(method, "thread/turns/list");
+      return { data: [...thread.turns].reverse(), nextCursor: null };
+    },
+  };
 }
 
-test('a completed child catches up to a follow-up turn after native interaction without replaying history', async t => {
- const events=[];
- const session=new CodexSession({emit:event=>events.push(event)});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- const firstTurn={id:'first',status:'completed',items:[{type:'agentMessage',id:'old-answer',text:'First review finished'}]};
- let snapshot={id:'child',status:{type:'idle'},turns:[firstTurn]};
- let reads=0;
- session.rpc=childSnapshotRpc(()=>snapshot,()=>reads++);
- await session.refreshSubagents();
- const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
- session.handleNotification('item/completed',interaction);
- assert.equal(session.state.subagents.get('child').status,'completed');
- // The provider may return the old completed turn before it has flushed the follow-up.
- await session.refreshSubagents();
- assert.equal(reads,2);
- assert.equal(session.state.subagents.get('child').status,'completed');
- const followup={id:'followup',status:'inProgress',items:[]};
- snapshot={id:'child',status:{type:'active',activeFlags:['waitingOnApproval']},turns:[firstTurn,followup]};
- await session.refreshSubagents();
- assert.equal(session.state.subagents.get('child').status,'waiting');
- assert.equal(session.state.subagents.get('child').endedAt,undefined);
- snapshot={...snapshot,status:{type:'active',activeFlags:[]}};
- await session.refreshSubagents();
- assert.equal(session.state.subagents.get('child').status,'running');
- snapshot={...snapshot,status:{type:'idle'},turns:[firstTurn,{...followup,status:'completed',items:[{type:'agentMessage',id:'new-answer',text:'Follow-up finished'}]}]};
- await session.refreshSubagents();
- assert.equal(session.state.subagents.get('child').status,'completed');
- assert.deepEqual(session.state.subagents.get('child').transcript.map(entry=>entry.text),['First review finished','Follow-up finished']);
- const saved=structuredClone(session.state.subagents.get('child'));
- session.handleNotification('item/completed',interaction);
- await session.refreshSubagents();
- assert.deepEqual(session.state.subagents.get('child'),saved);
- assert.equal(saved.communications.length,1);
- assert.equal(events.some(event=>event.type==='turn-started' || event.type==='turn-completed'),false);
-});
-
-test('a new interaction briefly polls a finished child without claiming a message restarted it', async t => {
- let now=1000;
- t.mock.method(Date,'now',()=>now);
- const events=[];
- const session=new CodexSession({emit:event=>events.push(event)});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- let reads=0;
- session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:'idle'},turns:[{id:'done',status:'completed',items:[]}]}),()=>reads++);
- await session.refreshSubagents();
- const interaction={threadId:'parent',item:{type:'subAgentActivity',id:'message',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}};
- session.handleNotification('item/completed',interaction);
- await session.refreshSubagents();
- assert.equal(reads,2);
- assert.equal(session.state.subagents.get('child').status,'completed');
- now+=1500;
- await session.refreshSubagents();
- assert.equal(reads,3);
- now+=60000;
- await session.refreshSubagents();
- assert.equal(reads,3);
- session.handleNotification('item/completed',interaction);
- await session.refreshSubagents();
- assert.equal(reads,3);
- assert.equal(events.some(event=>event.type==='subagent-update' && event.agent.status!=='completed'),false);
-});
-
-test('a resumed child latest in-progress turn corrects an earlier completion record', async t => {
- const session=new CodexSession({emit:()=>{}});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:'notLoaded'},turns:[{id:'old',status:'completed',items:[]},{id:'new',status:'inProgress',items:[]}]}));
- await session.refreshSubagents();
- assert.equal(session.state.subagents.get('child').status,'running');
- assert.equal(session.state.subagents.get('child').endedAt,undefined);
-});
-
-test('child turn notifications remain live after the parent finishes', t => {
- const events=[];
- const session=new CodexSession({emit:event=>events.push(event)});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- session.handleNotification('turn/started',{threadId:'child',turn:{id:'followup',status:'inProgress',items:[]}});
- assert.equal(session.state.subagents.get('child').status,'running');
- assert.equal(events.some(event=>event.type==='turn-started'),false);
- session.handleNotification('turn/started',{threadId:'parent',turn:{id:'stale-parent',status:'inProgress',items:[]}});
- assert.equal(events.some(event=>event.type==='turn-started'),false);
-});
-
-test('the scheduled child poll continues through stale completion until a follow-up appears', async t => {
- t.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
- const session=new CodexSession({emit:()=>{}});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'completed',startedAt:1,updatedAt:2,endedAt:2,transcript:[]}]]);
- let reads=0;
- let followup=false;
- session.rpc=childSnapshotRpc(()=>({id:'child',status:{type:followup?'active':'idle',...(followup?{activeFlags:[]}:{})},turns:[{id:followup?'followup':'first',status:followup?'inProgress':'completed',items:[]}]}),()=>reads++);
- await session.refreshSubagents();
- session.handleNotification('item/completed',{threadId:'parent',item:{type:'subAgentActivity',id:'follow-up',kind:'interacted',agentThreadId:'child',agentPath:'/root/review'}});
- t.mock.timers.tick(1500);
- await new Promise(resolve=>setImmediate(resolve));
- assert.equal(reads,2);
- followup=true;
- t.mock.timers.tick(1500);
- await new Promise(resolve=>setImmediate(resolve));
- assert.equal(reads,3);
- assert.equal(session.state.subagents.get('child').status,'running');
-});
-
-const savedUnknownChild = id => ({id,title:'Review auth',status:'unknown',startedAt:1,updatedAt:10,endedAt:9,parentId:'review-parent',latestActivity:'Responding',transcript:[{id:'saved',kind:'message',text:'Saved output'}],communications:[{id:'sent',fromId:null,toId:id,text:'Review auth',at:3}]});
-
-test('read-only recovery restores only authoritative latest terminal child outcomes', async t => {
- t.mock.method(Date,'now',()=>100);
- const agents=['done','failed','stopped','unfinished','empty','active','unreadable','archived','known'].map(savedUnknownChild);
- agents.find(agent=>agent.id==='archived').archived=true;
- agents.find(agent=>agent.id==='known').status='completed';
- agents.find(agent=>agent.id==='done').latestActivity='Session disconnected. Last received activity is shown below.';
- const saved=structuredClone(agents);
- const reads=[];
- let starts=0,closes=0;
- const rpc={
-  start:()=>{starts++;},notify:method=>assert.equal(method,'initialized'),close:async()=>{closes++;},
-  request:async(method,params)=>{
-   if(method==='initialize') return {};
-   if(method==='thread/read') {
-    reads.push(params.threadId);
-    if(params.threadId==='unreadable') throw new Error('Read failed');
-    return {thread:{id:params.threadId,status:{type:params.threadId==='active'?'active':'notLoaded'},turns:[]}};
-   }
-   assert.equal(method,'thread/turns/list');
-   const status={done:'completed',failed:'failed',stopped:'interrupted',unfinished:'inProgress',active:'completed'}[params.threadId];
-   return {data:status?[{id:'latest',status,items:[]}]:[],nextCursor:null};
-  },
- };
- const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents,clientVersion:'test',createRpc:()=>rpc});
- assert.deepEqual(events.map(event=>[event.type,event.agent.id,event.agent.status]),[['subagent-update','done','completed'],['subagent-update','failed','failed'],['subagent-update','stopped','cancelled']]);
- assert.equal(starts,1);
- assert.equal(closes,1);
- assert.deepEqual(reads,['done','failed','stopped','unfinished','empty','active','unreadable']);
- assert.deepEqual(agents,saved);
- for(const {agent} of events) {
-  const previous=saved.find(item=>item.id===agent.id);
-  assert.deepEqual(agent.transcript,previous.transcript);
-  assert.deepEqual(agent.communications,previous.communications);
-  assert.equal(agent.parentId,'review-parent');
-  assert.equal(agent.startedAt,1);
-  assert.equal(agent.endedAt,9);
-  assert.equal(agent.updatedAt,100);
- }
- assert.equal(events[0].agent.latestActivity,'Finished');
- assert.equal(events[1].agent.latestActivity,'Responding');
-});
-
-test('read-only child recovery uses paginated latest turns without replaying old output', async () => {
- let closed=false;
- const calls=[];
- const rpc={start:()=>{},notify:()=>{},close:async()=>{closed=true;},request:async(method,params)=>{
-  calls.push(method);
-  if(method==='initialize') return {};
-  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('Use paginated history'),{rpcError:true});
-  if(method==='thread/read') return {thread:{id:'child',status:{type:'notLoaded'}}};
-  assert.equal(method,'thread/turns/list');
-  assert.equal(params.sortDirection,'desc');
-  return {data:[{id:'latest',status:'failed',items:[]},{id:'older',status:'completed',items:[]}],nextCursor:null};
- }};
- const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
- assert.equal(events[0]?.agent.status,'failed');
- assert.deepEqual(calls,['initialize','thread/read','thread/turns/list']);
- assert.equal(closed,true);
-});
-
-test('child recovery closes an unreadable provider and leaves unknown outcomes unchanged', async () => {
- let closes=0;
- const agents=[savedUnknownChild('child')];
- const rpc={start:()=>{},notify:()=>{},close:async()=>{closes++;},request:async()=>{throw new Error('Provider unavailable');}};
- assert.deepEqual(await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents,createRpc:()=>rpc}),[]);
- assert.equal(closes,1);
- assert.equal(agents[0].status,'unknown');
- let created=false;
- assert.deepEqual(await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[{...agents[0],status:'completed'}],createRpc:()=>{created=true;return rpc;}}),[]);
- assert.equal(created,false);
-});
-
-test('polling always uses paginated child history without requesting a full read', async () => {
- const calls=[];
- const session=new CodexSession({emit:()=>{}});
- session.rpc={request:async(method,params)=>{
-  calls.push({method,params});
-  if(method==='thread/read' && params.includeTurns) throw Object.assign(new Error('Use paginated history'),{rpcError:true});
-  if(method==='thread/read') return {thread:{id:'child',status:{type:'active',activeFlags:[]}}};
-  return {data:[{id:'latest',status:'inProgress',items:[]}],nextCursor:null};
- }};
- const first=await session.readSubagentThread('child');
- const second=await session.readSubagentThread('child');
- assert.deepEqual(first,second);
- assert.equal(calls.filter(call=>call.params.includeTurns).length,0);
- assert.equal(calls.length,4);
-});
-
-test('concurrent child refreshes share one read and one output update', async t => {
- const events=[];
- const session=new CodexSession({emit:event=>events.push(event)});
- t.after(()=>session.close());
- session.state.threadId='parent';
- session.state.subagents=new Map([['child',{id:'child',title:'Review',status:'running',startedAt:1,updatedAt:2,transcript:[]}]]);
- const waiting=[];
- session.rpc={close:async()=>{},request:(method)=>method==='thread/read'?new Promise(resolve=>waiting.push(resolve)):Promise.resolve({data:[{id:'review',status:'inProgress',items:[{id:'answer',type:'agentMessage',text:'Reviewing auth'}]}],nextCursor:null})};
- const first=session.refreshSubagents();
- const second=session.refreshSubagents();
- const reads=waiting.length;
- for(const resolve of waiting) resolve({thread:{id:'child',status:{type:'active',activeFlags:[]},turns:[{id:'review',status:'inProgress',items:[{id:'answer',type:'agentMessage',text:'Reviewing auth'}]}]}});
- await Promise.all([first,second]);
- assert.equal(reads,1);
- assert.equal(session.state.subagents.get('child').transcript[0].text,'Reviewing auth');
- assert.equal(events.filter(event=>event.type==='subagent-update' && event.agent.transcript.length).length,2);
-});
-
-test('unknown recovery reads one latest turn without downloading historical items', async () => {
- const calls=[];
- const rpc={start:()=>{},notify:()=>{},close:async()=>{},request:async(method,params)=>{
-  calls.push({method,params});
-  if(method==='initialize') return {};
-  if(method==='thread/read') return {thread:{id:'child',status:{type:'notLoaded'},turns:params.includeTurns?[{id:'latest',status:'completed',items:[]}]:[]}};
-  return {data:[{id:'latest',status:'completed',items:[]}],nextCursor:'older-turns'};
- }};
- const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
- assert.equal(events[0]?.agent.status,'completed');
- const reads=calls.filter(call=>call.method!=='initialize');
- assert.deepEqual(reads,[
-  {method:'thread/read',params:{threadId:'child'}},
-  {method:'thread/turns/list',params:{threadId:'child',limit:1,sortDirection:'desc',itemsView:'notLoaded'}},
- ]);
-});
-
-test('unknown recovery still supports providers without paginated history', async () => {
- const calls=[];
- const rpc={start:()=>{},notify:()=>{},close:async()=>{},request:async(method,params)=>{
-  calls.push({method,params});
-  if(method==='initialize') return {};
-  if(method==='thread/turns/list') throw Object.assign(new Error('Unknown method'),{rpcError:true});
-  return {thread:{id:'child',status:{type:'notLoaded'},turns:params.includeTurns?[{id:'latest',status:'interrupted',items:[]}]:[]}};
- }};
- const events=await recoverCodexSubagents({cwd:'/repo',command:'/bin/codex',agents:[savedUnknownChild('child')],createRpc:()=>rpc});
- assert.equal(events[0]?.agent.status,'cancelled');
- assert.deepEqual(calls.map(call=>call.method),['initialize','thread/read','thread/turns/list','thread/read']);
-});
-
-test('Codex tool image blocks become visible image steps, including dynamic tool output', async t => {
+test("a completed child catches up to a follow-up turn after native interaction without replaying history", async (t) => {
   const events = [];
-  const session = new CodexSession({ emit: event => events.push(event) });
-  session.state.threadId = 'parent';
+  const session = new CodexSession({ emit: (event) => events.push(event) });
   t.after(() => session.close());
-  const data = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('tool image')]).toString('base64');
-  for (const type of ['mcpToolCall', 'dynamicToolCall']) {
-    const content = [{ type: 'image', data, mimeType: 'image/png' }];
-    session.handleNotification('item/completed', { threadId: 'parent', item: { id: type, type, tool: 'screenshot', status: 'completed', result: { content }, contentItems: content } });
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, endedAt: 2, transcript: [] }]]);
+  const firstTurn = { id: "first", status: "completed", items: [{ type: "agentMessage", id: "old-answer", text: "First review finished" }] };
+  let snapshot = { id: "child", status: { type: "idle" }, turns: [firstTurn] };
+  let reads = 0;
+  session.rpc = childSnapshotRpc(
+    () => snapshot,
+    () => reads++,
+  );
+  await session.refreshSubagents();
+  const interaction = {
+    threadId: "parent",
+    item: { type: "subAgentActivity", id: "follow-up", kind: "interacted", agentThreadId: "child", agentPath: "/root/review" },
+  };
+  session.handleNotification("item/completed", interaction);
+  assert.equal(session.state.subagents.get("child").status, "completed");
+  // The provider may return the old completed turn before it has flushed the follow-up.
+  await session.refreshSubagents();
+  assert.equal(reads, 2);
+  assert.equal(session.state.subagents.get("child").status, "completed");
+  const followup = { id: "followup", status: "inProgress", items: [] };
+  snapshot = { id: "child", status: { type: "active", activeFlags: ["waitingOnApproval"] }, turns: [firstTurn, followup] };
+  await session.refreshSubagents();
+  assert.equal(session.state.subagents.get("child").status, "waiting");
+  assert.equal(session.state.subagents.get("child").endedAt, undefined);
+  snapshot = { ...snapshot, status: { type: "active", activeFlags: [] } };
+  await session.refreshSubagents();
+  assert.equal(session.state.subagents.get("child").status, "running");
+  snapshot = {
+    ...snapshot,
+    status: { type: "idle" },
+    turns: [firstTurn, { ...followup, status: "completed", items: [{ type: "agentMessage", id: "new-answer", text: "Follow-up finished" }] }],
+  };
+  await session.refreshSubagents();
+  assert.equal(session.state.subagents.get("child").status, "completed");
+  assert.deepEqual(
+    session.state.subagents.get("child").transcript.map((entry) => entry.text),
+    ["First review finished", "Follow-up finished"],
+  );
+  const saved = structuredClone(session.state.subagents.get("child"));
+  session.handleNotification("item/completed", interaction);
+  await session.refreshSubagents();
+  assert.deepEqual(session.state.subagents.get("child"), saved);
+  assert.equal(saved.communications.length, 1);
+  assert.equal(
+    events.some((event) => event.type === "turn-started" || event.type === "turn-completed"),
+    false,
+  );
+});
+
+test("a new interaction briefly polls a finished child without claiming a message restarted it", async (t) => {
+  let now = 1000;
+  t.mock.method(Date, "now", () => now);
+  const events = [];
+  const session = new CodexSession({ emit: (event) => events.push(event) });
+  t.after(() => session.close());
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, endedAt: 2, transcript: [] }]]);
+  let reads = 0;
+  session.rpc = childSnapshotRpc(
+    () => ({ id: "child", status: { type: "idle" }, turns: [{ id: "done", status: "completed", items: [] }] }),
+    () => reads++,
+  );
+  await session.refreshSubagents();
+  const interaction = {
+    threadId: "parent",
+    item: { type: "subAgentActivity", id: "message", kind: "interacted", agentThreadId: "child", agentPath: "/root/review" },
+  };
+  session.handleNotification("item/completed", interaction);
+  await session.refreshSubagents();
+  assert.equal(reads, 2);
+  assert.equal(session.state.subagents.get("child").status, "completed");
+  now += 1500;
+  await session.refreshSubagents();
+  assert.equal(reads, 3);
+  now += 60000;
+  await session.refreshSubagents();
+  assert.equal(reads, 3);
+  session.handleNotification("item/completed", interaction);
+  await session.refreshSubagents();
+  assert.equal(reads, 3);
+  assert.equal(
+    events.some((event) => event.type === "subagent-update" && event.agent.status !== "completed"),
+    false,
+  );
+});
+
+test("a resumed child latest in-progress turn corrects an earlier completion record", async (t) => {
+  const session = new CodexSession({ emit: () => {} });
+  t.after(() => session.close());
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, endedAt: 2, transcript: [] }]]);
+  session.rpc = childSnapshotRpc(() => ({
+    id: "child",
+    status: { type: "notLoaded" },
+    turns: [
+      { id: "old", status: "completed", items: [] },
+      { id: "new", status: "inProgress", items: [] },
+    ],
+  }));
+  await session.refreshSubagents();
+  assert.equal(session.state.subagents.get("child").status, "running");
+  assert.equal(session.state.subagents.get("child").endedAt, undefined);
+});
+
+test("child turn notifications remain live after the parent finishes", (t) => {
+  const events = [];
+  const session = new CodexSession({ emit: (event) => events.push(event) });
+  t.after(() => session.close());
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, endedAt: 2, transcript: [] }]]);
+  session.handleNotification("turn/started", { threadId: "child", turn: { id: "followup", status: "inProgress", items: [] } });
+  assert.equal(session.state.subagents.get("child").status, "running");
+  assert.equal(
+    events.some((event) => event.type === "turn-started"),
+    false,
+  );
+  session.handleNotification("turn/started", { threadId: "parent", turn: { id: "stale-parent", status: "inProgress", items: [] } });
+  assert.equal(
+    events.some((event) => event.type === "turn-started"),
+    false,
+  );
+});
+
+test("the scheduled child poll continues through stale completion until a follow-up appears", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  const session = new CodexSession({ emit: () => {} });
+  t.after(() => session.close());
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, endedAt: 2, transcript: [] }]]);
+  let reads = 0;
+  let followup = false;
+  session.rpc = childSnapshotRpc(
+    () => ({
+      id: "child",
+      status: { type: followup ? "active" : "idle", ...(followup ? { activeFlags: [] } : {}) },
+      turns: [{ id: followup ? "followup" : "first", status: followup ? "inProgress" : "completed", items: [] }],
+    }),
+    () => reads++,
+  );
+  await session.refreshSubagents();
+  session.handleNotification("item/completed", {
+    threadId: "parent",
+    item: { type: "subAgentActivity", id: "follow-up", kind: "interacted", agentThreadId: "child", agentPath: "/root/review" },
+  });
+  t.mock.timers.tick(1500);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 2);
+  followup = true;
+  t.mock.timers.tick(1500);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 3);
+  assert.equal(session.state.subagents.get("child").status, "running");
+});
+
+const savedUnknownChild = (id) => ({
+  id,
+  title: "Review auth",
+  status: "unknown",
+  startedAt: 1,
+  updatedAt: 10,
+  endedAt: 9,
+  parentId: "review-parent",
+  latestActivity: "Responding",
+  transcript: [{ id: "saved", kind: "message", text: "Saved output" }],
+  communications: [{ id: "sent", fromId: null, toId: id, text: "Review auth", at: 3 }],
+});
+
+test("read-only recovery restores only authoritative latest terminal child outcomes", async (t) => {
+  t.mock.method(Date, "now", () => 100);
+  const agents = ["done", "failed", "stopped", "unfinished", "empty", "active", "unreadable", "archived", "known"].map(savedUnknownChild);
+  agents.find((agent) => agent.id === "archived").archived = true;
+  agents.find((agent) => agent.id === "known").status = "completed";
+  agents.find((agent) => agent.id === "done").latestActivity = "Session disconnected. Last received activity is shown below.";
+  const saved = structuredClone(agents);
+  const reads = [];
+  let starts = 0,
+    closes = 0;
+  const rpc = {
+    start: () => {
+      starts++;
+    },
+    notify: (method) => assert.equal(method, "initialized"),
+    close: async () => {
+      closes++;
+    },
+    request: async (method, params) => {
+      if (method === "initialize") return {};
+      if (method === "thread/read") {
+        reads.push(params.threadId);
+        if (params.threadId === "unreadable") throw new Error("Read failed");
+        return { thread: { id: params.threadId, status: { type: params.threadId === "active" ? "active" : "notLoaded" }, turns: [] } };
+      }
+      assert.equal(method, "thread/turns/list");
+      const status = { done: "completed", failed: "failed", stopped: "interrupted", unfinished: "inProgress", active: "completed" }[params.threadId];
+      return { data: status ? [{ id: "latest", status, items: [] }] : [], nextCursor: null };
+    },
+  };
+  const events = await recoverCodexSubagents({ cwd: "/repo", command: "/bin/codex", agents, clientVersion: "test", createRpc: () => rpc });
+  assert.deepEqual(
+    events.map((event) => [event.type, event.agent.id, event.agent.status]),
+    [
+      ["subagent-update", "done", "completed"],
+      ["subagent-update", "failed", "failed"],
+      ["subagent-update", "stopped", "cancelled"],
+    ],
+  );
+  assert.equal(starts, 1);
+  assert.equal(closes, 1);
+  assert.deepEqual(reads, ["done", "failed", "stopped", "unfinished", "empty", "active", "unreadable"]);
+  assert.deepEqual(agents, saved);
+  for (const { agent } of events) {
+    const previous = saved.find((item) => item.id === agent.id);
+    assert.deepEqual(agent.transcript, previous.transcript);
+    assert.deepEqual(agent.communications, previous.communications);
+    assert.equal(agent.parentId, "review-parent");
+    assert.equal(agent.startedAt, 1);
+    assert.equal(agent.endedAt, 9);
+    assert.equal(agent.updatedAt, 100);
   }
-  const images = events.filter(event => event.type === 'step-completed' && event.file);
+  assert.equal(events[0].agent.latestActivity, "Finished");
+  assert.equal(events[1].agent.latestActivity, "Responding");
+});
+
+test("read-only child recovery uses paginated latest turns without replaying old output", async () => {
+  let closed = false;
+  const calls = [];
+  const rpc = {
+    start: () => {},
+    notify: () => {},
+    close: async () => {
+      closed = true;
+    },
+    request: async (method, params) => {
+      calls.push(method);
+      if (method === "initialize") return {};
+      if (method === "thread/read" && params.includeTurns) throw Object.assign(new Error("Use paginated history"), { rpcError: true });
+      if (method === "thread/read") return { thread: { id: "child", status: { type: "notLoaded" } } };
+      assert.equal(method, "thread/turns/list");
+      assert.equal(params.sortDirection, "desc");
+      return {
+        data: [
+          { id: "latest", status: "failed", items: [] },
+          { id: "older", status: "completed", items: [] },
+        ],
+        nextCursor: null,
+      };
+    },
+  };
+  const events = await recoverCodexSubagents({ cwd: "/repo", command: "/bin/codex", agents: [savedUnknownChild("child")], createRpc: () => rpc });
+  assert.equal(events[0]?.agent.status, "failed");
+  assert.deepEqual(calls, ["initialize", "thread/read", "thread/turns/list"]);
+  assert.equal(closed, true);
+});
+
+test("child recovery closes an unreadable provider and leaves unknown outcomes unchanged", async () => {
+  let closes = 0;
+  const agents = [savedUnknownChild("child")];
+  const rpc = {
+    start: () => {},
+    notify: () => {},
+    close: async () => {
+      closes++;
+    },
+    request: async () => {
+      throw new Error("Provider unavailable");
+    },
+  };
+  assert.deepEqual(await recoverCodexSubagents({ cwd: "/repo", command: "/bin/codex", agents, createRpc: () => rpc }), []);
+  assert.equal(closes, 1);
+  assert.equal(agents[0].status, "unknown");
+  let created = false;
+  assert.deepEqual(
+    await recoverCodexSubagents({
+      cwd: "/repo",
+      command: "/bin/codex",
+      agents: [{ ...agents[0], status: "completed" }],
+      createRpc: () => {
+        created = true;
+        return rpc;
+      },
+    }),
+    [],
+  );
+  assert.equal(created, false);
+});
+
+test("polling always uses paginated child history without requesting a full read", async () => {
+  const calls = [];
+  const session = new CodexSession({ emit: () => {} });
+  session.rpc = {
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "thread/read" && params.includeTurns) throw Object.assign(new Error("Use paginated history"), { rpcError: true });
+      if (method === "thread/read") return { thread: { id: "child", status: { type: "active", activeFlags: [] } } };
+      return { data: [{ id: "latest", status: "inProgress", items: [] }], nextCursor: null };
+    },
+  };
+  const first = await session.readSubagentThread("child");
+  const second = await session.readSubagentThread("child");
+  assert.deepEqual(first, second);
+  assert.equal(calls.filter((call) => call.params.includeTurns).length, 0);
+  assert.equal(calls.length, 4);
+});
+
+test("concurrent child refreshes share one read and one output update", async (t) => {
+  const events = [];
+  const session = new CodexSession({ emit: (event) => events.push(event) });
+  t.after(() => session.close());
+  session.state.threadId = "parent";
+  session.state.subagents = new Map([["child", { id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: 2, transcript: [] }]]);
+  const waiting = [];
+  session.rpc = {
+    close: async () => {},
+    request: (method) =>
+      method === "thread/read"
+        ? new Promise((resolve) => waiting.push(resolve))
+        : Promise.resolve({
+            data: [{ id: "review", status: "inProgress", items: [{ id: "answer", type: "agentMessage", text: "Reviewing auth" }] }],
+            nextCursor: null,
+          }),
+  };
+  const first = session.refreshSubagents();
+  const second = session.refreshSubagents();
+  const reads = waiting.length;
+  for (const resolve of waiting)
+    resolve({
+      thread: {
+        id: "child",
+        status: { type: "active", activeFlags: [] },
+        turns: [{ id: "review", status: "inProgress", items: [{ id: "answer", type: "agentMessage", text: "Reviewing auth" }] }],
+      },
+    });
+  await Promise.all([first, second]);
+  assert.equal(reads, 1);
+  assert.equal(session.state.subagents.get("child").transcript[0].text, "Reviewing auth");
+  assert.equal(events.filter((event) => event.type === "subagent-update" && event.agent.transcript.length).length, 2);
+});
+
+test("unknown recovery reads one latest turn without downloading historical items", async () => {
+  const calls = [];
+  const rpc = {
+    start: () => {},
+    notify: () => {},
+    close: async () => {},
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "initialize") return {};
+      if (method === "thread/read")
+        return { thread: { id: "child", status: { type: "notLoaded" }, turns: params.includeTurns ? [{ id: "latest", status: "completed", items: [] }] : [] } };
+      return { data: [{ id: "latest", status: "completed", items: [] }], nextCursor: "older-turns" };
+    },
+  };
+  const events = await recoverCodexSubagents({ cwd: "/repo", command: "/bin/codex", agents: [savedUnknownChild("child")], createRpc: () => rpc });
+  assert.equal(events[0]?.agent.status, "completed");
+  const reads = calls.filter((call) => call.method !== "initialize");
+  assert.deepEqual(reads, [
+    { method: "thread/read", params: { threadId: "child" } },
+    { method: "thread/turns/list", params: { threadId: "child", limit: 1, sortDirection: "desc", itemsView: "notLoaded" } },
+  ]);
+});
+
+test("unknown recovery still supports providers without paginated history", async () => {
+  const calls = [];
+  const rpc = {
+    start: () => {},
+    notify: () => {},
+    close: async () => {},
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "initialize") return {};
+      if (method === "thread/turns/list") throw Object.assign(new Error("Unknown method"), { rpcError: true });
+      return { thread: { id: "child", status: { type: "notLoaded" }, turns: params.includeTurns ? [{ id: "latest", status: "interrupted", items: [] }] : [] } };
+    },
+  };
+  const events = await recoverCodexSubagents({ cwd: "/repo", command: "/bin/codex", agents: [savedUnknownChild("child")], createRpc: () => rpc });
+  assert.equal(events[0]?.agent.status, "cancelled");
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["initialize", "thread/read", "thread/turns/list", "thread/read"],
+  );
+});
+
+test("Codex tool image blocks become visible image steps, including dynamic tool output", async (t) => {
+  const events = [];
+  const session = new CodexSession({ emit: (event) => events.push(event) });
+  session.state.threadId = "parent";
+  t.after(() => session.close());
+  const data = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from("tool image")]).toString("base64");
+  for (const type of ["mcpToolCall", "dynamicToolCall"]) {
+    const content = [{ type: "image", data, mimeType: "image/png" }];
+    session.handleNotification("item/completed", {
+      threadId: "parent",
+      item: { id: type, type, tool: "screenshot", status: "completed", result: { content }, contentItems: content },
+    });
+  }
+  const images = events.filter((event) => event.type === "step-completed" && event.file);
   assert.equal(images.length, 2);
-  assert.deepEqual(fs.readFileSync(images[0].file), Buffer.from(data, 'base64'));
-  assert.ok(events.some(event => event.type === 'step-started' && event.step.kind === 'image'));
+  assert.deepEqual(fs.readFileSync(images[0].file), Buffer.from(data, "base64"));
+  assert.ok(events.some((event) => event.type === "step-started" && event.step.kind === "image"));
 });

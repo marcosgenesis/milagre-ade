@@ -74,7 +74,12 @@ test("saves and forgets the agent's native session id", () => {
 test("streams text per chat and saves each finished reply once", () => {
   let state = base();
   let runs = startRun(startRun({}, key(1), "gpt-6-sol"), key(2), "claude-opus-5-5");
-  for (const [sessionId, text] of [[1, "Hel"], [2, "Hi"], [1, "lo"], [2, " there"]] as const) {
+  for (const [sessionId, text] of [
+    [1, "Hel"],
+    [2, "Hi"],
+    [1, "lo"],
+    [2, " there"],
+  ] as const) {
     ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(sessionId), { type: "text-delta", messageId: "t", text }));
   }
   assert.equal(runs[key(1)].text, "Hello");
@@ -84,18 +89,30 @@ test("streams text per chat and saves each finished reply once", () => {
   const second = applyAgentEvent(first.state, first.runs, PROJECT, key(1), { type: "turn-completed" });
   assert.equal(second.changed, true);
   assert.deepEqual(second.runs, {});
-  assert.deepEqual(second.state.messages.map(({ id, session_id, body, role, model, outcome }) => ({ id, session_id, body, role, model, outcome })), [
-    { id: 10, session_id: 2, body: "Hi there", role: "assistant", model: "claude-opus-5-5", outcome: "completed" },
-    { id: 11, session_id: 1, body: "Hello", role: "assistant", model: "gpt-6-sol", outcome: "completed" },
-  ]);
+  assert.deepEqual(
+    second.state.messages.map(({ id, session_id, body, role, model, outcome }) => ({ id, session_id, body, role, model, outcome })),
+    [
+      { id: 10, session_id: 2, body: "Hi there", role: "assistant", model: "claude-opus-5-5", outcome: "completed" },
+      { id: 11, session_id: 1, body: "Hello", role: "assistant", model: "gpt-6-sol", outcome: "completed" },
+    ],
+  );
   assert.equal(second.state.next_id, 12);
 });
 
 test("Milagre's own failure messages carry no \"Agent error:\" prefix, the agent's raw errors do", () => {
   const run = (text: string) => ({ [key(1)]: { text, model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } });
-  const own = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.", notice: true, login: true });
+  const own = applyAgentEvent(base(), run(""), PROJECT, key(1), {
+    type: "turn-failed",
+    message: "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.",
+    notice: true,
+    login: true,
+  });
   assert.equal(own.state.messages[0].body, "Codex isn't logged in. Run `codex login` in a terminal, then send your message again.");
-  const partial = applyAgentEvent(base(), run("Half"), PROJECT, key(1), { type: "turn-failed", message: "Codex stopped unexpectedly. Send your message again to continue this chat.", notice: true });
+  const partial = applyAgentEvent(base(), run("Half"), PROJECT, key(1), {
+    type: "turn-failed",
+    message: "Codex stopped unexpectedly. Send your message again to continue this chat.",
+    notice: true,
+  });
   assert.equal(partial.state.messages[0].body, "Half\n\nCodex stopped unexpectedly. Send your message again to continue this chat.");
   const raw = applyAgentEvent(base(), run(""), PROJECT, key(1), { type: "turn-failed", message: "The model gpt-x is not supported." });
   assert.equal(raw.state.messages[0].body, "Agent error: The model gpt-x is not supported.");
@@ -107,7 +124,13 @@ test("keeps partial text when a turn fails or is cancelled", () => {
   assert.equal(failed.state.messages[0].body, "Half an answer\n\nAgent error: Codex stopped: boom");
   assert.equal(failed.state.messages[0].outcome, "failed");
 
-  const cancelled = applyAgentEvent(base(), { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } }, PROJECT, key(1), { type: "turn-cancelled" });
+  const cancelled = applyAgentEvent(
+    base(),
+    { [key(1)]: { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } },
+    PROJECT,
+    key(1),
+    { type: "turn-cancelled" },
+  );
   assert.equal(cancelled.state.messages[0].body, "What should I work on instead?");
   assert.equal(cancelled.state.messages[0].outcome, "cancelled");
 });
@@ -151,7 +174,14 @@ test("an unknown event type changes nothing", () => {
   assert.deepEqual(applyAgentEvent(state, runs, PROJECT, key(1), event), { state, runs, changed: false });
 });
 
-const approval = (requestId: string): PermissionRequest => ({ requestId, kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
+const approval = (requestId: string): PermissionRequest => ({
+  requestId,
+  kind: "command",
+  tool: "Shell",
+  title: "Run this command?",
+  command: "ls",
+  allowForChat: true,
+});
 
 test("turn-started opens a run for a turn this window didn't start", (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 100_000 });
@@ -169,14 +199,23 @@ test("approval requests wait on the run, oldest first, until they're resolved", 
   let runs = startRun({}, key(1), "gpt-6-sol");
   const state = base();
   for (const requestId of ["a", "b"]) runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "permission-request", ...approval(requestId) }).runs;
-  assert.deepEqual(runs[key(1)].approvals.map((item) => item.requestId), ["a", "b"]);
+  assert.deepEqual(
+    runs[key(1)].approvals.map((item) => item.requestId),
+    ["a", "b"],
+  );
   assert.deepEqual(runs[key(1)].approvals[0], approval("a"));
 
   runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "permission-request", ...approval("a"), title: "Again?" }).runs;
-  assert.deepEqual(runs[key(1)].approvals.map((item) => item.requestId), ["b", "a"]);
+  assert.deepEqual(
+    runs[key(1)].approvals.map((item) => item.requestId),
+    ["b", "a"],
+  );
 
   runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "permission-resolved", requestId: "b", decision: "deny" }).runs;
-  assert.deepEqual(runs[key(1)].approvals.map((item) => item.requestId), ["a"]);
+  assert.deepEqual(
+    runs[key(1)].approvals.map((item) => item.requestId),
+    ["a"],
+  );
   runs = applyAgentEvent(state, runs, PROJECT, key(1), { type: "permission-resolved", requestId: "missing", decision: "cancelled" }).runs;
   assert.equal(runs[key(1)].approvals.length, 1);
 
@@ -190,7 +229,14 @@ test("a steer saves the reply so far and keeps the run going", () => {
   const runs = { [key(1)]: { text: "  Half an answer \n", model: "gpt-6-sol", approvals: [approval("a")], steps: [], questions: [], answered: {} } };
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.changed, true);
-  assert.deepEqual(split.state.messages.at(-1), { id: state.next_id, session_id: 1, body: "Half an answer", context: null, role: "assistant", model: "gpt-6-sol" });
+  assert.deepEqual(split.state.messages.at(-1), {
+    id: state.next_id,
+    session_id: 1,
+    body: "Half an answer",
+    context: null,
+    role: "assistant",
+    model: "gpt-6-sol",
+  });
   assert.equal(split.state.next_id, state.next_id + 1);
   assert.deepEqual(split.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [approval("a")], steps: [], questions: [], answered: {}, split: true });
 
@@ -223,7 +269,20 @@ test("a turn that completes with no text after a steer split saves no reply", ()
   assert.equal(more.state.messages.at(-1)?.body, "Rest");
 });
 
-const question = (requestId: string): QuestionRequest => ({ requestId, questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }], multiSelect: false, allowOther: true, secret: false }] });
+const question = (requestId: string): QuestionRequest => ({
+  requestId,
+  questions: [
+    {
+      id: "0",
+      header: "Color",
+      question: "Which color?",
+      options: [{ label: "Red" }, { label: "Green" }],
+      multiSelect: false,
+      allowOther: true,
+      secret: false,
+    },
+  ],
+});
 
 const npmTest = { id: "s1", kind: "shell" as const, title: "Ran `npm test`", detail: "$ npm test\n" };
 
@@ -251,7 +310,10 @@ test("a step starts where the reply's text has got to, streams its output, and e
 
 test("a step that ends with a file keeps it", () => {
   const image = { id: "ig", kind: "image" as const, title: "Generating an image" };
-  const { runs } = fold([{ type: "step-started", step: image }, { type: "step-completed", id: "ig", status: "done", title: "Generated an image", file: "/tmp/ig.png" }]);
+  const { runs } = fold([
+    { type: "step-started", step: image },
+    { type: "step-completed", id: "ig", status: "done", title: "Generated an image", file: "/tmp/ig.png" },
+  ]);
   assert.equal(runs[key(1)].steps[0].file, "/tmp/ig.png");
 });
 
@@ -278,12 +340,21 @@ test("thinking streams its summary and ends with how long it took", () => {
   ]);
   assert.equal(runs[key(1)].steps[0].detail, "Plan it.");
   const ended = fold([{ type: "step-completed", id: "th1", status: "done", title: "Thought for 2s", detail: "Plan it.", durationMs: 2_100 }], runs).runs;
-  assert.deepEqual(ended[key(1)].steps, [{ id: "th1", kind: "thinking", title: "Thought for 2s", status: "done", offset: 0, detail: "Plan it.", durationMs: 2_100 }]);
+  assert.deepEqual(ended[key(1)].steps, [
+    { id: "th1", kind: "thinking", title: "Thought for 2s", status: "done", offset: 0, detail: "Plan it.", durationMs: 2_100 },
+  ]);
 });
 
 test("thinking cut off by a cancelled turn is saved as done, not failed", () => {
-  const { state } = fold([{ type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } }, { type: "step-started", step: npmTest }, { type: "turn-cancelled" }]);
-  assert.deepEqual(state.messages.at(-1)?.steps?.map((step) => step.status), ["done", "failed"]);
+  const { state } = fold([
+    { type: "step-started", step: { id: "th1", kind: "thinking", title: "Thinking" } },
+    { type: "step-started", step: npmTest },
+    { type: "turn-cancelled" },
+  ]);
+  assert.deepEqual(
+    state.messages.at(-1)?.steps?.map((step) => step.status),
+    ["done", "failed"],
+  );
 });
 
 test("streamed output keeps its last 20,000 characters", () => {
@@ -303,7 +374,11 @@ test("a step that starts with a huge detail is saved capped when the turn is can
 
 test("step events for a chat with nothing running change nothing", () => {
   const state = base();
-  for (const event of [{ type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "x" }, { type: "step-completed", id: "s1", status: "done" }] as AgentEvent[]) {
+  for (const event of [
+    { type: "step-started", step: npmTest },
+    { type: "step-output", id: "s1", text: "x" },
+    { type: "step-completed", id: "s1", status: "done" },
+  ] as AgentEvent[]) {
     assert.deepEqual(applyAgentEvent(state, {}, PROJECT, key(1), event), { state, runs: {}, changed: false });
   }
 });
@@ -322,7 +397,11 @@ test("a finished reply saves its steps where they happened in the trimmed text",
 });
 
 test("a step still running when the turn ends is saved as done or failed with the turn", () => {
-  const running = fold([{ type: "text-delta", messageId: "t", text: "Testing." }, { type: "step-started", step: npmTest }, { type: "step-output", id: "s1", text: "ok 1\n" }]).runs;
+  const running = fold([
+    { type: "text-delta", messageId: "t", text: "Testing." },
+    { type: "step-started", step: npmTest },
+    { type: "step-output", id: "s1", text: "ok 1\n" },
+  ]).runs;
   const cancelled = fold([{ type: "turn-cancelled" }], running).state.messages.at(-1);
   assert.equal(cancelled?.body, "Testing.\n\nWhat should I work on instead?");
   assert.deepEqual(cancelled?.steps, [{ ...npmTest, status: "failed", offset: 8, detail: "$ npm test\nok 1\n" }]);
@@ -331,9 +410,16 @@ test("a step still running when the turn ends is saved as done or failed with th
 });
 
 test("a reply with steps and no text saves an empty body; one with neither says so", () => {
-  const withSteps = fold([{ type: "step-started", step: npmTest }, { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" }, { type: "turn-completed" }]).state.messages.at(-1);
+  const withSteps = fold([
+    { type: "step-started", step: npmTest },
+    { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" },
+    { type: "turn-completed" },
+  ]).state.messages.at(-1);
   assert.equal(withSteps?.body, "");
-  assert.deepEqual(withSteps?.steps?.map((step: ChatStep) => step.offset), [0]);
+  assert.deepEqual(
+    withSteps?.steps?.map((step: ChatStep) => step.offset),
+    [0],
+  );
   const empty = fold([{ type: "turn-completed" }]).state.messages.at(-1);
   assert.equal(empty?.body, "The agent finished without a reply.");
   assert.equal(empty && "steps" in empty, false);
@@ -352,13 +438,20 @@ test("a steer saves finished steps with the reply so far; running ones carry on 
   assert.equal(split.runs[key(1)].text, "");
 
   // The running step finishes after the steer and is saved with the rest of the reply.
-  const rest = fold([{ type: "step-completed", id: "s1", status: "done", detail: "$ npm test\nok\n" }, { type: "turn-completed" }], split.runs, split.state).state.messages.at(-1);
+  const rest = fold(
+    [{ type: "step-completed", id: "s1", status: "done", detail: "$ npm test\nok\n" }, { type: "turn-completed" }],
+    split.runs,
+    split.state,
+  ).state.messages.at(-1);
   assert.equal(rest?.body, "");
   assert.deepEqual(rest?.steps, [{ ...npmTest, status: "done", offset: 0, detail: "$ npm test\nok\n" }]);
 });
 
 test("a steer with only finished steps and no text still saves them", () => {
-  const { runs, state } = fold([{ type: "step-started", step: npmTest }, { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" }]);
+  const { runs, state } = fold([
+    { type: "step-started", step: npmTest },
+    { type: "step-completed", id: "s1", status: "done", detail: "$ npm test\n" },
+  ]);
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   assert.equal(split.changed, true);
   assert.equal(split.state.messages.at(-1)?.body, "");
@@ -377,55 +470,79 @@ test("an open approval and question survive a steer and keep their steps; the tu
     { type: "text-delta", messageId: "t", text: "Testing." },
     { type: "step-started", step: npmTest },
     { type: "permission-request", ...request },
-    { type: "question-request", requestId: "q-1", questions: [{ id: "0", header: "", question: "Which?", options: [], multiSelect: false, allowOther: true, secret: false }] },
+    {
+      type: "question-request",
+      requestId: "q-1",
+      questions: [{ id: "0", header: "", question: "Which?", options: [], multiSelect: false, allowOther: true, secret: false }],
+    },
   ]);
   const split = splitRunForSteer(state, runs, PROJECT, key(1));
   const run = split.runs[key(1)];
   assert.equal(run.approvals[0].stepId, "s1");
-  assert.deepEqual(run.questions.map((question) => question.requestId), ["q-1"]);
-  assert.deepEqual(run.steps.map((step) => step.id), ["s1"]);
+  assert.deepEqual(
+    run.questions.map((question) => question.requestId),
+    ["q-1"],
+  );
+  assert.deepEqual(
+    run.steps.map((step) => step.id),
+    ["s1"],
+  );
   const ended = fold([{ type: "turn-cancelled" }], split.runs, split.state);
   assert.equal(ended.runs[key(1)], undefined);
   assert.equal(ended.state.messages.at(-1)?.steps?.[0].status, "failed");
 });
 
-test('subagent snapshots survive parent completion and late child results remain chat scoped', () => {
+test("subagent snapshots survive parent completion and late child results remain chat scoped", () => {
   let state = base();
-  let runs = startRun({},key(1),'codex');
-  const agent = {id:'child',title:'Review',status:'running' as const,startedAt:1,updatedAt:2,transcript:[]};
-  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagent-update',agent}));
-  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'turn-completed'}));
-  assert.equal(state.sessions[1].subagents?.[0].status,'running');
-  ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagent-update',agent:{...agent,status:'failed',updatedAt:3}}));
-  assert.equal(state.sessions[1].subagents?.[0].status,'failed');
-  assert.equal(state.sessions[2].subagents,undefined);
-  assert.deepEqual(runs,{});
-  assert.equal(JSON.parse(JSON.stringify(state)).sessions[1].subagents[0].title,'Review');
+  let runs = startRun({}, key(1), "codex");
+  const agent = { id: "child", title: "Review", status: "running" as const, startedAt: 1, updatedAt: 2, transcript: [] };
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "subagent-update", agent }));
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-completed" }));
+  assert.equal(state.sessions[1].subagents?.[0].status, "running");
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "subagent-update", agent: { ...agent, status: "failed", updatedAt: 3 } }));
+  assert.equal(state.sessions[1].subagents?.[0].status, "failed");
+  assert.equal(state.sessions[2].subagents, undefined);
+  assert.deepEqual(runs, {});
+  assert.equal(JSON.parse(JSON.stringify(state)).sessions[1].subagents[0].title, "Review");
 });
-test('explicit subagent waiting clears when the parent resumes output', () => {
- let state=base(), runs=startRun({},key(1),'codex');
- ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'subagents-waiting',waiting:true}));
- assert.equal(runs[key(1)].waitingForSubagents,true);
- ({state,runs}=applyAgentEvent(state,runs,PROJECT,key(1),{type:'text-delta',messageId:'m',text:'Continuing'}));
- assert.equal(runs[key(1)].waitingForSubagents,false);
+test("explicit subagent waiting clears when the parent resumes output", () => {
+  let state = base(),
+    runs = startRun({}, key(1), "codex");
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "subagents-waiting", waiting: true }));
+  assert.equal(runs[key(1)].waitingForSubagents, true);
+  ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "text-delta", messageId: "m", text: "Continuing" }));
+  assert.equal(runs[key(1)].waitingForSubagents, false);
 });
-test('a rediscovered child keeps its saved transcript and original start time', () => {
- let state=base();
- const agent={id:'child',title:'Review',status:'unknown' as const,startedAt:1,updatedAt:2,transcript:[{id:'old',kind:'message' as const,text:'Earlier finding'}]};
- ({state}=applyAgentEvent(state,{},PROJECT,key(1),{type:'subagent-update',agent}));
- ({state}=applyAgentEvent(state,{},PROJECT,key(1),{type:'subagent-update',agent:{...agent,status:'running',startedAt:3,updatedAt:3,transcript:[]}}));
- assert.equal(state.sessions[1].subagents?.[0].startedAt,1);
- assert.equal(state.sessions[1].subagents?.[0].transcript[0].text,'Earlier finding');
+test("a rediscovered child keeps its saved transcript and original start time", () => {
+  let state = base();
+  const agent = {
+    id: "child",
+    title: "Review",
+    status: "unknown" as const,
+    startedAt: 1,
+    updatedAt: 2,
+    transcript: [{ id: "old", kind: "message" as const, text: "Earlier finding" }],
+  };
+  ({ state } = applyAgentEvent(state, {}, PROJECT, key(1), { type: "subagent-update", agent }));
+  ({ state } = applyAgentEvent(state, {}, PROJECT, key(1), {
+    type: "subagent-update",
+    agent: { ...agent, status: "running", startedAt: 3, updatedAt: 3, transcript: [] },
+  }));
+  assert.equal(state.sessions[1].subagents?.[0].startedAt, 1);
+  assert.equal(state.sessions[1].subagents?.[0].transcript[0].text, "Earlier finding");
 });
 
 test("answers to a question join the chat as the user's message, after the reply so far", () => {
   const state = base();
   const runs: AgentRuns = { [key(1)]: { text: "Which color? ", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {} } };
   const recorded = recordAnswers(state, runs, PROJECT, key(1), "Red");
-  assert.deepEqual(recorded.state.messages.map(({ id, role, body }) => ({ id, role, body })), [
-    { id: 10, role: "assistant", body: "Which color?" },
-    { id: 11, role: "user", body: "Red" },
-  ]);
+  assert.deepEqual(
+    recorded.state.messages.map(({ id, role, body }) => ({ id, role, body })),
+    [
+      { id: 10, role: "assistant", body: "Which color?" },
+      { id: 11, role: "user", body: "Red" },
+    ],
+  );
   assert.equal(recorded.messageId, 11);
   assert.equal(recorded.state.next_id, 12);
   assert.deepEqual(recorded.runs[key(1)], { text: "", model: "gpt-6-sol", approvals: [], steps: [], questions: [], answered: {}, split: true });
@@ -433,10 +550,17 @@ test("answers to a question join the chat as the user's message, after the reply
   // Nothing streamed yet: only the answers are added, and the run still knows it was split.
   const empty: AgentRuns = { [key(1)]: { ...runs[key(1)], text: "" } };
   const alone = recordAnswers(state, empty, PROJECT, key(1), "Red");
-  assert.deepEqual(alone.state.messages.map(({ role, body }) => ({ role, body })), [{ role: "user", body: "Red" }]);
+  assert.deepEqual(
+    alone.state.messages.map(({ role, body }) => ({ role, body })),
+    [{ role: "user", body: "Red" }],
+  );
   assert.equal(alone.runs[key(1)].split, true);
 
-  for (const [testRuns, chatId, body] of [[runs, key(1), ""], [{}, key(1), "Red"], [runs, chatKey("/work/other", 1), "Red"]] as Array<[AgentRuns, string, string]>) {
+  for (const [testRuns, chatId, body] of [
+    [runs, key(1), ""],
+    [{}, key(1), "Red"],
+    [runs, chatKey("/work/other", 1), "Red"],
+  ] as Array<[AgentRuns, string, string]>) {
     const unchanged = recordAnswers(state, testRuns, PROJECT, chatId, body);
     assert.equal(unchanged.messageId, null);
     assert.equal(unchanged.state, state);
@@ -444,7 +568,10 @@ test("answers to a question join the chat as the user's message, after the reply
 });
 
 test("tasks-updated sets, replaces and clears the run's to-do list, and is ignored without a run", () => {
-  const tasks = [{ id: "0", content: "Write tests", status: "completed" as const }, { id: "1", content: "Fix bug", activeForm: "Fixing bug", status: "in_progress" as const }];
+  const tasks = [
+    { id: "0", content: "Write tests", status: "completed" as const },
+    { id: "1", content: "Fix bug", activeForm: "Fixing bug", status: "in_progress" as const },
+  ];
   const none = applyAgentEvent(base(), {}, PROJECT, key(1), { type: "tasks-updated", tasks });
   assert.deepEqual(none.runs, {});
   assert.equal(none.changed, false);

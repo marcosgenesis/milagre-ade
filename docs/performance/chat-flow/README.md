@@ -8,11 +8,11 @@ These synthetic workloads establish costs and compare the fixes. They do not gua
 
 Each history alternates user and assistant messages. Each assistant has eight paragraphs and eight tool steps. The real App runs against a held IPC fixture. Three trials per history size; values below are medians of React Profiler durations, not elapsed network or paint time. Background work emits 40 text updates into a different chat, 50 ms apart.
 
-| History | Rendering while opening, before → after | Rendering during background updates, before → after |
-| --- | --- | --- |
-| 40 messages | 107.1 → 99.9 ms | 157.0 → 75.2 ms |
-| 300 messages | 317.1 → 116.5 ms | 299.9 → 83.1 ms |
-| 1,000 messages | 718.4 → 110.3 ms | 546.7 → 84.5 ms |
+| History        | Rendering while opening, before → after | Rendering during background updates, before → after |
+| -------------- | --------------------------------------- | --------------------------------------------------- |
+| 40 messages    | 107.1 → 99.9 ms                         | 157.0 → 75.2 ms                                     |
+| 300 messages   | 317.1 → 116.5 ms                        | 299.9 → 83.1 ms                                     |
+| 1,000 messages | 718.4 → 110.3 ms                        | 546.7 → 84.5 ms                                     |
 
 The 1,000-message case mounts 2,739 DOM nodes instead of 64,658. It initially renders the newest 40 messages, matching mobile. Earlier pages load on request with the reading position retained. Opening Find loads all history and keeps it mounted after closing Find.
 
@@ -26,13 +26,13 @@ Raw trials: [before](desktop-before.json), [after](desktop-after.json).
 
 The synthetic project has 10 chats and 1,000 messages, with a client message ID on each of its 500 user inputs. Five trials use the production full/summary projections and the shared relay base64 encoder and assembler. These are Node CPU measurements, not Hermes measurements. Encryption and network transit are excluded.
 
-| Measure | Full snapshot | Drawer projection |
-| --- | --- | --- |
-| JSON | 2,629,456 bytes | 51,520 bytes |
-| Base64 payload | 3,505,968 bytes | 68,696 bytes |
-| Relay chunks | 11 | 1 |
-| Projection, serialization and encoding, median | 36.30 ms | 0.803 ms |
-| Assembly, decoding and parsing, median | 102.38 ms | 1.030 ms |
+| Measure                                        | Full snapshot   | Drawer projection |
+| ---------------------------------------------- | --------------- | ----------------- |
+| JSON                                           | 2,629,456 bytes | 51,520 bytes      |
+| Base64 payload                                 | 3,505,968 bytes | 68,696 bytes      |
+| Relay chunks                                   | 11              | 1                 |
+| Projection, serialization and encoding, median | 36.30 ms        | 0.803 ms          |
+| Assembly, decoding and parsing, median         | 102.38 ms       | 1.030 ms          |
 
 HTTP compression is not the relay payload size: the host reads the decoded HTTP body before framing it into the encrypted channel.
 

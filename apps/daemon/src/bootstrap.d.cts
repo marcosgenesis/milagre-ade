@@ -1,8 +1,8 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter } from "node:events";
 export interface DaemonClient extends EventEmitter {
-  call(method: 'daemon:status', args?: unknown[]): Promise<{ methods: string[]; capabilities: string[] }>;
-  call(method: 'daemon:snapshot', args: [{ paged: true }]): Promise<{ snapshotId: number; pageCount: number; eventSeq: number }>;
-  call(method: 'daemon:snapshot-page', args: [number, number]): Promise<string>;
+  call(method: "daemon:status", args?: unknown[]): Promise<{ methods: string[]; capabilities: string[] }>;
+  call(method: "daemon:snapshot", args: [{ paged: true }]): Promise<{ snapshotId: number; pageCount: number; eventSeq: number }>;
+  call(method: "daemon:snapshot-page", args: [number, number]): Promise<string>;
   call(method: string, args?: unknown[]): Promise<unknown>;
   close(): void;
   /** What daemon:status reported when the connection was checked. */

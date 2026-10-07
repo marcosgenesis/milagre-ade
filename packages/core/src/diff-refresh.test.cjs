@@ -51,7 +51,10 @@ test("an event for a project not read this run reads nothing", async () => {
 test("refreshing a project reads every worktree that has a chat", async () => {
   const { diffs, reads } = harness();
   await diffs.refresh("/a");
-  assert.deepEqual(reads.map((read) => read.worktreePath), ["/a"]);
+  assert.deepEqual(
+    reads.map((read) => read.worktreePath),
+    ["/a"],
+  );
 });
 
 test("focus refreshes only the visible Project, throttled per Project", async () => {
@@ -71,31 +74,54 @@ test("focus refreshes only the visible Project, throttled per Project", async ()
   assert.deepEqual(reads.map((read) => read.worktreePath).sort(), ["/a", "/a", "/b"]);
 });
 
-
 test("thinking completions do not read Git", async () => {
- const {diffs,states,reads}=harness(); await states.get('/a');
- diffs.observe('/a#7',{type:'step-started',step:{id:'thought',kind:'thinking'}});
- diffs.observe('/a#7',{type:'step-completed',id:'thought'});
- await new Promise(resolve=>setTimeout(resolve,30));
- assert.deepEqual(reads,[]); diffs.close();
+  const { diffs, states, reads } = harness();
+  await states.get("/a");
+  diffs.observe("/a#7", { type: "step-started", step: { id: "thought", kind: "thinking" } });
+  diffs.observe("/a#7", { type: "step-completed", id: "thought" });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(reads, []);
+  diffs.close();
 });
 
 test("concurrent refreshes share four Git slots and close cancels queued reads", async () => {
- const states=new ProjectStates({read:async p=>projectState(p),save:async()=>{}});
- const releases=[];const reads=[];let active=0,max=0,updates=0;
- const diffs=new DiffRefresher({states,readDiffStat:async p=>{
-   reads.push(p); max=Math.max(max,++active); await new Promise(resolve=>releases.push(resolve)); --active;return {added:1,removed:0};
- },update:async()=>{updates++;}});
- const pending=Array.from({length:10},(_,i)=>diffs.refresh('/'+i));
- await waitUntil(()=>reads.length>=4);
- assert.equal(reads.length,4); assert.equal(max,4);
- diffs.close();releases.forEach(resolve=>resolve());await Promise.all(pending);
- assert.equal(reads.length,4);assert.equal(updates,0);
+  const states = new ProjectStates({ read: async (p) => projectState(p), save: async () => {} });
+  const releases = [];
+  const reads = [];
+  let active = 0,
+    max = 0,
+    updates = 0;
+  const diffs = new DiffRefresher({
+    states,
+    readDiffStat: async (p) => {
+      reads.push(p);
+      max = Math.max(max, ++active);
+      await new Promise((resolve) => releases.push(resolve));
+      --active;
+      return { added: 1, removed: 0 };
+    },
+    update: async () => {
+      updates++;
+    },
+  });
+  const pending = Array.from({ length: 10 }, (_, i) => diffs.refresh("/" + i));
+  await waitUntil(() => reads.length >= 4);
+  assert.equal(reads.length, 4);
+  assert.equal(max, 4);
+  diffs.close();
+  releases.forEach((resolve) => resolve());
+  await Promise.all(pending);
+  assert.equal(reads.length, 4);
+  assert.equal(updates, 0);
 });
 
 test("only steps that can change files schedule a read", async () => {
-  const { diffs, states, reads } = harness(); await states.get("/a");
-  const step = (id, kind) => { diffs.observe("/a#7", { type: "step-started", step: { id, kind } }); diffs.observe("/a#7", { type: "step-completed", id }); };
+  const { diffs, states, reads } = harness();
+  await states.get("/a");
+  const step = (id, kind) => {
+    diffs.observe("/a#7", { type: "step-started", step: { id, kind } });
+    diffs.observe("/a#7", { type: "step-completed", id });
+  };
   for (const kind of ["read", "search", "thinking", "setup", "image"]) step(`s-${kind}`, kind);
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(reads, []);
@@ -110,7 +136,8 @@ test("only steps that can change files schedule a read", async () => {
 });
 
 test("a step completed without a recorded start still refreshes, and a turn end drops the kinds", async () => {
-  const { diffs, states, reads } = harness(); await states.get("/a");
+  const { diffs, states, reads } = harness();
+  await states.get("/a");
   diffs.observe("/a#7", { type: "step-started", step: { id: "x", kind: "read" } });
   diffs.observe("/a#7", { type: "turn-completed" });
   assert.equal(diffs.stepKinds.has("/a#7"), false);

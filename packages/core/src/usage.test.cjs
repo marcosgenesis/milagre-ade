@@ -18,7 +18,13 @@ const USAGE_BODY = {
   limits: [
     { kind: "session", group: "session", percent: 73, resets_at: "2026-10-01T20:49:59Z", scope: null },
     { kind: "weekly_all", group: "weekly", percent: 61, resets_at: "2026-10-06T19:59:59Z", scope: null },
-    { kind: "weekly_scoped", group: "weekly", percent: 66, resets_at: "2026-10-06T19:59:59Z", scope: { model: { id: null, display_name: "Fable" }, surface: null } },
+    {
+      kind: "weekly_scoped",
+      group: "weekly",
+      percent: 66,
+      resets_at: "2026-10-06T19:59:59Z",
+      scope: { model: { id: null, display_name: "Fable" }, surface: null },
+    },
   ],
 };
 
@@ -75,20 +81,33 @@ test("puts Session and Weekly first and skips limits it does not understand", as
   const [session, weekly, fable] = USAGE_BODY.limits;
   const { deps } = setup({ response: json(200, { limits: [fable, { kind: "monthly_mystery", percent: 10, resets_at: null }, weekly, session] }) });
   const result = await readClaudeUsage(deps);
-  assert.deepEqual(result.windows.map((item) => item.id), ["session", "weekly", "weekly:fable"]);
+  assert.deepEqual(
+    result.windows.map((item) => item.id),
+    ["session", "weekly", "weekly:fable"],
+  );
 });
 
 test("falls back to five_hour and seven_day when limits is missing", async () => {
   const { deps } = setup({ response: json(200, { five_hour: USAGE_BODY.five_hour, seven_day: USAGE_BODY.seven_day }) });
   const result = await readClaudeUsage(deps);
-  assert.deepEqual(result.windows.map((item) => [item.id, item.usedPercent]), [["session", 73], ["weekly", 61]]);
+  assert.deepEqual(
+    result.windows.map((item) => [item.id, item.usedPercent]),
+    [
+      ["session", 73],
+      ["weekly", 61],
+    ],
+  );
 });
 
 test("clamps out-of-range percentages and skips missing ones", async () => {
-  const { deps } = setup({ response: json(200, { limits: [
-    { kind: "session", percent: 130, resets_at: null },
-    { kind: "weekly_all", percent: null, resets_at: null },
-  ] }) });
+  const { deps } = setup({
+    response: json(200, {
+      limits: [
+        { kind: "session", percent: 130, resets_at: null },
+        { kind: "weekly_all", percent: null, resets_at: null },
+      ],
+    }),
+  });
   const result = await readClaudeUsage(deps);
   assert.deepEqual(result.windows, [{ id: "session", label: "Session", shortLabel: "5h", usedPercent: 100, resetsAt: null }]);
 });
@@ -135,7 +154,17 @@ const FAILURES = [
   ["HTTP 401", json(401, { error: "unauthorized" }), "Claude sign-in expired. Running any Claude agent refreshes it."],
   ["HTTP 429", json(429, {}), "Claude is rate limiting usage checks."],
   ["HTTP 500", json(500, {}), "Claude usage failed (HTTP 500)."],
-  ["unreadable JSON", { ok: true, status: 200, json: async () => { throw new SyntaxError(`Unexpected token near ${TOKEN}`); } }, "Claude returned an unreadable usage response."],
+  [
+    "unreadable JSON",
+    {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError(`Unexpected token near ${TOKEN}`);
+      },
+    },
+    "Claude returned an unreadable usage response.",
+  ],
   ["no windows", json(200, { limits: [] }), "Claude returned no usage windows."],
   ["a network failure", new TypeError(`fetch failed for ${TOKEN}`), "Couldn't reach Claude."],
   ["a timeout", Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }), "Claude usage timed out."],
@@ -183,7 +212,8 @@ function fakeCodex({ account = { type: "chatgpt", planType: "pro" }, rateLimits,
       if (!reply || message.id === undefined) continue;
       if (message.method === "initialize") emit({ id: message.id, result: { userAgent: "codex" } });
       if (message.method === "account/read") emit({ id: message.id, result: { account, requiresOpenaiAuth: true } });
-      if (message.method === "account/rateLimits/read") emit({ id: message.id, result: { rateLimits, ...(resetCredits ? { rateLimitResetCredits: resetCredits } : {}) } });
+      if (message.method === "account/rateLimits/read")
+        emit({ id: message.id, result: { rateLimits, ...(resetCredits ? { rateLimitResetCredits: resetCredits } : {}) } });
     }
     return true;
   };
@@ -228,19 +258,35 @@ test("reports banked Codex resets only when there are some", async () => {
 });
 
 test("orders Codex windows shortest first and labels other durations", async () => {
-  const both = fakeCodex({ rateLimits: {
-    primary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: RESETS_AT },
-    secondary: { usedPercent: 12, windowDurationMins: 300, resetsAt: null },
-  } });
+  const both = fakeCodex({
+    rateLimits: {
+      primary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: RESETS_AT },
+      secondary: { usedPercent: 12, windowDurationMins: 300, resetsAt: null },
+    },
+  });
   const result = await readCodexUsage(codexDeps(both).deps);
-  assert.deepEqual(result.windows.map((item) => [item.id, item.label, item.shortLabel]), [["session", "Session", "5h"], ["weekly", "Weekly", "wk"]]);
+  assert.deepEqual(
+    result.windows.map((item) => [item.id, item.label, item.shortLabel]),
+    [
+      ["session", "Session", "5h"],
+      ["weekly", "Weekly", "wk"],
+    ],
+  );
 
-  const odd = fakeCodex({ rateLimits: {
-    primary: { usedPercent: 5, windowDurationMins: 1440, resetsAt: null },
-    secondary: { usedPercent: 6, windowDurationMins: 90, resetsAt: null },
-  } });
+  const odd = fakeCodex({
+    rateLimits: {
+      primary: { usedPercent: 5, windowDurationMins: 1440, resetsAt: null },
+      secondary: { usedPercent: 6, windowDurationMins: 90, resetsAt: null },
+    },
+  });
   const oddResult = await readCodexUsage(codexDeps(odd).deps);
-  assert.deepEqual(oddResult.windows.map((item) => [item.id, item.label, item.shortLabel]), [["window:90", "90m window", "90m"], ["window:1440", "1d window", "1d"]]);
+  assert.deepEqual(
+    oddResult.windows.map((item) => [item.id, item.label, item.shortLabel]),
+    [
+      ["window:90", "90m window", "90m"],
+      ["window:1440", "1d window", "1d"],
+    ],
+  );
 });
 
 test("parses replies split across chunks and mixed with notifications", async () => {
@@ -313,7 +359,10 @@ test("shares one in-flight read between concurrent callers", async () => {
   assert.equal(first, second);
   claude.resolve({ provider: "claude", status: "ok", windows: [], updatedAt });
   const snapshot = await first;
-  assert.deepEqual(snapshot.providers.map((item) => item.provider), ["claude", "codex"]);
+  assert.deepEqual(
+    snapshot.providers.map((item) => item.provider),
+    ["claude", "codex"],
+  );
   assert.deepEqual([claudeReads, codexReads], [1, 1]);
 
   await readUsage();
@@ -327,8 +376,14 @@ test("waits for the login environment before reading either provider", async () 
   const readUsage = createUsageReader({
     now: () => NOW,
     ready: () => environment.promise.then(() => order.push("environment")),
-    readClaude: async () => { order.push("claude"); return { provider: "claude", status: "ok", windows: [], updatedAt }; },
-    readCodex: async () => { order.push("codex"); return { provider: "codex", status: "ok", windows: [], updatedAt }; },
+    readClaude: async () => {
+      order.push("claude");
+      return { provider: "claude", status: "ok", windows: [], updatedAt };
+    },
+    readCodex: async () => {
+      order.push("codex");
+      return { provider: "codex", status: "ok", windows: [], updatedAt };
+    },
   });
   const pending = readUsage();
   await new Promise((resolve) => setImmediate(resolve));
@@ -367,7 +422,7 @@ const RATE_LIMIT_MESSAGE = "Claude is rate limiting usage checks.";
 const MIN = 60_000;
 
 function rateLimited(retryAfter) {
-  return { ...json(429, {}), headers: { get: (name) => (name.toLowerCase() === "retry-after" ? retryAfter ?? null : null) } };
+  return { ...json(429, {}), headers: { get: (name) => (name.toLowerCase() === "retry-after" ? (retryAfter ?? null) : null) } };
 }
 
 test("a 429 reports Retry-After seconds as retryAfterMs", async () => {
@@ -376,7 +431,12 @@ test("a 429 reports Retry-After seconds as retryAfterMs", async () => {
 });
 
 test("a 429 defaults to 5 minutes and caps at 30", async () => {
-  for (const [header, expected] of [[undefined, 5 * MIN], ["soon", 5 * MIN], ["-3", 5 * MIN], ["999999", 30 * MIN]]) {
+  for (const [header, expected] of [
+    [undefined, 5 * MIN],
+    ["soon", 5 * MIN],
+    ["-3", 5 * MIN],
+    ["999999", 30 * MIN],
+  ]) {
     const result = await readClaudeUsage(setup({ response: rateLimited(header) }).deps);
     assert.equal(result.retryAfterMs, expected, String(header));
   }
@@ -400,8 +460,22 @@ function claudeReader({ responses, store = createUsageStore(), clock }) {
   const readUsage = createUsageReader({
     now,
     store,
-    readClaude: () => readClaudeUsage({ ...deps, now, fetchImpl: async (url) => { fetchCalls.push(url); return queue.shift(); } }),
-    readCodex: async () => ({ provider: "codex", status: "unavailable", windows: [], updatedAt: new Date(now()).toISOString(), message: "Codex CLI not found." }),
+    readClaude: () =>
+      readClaudeUsage({
+        ...deps,
+        now,
+        fetchImpl: async (url) => {
+          fetchCalls.push(url);
+          return queue.shift();
+        },
+      }),
+    readCodex: async () => ({
+      provider: "codex",
+      status: "unavailable",
+      windows: [],
+      updatedAt: new Date(now()).toISOString(),
+      message: "Codex CLI not found.",
+    }),
   });
   return { readUsage, fetchCalls, time };
 }
@@ -471,7 +545,10 @@ test("fallback drops windows whose reset time has passed", async () => {
   await readUsage();
   time.now = Date.parse("2026-10-01T21:00:00Z");
   const limited = claudeOf(await readUsage());
-  assert.deepEqual(limited.windows.map((item) => item.id), ["weekly", "weekly:fable"]);
+  assert.deepEqual(
+    limited.windows.map((item) => item.id),
+    ["weekly", "weekly:fable"],
+  );
 });
 
 test("with no last good result a 429 is returned as is", async () => {
@@ -516,13 +593,28 @@ test("the persisted cache contains no credentials", async () => {
 
 test("cachedSnapshot builds ok providers from the store and drops expired windows", async () => {
   const store = createUsageStore();
-  store.setLast("claude", { windows: [
-    { id: "session", label: "Session", shortLabel: "5h", usedPercent: 73, resetsAt: "2026-10-01T20:49:59Z" },
-    { id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" },
-  ], updatedAt: "2026-10-01T19:00:00.000Z" });
-  store.setLast("codex", { windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: "2026-10-01T20:00:00Z" }], updatedAt: "2026-10-01T19:10:00.000Z" });
+  store.setLast("claude", {
+    windows: [
+      { id: "session", label: "Session", shortLabel: "5h", usedPercent: 73, resetsAt: "2026-10-01T20:49:59Z" },
+      { id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" },
+    ],
+    updatedAt: "2026-10-01T19:00:00.000Z",
+  });
+  store.setLast("codex", {
+    windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 88, resetsAt: "2026-10-01T20:00:00Z" }],
+    updatedAt: "2026-10-01T19:10:00.000Z",
+  });
   const snapshot = cachedSnapshot(store, Date.parse("2026-10-01T21:00:00Z"));
-  assert.deepEqual(snapshot, { providers: [{ provider: "claude", status: "ok", windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" }], updatedAt: "2026-10-01T19:00:00.000Z" }] });
+  assert.deepEqual(snapshot, {
+    providers: [
+      {
+        provider: "claude",
+        status: "ok",
+        windows: [{ id: "weekly", label: "Weekly", shortLabel: "wk", usedPercent: 61, resetsAt: "2026-10-06T19:59:59Z" }],
+        updatedAt: "2026-10-01T19:00:00.000Z",
+      },
+    ],
+  });
   assert.deepEqual(cachedSnapshot(createUsageStore(), NOW), { providers: [] });
 });
 

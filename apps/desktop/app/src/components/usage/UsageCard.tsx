@@ -54,7 +54,9 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
       }}
     >
       <div className="flex items-start gap-2 px-4 pb-3 pt-3.5">
-        <span className="mt-0.5 flex text-ink"><ProviderMark provider={usage.provider} size={16} /></span>
+        <span className="mt-0.5 flex text-ink">
+          <ProviderMark provider={usage.provider} size={16} />
+        </span>
         <div className="min-w-0 flex-1">
           <p className="text-[14px] font-semibold leading-5">{name}</p>
           <p className="text-[12px] text-ink-3">{formatUpdatedAgo(usage.updatedAt, now)}</p>
@@ -75,9 +77,7 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
         </button>
       </div>
 
-      {usage.message && (
-        <p className="mx-4 mb-3 rounded-control bg-field px-2.5 py-1.5 text-[12px] leading-[1.45] text-ink">{usage.message}</p>
-      )}
+      {usage.message && <p className="mx-4 mb-3 rounded-control bg-field px-2.5 py-1.5 text-[12px] leading-[1.45] text-ink">{usage.message}</p>}
 
       {usage.windows.length > 0 && (
         <div className="flex flex-col gap-3 border-t border-line px-4 pb-4 pt-3">
@@ -86,7 +86,9 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
               <p className="text-[13px] font-medium">{item.label}</p>
               <UsageBar usedPercent={item.usedPercent} display={usageDisplay} className="h-1.5 w-full" />
               <div className="flex items-center justify-between text-[12px] tabular-nums text-ink-2">
-                <span>{formatPercent(shownPercent(item.usedPercent, usageDisplay))} {shownSuffix(usageDisplay)}</span>
+                <span>
+                  {formatPercent(shownPercent(item.usedPercent, usageDisplay))} {shownSuffix(usageDisplay)}
+                </span>
                 <span>{formatResetsIn(item.resetsAt, now)}</span>
               </div>
             </div>

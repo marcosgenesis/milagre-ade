@@ -65,8 +65,7 @@ export interface GitChatContext {
 
 export type GitTextResult =
   /** `repeated`: the subject kept repeating an earlier commit, so the commit message is empty. */
-  | { ok: true; provider: ModelProvider; commitMessage: string; prTitle: string; prBody: string; repeated?: boolean }
-  | { ok: false; message: string };
+  { ok: true; provider: ModelProvider; commitMessage: string; prTitle: string; prBody: string; repeated?: boolean } | { ok: false; message: string };
 
 export type GitCommitResult =
   | { ok: true; sha: string; shortSha: string }
@@ -136,10 +135,25 @@ export interface DialogMode {
  * is disabled without origin. On the base branch nothing reaches the remote in one click: "Commit only"
  * is the primary button.
  */
-export function dialogMode({ hasChanges, unpushed, prOpen, onBase, hasOrigin, ghReady, ahead = 0, base = "main", ghMessage = null, detached = false, commitBlocked = null, turnRunning = false }: DialogModeInput): DialogMode {
+export function dialogMode({
+  hasChanges,
+  unpushed,
+  prOpen,
+  onBase,
+  hasOrigin,
+  ghReady,
+  ahead = 0,
+  base = "main",
+  ghMessage = null,
+  detached = false,
+  commitBlocked = null,
+  turnRunning = false,
+}: DialogModeInput): DialogMode {
   const pushBlocked = !hasOrigin ? NO_ORIGIN : detached ? DETACHED : null;
   const commitReason = commitBlocked || (detached ? DETACHED_COMMIT : null) || (turnRunning ? TURN_RUNNING : null);
-  const prBlocked = prOpen ? null : pushBlocked ?? (onBase ? `You're on ${base}. Open a PR from a worktree branch.` : !ghReady ? ghMessage || GH_MISSING : null);
+  const prBlocked = prOpen
+    ? null
+    : (pushBlocked ?? (onBase ? `You're on ${base}. Open a PR from a worktree branch.` : !ghReady ? ghMessage || GH_MISSING : null));
   const canPr = !prOpen && !prBlocked;
   const button = (label: string, steps: GitStep[]): DialogButton => ({
     label,
@@ -206,7 +220,10 @@ export function gitChatContext(chatTitle: string, messages: ChatMessage[]): GitC
   return {
     chatTitle,
     firstMessage: userMessages[0]?.body ?? "",
-    recentMessages: userMessages.slice(1).slice(-3).map((message) => message.body),
+    recentMessages: userMessages
+      .slice(1)
+      .slice(-3)
+      .map((message) => message.body),
     testCommands: testCommandsFrom(messages),
   };
 }

@@ -46,7 +46,10 @@ export function pullRequestRefsCache() {
 
 // gh prints the new PR's URL alone on the last line; URLs in the body come before it.
 function createdUrl(detail: string) {
-  const lines = detail.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lines = detail
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const index = lines.map((line) => PR_URL.test(line)).lastIndexOf(true);
   return index > 0 ? lines[index] : null;
 }
@@ -69,7 +72,11 @@ function mergedRef(args: string) {
 }
 
 /** The chat's PRs that could be read, in the order it made them, with the worktree branch's PR included once. */
-export function chatPullRequests(refs: PullRequestRef[], found: Record<PullRequestRef, PullRequest | null | undefined>, branch: PullRequest | undefined): PullRequest[] {
+export function chatPullRequests(
+  refs: PullRequestRef[],
+  found: Record<PullRequestRef, PullRequest | null | undefined>,
+  branch: PullRequest | undefined,
+): PullRequest[] {
   const prs: PullRequest[] = [];
   for (const pr of [...refs.map((ref) => found[ref]), branch]) {
     if (pr && !prs.some((other) => other.url === pr.url)) prs.push(pr);
@@ -80,5 +87,8 @@ export function chatPullRequests(refs: PullRequestRef[], found: Record<PullReque
 /** The order the row shows them in: blocked PRs (conflicts, changes requested, out of date), other open PRs, then merged ones. */
 export function rowPullRequests(prs: PullRequest[]): PullRequest[] {
   const rank = (pr: PullRequest) => (pr.state === "MERGED" ? 2 : pullRequestBlockers(pr).length ? 0 : 1);
-  return prs.map((pr, index) => ({ pr, index })).sort((a, b) => rank(a.pr) - rank(b.pr) || a.index - b.index).map(({ pr }) => pr);
+  return prs
+    .map((pr, index) => ({ pr, index }))
+    .sort((a, b) => rank(a.pr) - rank(b.pr) || a.index - b.index)
+    .map(({ pr }) => pr);
 }

@@ -5,7 +5,13 @@ import { formatCommentsMessage, isOutdated, labelFor, locateComment, selectionFr
 
 const PATCH = "@@ -1,4 +1,4 @@\n a\n-b\n-c\n+B\n+C\n d\n";
 const [hunk] = parsePatch(PATCH);
-const comment = (selection: NonNullable<ReturnType<typeof selectionFromRows>>, body = "note"): DiffComment => ({ id: "1", path: "src/a.ts", body, createdAt: 0, ...selection });
+const comment = (selection: NonNullable<ReturnType<typeof selectionFromRows>>, body = "note"): DiffComment => ({
+  id: "1",
+  path: "src/a.ts",
+  body,
+  createdAt: 0,
+  ...selection,
+});
 
 test("a unified range keeps every row and takes the new side's numbers", () => {
   assert.deepEqual(selectionFromRows(hunk, 1, 3), { side: "new", start: 2, end: 2, snippet: ["-b", "-c", "+B"] });
@@ -47,16 +53,41 @@ test("labels", () => {
 test("formats the message with fences, sides and the mode", () => {
   const first = comment(selectionFromRows(hunk, 0, 3)!, "Rename this.");
   const second: DiffComment = { id: "2", path: "README.md", side: "old", start: 3, end: 3, snippet: ["-Old tagline"], body: "Keep it.", createdAt: 0 };
-  assert.equal(formatCommentsMessage([first, second], { mode: "uncommitted" }), [
-    "Review comments on the diff (uncommitted changes):", "",
-    "1. src/a.ts, lines 1–2 (new):", "```typescript", " a", "-b", "-c", "+B", "```", "Rename this.", "",
-    "2. README.md, line 3 (old):", "```markdown", "-Old tagline", "```", "Keep it.",
-  ].join("\n"));
+  assert.equal(
+    formatCommentsMessage([first, second], { mode: "uncommitted" }),
+    [
+      "Review comments on the diff (uncommitted changes):",
+      "",
+      "1. src/a.ts, lines 1–2 (new):",
+      "```typescript",
+      " a",
+      "-b",
+      "-c",
+      "+B",
+      "```",
+      "Rename this.",
+      "",
+      "2. README.md, line 3 (old):",
+      "```markdown",
+      "-Old tagline",
+      "```",
+      "Keep it.",
+    ].join("\n"),
+  );
   assert.ok(formatCommentsMessage([second], { mode: "committed", base: "main" }).startsWith("Review comments on the diff (committed changes against main):"));
 });
 
 test("long snippets keep the first 40 rows", () => {
-  const long: DiffComment = { id: "3", path: "x.unknown", side: "new", start: 1, end: 50, snippet: Array.from({ length: 50 }, (_, i) => `+l${i}`), body: "b", createdAt: 0 };
+  const long: DiffComment = {
+    id: "3",
+    path: "x.unknown",
+    side: "new",
+    start: 1,
+    end: 50,
+    snippet: Array.from({ length: 50 }, (_, i) => `+l${i}`),
+    body: "b",
+    createdAt: 0,
+  };
   const lines = formatCommentsMessage([long], { mode: "uncommitted" }).split("\n");
   assert.equal(lines[3], "```");
   assert.equal(lines[4 + 40], "… (10 more lines)");

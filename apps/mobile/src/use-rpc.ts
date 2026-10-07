@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { Client } from './client';
+import { useEffect, useState } from "react";
+import type { Client } from "./client";
 
 export function useRpc<T>(client: Client | null, method: string, args: unknown[]) {
   const encoded = JSON.stringify(args);
@@ -9,13 +9,18 @@ export function useRpc<T>(client: Client | null, method: string, args: unknown[]
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
-    void client.call<T>(method, JSON.parse(encoded)).then(data => {
-      if (!cancelled) setLoaded({ client, identity, data, error: '' });
-    }).catch(error => {
-      if (!cancelled) setLoaded({ client, identity, data: null, error: error.message });
-    });
-    return () => { cancelled = true; };
+    void client
+      .call<T>(method, JSON.parse(encoded))
+      .then((data) => {
+        if (!cancelled) setLoaded({ client, identity, data, error: "" });
+      })
+      .catch((error) => {
+        if (!cancelled) setLoaded({ client, identity, data: null, error: error.message });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [client, method, encoded, identity]);
   const current = loaded?.client === client && loaded?.identity === identity ? loaded : null;
-  return { data: current?.data ?? null, error: current?.error || '', loading: !!client && !current, refresh: () => setRevision(value => value + 1) };
+  return { data: current?.data ?? null, error: current?.error || "", loading: !!client && !current, refresh: () => setRevision((value) => value + 1) };
 }

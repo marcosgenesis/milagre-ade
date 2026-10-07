@@ -40,4 +40,3 @@ export function extractOutdatedProvider(message: string): ModelProvider | null {
   }
   return null;
 }
-

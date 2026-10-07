@@ -61,9 +61,19 @@ function harness({ idleMs = 60_000 } = {}) {
   });
   return { manager, sent, created, closedChats };
 }
-const request = (chatId, extra = {}) => ({ chatId, provider: "codex", model: "gpt-6-sol", cwd: "/repo", permissionMode: "auto", prompt: "hi", images: [], command: "/bin/codex", ...extra });
+const request = (chatId, extra = {}) => ({
+  chatId,
+  provider: "codex",
+  model: "gpt-6-sol",
+  cwd: "/repo",
+  permissionMode: "auto",
+  prompt: "hi",
+  images: [],
+  command: "/bin/codex",
+  ...extra,
+});
 
-test("account switches keep active replies, then resume their history with the new account", async t => {
+test("account switches keep active replies, then resume their history with the new account", async (t) => {
   const { manager, created } = harness();
   t.after(() => manager.closeAll());
   await manager.startTurn(request("1", { accountId: "personal", env: { CODEX_HOME: "/personal" } }));
@@ -93,7 +103,16 @@ test("creates one session per chat and reuses it", async (t) => {
   assert.equal(created[0].options.cwd, "/repo");
   assert.equal(created[0].options.resumeId, "thread-7");
   assert.equal(created[0].options.command, "/bin/codex");
-  assert.deepEqual(created[0].turns[0], { prompt: "hi", images: [], model: "gpt-6-sol", permissionMode: "auto", effort: undefined, ultracode: undefined, fastMode: undefined, replies: undefined });
+  assert.deepEqual(created[0].turns[0], {
+    prompt: "hi",
+    images: [],
+    model: "gpt-6-sol",
+    permissionMode: "auto",
+    effort: undefined,
+    ultracode: undefined,
+    fastMode: undefined,
+    replies: undefined,
+  });
 });
 
 test("a turn carries the reply style to its session", async (t) => {
@@ -294,8 +313,19 @@ test("an approval request is sent right after the text before it", async (t) => 
   t.after(() => manager.closeAll());
   await manager.startTurn(request("1"));
   created[0].emit({ type: "text-delta", messageId: "t1", text: "Let me check" });
-  created[0].emit({ type: "permission-request", requestId: "r1", kind: "command", tool: "Shell", title: "Run this command?", command: "ls", allowForChat: true });
-  assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "permission-request"]);
+  created[0].emit({
+    type: "permission-request",
+    requestId: "r1",
+    kind: "command",
+    tool: "Shell",
+    title: "Run this command?",
+    command: "ls",
+    allowForChat: true,
+  });
+  assert.deepEqual(
+    sent.map((item) => item.event.type),
+    ["text-delta", "permission-request"],
+  );
 });
 
 test("command output is batched per step, in order with the reply around it", async (t) => {
@@ -308,16 +338,22 @@ test("command output is batched per step, in order with the reply around it", as
   created[0].emit({ type: "step-output", id: "exec-1", text: "ok 1\n" });
   created[0].emit({ type: "step-output", id: "exec-1", text: "ok 2\n" });
   created[0].emit({ type: "step-output", id: "exec-2", text: "other\n" });
-  assert.deepEqual(sent.map((item) => item.event), [
-    { type: "text-delta", messageId: "t1", text: "Testing." },
-    { type: "step-started", step },
-    { type: "step-output", id: "exec-1", text: "ok 1\nok 2\n" },
-  ]);
+  assert.deepEqual(
+    sent.map((item) => item.event),
+    [
+      { type: "text-delta", messageId: "t1", text: "Testing." },
+      { type: "step-started", step },
+      { type: "step-output", id: "exec-1", text: "ok 1\nok 2\n" },
+    ],
+  );
   created[0].emit({ type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" });
-  assert.deepEqual(sent.slice(3).map((item) => item.event), [
-    { type: "step-output", id: "exec-2", text: "other\n" },
-    { type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" },
-  ]);
+  assert.deepEqual(
+    sent.slice(3).map((item) => item.event),
+    [
+      { type: "step-output", id: "exec-2", text: "other\n" },
+      { type: "step-completed", id: "exec-1", status: "done", detail: "$ npm test\nok 1\nok 2\n" },
+    ],
+  );
 });
 
 test("a batch of command output keeps only its end", async (t) => {
@@ -368,7 +404,10 @@ test("routes question answers to the chat's session and refuses malformed ones",
   await manager.startTurn(request("1"));
   assert.equal(manager.answerQuestion("1", "q-1", { color: ["Green", "a darker one"] }), true);
   assert.equal(manager.answerQuestion("1", "q-2", null), true);
-  assert.deepEqual(created[0].replies, [{ requestId: "q-1", answers: { color: ["Green", "a darker one"] } }, { requestId: "q-2", answers: null }]);
+  assert.deepEqual(created[0].replies, [
+    { requestId: "q-1", answers: { color: ["Green", "a darker one"] } },
+    { requestId: "q-2", answers: null },
+  ]);
   assert.equal(manager.answerQuestion("9", "q-1", null), false);
   for (const bad of [undefined, "Green", ["Green"], { color: "Green" }, { color: [7] }, { color: ["x".repeat(10_001)] }]) {
     assert.throws(() => manager.answerQuestion("1", "q-1", bad), /Invalid answers to an agent question/);
@@ -382,7 +421,10 @@ test("a question is sent right after the command output before it", async (t) =>
   await manager.startTurn(request("1"));
   created[0].emit({ type: "step-output", id: "exec-1", text: "ok\n" });
   created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
-  assert.deepEqual(sent.map((item) => item.event.type), ["step-output", "question-request"]);
+  assert.deepEqual(
+    sent.map((item) => item.event.type),
+    ["step-output", "question-request"],
+  );
 });
 
 test("a question is sent right after the text before it", async (t) => {
@@ -392,9 +434,11 @@ test("a question is sent right after the text before it", async (t) => {
   created[0].emit({ type: "text-delta", messageId: "t1", text: "One thing first" });
   created[0].emit({ type: "question-request", requestId: "q-1", questions: [] });
   created[0].emit({ type: "question-resolved", requestId: "q-1", outcome: "dismissed" });
-  assert.deepEqual(sent.map((item) => item.event.type), ["text-delta", "question-request", "question-resolved"]);
+  assert.deepEqual(
+    sent.map((item) => item.event.type),
+    ["text-delta", "question-request", "question-resolved"],
+  );
 });
-
 
 test("TLDR changes resume the same chat with new instructions between turns", async (t) => {
   const { manager, created } = harness();
@@ -431,22 +475,27 @@ test("TLDR changes leave a running turn alone and apply once it finishes", async
   assert.equal(created[1].options.tldrEnabled, false);
 });
 
-test('background children prevent idle eviction after the parent finishes', async t => {
- const {manager,created}=harness({idleMs:15});
- t.after(()=>manager.closeAll());
- await manager.startTurn(request('1'));
- created[0].emit({type:'subagent-update',agent:{id:'child',status:'running'}});
- created[0].emit({type:'turn-completed'});
- await new Promise(resolve=>setTimeout(resolve,40));
- assert.equal(created[0].closed,false);
- created[0].emit({type:'subagent-update',agent:{id:'child',status:'completed'}});
- await waitUntil(()=>created[0].closed);
+test("background children prevent idle eviction after the parent finishes", async (t) => {
+  const { manager, created } = harness({ idleMs: 15 });
+  t.after(() => manager.closeAll());
+  await manager.startTurn(request("1"));
+  created[0].emit({ type: "subagent-update", agent: { id: "child", status: "running" } });
+  created[0].emit({ type: "turn-completed" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(created[0].closed, false);
+  created[0].emit({ type: "subagent-update", agent: { id: "child", status: "completed" } });
+  await waitUntil(() => created[0].closed);
 });
 
 test("Milagre's own tools ask through the chat's approval cards and read its permission mode", async () => {
-
   const added = [];
-  const session = { turnActive: true, closed: false, permissions: { mode: "auto", add: (request, answer) => added.push({ request, answer }) }, startTurn: async () => ({ turnId: "t", steered: false }), close: async () => {} };
+  const session = {
+    turnActive: true,
+    closed: false,
+    permissions: { mode: "auto", add: (request, answer) => added.push({ request, answer }) },
+    startTurn: async () => ({ turnId: "t", steered: false }),
+    close: async () => {},
+  };
   const manager = new SessionManager({ createSession: () => session, send: () => {} });
   assert.equal(await manager.askApproval("p#1", { requestId: "r" }), "cancelled", "a chat without a session has nobody to ask");
   assert.equal(manager.permissionMode("p#1"), "ask");

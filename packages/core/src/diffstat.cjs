@@ -15,7 +15,7 @@ const PATHSPEC = ["--", ".", ":(exclude).milagre"];
 
 /** Same recorded/default comparison branch as Changes and the commit dialog. */
 async function diffBase(cwd, base) {
-  return (await client.resolveBase(cwd, base)).ref ?? 'HEAD';
+  return (await client.resolveBase(cwd, base)).ref ?? "HEAD";
 }
 
 // resolveBase is up to six git processes and its answer rarely changes, while every agent step
@@ -23,7 +23,7 @@ async function diffBase(cwd, base) {
 const BASE_TTL = 30_000;
 const baseCache = new Map();
 async function cachedDiffBase(cwd, base, now = Date.now) {
-  const key = `${cwd}\0${base ?? ''}`;
+  const key = `${cwd}\0${base ?? ""}`;
   const hit = baseCache.get(key);
   if (hit && now() - hit.at < BASE_TTL) return hit.ref;
   const ref = await diffBase(cwd, base);
@@ -71,8 +71,10 @@ async function untrackedLines(cwd) {
     const full = path.join(cwd, file);
     const stat = await fs.stat(full).catch(() => null);
     const before = known?.get(file);
-    const entry = stat && before && before.size === stat.size && before.mtimeMs === stat.mtimeMs
-      ? before : { size: stat?.size, mtimeMs: stat?.mtimeMs, lines: await fileLineCount(full) };
+    const entry =
+      stat && before && before.size === stat.size && before.mtimeMs === stat.mtimeMs
+        ? before
+        : { size: stat?.size, mtimeMs: stat?.mtimeMs, lines: await fileLineCount(full) };
     counted.set(file, entry);
     lines += entry.lines;
   }

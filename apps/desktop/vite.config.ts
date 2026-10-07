@@ -36,7 +36,7 @@ export default defineConfig({
   plugins: [react(), contentSecurityPolicy],
   // Canvas is lazy-loaded. Prebundle it before first paint so its React runtime
   // stays shared with the renderer when the user first opens it in development.
-  optimizeDeps: { include: ['@xyflow/react'] },
+  optimizeDeps: { include: ["@xyflow/react"] },
   resolve: {
     alias: {
       "@": resolve(projectRoot, "app/src"),

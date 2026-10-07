@@ -8,11 +8,11 @@ brew install --cask the-ptf/tap/milagre
 
 The tap starts with the signed, notarized `v0.88.0` release for Apple Silicon and Intel. Its scheduled updater downloads both stable-release DMGs, checks their sizes and hashes, and commits the new cask. Uninstalling keeps saved Chats and settings.
 
-| Platform | Architecture | Installers | Distribution |
-| --- | --- | --- | --- |
-| macOS | Apple Silicon, Intel | DMG, ZIP | Homebrew tap and signed GitHub releases |
-| Windows | x64 | Per-user NSIS EXE | WinGet manifest; public listing awaits a tested signed release |
-| Linux | x64 | AppImage, DEB, RPM | Signed APT/RPM metadata and Cloudflare hosting workflow; first publication pending |
+| Platform | Architecture         | Installers         | Distribution                                                                       |
+| -------- | -------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| macOS    | Apple Silicon, Intel | DMG, ZIP           | Homebrew tap and signed GitHub releases                                            |
+| Windows  | x64                  | Per-user NSIS EXE  | WinGet manifest; public listing awaits a tested signed release                     |
+| Linux    | x64                  | AppImage, DEB, RPM | Signed APT/RPM metadata and Cloudflare hosting workflow; first publication pending |
 
 Windows ARM64, Linux ARM64, Chocolatey, Scoop, Flatpak and Snap remain outside this implementation. Git and a supported, logged-in agent CLI are still required. Electron bundles the host's Node runtime.
 
@@ -64,12 +64,12 @@ If `gh release create` succeeded but the asset upload failed, the next run sees 
 
 Required repository secrets:
 
-| Purpose | Secrets |
-| --- | --- |
-| Apple signing | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` |
-| Windows signing | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` |
-| Linux signing | `LINUX_REPOSITORY_PRIVATE_KEY`, `LINUX_REPOSITORY_KEY_FINGERPRINT` |
-| Cloudflare deployment | `CLOUDFLARE_PACKAGES_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
+| Purpose               | Secrets                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| Apple signing         | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` |
+| Windows signing       | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`                                                     |
+| Linux signing         | `LINUX_REPOSITORY_PRIVATE_KEY`, `LINUX_REPOSITORY_KEY_FINGERPRINT`                         |
+| Cloudflare deployment | `CLOUDFLARE_PACKAGES_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`                                   |
 
 Apple and Linux signing secrets and the Cloudflare account ID are configured. Windows signing and the dedicated Cloudflare deployment token still need setup. The existing local Cloudflare token stays in its private environment file; it is not copied into GitHub. Use a dedicated deployment token for the repository workflow.
 

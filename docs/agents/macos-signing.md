@@ -10,13 +10,13 @@ Public releases use a **Developer ID Application** certificate for direct distri
 4. Generate an [app-specific password](https://support.apple.com/pt-br/102654) for notarization from your Apple Account. Use a dedicated password for Milagre, not the account's login password.
 5. Add the following repository secrets in [GitHub Actions settings](https://github.com/the-ptf/milagre-ade/settings/secrets/actions):
 
-| Secret | Value |
-| --- | --- |
-| `CSC_LINK` | Base64-encoded Developer ID Application `.p12`, including its private key |
-| `CSC_KEY_PASSWORD` | Password used when exporting the `.p12` |
-| `APPLE_ID` | Apple Account email used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Dedicated app-specific password |
-| `APPLE_TEAM_ID` | Team ID associated with the signing certificate |
+| Secret                        | Value                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `CSC_LINK`                    | Base64-encoded Developer ID Application `.p12`, including its private key |
+| `CSC_KEY_PASSWORD`            | Password used when exporting the `.p12`                                   |
+| `APPLE_ID`                    | Apple Account email used for notarization                                 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | Dedicated app-specific password                                           |
+| `APPLE_TEAM_ID`               | Team ID associated with the signing certificate                           |
 
 Use the GitHub CLI without placing secret values in shell arguments or history:
 

@@ -38,7 +38,10 @@ async function browserChecks() {
   const win = new BrowserWindow({ width: 400, height: 640, show: false, webPreferences: { backgroundThrottling: false } });
   const evaluate = (source) => win.webContents.executeJavaScript(source);
   async function waitFor(source) {
-    for (let i = 0; i < 200; i++) { if (await evaluate(source)) return; await delay(20); }
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(source)) return;
+      await delay(20);
+    }
     throw Error(`Timed out: ${source}`);
   }
   async function shot(name) {
@@ -127,7 +130,12 @@ async function browserChecks() {
     // A sent brief opens read-only: Preview alone, and Close.
     await evaluate('document.querySelector("[data-read-only-brief] [data-handover-brief]").click()');
     await waitFor('document.querySelector("[data-brief-dialog]")');
-    assert.equal(await evaluate('!!document.querySelector("[data-brief-tab]") || !!document.querySelector("[data-brief-editor]") || !!document.querySelector("[data-brief-save]")'), false);
+    assert.equal(
+      await evaluate(
+        '!!document.querySelector("[data-brief-tab]") || !!document.querySelector("[data-brief-editor]") || !!document.querySelector("[data-brief-save]")',
+      ),
+      false,
+    );
     assert.equal(await evaluate('document.querySelector("[data-brief-preview] h1").textContent'), "Sent brief");
     await evaluate('document.querySelector("[data-brief-close]").click()');
     await waitFor('!document.querySelector("[data-brief-dialog]")');
@@ -144,19 +152,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "handover-fixture",
-      resolveId(id) { if (id === "/__handover_fixture.tsx") return id; },
-      load(id) { if (id === "/__handover_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__handover__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__handover_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "handover-fixture",
+        resolveId(id) {
+          if (id === "/__handover_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__handover_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__handover__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__handover_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -165,13 +182,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__handover__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

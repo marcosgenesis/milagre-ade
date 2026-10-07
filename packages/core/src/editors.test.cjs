@@ -5,18 +5,26 @@ const path = require("node:path");
 const test = require("node:test");
 const { requireWorktreeRoot, detectEditors, openCommand, openInEditor, resolveInside } = require("./editors.cjs");
 
-test('a validated shared workspace opens member aliases but refuses unrelated symlink targets', async t => {
-  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'milagre-editor-owned-')));
+test("a validated shared workspace opens member aliases but refuses unrelated symlink targets", async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-editor-owned-")));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const workspace = path.join(root, 'workspace'), member = path.join(root, 'member');
-  await fs.mkdir(workspace); await fs.mkdir(member); await fs.writeFile(path.join(member, 'file.ts'), 'owned');
-  await fs.writeFile(path.join(root, 'secret.txt'), 'external');
-  await fs.symlink(member, path.join(workspace, 'api')); await fs.symlink(root, path.join(workspace, 'escape'));
-  assert.equal((await resolveInside(workspace, 'api/file.ts', [member])).target, path.join(member, 'file.ts'));
-  await assert.rejects(resolveInside(workspace, 'escape/secret.txt', [member]), /outside/);
+  const workspace = path.join(root, "workspace"),
+    member = path.join(root, "member");
+  await fs.mkdir(workspace);
+  await fs.mkdir(member);
+  await fs.writeFile(path.join(member, "file.ts"), "owned");
+  await fs.writeFile(path.join(root, "secret.txt"), "external");
+  await fs.symlink(member, path.join(workspace, "api"));
+  await fs.symlink(root, path.join(workspace, "escape"));
+  assert.equal((await resolveInside(workspace, "api/file.ts", [member])).target, path.join(member, "file.ts"));
+  await assert.rejects(resolveInside(workspace, "escape/secret.txt", [member]), /outside/);
 });
 
-const fakeFs = (present) => ({ access: async (target) => { if (!present.includes(target)) throw new Error("ENOENT"); } });
+const fakeFs = (present) => ({
+  access: async (target) => {
+    if (!present.includes(target)) throw new Error("ENOENT");
+  },
+});
 const fakeWhich = (found) => async (name) => found[name] ?? null;
 
 test("detects editors in the fixed order, from apps and CLIs", async () => {
@@ -26,8 +34,14 @@ test("detects editors in the fixed order, from apps and CLIs", async () => {
     which: fakeWhich({ code: "/usr/local/bin/code", subl: "/usr/local/bin/subl" }),
     home: "/Users/me",
   });
-  assert.deepEqual(editors.map((editor) => editor.id), ["cursor", "vscode", "zed", "sublime"]);
-  assert.deepEqual(editors.map((editor) => editor.name), ["Cursor", "Visual Studio Code", "Zed", "Sublime Text"]);
+  assert.deepEqual(
+    editors.map((editor) => editor.id),
+    ["cursor", "vscode", "zed", "sublime"],
+  );
+  assert.deepEqual(
+    editors.map((editor) => editor.name),
+    ["Cursor", "Visual Studio Code", "Zed", "Sublime Text"],
+  );
   assert.equal(editors[0].appPath, "/Users/me/Applications/Cursor.app");
   assert.equal(editors[0].cli, null);
   assert.equal(editors[1].appPath, null);
@@ -37,8 +51,16 @@ test("detects editors in the fixed order, from apps and CLIs", async () => {
 });
 
 test("lists Windsurf and VSCodium, and nothing when nothing is installed", async () => {
-  const some = await detectEditors({ platform: "darwin", fs: fakeFs(["/Applications/Windsurf.app", "/Applications/VSCodium.app"]), which: fakeWhich({}), home: "/h" });
-  assert.deepEqual(some.map((editor) => editor.id), ["windsurf", "vscodium"]);
+  const some = await detectEditors({
+    platform: "darwin",
+    fs: fakeFs(["/Applications/Windsurf.app", "/Applications/VSCodium.app"]),
+    which: fakeWhich({}),
+    home: "/h",
+  });
+  assert.deepEqual(
+    some.map((editor) => editor.id),
+    ["windsurf", "vscodium"],
+  );
   assert.deepEqual(await detectEditors({ platform: "darwin", fs: fakeFs([]), which: fakeWhich({}), home: "/h" }), []);
 });
 
@@ -48,9 +70,18 @@ const cliOnly = { ...cursor, appPath: null };
 
 test("a CLI with a line uses the editor's goto form", () => {
   assert.deepEqual(openCommand(cursor, { target: "/r/a.ts", line: 42 }), { file: "/usr/local/bin/cursor", args: ["-g", "/r/a.ts:42"] });
-  assert.deepEqual(openCommand({ ...cursor, id: "vscode", cli: "/bin/code" }, { target: "/r/a.ts", line: 3 }), { file: "/bin/code", args: ["-g", "/r/a.ts:3"] });
-  assert.deepEqual(openCommand({ ...cursor, id: "windsurf", cli: "/bin/windsurf" }, { target: "/r/a.ts", line: 3 }), { file: "/bin/windsurf", args: ["-g", "/r/a.ts:3"] });
-  assert.deepEqual(openCommand({ ...cursor, id: "vscodium", cli: "/bin/codium" }, { target: "/r/a.ts", line: 3 }), { file: "/bin/codium", args: ["-g", "/r/a.ts:3"] });
+  assert.deepEqual(openCommand({ ...cursor, id: "vscode", cli: "/bin/code" }, { target: "/r/a.ts", line: 3 }), {
+    file: "/bin/code",
+    args: ["-g", "/r/a.ts:3"],
+  });
+  assert.deepEqual(openCommand({ ...cursor, id: "windsurf", cli: "/bin/windsurf" }, { target: "/r/a.ts", line: 3 }), {
+    file: "/bin/windsurf",
+    args: ["-g", "/r/a.ts:3"],
+  });
+  assert.deepEqual(openCommand({ ...cursor, id: "vscodium", cli: "/bin/codium" }, { target: "/r/a.ts", line: 3 }), {
+    file: "/bin/codium",
+    args: ["-g", "/r/a.ts:3"],
+  });
   assert.deepEqual(openCommand({ ...cursor, id: "zed", cli: "/bin/zed" }, { target: "/r/a.ts", line: 9 }), { file: "/bin/zed", args: ["/r/a.ts:9"] });
   assert.deepEqual(openCommand({ ...cursor, id: "sublime", cli: "/bin/subl" }, { target: "/r/a.ts", line: 9 }), { file: "/bin/subl", args: ["/r/a.ts:9"] });
 });
@@ -67,7 +98,10 @@ test("a CLI without an app opens the path with the CLI alone", () => {
 });
 
 test("a folder never gets a line", () => {
-  assert.deepEqual(openCommand(cursor, { target: "/r", line: 4, isDirectory: true }), { file: "/usr/bin/open", args: ["-a", "/Applications/Cursor.app", "/r"] });
+  assert.deepEqual(openCommand(cursor, { target: "/r", line: 4, isDirectory: true }), {
+    file: "/usr/bin/open",
+    args: ["-a", "/Applications/Cursor.app", "/r"],
+  });
 });
 
 async function tempProject() {
@@ -107,7 +141,9 @@ test("openInEditor runs the editor and reports a short error string", async (t) 
   const { base, root } = await tempProject();
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const calls = [];
-  const run = async (file, args) => { calls.push({ file, args }); };
+  const run = async (file, args) => {
+    calls.push({ file, args });
+  };
   const deps = { editors: [cursor], run, checkRoot: async () => {} };
   assert.equal(await openInEditor({ root, path: "src/a.ts", line: 7, editor: "cursor" }, deps), null);
   assert.deepEqual(calls[0], { file: "/usr/local/bin/cursor", args: ["-g", `${path.join(root, "src", "a.ts")}:7`] });
@@ -122,20 +158,29 @@ test("openInEditor falls back to the first editor, and reports no editor or a fa
   const { base, root } = await tempProject();
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const calls = [];
-  const run = async (file, args) => { calls.push({ file, args }); };
+  const run = async (file, args) => {
+    calls.push({ file, args });
+  };
   assert.equal(await openInEditor({ root, path: "src/a.ts", editor: "nonsense" }, { editors: [appOnly], run, checkRoot: async () => {} }), null);
   assert.equal(calls.length, 1);
   assert.equal(await openInEditor({ root }, { editors: [], run, checkRoot: async () => {} }), "No editor found");
-  const failing = async () => { throw new Error("spawn failed"); };
+  const failing = async () => {
+    throw new Error("spawn failed");
+  };
   assert.equal(await openInEditor({ root }, { editors: [cursor], run: failing, checkRoot: async () => {} }), "Couldn't open Cursor");
-  assert.equal(await openInEditor({ root, line: "7; rm" , path: "src/a.ts" }, { editors: [cursor], run, checkRoot: async () => {} }), null);
+  assert.equal(await openInEditor({ root, line: "7; rm", path: "src/a.ts" }, { editors: [cursor], run, checkRoot: async () => {} }), null);
   assert.deepEqual(calls.at(-1).args, ["-a", "/Applications/Cursor.app", path.join(root, "src", "a.ts")]);
 });
 
 test("a CLI that is not on PATH is found inside the app bundle", async () => {
   const editors = await detectEditors({
     platform: "darwin",
-    fs: fakeFs(["/Applications/Cursor.app", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "/Applications/Zed.app", "/Applications/Zed.app/Contents/MacOS/cli"]),
+    fs: fakeFs([
+      "/Applications/Cursor.app",
+      "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+      "/Applications/Zed.app",
+      "/Applications/Zed.app/Contents/MacOS/cli",
+    ]),
     which: fakeWhich({ zed: "/usr/local/bin/zed" }),
     home: "/h",
   });
@@ -156,7 +201,9 @@ test("editor:open only accepts the top folder of a checkout", async (t) => {
   await fs.writeFile(path.join(base, "plain", "b.ts"), "x");
   await requireWorktreeRoot(repo);
   const calls = [];
-  const run = async (file, args) => { calls.push({ file, args }); };
+  const run = async (file, args) => {
+    calls.push({ file, args });
+  };
   const deps = { editors: [cursor], run };
   assert.equal(await openInEditor({ root: repo, path: "sub/a.ts" }, deps), null);
   assert.equal(calls.length, 1);

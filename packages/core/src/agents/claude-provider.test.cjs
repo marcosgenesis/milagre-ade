@@ -10,7 +10,19 @@ const init = { type: "system", subtype: "init", session_id: "session-1" };
 const delta = (text) => ({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
 const success = { type: "result", subtype: "success", is_error: false, result: "Hello" };
 
-const COLOR_QUESTION = { questions: [{ question: "Which color?", header: "Color", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false }] };
+const COLOR_QUESTION = {
+  questions: [
+    {
+      question: "Which color?",
+      header: "Color",
+      options: [
+        { label: "Red", description: "Warm" },
+        { label: "Green", description: "Calm" },
+      ],
+      multiSelect: false,
+    },
+  ],
+};
 
 const scripts = {
   async *absorbs({ next }) {
@@ -50,12 +62,16 @@ const scripts = {
   },
   async *asks({ options, signal }) {
     yield init;
-    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
-      signal,
-      requestId: "req-1",
-      toolUseID: "tool-1",
-      suggestions: [{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "localSettings" }],
-    });
+    const result = await options.canUseTool(
+      "Write",
+      { file_path: "/repo/hello.txt", content: "hi" },
+      {
+        signal,
+        requestId: "req-1",
+        toolUseID: "tool-1",
+        suggestions: [{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "localSettings" }],
+      },
+    );
     yield delta(JSON.stringify(result));
     yield success;
   },
@@ -63,17 +79,27 @@ const scripts = {
     yield init;
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10);
-    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
-      signal: controller.signal,
-      requestId: "req-2",
-      toolUseID: "tool-2",
-    });
+    const result = await options.canUseTool(
+      "Write",
+      { file_path: "/repo/hello.txt", content: "hi" },
+      {
+        signal: controller.signal,
+        requestId: "req-2",
+        toolUseID: "tool-2",
+      },
+    );
     yield delta(JSON.stringify(result));
     yield success;
   },
   async *questions({ options, signal }) {
     yield init;
-    const result = await options.canUseTool("AskUserQuestion", COLOR_QUESTION, { signal, requestId: "q-1", toolUseID: "tool-q", displayName: "AskUserQuestion", requiresUserInteraction: true });
+    const result = await options.canUseTool("AskUserQuestion", COLOR_QUESTION, {
+      signal,
+      requestId: "q-1",
+      toolUseID: "tool-q",
+      displayName: "AskUserQuestion",
+      requiresUserInteraction: true,
+    });
     yield delta(JSON.stringify(result));
     yield success;
   },
@@ -88,28 +114,45 @@ const scripts = {
   async *runsTools({ options, signal }) {
     yield init;
     yield delta("Checking.");
-    yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "npm test" } }] } };
+    yield {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "npm test" } }] },
+    };
     const answer = await options.canUseTool("Bash", { command: "npm test" }, { signal, requestId: "req-1", toolUseID: "tool-1" });
     const allowed = answer.behavior === "allow";
-    yield { type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: allowed ? "ok" : answer.message, is_error: !allowed }] }, tool_use_result: allowed ? { stdout: "ok", stderr: "" } : `Error: ${answer.message}` };
+    yield {
+      type: "user",
+      parent_tool_use_id: null,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: allowed ? "ok" : answer.message, is_error: !allowed }] },
+      tool_use_result: allowed ? { stdout: "ok", stderr: "" } : `Error: ${answer.message}`,
+    };
     yield delta("All green.");
     yield success;
   },
   // A tool call that never gets its result before the turn ends.
   async *toolWithoutResult() {
     yield init;
-    yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "tool-9", name: "Bash", input: { command: "sleep 9" } }] } };
+    yield {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "tool-9", name: "Bash", input: { command: "sleep 9" } }] },
+    };
     yield success;
   },
   async *sdkAbortsAlready({ options }) {
     yield init;
     const controller = new AbortController();
     controller.abort();
-    const result = await options.canUseTool("Write", { file_path: "/repo/hello.txt", content: "hi" }, {
-      signal: controller.signal,
-      requestId: "req-3",
-      toolUseID: "tool-3",
-    });
+    const result = await options.canUseTool(
+      "Write",
+      { file_path: "/repo/hello.txt", content: "hi" },
+      {
+        signal: controller.signal,
+        requestId: "req-3",
+        toolUseID: "tool-3",
+      },
+    );
     yield delta(JSON.stringify(result));
     yield success;
   },
@@ -124,8 +167,12 @@ function fakeSdk(script) {
     calls.queries += 1;
     calls.options = options;
     let markInterrupted;
-    const interrupted = new Promise((resolve) => { markInterrupted = resolve; });
-    const released = new Promise((resolve) => { calls.release = resolve; });
+    const interrupted = new Promise((resolve) => {
+      markInterrupted = resolve;
+    });
+    const released = new Promise((resolve) => {
+      calls.release = resolve;
+    });
     const controller = new AbortController();
     const messages = prompt[Symbol.asyncIterator]();
     const next = async () => {
@@ -137,11 +184,23 @@ function fakeSdk(script) {
       while (await next()) yield* script({ interrupted, released, options, signal: controller.signal, next });
     }
     return Object.assign(run(), {
-      interrupt: async () => { calls.interrupts += 1; controller.abort(); markInterrupted(); },
-      setModel: async (model) => { calls.models.push(model); },
-      setPermissionMode: async (mode) => { calls.modes.push(mode); },
-      applyFlagSettings: async (settings) => { calls.flags.push(settings); },
-      setMaxThinkingTokens: async (...args) => { calls.thinking.push(args); },
+      interrupt: async () => {
+        calls.interrupts += 1;
+        controller.abort();
+        markInterrupted();
+      },
+      setModel: async (model) => {
+        calls.models.push(model);
+      },
+      setPermissionMode: async (mode) => {
+        calls.modes.push(mode);
+      },
+      applyFlagSettings: async (settings) => {
+        calls.flags.push(settings);
+      },
+      setMaxThinkingTokens: async (...args) => {
+        calls.thinking.push(args);
+      },
     });
   };
   return { calls, loadSdk: async () => ({ query }) };
@@ -150,7 +209,15 @@ function fakeSdk(script) {
 function claude(t, { script = scripts.reply, resumeId, tldrEnabled, command = "/usr/local/bin/claude", interruptGraceMs } = {}) {
   const sdk = fakeSdk(script);
   const events = [];
-  const session = new ClaudeSession({ cwd: "/repo", resumeId, tldrEnabled, command, emit: (event) => events.push(event), loadSdk: sdk.loadSdk, interruptGraceMs });
+  const session = new ClaudeSession({
+    cwd: "/repo",
+    resumeId,
+    tldrEnabled,
+    command,
+    emit: (event) => events.push(event),
+    loadSdk: sdk.loadSdk,
+    interruptGraceMs,
+  });
   t.after(() => session.close());
   return { session, events, calls: sdk.calls };
 }
@@ -161,9 +228,18 @@ test("starts with Milagre's options and streams a reply", async (t) => {
   await session.startTurn(TURN);
   await ended(events);
 
-  assert.deepEqual(events.map((event) => event.type), ["turn-started", "session-started", "text-delta", "text-delta", "turn-completed"]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["turn-started", "session-started", "text-delta", "text-delta", "turn-completed"],
+  );
   assert.equal(events[1].nativeId, "session-1");
-  assert.equal(events.filter((event) => event.type === "text-delta").map((event) => event.text).join(""), "Hello");
+  assert.equal(
+    events
+      .filter((event) => event.type === "text-delta")
+      .map((event) => event.text)
+      .join(""),
+    "Hello",
+  );
   assert.equal(calls.options.cwd, "/repo");
   assert.equal(calls.options.model, "claude-opus-5-5");
   assert.equal(calls.options.permissionMode, "acceptEdits");
@@ -263,12 +339,23 @@ test("a CLI that rejects the style still runs the turn, and the style is not ret
   const sdkQuery = session.loadSdk;
   session.loadSdk = async () => {
     const { query } = await sdkQuery();
-    return { query: (args) => Object.assign(query(args), { applyFlagSettings: async (settings) => { original.flags.push(settings); if ("outputStyle" in settings) throw new Error("Unknown output style: Concise"); } }) };
+    return {
+      query: (args) =>
+        Object.assign(query(args), {
+          applyFlagSettings: async (settings) => {
+            original.flags.push(settings);
+            if ("outputStyle" in settings) throw new Error("Unknown output style: Concise");
+          },
+        }),
+    };
   };
   await session.startTurn({ ...TURN, replies: "concise" });
   await ended(events);
   assert.equal(events.at(-1).type, "turn-completed");
-  assert.equal(events.some((event) => event.type === "turn-failed"), false);
+  assert.equal(
+    events.some((event) => event.type === "turn-failed"),
+    false,
+  );
   await session.startTurn({ ...TURN, replies: "concise" });
   await ended(events, 2);
   assert.equal(events.at(-1).type, "turn-completed");
@@ -287,7 +374,10 @@ test("resumes a saved session without announcing it again", async (t) => {
   await session.startTurn(TURN);
   await ended(events);
   assert.equal(calls.options.resume, "session-1");
-  assert.equal(events.some((event) => event.type === "session-started"), false);
+  assert.equal(
+    events.some((event) => event.type === "session-started"),
+    false,
+  );
 });
 
 test("forgets a session that can't be resumed", async (t) => {
@@ -330,14 +420,22 @@ test("a logged-out Claude fails the turn with the login message", async (t) => {
   // Recorded from Claude Code 2.1.287 with an empty CLAUDE_CONFIG_DIR.
   const script = async function* () {
     yield init;
-    yield { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
+    yield {
+      type: "assistant",
+      error: "authentication_failed",
+      parent_tool_use_id: null,
+      message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] },
+    };
     yield { type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" };
   };
   const { session, events } = claude(t, { script });
   await session.startTurn(TURN);
   await ended(events);
   assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
-  assert.equal(events.some((event) => event.type === "text-delta"), false);
+  assert.equal(
+    events.some((event) => event.type === "text-delta"),
+    false,
+  );
 });
 
 test("explains a missing CLI without starting anything", async (t) => {
@@ -349,7 +447,9 @@ test("explains a missing CLI without starting anything", async (t) => {
 
 test("keeps the saved session when a resumed start fails for another reason", async (t) => {
   // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
-  const script = async function* () { throw new Error("spawn EACCES"); };
+  const script = async function* () {
+    throw new Error("spawn EACCES");
+  };
   const { session, events } = claude(t, { script, resumeId: "session-1" });
   await session.startTurn(TURN);
   await ended(events);
@@ -359,9 +459,19 @@ test("keeps the saved session when a resumed start fails for another reason", as
 test("cancels a turn interrupted while the SDK is still loading", async (t) => {
   const sdk = fakeSdk(scripts.reply);
   let release;
-  const gate = new Promise((resolve) => { release = resolve; });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
   const events = [];
-  const session = new ClaudeSession({ cwd: "/repo", command: "/usr/local/bin/claude", emit: (event) => events.push(event), loadSdk: async () => { await gate; return sdk.loadSdk(); } });
+  const session = new ClaudeSession({
+    cwd: "/repo",
+    command: "/usr/local/bin/claude",
+    emit: (event) => events.push(event),
+    loadSdk: async () => {
+      await gate;
+      return sdk.loadSdk();
+    },
+  });
   t.after(() => session.close());
   const turn = session.startTurn(TURN);
   await session.interrupt();
@@ -387,7 +497,11 @@ test("refuses new turns once closed", async (t) => {
 });
 
 const asked = (events) => waitUntil(() => events.some((event) => event.type === "permission-request"));
-const replyText = (events) => events.filter((event) => event.type === "text-delta").map((event) => event.text).join("");
+const replyText = (events) =>
+  events
+    .filter((event) => event.type === "text-delta")
+    .map((event) => event.text)
+    .join("");
 
 test("Ask mode lets Claude Code check with the user", async (t) => {
   const { session, events, calls } = claude(t);
@@ -400,15 +514,29 @@ test("asks before a tool runs and passes the answer back", async (t) => {
   const { session, events } = claude(t, { script: scripts.asks });
   await session.startTurn({ ...TURN, permissionMode: "ask" });
   await asked(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-request"), {
-    type: "permission-request", requestId: "req-1", kind: "edit", tool: "Write", title: "Write hello.txt?", files: ["/repo/hello.txt"], diff: "+hi", allowForChat: true, stepId: "tool-1",
-  });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-request"),
+    {
+      type: "permission-request",
+      requestId: "req-1",
+      kind: "edit",
+      tool: "Write",
+      title: "Write hello.txt?",
+      files: ["/repo/hello.txt"],
+      diff: "+hi",
+      allowForChat: true,
+      stepId: "tool-1",
+    },
+  );
   assert.equal(session.respondToPermission("req-1", "allow"), true);
   await ended(events);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { file_path: "/repo/hello.txt", content: "hi" } });
   const types = events.map((event) => event.type);
   assert.ok(types.indexOf("permission-resolved") < types.indexOf("turn-completed"));
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "allow" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "req-1", decision: "allow" },
+  );
 });
 
 test("switching to Full mid-turn reaches Claude Code and approves the waiting card", async (t) => {
@@ -419,7 +547,10 @@ test("switching to Full mid-turn reaches Claude Code and approves the waiting ca
   await ended(events);
   assert.deepEqual(calls.modes, ["bypassPermissions"]);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { file_path: "/repo/hello.txt", content: "hi" } });
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "allow" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "req-1", decision: "allow" },
+  );
   // The next turn already runs in Full; nothing is set again.
   await session.startTurn({ ...TURN, permissionMode: "full" });
   await ended(events, 2);
@@ -450,7 +581,9 @@ test("always allowing in this chat keeps the rule in the session", async (t) => 
   await asked(events);
   session.respondToPermission("req-1", "allow-for-chat");
   await ended(events);
-  assert.deepEqual(JSON.parse(replyText(events)).updatedPermissions, [{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "session" }]);
+  assert.deepEqual(JSON.parse(replyText(events)).updatedPermissions, [
+    { type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "session" },
+  ]);
 });
 
 test("denying tells Claude it was denied in Milagre", async (t) => {
@@ -468,7 +601,10 @@ test("interrupting cancels a pending approval", async (t) => {
   await asked(events);
   await session.interrupt();
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "permission-resolved"), { type: "permission-resolved", requestId: "req-1", decision: "cancelled" });
+  assert.deepEqual(
+    events.find((event) => event.type === "permission-resolved"),
+    { type: "permission-resolved", requestId: "req-1", decision: "cancelled" },
+  );
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
   assert.equal(session.respondToPermission("req-1", "allow"), false);
 });
@@ -494,10 +630,14 @@ test("a tool call shows as a step before its approval, and ends with its result"
   assert.ok(events.indexOf(started) < events.indexOf(request));
   session.respondToPermission("req-1", "allow");
   await ended(events);
-  assert.deepEqual(events.filter((event) => event.type !== "permission-request").map((event) => event.type), [
-    "turn-started", "session-started", "text-delta", "step-started", "permission-resolved", "step-completed", "text-delta", "turn-completed",
-  ]);
-  assert.deepEqual(events.find((event) => event.type === "step-completed"), { type: "step-completed", id: "tool-1", status: "done", detail: "$ npm test\nok" });
+  assert.deepEqual(
+    events.filter((event) => event.type !== "permission-request").map((event) => event.type),
+    ["turn-started", "session-started", "text-delta", "step-started", "permission-resolved", "step-completed", "text-delta", "turn-completed"],
+  );
+  assert.deepEqual(
+    events.find((event) => event.type === "step-completed"),
+    { type: "step-completed", id: "tool-1", status: "done", detail: "$ npm test\nok" },
+  );
 });
 
 test("a denied tool call ends as a failed step", async (t) => {
@@ -506,7 +646,10 @@ test("a denied tool call ends as a failed step", async (t) => {
   await asked(events);
   session.respondToPermission("req-1", "deny");
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "step-completed"), { type: "step-completed", id: "tool-1", status: "failed", detail: "$ npm test\nDenied in Milagre" });
+  assert.deepEqual(
+    events.find((event) => event.type === "step-completed"),
+    { type: "step-completed", id: "tool-1", status: "failed", detail: "$ npm test\nDenied in Milagre" },
+  );
 });
 
 test("tool calls still waiting for a result are forgotten when the turn ends", async (t) => {
@@ -579,7 +722,10 @@ test("a steer sent while the SDK is still loading waits for the turn", async (t)
   assert.equal((await second).steered, true);
   await first;
   await ended(events);
-  assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Also add tests"]);
+  assert.deepEqual(
+    calls.prompts.map((prompt) => prompt.message.content[0].text),
+    ["Hi", "Also add tests"],
+  );
 });
 
 test("a message sent while a turn is stopping starts the next turn", async (t) => {
@@ -613,7 +759,10 @@ test("a message sent while a turn is stopping starts the next turn", async (t) =
   assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }, { type: "turn-completed" }]);
   const types = events.map((event) => event.type);
   assert.ok(types.indexOf("turn-cancelled") < types.lastIndexOf("turn-started"));
-  assert.deepEqual(calls.prompts.map((prompt) => prompt.message.content[0].text), ["Hi", "Next"]);
+  assert.deepEqual(
+    calls.prompts.map((prompt) => prompt.message.content[0].text),
+    ["Hi", "Next"],
+  );
 });
 
 test("a message sent while Stop closes the session is handed back as sessionClosed", async (t) => {
@@ -640,7 +789,10 @@ test("an approval requested after the turn was stopped is cancelled at once", as
   await waitUntil(() => events.length > 0);
   await session.interrupt();
   await ended(events);
-  assert.equal(events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"), false);
+  assert.equal(
+    events.some((event) => event.type === "permission-request" || event.type === "permission-resolved"),
+    false,
+  );
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
   assert.equal(session.respondToPermission("late-1", "allow"), false);
 });
@@ -652,16 +804,35 @@ test("Claude's question becomes a card, and the answers go back keyed by questio
   await session.startTurn({ ...TURN, permissionMode: "full" });
   await questioned(events);
   assert.equal(calls.options.permissionMode, "bypassPermissions");
-  assert.deepEqual(events.find((event) => event.type === "question-request"), {
-    type: "question-request",
-    requestId: "q-1",
-    questions: [{ id: "0", header: "Color", question: "Which color?", options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }], multiSelect: false, allowOther: true, secret: false }],
-  });
-  assert.equal(session.answerQuestion("q-1", { "0": ["Green"] }), true);
-  assert.equal(session.answerQuestion("q-1", { "0": ["Red"] }), false);
+  assert.deepEqual(
+    events.find((event) => event.type === "question-request"),
+    {
+      type: "question-request",
+      requestId: "q-1",
+      questions: [
+        {
+          id: "0",
+          header: "Color",
+          question: "Which color?",
+          options: [
+            { label: "Red", description: "Warm" },
+            { label: "Green", description: "Calm" },
+          ],
+          multiSelect: false,
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    },
+  );
+  assert.equal(session.answerQuestion("q-1", { 0: ["Green"] }), true);
+  assert.equal(session.answerQuestion("q-1", { 0: ["Red"] }), false);
   await ended(events);
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "allow", updatedInput: { ...COLOR_QUESTION, answers: { "Which color?": "Green" } } });
-  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "q-1", outcome: "answered" });
+  assert.deepEqual(
+    events.find((event) => event.type === "question-resolved"),
+    { type: "question-resolved", requestId: "q-1", outcome: "answered" },
+  );
   assert.deepEqual(events.at(-1), { type: "turn-completed" });
 });
 
@@ -681,9 +852,12 @@ test("interrupting cancels Claude's open question", async (t) => {
   await questioned(events);
   await session.interrupt();
   await ended(events);
-  assert.deepEqual(events.find((event) => event.type === "question-resolved"), { type: "question-resolved", requestId: "q-1", outcome: "cancelled" });
+  assert.deepEqual(
+    events.find((event) => event.type === "question-resolved"),
+    { type: "question-resolved", requestId: "q-1", outcome: "cancelled" },
+  );
   assert.deepEqual(events.at(-1), { type: "turn-cancelled" });
-  assert.equal(session.answerQuestion("q-1", { "0": ["Green"] }), false);
+  assert.equal(session.answerQuestion("q-1", { 0: ["Green"] }), false);
 });
 
 test("a steering message dismisses Claude's open question and reaches Claude", async (t) => {
@@ -707,7 +881,10 @@ test("a question Milagre can't show is turned down without a card", async (t) =>
   const { session, events } = claude(t, { script });
   await session.startTurn(TURN);
   await ended(events);
-  assert.equal(events.some((event) => event.type === "question-request"), false);
+  assert.equal(
+    events.some((event) => event.type === "question-request"),
+    false,
+  );
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: UNSHOWN_MESSAGE });
 });
 
@@ -723,14 +900,22 @@ test("a question asked after the turn was stopped is cancelled at once", async (
   await waitUntil(() => events.length > 0);
   await session.interrupt();
   await ended(events);
-  assert.equal(events.some((event) => event.type === "question-request" || event.type === "question-resolved"), false);
+  assert.equal(
+    events.some((event) => event.type === "question-request" || event.type === "question-resolved"),
+    false,
+  );
   assert.deepEqual(JSON.parse(replyText(events)), { behavior: "deny", message: "The turn was cancelled in Milagre.", interrupt: true });
   assert.equal(session.answerQuestion("q-late", null), false);
 });
 
 const loggedOut = async function* () {
   yield init;
-  yield { type: "assistant", error: "authentication_failed", parent_tool_use_id: null, message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] } };
+  yield {
+    type: "assistant",
+    error: "authentication_failed",
+    parent_tool_use_id: null,
+    message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] },
+  };
   yield { type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" };
 };
 
@@ -740,7 +925,10 @@ test("a logged-out Claude closes its session and forgets the id its logged-out r
   await ended(events);
   await waitUntil(() => session.closed);
   assert.deepEqual(events.slice(-2), [{ type: "session-reset" }, failedWith(loginMessage("claude"), { login: true })]);
-  assert.equal(events.some((event) => event.message === RESUME_FAILED_MESSAGE), false);
+  assert.equal(
+    events.some((event) => event.message === RESUME_FAILED_MESSAGE),
+    false,
+  );
 });
 
 test("a logged-out Claude that resumed a chat keeps the chat's id", async (t) => {
@@ -748,7 +936,10 @@ test("a logged-out Claude that resumed a chat keeps the chat's id", async (t) =>
   await session.startTurn(TURN);
   await ended(events);
   await waitUntil(() => session.closed);
-  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.equal(
+    events.some((event) => event.type === "session-reset"),
+    false,
+  );
   assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
 });
 
@@ -766,7 +957,17 @@ test("after a login failure the next message starts a fresh process that resumes
     },
   });
   t.after(() => Promise.all(sessions.map((session) => session.close())));
-  const request = { chatId: "chat-1", provider: "claude", cwd: "/repo", command: "/c/claude", prompt: "Hi", images: [], model: "claude-opus-5-5", permissionMode: "auto", resumeId: "session-1" };
+  const request = {
+    chatId: "chat-1",
+    provider: "claude",
+    cwd: "/repo",
+    command: "/c/claude",
+    prompt: "Hi",
+    images: [],
+    model: "claude-opus-5-5",
+    permissionMode: "auto",
+    resumeId: "session-1",
+  };
   await manager.startTurn(request);
   await waitUntil(() => sent.filter(isTerminal).length === 1 && sessions[0].closed);
   assert.deepEqual(sent.at(-1), failedWith(loginMessage("claude"), { login: true }));
@@ -792,10 +993,12 @@ test("a login failure on a later turn keeps the chat's id, and only a fresh logg
   await session.startTurn(TURN);
   await ended(events, 2);
   await waitUntil(() => session.closed);
-  assert.equal(events.some((event) => event.type === "session-reset"), false);
+  assert.equal(
+    events.some((event) => event.type === "session-reset"),
+    false,
+  );
   assert.deepEqual(events.at(-1), failedWith(loginMessage("claude"), { login: true }));
 });
-
 
 test("TLDR can be disabled when starting or resuming Claude", async (t) => {
   for (const resumeId of [undefined, "session-existing"]) {
@@ -814,7 +1017,10 @@ test("a Chat's linked tools are served in-process and allowed without Claude's o
   const loadSdk = async () => ({
     ...(await sdk.loadSdk()),
     tool: (name, description, input, handler, extras) => ({ name, description, input, handler, extras }),
-    createSdkMcpServer: (options) => { made.push(options); return { type: "sdk", name: options.name, instance: {} }; },
+    createSdkMcpServer: (options) => {
+      made.push(options);
+      return { type: "sdk", name: options.name, instance: {} };
+    },
   });
   const events = [];
   const linked = { tools: [{ name: "linked_overview", description: "Summary", input: {}, readOnly: true, run: async () => "summary of web" }] };

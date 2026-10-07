@@ -1,63 +1,101 @@
-const { randomBytes, randomUUID } = require('node:crypto');
+const { randomBytes, randomUUID } = require("node:crypto");
 
-const ORIENTATIONS = new Set(['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right']);
+const ORIENTATIONS = new Set(["portrait", "portrait-upside-down", "landscape-left", "landscape-right"]);
 const MAX_SDP_BYTES = 262144;
-function identifier() { return randomBytes(24).toString('base64url'); }
+function identifier() {
+  return randomBytes(24).toString("base64url");
+}
 function validEvent(event) {
-  if (!event || typeof event !== 'object' || Array.isArray(event)) return false;
-  if (event.kind === 'touch') return ['begin', 'move', 'end'].includes(event.phase) &&
-    Array.isArray(event.points) && event.points.length >= 1 && event.points.length <= 2 &&
-    event.points.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1);
-  if (event.kind === 'button') return event.button === 'home' || event.button === 'back';
-  if (event.kind === 'rotate') return ORIENTATIONS.has(event.orientation);
-  return event.kind === 'key' && ['down', 'up'].includes(event.phase) && Number.isInteger(event.usage) &&
-    event.usage >= 4 && event.usage <= 255 && (event.key === undefined || (typeof event.key === 'string' && event.key.length === 1)) &&
-    (event.shifted === undefined || typeof event.shifted === 'boolean');
+  if (!event || typeof event !== "object" || Array.isArray(event)) return false;
+  if (event.kind === "touch")
+    return (
+      ["begin", "move", "end"].includes(event.phase) &&
+      Array.isArray(event.points) &&
+      event.points.length >= 1 &&
+      event.points.length <= 2 &&
+      event.points.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)
+    );
+  if (event.kind === "button") return event.button === "home" || event.button === "back";
+  if (event.kind === "rotate") return ORIENTATIONS.has(event.orientation);
+  return (
+    event.kind === "key" &&
+    ["down", "up"].includes(event.phase) &&
+    Number.isInteger(event.usage) &&
+    event.usage >= 4 &&
+    event.usage <= 255 &&
+    (event.key === undefined || (typeof event.key === "string" && event.key.length === 1)) &&
+    (event.shifted === undefined || typeof event.shifted === "boolean")
+  );
 }
 // Copy only admitted fields; callers cannot forward arbitrary helper commands.
 function cleanEvent(event) {
-  if (event.kind === 'touch') return { kind: 'touch', phase: event.phase, points: event.points.map(({ x, y }) => ({ x, y })) };
-  if (event.kind === 'button') return { kind: 'button', button: event.button };
-  if (event.kind === 'rotate') return { kind: 'rotate', orientation: event.orientation };
-  return { kind: 'key', phase: event.phase, usage: event.usage, ...(event.key === undefined ? {} : { key: event.key }), ...(event.shifted === undefined ? {} : { shifted: event.shifted }) };
+  if (event.kind === "touch") return { kind: "touch", phase: event.phase, points: event.points.map(({ x, y }) => ({ x, y })) };
+  if (event.kind === "button") return { kind: "button", button: event.button };
+  if (event.kind === "rotate") return { kind: "rotate", orientation: event.orientation };
+  return {
+    kind: "key",
+    phase: event.phase,
+    usage: event.usage,
+    ...(event.key === undefined ? {} : { key: event.key }),
+    ...(event.shifted === undefined ? {} : { shifted: event.shifted }),
+  };
 }
 
 /** One host owns devices; capabilities belong to a trusted transport connection. */
 function createSimulators(options = {}) {
-  const supported = options.supported ?? (process.platform === 'darwin' && process.arch === 'arm64');
-  const adapter = options.adapter ?? require('./simulators-helper.cjs').createSimulatorAdapter(options);
+  const supported = options.supported ?? (process.platform === "darwin" && process.arch === "arm64");
+  const adapter = options.adapter ?? require("./simulators-helper.cjs").createSimulatorAdapter(options);
   const iceServers = options.iceServers ?? adapter.iceServers ?? [];
   const now = options.now ?? Date.now;
   const ttl = options.viewerTtlMs ?? 30000;
   const maxViewers = options.maxViewers ?? 8;
-  const owners = new Map(), viewers = new Map(), devices = new Map();
-  let closed = false, queue = Promise.resolve(), pending = 0;
+  const owners = new Map(),
+    viewers = new Map(),
+    devices = new Map();
+  let closed = false,
+    queue = Promise.resolve(),
+    pending = 0;
 
   function serial(fn, allowClosed = false) {
-    if (closed && !allowClosed) return Promise.reject(new Error('Simulator service is closed.'));
+    if (closed && !allowClosed) return Promise.reject(new Error("Simulator service is closed."));
     // Input must never grow an unbounded replay queue on a slow helper.
-    if (pending >= 128 && !allowClosed) return Promise.reject(new Error('Simulator is busy. Retry after pending commands finish.'));
+    if (pending >= 128 && !allowClosed) return Promise.reject(new Error("Simulator is busy. Retry after pending commands finish."));
     pending++;
     const result = queue.then(fn);
-    queue = result.catch(() => {}).finally(() => { pending--; });
+    queue = result
+      .catch(() => {})
+      .finally(() => {
+        pending--;
+      });
     return result;
   }
   function ownerState(owner) {
-    if (typeof owner !== 'string' || !owner || owner.length > 1024) throw new Error('A trusted simulator owner is required.');
+    if (typeof owner !== "string" || !owner || owner.length > 1024) throw new Error("A trusted simulator owner is required.");
     let state = owners.get(owner);
-    if (!state) { state = { dead: false, count: 0 }; owners.set(owner, state); }
+    if (!state) {
+      state = { dead: false, count: 0 };
+      owners.set(owner, state);
+    }
     return state;
   }
   function requireViewer(request, owner) {
     const v = viewers.get(request?.viewerId);
-    if (!v || v.owner !== owner || v.ownerState.dead) throw new Error('Unknown simulator viewer or owner. Reopen the viewer.');
+    if (!v || v.owner !== owner || v.ownerState.dead) throw new Error("Unknown simulator viewer or owner. Reopen the viewer.");
     return v;
   }
   function releaseHeld(device) {
     const touch = device.touch;
     device.touch = null;
-    if (touch) { try { device.channel.send({ ...touch, phase: 'end' }); } catch {} }
-    for (const usage of device.keys) { try { device.channel.send({ kind: 'key', phase: 'up', usage }); } catch {} }
+    if (touch) {
+      try {
+        device.channel.send({ ...touch, phase: "end" });
+      } catch {}
+    }
+    for (const usage of device.keys) {
+      try {
+        device.channel.send({ kind: "key", phase: "up", usage });
+      } catch {}
+    }
     device.keys.clear();
   }
   function revoke(device) {
@@ -67,18 +105,29 @@ function createSimulators(options = {}) {
   }
   function metadata(device) {
     const state = device.channel.status();
-    const signature = `${state.width}:${state.height}:${state.orientation}:${state.ready}:${state.error ?? ''}`;
+    const signature = `${state.width}:${state.height}:${state.orientation}:${state.ready}:${state.error ?? ""}`;
     if (device.signature !== signature) {
-      if (device.signature !== undefined) { releaseHeld(device); device.generation++; }
+      if (device.signature !== undefined) {
+        releaseHeld(device);
+        device.generation++;
+      }
       device.signature = signature;
     }
     if (device.rotation && (state.orientation === device.rotation.orientation || now() - device.rotation.at >= 5000)) device.rotation = null;
     return { ...state, ready: !!state.ready && !state.error && !device.rotation };
   }
   function statusOf(v) {
-    const device = v.device, state = metadata(device);
+    const device = v.device,
+      state = metadata(device);
     if (state.error) throw new Error(state.error);
-    return { width: state.width, height: state.height, orientation: state.orientation, generation: device.generation, controlling: device.controller === v.id, ready: state.ready };
+    return {
+      width: state.width,
+      height: state.height,
+      orientation: state.orientation,
+      generation: device.generation,
+      controlling: device.controller === v.id,
+      ready: state.ready,
+    };
   }
   async function remove(v) {
     if (!viewers.delete(v.id)) return;
@@ -96,26 +145,37 @@ function createSimulators(options = {}) {
   async function expire() {
     for (const v of viewers.values()) if (now() - v.heartbeat >= ttl || v.ownerState.dead) await remove(v);
   }
-  async function active(request, owner) { await expire(); return requireViewer(request, owner); }
-  const expiryTimer = setInterval(() => { if (!closed) void serial(expire).catch(() => {}); }, Math.min(5000, ttl));
+  async function active(request, owner) {
+    await expire();
+    return requireViewer(request, owner);
+  }
+  const expiryTimer = setInterval(
+    () => {
+      if (!closed) void serial(expire).catch(() => {});
+    },
+    Math.min(5000, ttl),
+  );
   expiryTimer.unref();
 
   return {
     async list() {
-      if (closed) throw new Error('Simulator service is closed.');
+      if (closed) throw new Error("Simulator service is closed.");
       if (!supported) return { devices: [], supported: false };
-      try { return { devices: await adapter.list(), supported: true }; }
-      catch { return { devices: [], supported: true, error: 'Could not list simulators. Check that Xcode is installed and available.' }; }
+      try {
+        return { devices: await adapter.list(), supported: true };
+      } catch {
+        return { devices: [], supported: true, error: "Could not list simulators. Check that Xcode is installed and available." };
+      }
     },
     async open(request, owner) {
       const ownership = ownerState(owner);
       return serial(async () => {
         await expire();
-        if (!supported) throw new Error('Simulator viewing is supported on Apple silicon Macs only.');
-        if (ownership.dead || closed) throw new Error('Simulator owner disconnected.');
-        if (viewers.size >= maxViewers) throw new Error('Too many simulator viewers. Close a viewer first.');
+        if (!supported) throw new Error("Simulator viewing is supported on Apple silicon Macs only.");
+        if (ownership.dead || closed) throw new Error("Simulator owner disconnected.");
+        if (viewers.size >= maxViewers) throw new Error("Too many simulator viewers. Close a viewer first.");
         const found = (await adapter.list()).find((d) => d.id === request?.deviceId);
-        if (!found) throw new Error('Unknown or stopped simulator device.');
+        if (!found) throw new Error("Unknown or stopped simulator device.");
         let device = devices.get(found.id);
         if (device?.channel.status().error) {
           for (const id of [...device.viewers]) await remove(viewers.get(id));
@@ -123,15 +183,39 @@ function createSimulators(options = {}) {
         }
         if (!device) {
           const channel = await adapter.connect(found.id);
-          device = { id: found.id, platform: found.platform, channel, viewers: new Set(), controller: null, generation: 1, touch: null, keys: new Set(), rotation: null };
-          if (ownership.dead || closed) { await channel.close(); throw new Error('Simulator owner disconnected.'); }
+          device = {
+            id: found.id,
+            platform: found.platform,
+            channel,
+            viewers: new Set(),
+            controller: null,
+            generation: 1,
+            touch: null,
+            keys: new Set(),
+            rotation: null,
+          };
+          if (ownership.dead || closed) {
+            await channel.close();
+            throw new Error("Simulator owner disconnected.");
+          }
           devices.set(found.id, device);
         }
-        if (ownership.dead || closed) throw new Error('Simulator owner disconnected.');
+        if (ownership.dead || closed) throw new Error("Simulator owner disconnected.");
         const id = identifier();
         ownership.count++;
         owners.set(owner, ownership);
-        viewers.set(id, { id, owner, ownerState: ownership, device, sessionId: randomUUID(), sequence: -1, heartbeat: now(), rateAt: now(), inputTokens: 240, offered: false });
+        viewers.set(id, {
+          id,
+          owner,
+          ownerState: ownership,
+          device,
+          sessionId: randomUUID(),
+          sequence: -1,
+          heartbeat: now(),
+          rateAt: now(),
+          inputTokens: 240,
+          offered: false,
+        });
         device.viewers.add(id);
         return { viewerId: id, device: { ...found }, iceServers: structuredClone(iceServers) };
       });
@@ -139,58 +223,97 @@ function createSimulators(options = {}) {
     offer(request, owner) {
       return serial(async () => {
         const v = await active(request, owner);
-        if (typeof request.sdp !== 'string' || !request.sdp.startsWith('v=0') || Buffer.byteLength(request.sdp) > MAX_SDP_BYTES) throw new Error('Invalid or oversized simulator SDP.');
-        if (v.offered) throw new Error('This viewer has already negotiated an offer. Reopen the viewer.');
+        if (typeof request.sdp !== "string" || !request.sdp.startsWith("v=0") || Buffer.byteLength(request.sdp) > MAX_SDP_BYTES)
+          throw new Error("Invalid or oversized simulator SDP.");
+        if (v.offered) throw new Error("This viewer has already negotiated an offer. Reopen the viewer.");
         v.offered = true;
         v.heartbeat = now();
         const answer = await adapter.offer(v.device.id, v.sessionId, request.sdp);
-        if (v.ownerState.dead || closed) throw new Error('Simulator owner disconnected.');
-        if (answer?.type !== 'answer' || typeof answer.sdp !== 'string' || Buffer.byteLength(answer.sdp) > MAX_SDP_BYTES) throw new Error('Invalid simulator SDP answer.');
+        if (v.ownerState.dead || closed) throw new Error("Simulator owner disconnected.");
+        if (answer?.type !== "answer" || typeof answer.sdp !== "string" || Buffer.byteLength(answer.sdp) > MAX_SDP_BYTES)
+          throw new Error("Invalid simulator SDP answer.");
         v.heartbeat = now();
-        return { type: 'answer', sdp: answer.sdp };
+        return { type: "answer", sdp: answer.sdp };
       });
     },
     status(request, owner) {
-      return serial(async () => { const v = await active(request, owner); v.heartbeat = now(); return statusOf(v); });
+      return serial(async () => {
+        const v = await active(request, owner);
+        v.heartbeat = now();
+        return statusOf(v);
+      });
     },
     control(request, owner) {
       return serial(async () => {
-        const v = await active(request, owner), device = v.device;
-        if (typeof request.takeOver !== 'boolean') throw new Error('Invalid simulator control request.');
-        if (device.controller !== v.id && (!device.controller || request.takeOver)) { revoke(device); device.controller = v.id; }
+        const v = await active(request, owner),
+          device = v.device;
+        if (typeof request.takeOver !== "boolean") throw new Error("Invalid simulator control request.");
+        if (device.controller !== v.id && (!device.controller || request.takeOver)) {
+          revoke(device);
+          device.controller = v.id;
+        }
         v.heartbeat = now();
         return statusOf(v);
       });
     },
     input(request, owner) {
       return serial(async () => {
-        const v = await active(request, owner), device = v.device;
-        if (!Number.isSafeInteger(request.sequence) || request.sequence < 0 || !Number.isSafeInteger(request.generation) || !validEvent(request.event)) throw new Error('Invalid simulator input event.');
-        if (request.event.kind === 'button' && request.event.button === 'back' && device.platform !== 'android') throw new Error('Back is available only on Android.');
+        const v = await active(request, owner),
+          device = v.device;
+        if (!Number.isSafeInteger(request.sequence) || request.sequence < 0 || !Number.isSafeInteger(request.generation) || !validEvent(request.event))
+          throw new Error("Invalid simulator input event.");
+        if (request.event.kind === "button" && request.event.button === "back" && device.platform !== "android")
+          throw new Error("Back is available only on Android.");
         const state = metadata(device);
-        if (device.controller !== v.id || !state.ready || request.generation !== device.generation || request.sequence <= v.sequence) return { accepted: false };
+        if (device.controller !== v.id || !state.ready || request.generation !== device.generation || request.sequence <= v.sequence)
+          return { accepted: false };
         v.sequence = request.sequence;
         v.inputTokens = Math.min(240, v.inputTokens + Math.max(0, now() - v.rateAt) * 0.24);
         v.rateAt = now();
-        if (v.inputTokens < 1) { releaseHeld(device); return { accepted: false }; }
+        if (v.inputTokens < 1) {
+          releaseHeld(device);
+          return { accepted: false };
+        }
         v.inputTokens--;
         const event = cleanEvent(request.event);
-        if (event.kind === 'touch') {
-          if (event.phase === 'begin' ? !!device.touch : !device.touch || device.touch.points.length !== event.points.length) return { accepted: false };
+        if (event.kind === "touch") {
+          if (event.phase === "begin" ? !!device.touch : !device.touch || device.touch.points.length !== event.points.length) return { accepted: false };
         }
-        if (event.kind === 'rotate') { releaseHeld(device); device.generation++; device.rotation = { orientation: event.orientation, at: now() }; }
-        try { device.channel.send(event); } catch { revoke(device); return { accepted: false }; }
-        if (event.kind === 'touch') device.touch = event.phase === 'end' ? null : event;
-        if (event.kind === 'key') { if (event.phase === 'down') device.keys.add(event.usage); else device.keys.delete(event.usage); }
+        if (event.kind === "rotate") {
+          releaseHeld(device);
+          device.generation++;
+          device.rotation = { orientation: event.orientation, at: now() };
+        }
+        try {
+          device.channel.send(event);
+        } catch {
+          revoke(device);
+          return { accepted: false };
+        }
+        if (event.kind === "touch") device.touch = event.phase === "end" ? null : event;
+        if (event.kind === "key") {
+          if (event.phase === "down") device.keys.add(event.usage);
+          else device.keys.delete(event.usage);
+        }
         v.heartbeat = now();
         return { accepted: true };
       });
     },
-    closeViewer(request, owner) { return serial(async () => { await remove(await active(request, owner)); return null; }); },
+    closeViewer(request, owner) {
+      return serial(async () => {
+        await remove(await active(request, owner));
+        return null;
+      });
+    },
     disconnect(owner) {
       const state = owners.get(owner);
-      if (state) { state.dead = true; owners.delete(owner); }
-      return serial(async () => { for (const v of viewers.values()) if (v.owner === owner) await remove(v); }, true);
+      if (state) {
+        state.dead = true;
+        owners.delete(owner);
+      }
+      return serial(async () => {
+        for (const v of viewers.values()) if (v.owner === owner) await remove(v);
+      }, true);
     },
     close() {
       if (closed) return queue;

@@ -59,7 +59,9 @@ test("picks a tone from the rounded percentage", () => {
 
 test("keeps the last good numbers when a refresh fails", () => {
   const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * MINUTE) })] };
-  const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude is rate limiting usage checks. Try again in a minute." })] };
+  const failed: UsageSnapshot = {
+    providers: [claude({ status: "error", windows: [], message: "Claude is rate limiting usage checks. Try again in a minute." })],
+  };
 
   const merged = mergeSnapshot(previous, failed, NOW);
   assert.deepEqual(merged.providers[0].windows, previous.providers[0].windows);
@@ -85,7 +87,10 @@ test("does not invent data for a first-time error or keep data for an unavailabl
 
 test("hides unavailable providers and labels segments for screen readers", () => {
   const codexMissing: ProviderUsage = { provider: "codex", status: "unavailable", windows: [], updatedAt: at(0), message: "Codex CLI not found." };
-  assert.deepEqual(visibleProviders({ providers: [claude(), codexMissing] }).map((item) => item.provider), ["claude"]);
+  assert.deepEqual(
+    visibleProviders({ providers: [claude(), codexMissing] }).map((item) => item.provider),
+    ["claude"],
+  );
   assert.equal(usageLabel(claude()), "Claude usage: Session 73% used, Weekly 61% used");
   assert.equal(usageLabel(claude({ status: "error", windows: [] })), "Claude usage unavailable");
   assert.equal(usageLabel(claude({ status: "error", message: "Couldn't reach Claude." })), "Claude usage, last known: Session 73% used, Weekly 61% used");
@@ -97,8 +102,14 @@ test("the sidebar shows a provider only when it has numbers", () => {
   const claudeErrored = claude({ status: "error", windows: [], message: "Couldn't reach Claude." });
   const claudeLastKnown = claude({ status: "error", message: "Couldn't reach Claude." });
   const codexOk: ProviderUsage = { provider: "codex", status: "ok", windows: claude().windows, updatedAt: at(0) };
-  assert.deepEqual(visibleProviders({ providers: [claudeErrored, codexOk] }).map((item) => item.provider), ["codex"]);
-  assert.deepEqual(visibleProviders({ providers: [claudeLastKnown, codexOk] }).map((item) => item.provider), ["claude", "codex"]);
+  assert.deepEqual(
+    visibleProviders({ providers: [claudeErrored, codexOk] }).map((item) => item.provider),
+    ["codex"],
+  );
+  assert.deepEqual(
+    visibleProviders({ providers: [claudeLastKnown, codexOk] }).map((item) => item.provider),
+    ["claude", "codex"],
+  );
   assert.deepEqual(visibleProviders({ providers: [claudeErrored, codexMissing] }), []);
   assert.deepEqual(visibleProviders({ providers: [claude({ status: "ok", windows: [] }), codexMissing] }), []);
 });
@@ -106,9 +117,15 @@ test("the sidebar shows a provider only when it has numbers", () => {
 test("numbers seeded from the saved cache count as numbers for the sidebar", () => {
   const cached: UsageSnapshot = { providers: [{ provider: "claude", status: "ok", windows: claude().windows, updatedAt: at(0) }] };
   const seeded = seedSnapshot(null, cached)!;
-  assert.deepEqual(visibleProviders(seeded).map((item) => item.provider), ["claude"]);
+  assert.deepEqual(
+    visibleProviders(seeded).map((item) => item.provider),
+    ["claude"],
+  );
   // A provider with nothing saved and nothing read yet stays hidden.
-  assert.deepEqual(visibleProviders({ providers: [{ provider: "codex", status: "error", windows: [], updatedAt: at(0), message: "Couldn't read usage." }] }), []);
+  assert.deepEqual(
+    visibleProviders({ providers: [{ provider: "codex", status: "error", windows: [], updatedAt: at(0), message: "Couldn't read usage." }] }),
+    [],
+  );
 });
 
 test("shows used or remaining percent", () => {
@@ -119,9 +136,14 @@ test("shows used or remaining percent", () => {
 
 test("drops kept windows that have already reset", () => {
   const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * HOUR) })] };
-  const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude sign-in expired. Running any Claude agent refreshes it." })] };
+  const failed: UsageSnapshot = {
+    providers: [claude({ status: "error", windows: [], message: "Claude sign-in expired. Running any Claude agent refreshes it." })],
+  };
   const merged = mergeSnapshot(previous, failed, NOW + 2 * HOUR);
-  assert.deepEqual(merged.providers[0].windows.map((item) => item.id), ["weekly", "weekly:fable"]);
+  assert.deepEqual(
+    merged.providers[0].windows.map((item) => item.id),
+    ["weekly", "weekly:fable"],
+  );
   assert.equal(merged.providers[0].updatedAt, at(-6 * HOUR));
 });
 

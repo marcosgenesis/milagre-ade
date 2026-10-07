@@ -183,8 +183,12 @@ async function readCodexUsage(deps = {}) {
   if (!command) return done("unavailable", [], "Codex CLI not found.");
   return new Promise((resolve) => {
     let child;
-    try { child = spawnCommand(command, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: deps.env || process.env, windowsHide: true }, spawnImpl); }
-    catch { resolve(done("error", [], "Codex could not start.")); return; }
+    try {
+      child = spawnCommand(command, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: deps.env || process.env, windowsHide: true }, spawnImpl);
+    } catch {
+      resolve(done("error", [], "Codex could not start."));
+      return;
+    }
     let settled = false;
     let buffer = "";
     const timer = setTimeout(() => finish(done("error", [], "Codex usage timed out.")), timeoutMs);
@@ -215,15 +219,13 @@ async function readCodexUsage(deps = {}) {
       } else if (message.id === 3) {
         const windows = codexWindows(message.result?.rateLimits);
         const banked = bankedResetsOf(message.result?.rateLimitResetCredits?.availableCount);
-        finish(windows.length
-          ? providerResult("codex", now, "ok", windows, undefined, banked)
-          : done("error", [], "Codex returned no usage windows."));
+        finish(windows.length ? providerResult("codex", now, "ok", windows, undefined, banked) : done("error", [], "Codex returned no usage windows."));
       }
     }
 
-    child.on("error", (error) => finish(error?.code === "ENOENT"
-      ? done("unavailable", [], "Codex CLI not found.")
-      : done("error", [], "Couldn't start Codex.")));
+    child.on("error", (error) =>
+      finish(error?.code === "ENOENT" ? done("unavailable", [], "Codex CLI not found.") : done("error", [], "Couldn't start Codex.")),
+    );
     child.on("close", () => finish(done("error", [], "Codex exited before reporting usage.")));
     child.stdin.on("error", () => {});
     child.stdout.on("data", (chunk) => {
@@ -274,7 +276,9 @@ function createUsageReader(deps = {}) {
   };
   let inFlight = null;
   return function readUsage() {
-    inFlight ??= Promise.resolve().then(ready).catch(() => {})
+    inFlight ??= Promise.resolve()
+      .then(ready)
+      .catch(() => {})
       .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex)]))
       .then((providers) => ({ providers }))
       .finally(() => {
@@ -286,24 +290,47 @@ function createUsageReader(deps = {}) {
 
 // The CLI owns the per-profile Keychain name and token refresh. Ask its control API without
 // starting a model turn, instead of depending on the credential store's private naming scheme.
-async function readClaudeProfileUsage({ command, env, loadSdk = () => import('@anthropic-ai/claude-agent-sdk'), now = Date.now, timeoutMs = PROVIDER_TIMEOUT_MS }) {
+async function readClaudeProfileUsage({
+  command,
+  env,
+  loadSdk = () => import("@anthropic-ai/claude-agent-sdk"),
+  now = Date.now,
+  timeoutMs = PROVIDER_TIMEOUT_MS,
+}) {
   let session, timer;
-  const done = (status, windows, message) => providerResult('claude', now, status, windows, message);
+  const done = (status, windows, message) => providerResult("claude", now, status, windows, message);
   try {
     const { query } = await loadSdk();
-    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
-    session = query({ prompt: { async *[Symbol.asyncIterator]() { await new Promise(() => {}); } }, options: {
-      pathToClaudeCodeExecutable: command, env, cwd: os.homedir(), settingSources: [], persistSession: false,
-    } });
+    session = query({
+      prompt: {
+        // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
+        async *[Symbol.asyncIterator]() {
+          await new Promise(() => {});
+        },
+      },
+      options: {
+        pathToClaudeCodeExecutable: command,
+        env,
+        cwd: os.homedir(),
+        settingSources: [],
+        persistSession: false,
+      },
+    });
     const result = await Promise.race([
       session.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs); }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      }),
     ]);
-    if (!result.rate_limits_available) return done('unavailable', [], 'Plan usage is unavailable for this account.');
-    if (!result.rate_limits) return done('error', [], 'Could not read usage for this account.');
-    return done('ok', claudeWindows(result.rate_limits));
-  } catch { return done('error', [], 'Could not read usage for this account.'); }
-  finally { clearTimeout(timer); session?.close?.(); }
+    if (!result.rate_limits_available) return done("unavailable", [], "Plan usage is unavailable for this account.");
+    if (!result.rate_limits) return done("error", [], "Could not read usage for this account.");
+    return done("ok", claudeWindows(result.rate_limits));
+  } catch {
+    return done("error", [], "Could not read usage for this account.");
+  } finally {
+    clearTimeout(timer);
+    session?.close?.();
+  }
 }
 
 module.exports = { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage };

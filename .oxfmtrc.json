@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 160,
+  "tabWidth": 2,
+  "useTabs": false,
+  "singleQuote": false,
+  "semi": true,
+  "trailingComma": "all",
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/release/**",
+    "package-lock.json",
+    "**/*.gen.ts",
+    "CHANGELOG.md",
+    "apps/mobile/ios/**",
+    "apps/mobile/android/**",
+    ".expo/**",
+    "**/.expo/**",
+    "docs/superpowers/**",
+    "docs/workflow-audit-2026-10.md",
+    "packages/core/src/bundled-skills/**"
+  ]
+}

@@ -66,8 +66,8 @@ function ProjectAccountsForComputer() {
     request.current++;
   }, []);
   // This effect fetches the newly selected scope from the connected computer.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     return invalidate;
   }, [load, invalidate, session.providerRevision, retry]);

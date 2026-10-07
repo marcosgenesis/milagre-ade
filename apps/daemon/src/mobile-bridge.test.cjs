@@ -1055,3 +1055,34 @@ test("drawer snapshots are marked and cached separately from full snapshots", as
   assert.equal((await (await request(route)).json()).result.previewOnly, undefined);
   assert.equal((await request(route + "&view=chats", { headers: { "if-none-match": response.headers.get("etag") } })).status, 304);
 });
+
+test("phone:routes is answered by the phone hook, never forwarded to the daemon", async (t) => {
+  const asked = [];
+  const answer = { hostId: "h".repeat(22), key: "k".repeat(43), lan: ["ws://192.168.1.20:8798"] };
+  const { rpc } = await fixture(t, { bridgeOptions: { phoneRoutes: async (key) => (asked.push(key), answer) } });
+  const response = await rpc("phone:routes", [{ phoneKey: "p".repeat(43) }]);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).result, answer);
+  assert.deepEqual(asked, ["p".repeat(43)]);
+  // A malformed call still reaches the hook, which owns the validation.
+  assert.equal((await rpc("phone:routes", [])).status, 200);
+  assert.deepEqual(asked, ["p".repeat(43), undefined]);
+});
+
+test("a failing phone:routes hook reports its own status", async (t) => {
+  const { rpc } = await fixture(t, {
+    bridgeOptions: {
+      phoneRoutes: async () => {
+        throw Object.assign(new Error("Expected this phone's key"), { status: 400 });
+      },
+    },
+  });
+  const response = await rpc("phone:routes", [{ phoneKey: "x" }]);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error.message, /key/);
+});
+
+test("phone:routes is refused without a hook", async (t) => {
+  const { rpc } = await fixture(t);
+  assert.equal((await rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
+});

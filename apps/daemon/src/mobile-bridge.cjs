@@ -243,7 +243,16 @@ async function folderBytes(folder) {
 // daemon; closing this listener must never stop that runtime or its turns.
 // `allowedRoot` (the review demo sets it): every path a request names must resolve inside that folder, or it is a 403.
 // Confined, the phone's uploads may take up `attachmentQuota` bytes in all; past that /attachments answers 507.
-async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 1024, pingMs = 25000, allowedRoot, attachmentQuota = ATTACHMENT_QUOTA }) {
+async function startMobileBridge({
+  dataDir,
+  port = 8787,
+  token,
+  compressAbove = 1024,
+  pingMs = 25000,
+  allowedRoot,
+  attachmentQuota = ATTACHMENT_QUOTA,
+  phoneRoutes,
+}) {
   if (!/^[a-f0-9]{64}$/.test(token ?? "")) throw new Error("Bridge token must be 32 random bytes encoded as hex");
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid bridge port");
   const confine = allowedRoot === undefined ? null : createConfinement({ allowedRoot, uploadsDir: path.join(dataDir, "mobile-attachments") });
@@ -555,11 +564,17 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
           } else {
             if (request?.v !== 1 || typeof request.method !== "string" || !Array.isArray(request.args))
               throw failure(400, "Expected version 1, method and args array");
-            if (!METHODS.has(request.method)) throw failure(403, "Command is not available from mobile");
-            if (confine) {
-              const decided = await confine.checkCall(request.method, request.args);
-              result = "result" in decided ? decided.result : await confine.filterResult(request.method, await client.call(request.method, decided.args));
-            } else result = await client.call(request.method, request.args);
+            if (request.method === "phone:routes") {
+              // Answered by the phone setting that runs this bridge, not by the daemon. A confined demo has no LAN to offer.
+              if (!phoneRoutes || confine) throw failure(403, "Command is not available from mobile");
+              result = await phoneRoutes(request.args[0]?.phoneKey);
+            } else {
+              if (!METHODS.has(request.method)) throw failure(403, "Command is not available from mobile");
+              if (confine) {
+                const decided = await confine.checkCall(request.method, request.args);
+                result = "result" in decided ? decided.result : await confine.filterResult(request.method, await client.call(request.method, decided.args));
+              } else result = await client.call(request.method, request.args);
+            }
             // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };

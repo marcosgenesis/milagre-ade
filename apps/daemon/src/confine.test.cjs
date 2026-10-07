@@ -552,3 +552,8 @@ test("the project search lists only repositories inside the folder, and a Projec
   assert.equal((await f.rpc("project:image", [f.demo])).status, 200);
   assert.equal((await f.rpc("project:image", [f.outside])).status, 403);
 });
+
+test("a confined bridge refuses phone:routes even when it has the hook", async (t) => {
+  const f = await fixture(t, { bridgeOptions: { phoneRoutes: async () => ({ hostId: "h", key: "k", lan: [] }) } });
+  assert.equal((await f.rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
+});

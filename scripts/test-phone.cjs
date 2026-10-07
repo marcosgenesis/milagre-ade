@@ -58,7 +58,7 @@ async function browserChecks() {
   const daemon = await startDaemon({
     dataDir,
     version: "test",
-    phoneOptions: { localPort: 0, startRelay },
+    phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", startRelay },
     runtimeOptions: {
       cwd: dataDir,
       environmentReady: Promise.resolve(),

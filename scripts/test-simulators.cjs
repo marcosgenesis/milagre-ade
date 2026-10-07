@@ -186,7 +186,8 @@ async function browserChecks() {
     await click("[data-simulator-device=device-2]");
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
     assert.equal(await evaluate("window.simulatorCalls.at(-1).chatId"), "/fixture#1");
-    assert.equal(await evaluate("!!document.querySelector(\"[aria-label='Back to devices']\")"), false, "the viewer has no back button");
+    // Once the device list has gone and the docked viewer has come in.
+    await waitFor("!document.querySelector(\"[aria-label='Back to devices']\")");
     assert.equal(
       await evaluate('document.querySelector("[data-slot=simulator-popover] header").textContent.includes("This Chat")'),
       false,

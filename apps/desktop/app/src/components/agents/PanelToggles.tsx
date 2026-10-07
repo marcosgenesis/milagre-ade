@@ -45,6 +45,12 @@ const BUTTONS: { name: PanelName; label: string; icon: typeof PaintBoardIcon; sh
   { name: "simulator", label: "simulator", icon: SmartphoneIcon, shortcut: "⌘⇧S", key: "s" },
 ];
 
+/**
+ * The corner's buttons sit 40px apart (32px wide, 8px between): wide enough that the shortcut hints under them, shown
+ * while ⌘ is held, don't run into each other. What sits left of them moves this much per button.
+ */
+export const CORNER_PITCH = 40;
+
 /** How many buttons PanelToggles shows, for what sits left of them. */
 export const sidePanelCount = (shown: Partial<Record<PanelName, SidePanel>>) => BUTTONS.filter(({ name }) => shown[name]).length;
 
@@ -72,11 +78,11 @@ export function PanelToggles({ right }: { right: number }) {
   if (!buttons.length) return null;
   return (
     // Same line as the traffic lights and the changes toggle (top 14px, 32px tall).
-    <div data-slot="panel-toggles" className="fixed top-[14px] z-[60] flex gap-1 [-webkit-app-region:no-drag]" style={{ right }}>
+    <div data-slot="panel-toggles" className="fixed top-[14px] z-[60] flex gap-2 [-webkit-app-region:no-drag]" style={{ right }}>
       {buttons.map(({ name, label, icon, shortcut }) => {
         const panel = shown[name]!;
         return (
-          <Tooltip key={name} label={panel.open ? `Hide ${label}` : `Show ${label}`} shortcut={shortcut} side="bottom" align="end">
+          <Tooltip key={name} label={panel.open ? `Hide ${label}` : `Show ${label}`} shortcut={shortcut} compactHint side="bottom" align="end">
             <button
               type="button"
               aria-label={`Toggle ${label} panel`}

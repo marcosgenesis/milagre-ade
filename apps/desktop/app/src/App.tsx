@@ -55,7 +55,7 @@ import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { ChangesPanel } from "./components/changes/ChangesPanel";
-import { PanelToggles, sidePanelCount, useSidePanels } from "./components/agents/PanelToggles";
+import { CORNER_PITCH, PanelToggles, sidePanelCount, useSidePanels } from "./components/agents/PanelToggles";
 import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
 import { AttentionButton, ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
@@ -1725,7 +1725,7 @@ function App() {
         )}
         <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
         {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
-        <PanelToggles right={changesAvailable ? 48 : 12} />
+        <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
         {showAttentionButton && attentionChats[0] && (
           <AttentionButton
             label={attentionLabel(attentionPaths.map(projectName))}

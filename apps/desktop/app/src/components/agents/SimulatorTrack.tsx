@@ -11,6 +11,7 @@ import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
+import { DockSlide } from "./DockSlide";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --simulator-dock.
 const DOCK_WIDTH = 400;
@@ -86,14 +87,6 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [api, close, chatId]);
-  useEffect(() => {
-    if (!opened || !docked) return;
-    const root = document.documentElement.style;
-    root.setProperty("--simulator-dock", `${DOCK_WIDTH + 12}px`);
-    return () => {
-      root.removeProperty("--simulator-dock");
-    };
-  }, [opened, docked]);
   const mutate = async (method: "attach" | "detach", device: SimulatorDevice) => {
     if (!api || busy) return;
     setBusy(true);
@@ -124,6 +117,107 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   // The window's top-right corner offers the simulator too, while this Chat has one attached.
   useSidePanel("simulator", api && list.supported && attachedCount ? { open: opened, toggle: open } : null);
   if (!api || !list.supported || !attachedCount) return null;
+  const panelContent = (
+    <>
+      <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        {attaching ? (
+          <Tooltip label="Back to devices">
+            <button
+              type="button"
+              aria-label="Back to devices"
+              onClick={() => {
+                setSelected(null);
+                setAttaching(false);
+              }}
+              className="rounded p-1 text-ink-2 hover:bg-hover"
+            >
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={16} aria-hidden />
+            </button>
+          </Tooltip>
+        ) : (
+          <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
+        )}
+        <div className="min-w-0 flex-1">
+          {selected ? (
+            <button
+              type="button"
+              aria-label={`${selected.name}, choose simulator`}
+              onClick={() => setSelected(null)}
+              className="-ml-1 flex max-w-full items-center gap-1 rounded px-1 text-[13px] hover:bg-hover"
+            >
+              <span className="truncate">{selected.name}</span>
+              <HugeiconsIcon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" aria-hidden />
+            </button>
+          ) : (
+            <div className="truncate text-[13px]">{attaching ? "Attach simulator" : "Simulators"}</div>
+          )}
+          {!selected && <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>}
+        </div>
+        <Tooltip label="Close simulator">
+          <button type="button" aria-label="Close simulator" onClick={close} className="rounded p-1 text-ink-2 hover:bg-hover">
+            <HugeiconsIcon icon={Cancel01Icon} size={16} aria-hidden />
+          </button>
+        </Tooltip>
+      </header>
+      {selected ? (
+        <SimulatorFrame key={selected.id} api={api} deviceId={selected.id} chatId={chatId} onClose={close} />
+      ) : (
+        <ScrollArea className="p-1">
+          {loading && (
+            <p role="status" className="p-3 text-[13px] text-ink-2">
+              Finding running simulators...
+            </p>
+          )}
+          {list.error && (
+            <p role="alert" className="p-3 text-[13px] text-red">
+              {list.error}
+            </p>
+          )}
+          {!loading && !list.error && !(attaching ? list.available : list.attached)?.length && (
+            <p className="p-3 text-[13px] text-ink-2">{attaching ? "No other devices are running on this Mac." : "No simulators attached to this Chat."}</p>
+          )}
+          {(attaching ? (list.available ?? []) : (list.attached ?? [])).map((device) => {
+            const running = attaching || list.devices.some((d) => d.id === device.id);
+            return (
+              <div key={device.id} className="flex items-center">
+                <button
+                  type="button"
+                  disabled={busy || !running}
+                  data-simulator-device={device.id}
+                  onClick={() => (attaching ? void mutate("attach", device) : setSelected(device))}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-hover disabled:opacity-50"
+                >
+                  <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{device.name}</span>
+                  <span className="text-[11px] text-ink-3">
+                    {running ? `${device.platform === "android" ? "Android" : "iOS"} ${device.version}` : "Stopped"}
+                  </span>
+                </button>
+                {!attaching && (
+                  <Tooltip label="Detach from Chat">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Detach ${device.name} from Chat`}
+                      onClick={() => void mutate("detach", device)}
+                      className="rounded p-2 text-ink-3 hover:bg-hover"
+                    >
+                      <HugeiconsIcon icon={Cancel01Icon} size={14} aria-hidden />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            );
+          })}
+          {!attaching && (
+            <button type="button" onClick={() => setAttaching(true)} className="w-full rounded-md px-3 py-2 text-left text-[13px] text-ink-2 hover:bg-hover">
+              Attach simulator
+            </button>
+          )}
+        </ScrollArea>
+      )}
+    </>
+  );
   return (
     <div className="flex" data-slot="simulator-track">
       <Tooltip label="Simulators attached to this Chat" align="end">
@@ -143,135 +237,48 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       </Tooltip>
       {createPortal(
         <AnimatePresence>
-          {opened && (
-            <motion.div
-              key="simulator"
-              // Docked, it slides in from the right like the git changes panel; anchored, it rises from its pill.
-              initial={reduced ? false : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
-              animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
-              exit={reduced ? { opacity: 0, transition: { duration: 0 } } : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
-              transition={{ duration: 0.18, ease: EASE_OUT }}
-              ref={panel}
-              id={panelId}
-              role="dialog"
-              aria-label="Simulator"
-              aria-modal="false"
-              tabIndex={-1}
-              data-slot="simulator-popover"
-              data-docked={docked || undefined}
-              // Docked, it lines up with the sidebar's card and sits left of the git changes panel.
-              style={
-                docked
-                  ? { top: dock?.top ?? 40, right: (dock?.right ?? 0) + 12, bottom: dock?.bottom ?? 12, width: DOCK_WIDTH }
-                  : { ...bounds, height: selected ? 650 : undefined }
-              }
-              className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
-            >
-              <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-                {attaching ? (
-                  <Tooltip label="Back to devices">
-                    <button
-                      type="button"
-                      aria-label="Back to devices"
-                      onClick={() => {
-                        setSelected(null);
-                        setAttaching(false);
-                      }}
-                      className="rounded p-1 text-ink-2 hover:bg-hover"
-                    >
-                      <HugeiconsIcon icon={ArrowLeft01Icon} size={16} aria-hidden />
-                    </button>
-                  </Tooltip>
-                ) : (
-                  <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
-                )}
-                <div className="min-w-0 flex-1">
-                  {selected ? (
-                    <button
-                      type="button"
-                      aria-label={`${selected.name}, choose simulator`}
-                      onClick={() => setSelected(null)}
-                      className="-ml-1 flex max-w-full items-center gap-1 rounded px-1 text-[13px] hover:bg-hover"
-                    >
-                      <span className="truncate">{selected.name}</span>
-                      <HugeiconsIcon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" aria-hidden />
-                    </button>
-                  ) : (
-                    <div className="truncate text-[13px]">{attaching ? "Attach simulator" : "Simulators"}</div>
-                  )}
-                  {!selected && <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>}
-                </div>
-                <Tooltip label="Close simulator">
-                  <button type="button" aria-label="Close simulator" onClick={close} className="rounded p-1 text-ink-2 hover:bg-hover">
-                    <HugeiconsIcon icon={Cancel01Icon} size={16} aria-hidden />
-                  </button>
-                </Tooltip>
-              </header>
-              {selected ? (
-                <SimulatorFrame key={selected.id} api={api} deviceId={selected.id} chatId={chatId} onClose={close} />
-              ) : (
-                <ScrollArea className="p-1">
-                  {loading && (
-                    <p role="status" className="p-3 text-[13px] text-ink-2">
-                      Finding running simulators...
-                    </p>
-                  )}
-                  {list.error && (
-                    <p role="alert" className="p-3 text-[13px] text-red">
-                      {list.error}
-                    </p>
-                  )}
-                  {!loading && !list.error && !(attaching ? list.available : list.attached)?.length && (
-                    <p className="p-3 text-[13px] text-ink-2">
-                      {attaching ? "No other devices are running on this Mac." : "No simulators attached to this Chat."}
-                    </p>
-                  )}
-                  {(attaching ? (list.available ?? []) : (list.attached ?? [])).map((device) => {
-                    const running = attaching || list.devices.some((d) => d.id === device.id);
-                    return (
-                      <div key={device.id} className="flex items-center">
-                        <button
-                          type="button"
-                          disabled={busy || !running}
-                          data-simulator-device={device.id}
-                          onClick={() => (attaching ? void mutate("attach", device) : setSelected(device))}
-                          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-hover disabled:opacity-50"
-                        >
-                          <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
-                          <span className="min-w-0 flex-1 truncate text-[13px]">{device.name}</span>
-                          <span className="text-[11px] text-ink-3">
-                            {running ? `${device.platform === "android" ? "Android" : "iOS"} ${device.version}` : "Stopped"}
-                          </span>
-                        </button>
-                        {!attaching && (
-                          <Tooltip label="Detach from Chat">
-                            <button
-                              type="button"
-                              disabled={busy}
-                              aria-label={`Detach ${device.name} from Chat`}
-                              onClick={() => void mutate("detach", device)}
-                              className="rounded p-2 text-ink-3 hover:bg-hover"
-                            >
-                              <HugeiconsIcon icon={Cancel01Icon} size={14} aria-hidden />
-                            </button>
-                          </Tooltip>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {!attaching && (
-                    <button
-                      type="button"
-                      onClick={() => setAttaching(true)}
-                      className="w-full rounded-md px-3 py-2 text-left text-[13px] text-ink-2 hover:bg-hover"
-                    >
-                      Attach simulator
-                    </button>
-                  )}
-                </ScrollArea>
-              )}
-            </motion.div>
-          )}
+          {opened &&
+            (docked ? (
+              <DockSlide
+                key="simulator-dock"
+                // Docked, it opens like the git changes panel, lines up with the sidebar's card, and sits left of the
+                // changes panel; the chat makes room through --simulator-dock.
+                width={DOCK_WIDTH}
+                reserve="--simulator-dock"
+                ref={panel}
+                id={panelId}
+                role="dialog"
+                aria-label="Simulator"
+                aria-modal="false"
+                tabIndex={-1}
+                data-slot="simulator-popover"
+                data-docked
+                style={{ top: dock?.top ?? 40, right: (dock?.right ?? 0) + 12, bottom: dock?.bottom ?? 12 }}
+                className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
+              >
+                {panelContent}
+              </DockSlide>
+            ) : (
+              <motion.div
+                key="simulator"
+                // Anchored over its pill, the device list rises from it.
+                initial={reduced ? false : { opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: EASE_OUT }}
+                ref={panel}
+                id={panelId}
+                role="dialog"
+                aria-label="Simulator"
+                aria-modal="false"
+                tabIndex={-1}
+                data-slot="simulator-popover"
+                style={{ ...bounds, height: selected ? 650 : undefined }}
+                className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
+              >
+                {panelContent}
+              </motion.div>
+            ))}
         </AnimatePresence>,
         document.body,
       )}

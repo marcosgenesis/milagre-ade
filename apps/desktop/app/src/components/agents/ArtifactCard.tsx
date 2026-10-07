@@ -1,7 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { EASE_OUT } from "../../lib/ease";
+import { AnimatePresence, useReducedMotion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowExpand01Icon,
@@ -19,6 +18,7 @@ import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 import { DESIGNS_EXPANDED, useDockArea } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
+import { DockSlide } from "./DockSlide";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
@@ -429,15 +429,6 @@ function ArtifactDock({
   const [choice, setChoice] = useState<ArtifactRef | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  // Beside the chat, the chat makes room; filling the workspace, the canvas covers it.
-  useEffect(() => {
-    if (full) return;
-    const root = document.documentElement.style;
-    root.setProperty("--artifact-dock", `${DOCK_WIDTH + 12}px`);
-    return () => {
-      root.removeProperty("--artifact-dock");
-    };
-  }, [full]);
   // Escape leaves comment mode first, then closes the canvas.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -484,13 +475,12 @@ function ArtifactDock({
   };
   const icon = "rounded p-1 text-ink-2 hover:bg-hover disabled:opacity-40";
   return createPortal(
-    <motion.div
-      // Slides in from the right like the git changes panel, and back out when closed.
-      initial={reduced ? false : { opacity: 0, x: 24 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, x: 24 }}
-      transition={{ duration: 0.18, ease: EASE_OUT }}
-      onAnimationComplete={() => setEntered(true)}
+    <DockSlide
+      // Opens like the git changes panel. Beside the chat, the chat makes room (--artifact-dock); filling the
+      // workspace, the canvas covers it and reserves nothing.
+      width={full ? null : DOCK_WIDTH}
+      reserve="--artifact-dock"
+      onEntered={() => setEntered(true)}
       role="dialog"
       aria-label="Designs"
       aria-modal="false"
@@ -504,7 +494,6 @@ function ArtifactDock({
               top: area?.top ?? 40,
               right: `calc(${(area?.right ?? 0) + 12}px + var(--simulator-dock, 0px))`,
               bottom: area?.bottom ?? 12,
-              width: DOCK_WIDTH,
             }
       }
       className="fixed z-40 flex flex-col overflow-hidden rounded-window bg-surface text-ink shadow-card"
@@ -601,7 +590,7 @@ function ArtifactDock({
       ) : (
         <div className="min-h-0 flex-1 bg-canvas" />
       )}
-    </motion.div>,
+    </DockSlide>,
     document.body,
   );
 }

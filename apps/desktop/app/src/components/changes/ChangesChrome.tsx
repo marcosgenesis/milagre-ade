@@ -103,7 +103,7 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
   return (
     // Same line as the traffic lights and the sidebar toggle (top 14px, 32px tall).
     <div className="fixed top-[14px] right-3 z-[60] [-webkit-app-region:no-drag]">
-      <Tooltip label={open ? "Hide changes" : "Show changes"} shortcut="⌘⇧D" side="bottom" align="end">
+      <Tooltip label={open ? "Hide changes" : "Show changes"} shortcut="⌘⇧D" compactHint side="bottom" align="end">
         <button
           type="button"
           aria-label="Toggle changes panel"
@@ -144,8 +144,8 @@ export function AttentionButton({ label, items, offset, onOpen }: { label: strin
     <div
       data-attention
       className="fixed top-[14px] z-[60] [-webkit-app-region:no-drag]"
-      // Left of the buttons in the corner: `offset` is how many there are, 36px each.
-      style={{ right: 12 + offset * 36, animation: "fade-in 160ms ease-out" }}
+      // Left of the buttons in the corner: `offset` is how many there are, 40px each (PanelToggles' CORNER_PITCH).
+      style={{ right: 12 + offset * 40, animation: "fade-in 160ms ease-out" }}
     >
       <button
         ref={trigger}

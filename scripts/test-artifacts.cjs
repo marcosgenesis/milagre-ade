@@ -28,6 +28,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
 import { PanelToggles } from "/src/components/agents/PanelToggles";
+import { ChangesToggle } from "/src/components/changes/ChangesChrome";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
@@ -82,7 +83,7 @@ function Fixture() {
   </div></main>{changes && <div data-changes-slot style={{ width: 300, flexShrink: 0 }} />}</div>;
 }
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root")).render(<><Fixture /><PanelToggles right={12} /></>);
+createRoot(document.getElementById("root")).render(<><Fixture /><ChangesToggle open={false} onToggle={() => {}} /><PanelToggles right={52} /></>);
 `;
 
 async function browserChecks() {
@@ -158,7 +159,8 @@ async function browserChecks() {
     await evaluate(`${thumb("login")}.click()`);
     await waitFor(`${frames}?.length === 2 && [...${frames}].every((f) => f.querySelector("iframe"))`);
     assert.match(await evaluate(`${frame("login")}.textContent`), /Login screen, warmer.*v2 of 2/);
-    assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock").trim()'), "572px");
+    // The chat's room springs open with the panel, to the panel's width and its gap.
+    await waitFor('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock").trim() === "572px"');
     const inView = (id) =>
       `(() => { const c = ${dock}.querySelector("[data-slot=artifact-canvas]").getBoundingClientRect(); const f = ${frame(id)}.getBoundingClientRect(); return f.left >= c.left - 1 && f.right <= c.right + 1 && f.top >= c.top - 1 && f.bottom <= c.bottom + 1; })()`;
     await waitFor(inView("login"));
@@ -297,6 +299,19 @@ async function browserChecks() {
     assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no simulator button without a simulator");
     await evaluate(`${toggle}.click()`);
     await waitFor(`!${dock} && ${toggle}.getAttribute("aria-pressed") === "false"`);
+    // Holding ⌘ shows each corner button's shortcut under it, short enough not to run into its neighbour's.
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Meta", modifiers: ["meta"] });
+    await waitFor('document.querySelectorAll("body > [aria-hidden=true].fixed").length >= 2');
+    const badges = await evaluate(
+      '[...document.querySelectorAll("body > [aria-hidden=true].fixed")].map((b) => { const r = b.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, text: b.textContent }; }).sort((a, b) => a.left - b.left)',
+    );
+    for (let i = 1; i < badges.length; i++) assert.ok(badges[i - 1].right <= badges[i].left, `hints overlap: ${JSON.stringify(badges)}`);
+    assert.ok(
+      badges.every((badge) => !badge.text.includes("⌘") && badge.top > 40),
+      "short hints, under the buttons",
+    );
+    await screenshot("corner-hints");
+    window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Meta" });
     // ⌘⇧E does the same as the button.
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "E", modifiers: ["meta", "shift"] });
     await waitFor(`!!${dock} && ${dock}.querySelectorAll("[data-slot=artifact-frame]").length === 2`);

@@ -32,6 +32,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { s
 async function startDesktop() {
   const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
   let updateState = { status: "idle", version: null, progress: 0 };
+  /** @type {Promise<typeof updateState> | null} */
   let updateCheck = null;
   const { createReleaseChannelStore, configureUpdater, isChannelNotPublished } = require("./release-channel.cjs");
   const releaseChannel = createReleaseChannelStore({ file: path.join(app.getPath("userData"), "release-channel.json") });
@@ -126,6 +127,7 @@ async function startDesktop() {
   });
 
   // Installed editors are looked up once per run.
+  /** @type {Promise<import("@milagre/core/editors").DetectedEditor[]> | null} */
   let editorsFound = null;
   // Looked up after the login shell filled in PATH, so CLIs from a Finder launch are found.
   // A failed lookup is not kept, so the next call looks again.
@@ -332,6 +334,7 @@ async function startDesktop() {
 
   // Flushes accepted changes and disconnects desktop. The host and agents keep running.
   let quitting = false;
+  /** @type {Promise<void> | null} */
   let quitPrepared = null;
   function prepareQuit() {
     quitting = true;

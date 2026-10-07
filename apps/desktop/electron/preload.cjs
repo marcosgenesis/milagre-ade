@@ -1,5 +1,5 @@
 // @ts-check
-/** @typedef {import("../app/src/electron.d.ts")} BridgeTypes */
+/** @typedef {typeof import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** @type {Window["milagre"]} */

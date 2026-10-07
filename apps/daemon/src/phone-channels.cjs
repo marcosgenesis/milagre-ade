@@ -31,7 +31,8 @@ const routeOk = (path) => typeof path === "string" && path.startsWith("/") && !p
 /**
  * One encrypted channel per phone, whatever carries its bytes: the public relay (frames multiplexed on the Mac's
  * relay socket) or the LAN listener (one socket per phone). A `session` is `{ conns, send(bytes) }`; `send` takes a
- * whole frame (type, conn id, payload) and delivers it to that phone.
+ * whole frame (type, conn id, payload) and delivers it to that phone. `send` must also handle CLOSE frames: the channel
+ * emits them (after a refusal, or when it drops a connection) and the carrier has to close that phone's socket.
  */
 function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired = false, WebSocket, fetch: fetchBridge, random, helloMs }) {
   const sendFrame = (current, type, conn, payload) => current.send(frame(type, conn, payload));

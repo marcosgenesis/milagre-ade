@@ -2,7 +2,7 @@ import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
-import type { AgentPort, AgentTask, Subagent } from "../model";
+import type { AgentPort, AgentTask, ContextUsage, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -347,6 +347,8 @@ interface ChatComposerProps {
   waitingForSubagents?: boolean;
   /** The running turn's to-do list, shown as a pill beside the subagents. */
   tasks?: AgentTask[];
+  /** How full the agent's context window is, shown as a ring beside Send. */
+  contextUsage?: ContextUsage;
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
   /** Stops the command listening on one of the chat's ports. */
@@ -591,6 +593,7 @@ export function ChatComposer({
   onArchiveSubagent,
   waitingForSubagents = false,
   tasks,
+  contextUsage,
   ports,
   onStopPort,
   waitingStepIds,
@@ -859,6 +862,7 @@ export function ChatComposer({
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
             alwaysExpanded={isNewChat}
+            contextUsage={contextUsage}
           />
           {newChatError && (
             <p role="alert" className="mt-2 px-1 text-[12px] text-red">

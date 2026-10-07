@@ -129,6 +129,23 @@ function mapClaudeMessage(message, state) {
     state.sessionId = message.session_id;
     events.push({ type: "session-started", nativeId: message.session_id });
   }
+  // Claude Code compacts the conversation when the context window fills: a status, then a boundary.
+  if (message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
+    state.compactCount = (state.compactCount ?? 0) + 1;
+    state.compacting = `compact-${state.compactCount}`;
+    events.push({ type: "step-started", step: { id: state.compacting, kind: "other", title: "Compacting context" } });
+  }
+  if (message.type === "system" && message.subtype === "compact_boundary") {
+    if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
+    state.compacting = null;
+    const after = message.compact_metadata?.post_tokens;
+    if (typeof after === "number") events.push(...claudeContextUsage(state, after));
+  }
+  if (message.type === "assistant" && message.parent_tool_use_id == null && message.message?.usage) {
+    const usage = message.message.usage;
+    const used = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+    events.push(...claudeContextUsage(state, used));
+  }
   if (message.type === "stream_event" && message.parent_tool_use_id == null) {
     const event = message.event ?? {};
     if (event.type === "content_block_start" && event.content_block?.type === "text" && state.hasText) events.push(textDelta(state, "\n\n"));
@@ -178,6 +195,12 @@ function mapClaudeMessage(message, state) {
     }
   }
   if (message.type === "result") {
+    // The window size only arrives with a result, so the first turn shows its usage when it ends.
+    const windows = Object.values(message.modelUsage ?? {}).map((usage) => usage?.contextWindow ?? 0);
+    if (Math.max(0, ...windows) > 0) {
+      state.contextWindow = Math.max(...windows);
+      if (state.contextUsed !== undefined) events.push(...claudeContextUsage(state, state.contextUsed));
+    }
     if (message.subtype === "success" && !message.is_error) events.push({ type: "turn-completed" });
     else if (state.authFailed) events.push(failedWith(loginMessage("claude"), { login: true }));
     else
@@ -186,17 +209,30 @@ function mapClaudeMessage(message, state) {
         message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn.",
       });
     state.authFailed = false;
+    state.compacting = null;
   }
   return events;
 }
 
+// The context gauge, once the window size is known.
+function claudeContextUsage(state, used) {
+  state.contextUsed = used;
+  return state.contextWindow ? [{ type: "context-usage", used, size: state.contextWindow }] : [];
+}
+
 // codex app-server notification -> events. Everything not listed is ignored on purpose:
-// the server also reports MCP startup, hooks, rate limits, token usage and the turn's running diff.
+// the server also reports MCP startup, hooks, rate limits and the turn's running diff.
 function mapCodexNotification(method, params, state) {
   const children = codexSubagents(method, params, state);
   if (children.length) return children;
   if (params.threadId && state.threadId && params.threadId !== state.threadId) return [];
   if (method === "turn/started") return [{ type: "turn-started", turnId: params.turn?.id ?? null }];
+  // The last request's tokens are what the context window holds now.
+  if (method === "thread/tokenUsage/updated") {
+    const used = params.tokenUsage?.last?.totalTokens;
+    const size = params.tokenUsage?.modelContextWindow;
+    return typeof used === "number" && size > 0 ? [{ type: "context-usage", used, size }] : [];
+  }
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];

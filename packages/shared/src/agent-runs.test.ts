@@ -584,6 +584,15 @@ test("tasks-updated sets, replaces and clears the run's to-do list, and is ignor
   assert.equal("tasks" in runs[key(1)], false);
 });
 
+test("context-usage follows the run and is saved on the chat when the turn ends", () => {
+  let { state, runs, changed } = applyAgentEvent(base(), startRun({}, key(1), "codex"), PROJECT, key(1), { type: "context-usage", used: 1000, size: 4000 });
+  assert.equal(changed, false);
+  assert.deepEqual(runs[key(1)].contextUsage, { used: 1000, size: 4000 });
+  ({ state, runs, changed } = applyAgentEvent(state, runs, PROJECT, key(1), { type: "turn-failed", message: "at capacity" }));
+  assert.equal(changed, true);
+  assert.deepEqual(state.sessions[1].contextUsage, { used: 1000, size: 4000 });
+});
+
 test("tasks survive a steering split and go with the run when the turn ends", () => {
   const tasks = [{ id: "0", content: "Write tests", status: "pending" as const }];
   let { state, runs } = applyAgentEvent(base(), startRun({}, key(1), "claude"), PROJECT, key(1), { type: "tasks-updated", tasks });

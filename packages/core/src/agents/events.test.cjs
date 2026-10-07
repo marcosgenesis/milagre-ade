@@ -77,6 +77,47 @@ test("Codex: turn/completed maps each status", () => {
   assert.deepEqual(done("failed"), [{ type: "turn-failed", message: "Codex could not finish this turn." }]);
 });
 
+test("Codex: token usage is the context gauge, and compaction is a step", () => {
+  const state = { ...codexState(), turnId: "t-1" };
+  const usage = (last, window) => ({ threadId: "thread-1", turnId: "t-1", tokenUsage: { total: {}, last: { totalTokens: last }, modelContextWindow: window } });
+  assert.deepEqual(mapCodexNotification("thread/tokenUsage/updated", usage(230_568, 258_400), state), [
+    { type: "context-usage", used: 230_568, size: 258_400 },
+  ]);
+  assert.deepEqual(mapCodexNotification("thread/tokenUsage/updated", usage(10, null), state), []);
+  const item = { type: "contextCompaction", id: "c-1" };
+  assert.deepEqual(mapCodexNotification("item/started", { threadId: "thread-1", turnId: "t-1", item }, state), [
+    { type: "step-started", step: { id: "c-1", kind: "other", title: "Compacting context" } },
+  ]);
+  assert.deepEqual(mapCodexNotification("item/completed", { threadId: "thread-1", turnId: "t-1", item }, state), [
+    { type: "step-completed", id: "c-1", status: "done", title: "Compacted context" },
+  ]);
+});
+
+test("Claude: usage fills the context gauge once a result names the window, and compaction is a step", () => {
+  const state = claudeState();
+  const assistant = {
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { content: [], usage: { input_tokens: 5, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 5_000, output_tokens: 995 } },
+  };
+  assert.deepEqual(mapClaudeMessage(assistant, state), []);
+  assert.deepEqual(mapClaudeMessage({ type: "result", subtype: "success", is_error: false, modelUsage: { opus: { contextWindow: 200_000 } } }, state), [
+    { type: "context-usage", used: 96_000, size: 200_000 },
+    { type: "turn-completed" },
+  ]);
+  assert.deepEqual(mapClaudeMessage(assistant, state), [{ type: "context-usage", used: 96_000, size: 200_000 }]);
+  assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "status", status: "compacting" }, state), [
+    { type: "step-started", step: { id: "compact-1", kind: "other", title: "Compacting context" } },
+  ]);
+  assert.deepEqual(
+    mapClaudeMessage({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 190_000, post_tokens: 20_000 } }, state),
+    [
+      { type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" },
+      { type: "context-usage", used: 20_000, size: 200_000 },
+    ],
+  );
+});
+
 test("CLI failures name the fix", () => {
   assert.equal(
     missingCliMessage("claude"),

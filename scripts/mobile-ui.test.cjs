@@ -2990,98 +2990,108 @@ test("simulator sheet preserves its native header and bounds chooser/viewer cont
   }
 });
 
-test("mobile Accounts selects by tapping the row and manages accounts through its menu", async () => {
-  const react = hookHost({ effects: true });
-  const calls = [];
-  const accounts = {
-    providers: [
-      {
-        provider: "codex",
-        selectedId: "default",
-        accounts: [
-          { id: "default", provider: "codex", label: "Connected CLI account", state: "ready" },
-          { id: "work", provider: "codex", label: "Work", email: "work@example.test", state: "ready" },
-        ],
+for (const provider of ["claude", "codex"])
+  test(`mobile Accounts selects by tapping the row and manages accounts through its menu (${provider})`, async () => {
+    const react = hookHost({ effects: true });
+    const calls = [];
+    const accounts = {
+      providers: [
+        {
+          provider,
+          selectedId: "default",
+          accounts: [
+            { id: "default", provider, label: "Connected CLI account", state: "ready" },
+            {
+              id: "work",
+              provider,
+              label: "Work",
+              email: "work@example.test",
+              plan: provider === "claude" ? "self_serve_business_polite" : "business",
+              state: "ready",
+            },
+          ],
+        },
+      ],
+    };
+    const session = {
+      hostName: "Preview Mac",
+      refreshProviders: async () => {
+        calls.push(["refreshProviders"]);
       },
-    ],
-  };
-  const session = {
-    hostName: "Preview Mac",
-    refreshProviders: async () => {
-      calls.push(["refreshProviders"]);
-    },
-    client: {
-      call: async (method, args = []) => {
-        calls.push([method, ...args]);
-        const group = accounts.providers[0];
-        if (method === "accounts:select") group.selectedId = args[1];
-        if (method === "accounts:login") group.accounts.find((a) => a.id === args[1]).state = "signing-in";
-        if (method === "accounts:cancel") group.accounts.find((a) => a.id === args[1]).state = "signed-out";
-        if (method === "accounts:remove") {
-          group.accounts = group.accounts.filter((a) => a.id !== args[1]);
-          group.selectedId = "default";
-        }
-        return structuredClone(accounts);
+      client: {
+        call: async (method, args = []) => {
+          calls.push([method, ...args]);
+          const group = accounts.providers[0];
+          if (method === "accounts:select") group.selectedId = args[1];
+          if (method === "accounts:login") group.accounts.find((a) => a.id === args[1]).state = "signing-in";
+          if (method === "accounts:cancel") group.accounts.find((a) => a.id === args[1]).state = "signed-out";
+          if (method === "accounts:remove") {
+            group.accounts = group.accounts.filter((a) => a.id !== args[1]);
+            group.selectedId = "default";
+          }
+          return structuredClone(accounts);
+        },
       },
-    },
-  };
-  const { AccountsForComputer: AccountsSection } = load("accounts-section.tsx", {
-    react,
-    "react/jsx-runtime": { jsx, jsxs: jsx },
-    "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
-    "@hugeicons/core-free-icons": {},
-    "@milagre/shared/providers": require("@milagre/shared/providers"),
-    "./session": { useSession: () => session },
-    "./icons": { ProviderLogo: "ProviderLogo", Icon: "Icon" },
-    "./ui": { PillButton: "Button", Field: "Field", IconButton: "IconButton", PullDown: "PullDown", colors: {}, styles: {} },
+    };
+    const { AccountsForComputer: AccountsSection } = load("accounts-section.tsx", {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": require("@milagre/shared/providers"),
+      "./session": { useSession: () => session },
+      "./icons": { ProviderLogo: "ProviderLogo", Icon: "Icon" },
+      "./ui": { PillButton: "Button", Field: "Field", IconButton: "IconButton", PullDown: "PullDown", colors: {}, styles: {} },
+    });
+    const render = () => {
+      react.begin();
+      return AccountsSection();
+    };
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === "Actions for work@example.test");
+    try {
+      render();
+      await settle();
+      const row = find(render(), (n) => n.type === "Pressable" && n.props.accessibilityRole === "radio" && n.props.accessibilityLabel === "work@example.test");
+      assert.ok(row, "The account row is a directly selectable control");
+      assert.match(row.props.accessibilityHint, /^Business account\./);
+      assert.equal(JSON.stringify(row).includes("self_serve_business_polite"), false);
+      row.props.onPress();
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:select:${provider}:work`));
+      assert.equal(find(render(), (n) => n.props.accessibilityLabel === "work@example.test").props.accessibilityState.checked, true);
+      assert.ok(calls.some((c) => c[0] === "refreshProviders"));
+      assert.equal(
+        find(render(), (n) => n.props.title === "Add account"),
+        undefined,
+      );
+      assert.equal(
+        find(render(), (n) => n.type === "Field"),
+        undefined,
+      );
+      assert.equal(
+        menu()
+          .props.sections.flatMap((s) => s.items.map((i) => i.title))
+          .join(","),
+        "Re-authenticate,Remove",
+      );
+      menu().props.onSelect("login");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:login:${provider}:work`));
+      menu().props.onSelect("cancel");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:cancel:${provider}:work`));
+      menu().props.onSelect("remove");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:remove:${provider}:work`));
+      assert.equal(
+        find(render(), (n) => n.props.accessibilityLabel === "work@example.test"),
+        undefined,
+      );
+    } finally {
+      react.unmount();
+    }
   });
-  const render = () => {
-    react.begin();
-    return AccountsSection();
-  };
-  const settle = () => new Promise((resolve) => setImmediate(resolve));
-  const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === "Actions for work@example.test");
-  try {
-    render();
-    await settle();
-    const row = find(render(), (n) => n.type === "Pressable" && n.props.accessibilityRole === "radio" && n.props.accessibilityLabel === "work@example.test");
-    assert.ok(row, "The account row is a directly selectable control");
-    row.props.onPress();
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:select:codex:work"));
-    assert.equal(find(render(), (n) => n.props.accessibilityLabel === "work@example.test").props.accessibilityState.checked, true);
-    assert.ok(calls.some((c) => c[0] === "refreshProviders"));
-    assert.equal(
-      find(render(), (n) => n.props.title === "Add account"),
-      undefined,
-    );
-    assert.equal(
-      find(render(), (n) => n.type === "Field"),
-      undefined,
-    );
-    assert.equal(
-      menu()
-        .props.sections.flatMap((s) => s.items.map((i) => i.title))
-        .join(","),
-      "Re-authenticate,Remove",
-    );
-    menu().props.onSelect("login");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:login:codex:work"));
-    menu().props.onSelect("cancel");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:cancel:codex:work"));
-    menu().props.onSelect("remove");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:remove:codex:work"));
-    assert.equal(
-      find(render(), (n) => n.props.accessibilityLabel === "work@example.test"),
-      undefined,
-    );
-  } finally {
-    react.unmount();
-  }
-});
 
 function ongoingChatHost(options = {}) {
   const screen = chatHost({ effects: true, ...options });
@@ -3380,6 +3390,187 @@ test("mobile TSX preview colors native text in both themes and preserves selecti
   const dark = render();
   assert.notEqual(keyword(dark), keyword(light));
   assert.notEqual(keyword(dark), tag(dark));
+});
+
+for (const provider of ["claude", "codex"])
+  test(`mobile Project Accounts assigns within a scope and restores inheritance (${provider})`, async () => {
+    const react = hookHost({ effects: true });
+    const calls = [];
+    const login = deferred();
+    const snapshot = {
+      scopeKey: "/p",
+      providers: [
+        {
+          provider,
+          accountId: null,
+          effectiveId: "default",
+          defaultId: "default",
+          accounts: [
+            { id: "default", provider, label: "CLI", email: "default@example.test", state: "ready" },
+            { id: "work", provider, label: "Work", email: "work@example.test", plan: "business", state: "ready" },
+            { id: "out", provider, label: "Expired", state: "signed-out" },
+            { id: "gone", provider, label: "Removed account", state: "error", missing: true, message: "Choose a saved account." },
+          ],
+        },
+      ],
+    };
+    const session = {
+      snapshot: { project: { path: "/p" } },
+      refreshProviders: async () => calls.push(["refreshProviders"]),
+      client: {
+        call: async (method, args = []) => {
+          calls.push([method, ...args]);
+          if (method === "accounts:scopes")
+            return [
+              { key: "/p", name: "Project", kind: "project", projects: [{ id: "p", path: "/p", name: "Project" }] },
+              { key: "milagre-link:two", name: "Linked work", kind: "link", projects: [{ id: "p", path: "/p", name: "Project" }] },
+            ];
+          if (method === "accounts:login") return login.promise;
+          if (method === "accounts:scope") return { ...structuredClone(snapshot), scopeKey: args[0] };
+          if (method === "accounts:assign") {
+            snapshot.providers[0].accountId = args[2];
+            snapshot.providers[0].effectiveId = args[2] || "default";
+          }
+          return structuredClone(snapshot);
+        },
+      },
+    };
+    const { ProjectAccountsSection } = load("project-accounts-section.tsx", {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": require("@milagre/shared/providers"),
+      "./session": { useSession: () => session },
+      "./icons": { Icon: "Icon", ProviderLogo: "ProviderLogo" },
+      "./project-icon": { ProjectIcon: "ProjectIcon", ProjectIcons: "ProjectIcons" },
+      "./ui": { ListRow: "ListRow", PageScroll: "PageScroll", PullDown: "PullDown", colors: {}, styles: {} },
+      "expo-router": { router: { push() {} } },
+    });
+    const render = () => {
+      react.begin();
+      return ProjectAccountsSection().type();
+    };
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    try {
+      render();
+      await settle();
+      render();
+      await settle();
+      const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === `${provider === "claude" ? "Claude" : "Codex"} account`);
+      assert.ok(menu(), "Provider selector loads for the current Project");
+      const items = menu().props.sections.flatMap((s) => s.items);
+      assert.equal(items.find((i) => i.id === "out").disabled, true);
+      assert.equal(items.find((i) => i.id === "gone").disabled, true);
+      assert.equal(
+        find(render(), (n) => n.props.title === "Re-authenticate: Removed account"),
+        undefined,
+      );
+      assert.equal(
+        find(render(), (n) => n.props.title === "Re-authenticate: default@example.test"),
+        undefined,
+      );
+      assert.match(items.find((i) => i.id === "__default__").title, /default@example.test/);
+      menu().props.onSelect("work");
+      await settle();
+      assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[1] === "/p" && c[2] === provider && c[3] === "work"));
+      menu().props.onSelect("__default__");
+      await settle();
+      assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[3] === null));
+      assert.ok(calls.some((c) => c[0] === "refreshProviders"));
+      assert.equal(find(render(), (n) => n.type === "ListRow" && n.props.title === "Project").props.leading.props.path, "/p");
+      find(render(), (n) => n.props.title === "Re-authenticate: Expired").props.onPress();
+      find(render(), (n) => n.props.title === "Project").props.onPress();
+      find(render(), (n) => n.props.title === "Linked work").props.onPress();
+      render();
+      await settle();
+      const scopeReads = calls.filter((c) => c[0] === "accounts:scope").length;
+      login.resolve({});
+      await settle();
+      assert.equal(
+        calls.filter((c) => c[0] === "accounts:scope").length,
+        scopeReads,
+        "Finishing login from an old scope must not invalidate current scope reads",
+      );
+      assert.ok(menu());
+      assert.equal(find(render(), (n) => n.props.title === "Linked work").props.leading.type, "ProjectIcons");
+    } finally {
+      react.unmount();
+    }
+  });
+
+test("mobile provider discovery uses the selected scope and ignores late responses after switching", async () => {
+  const stale = deferred();
+  const requests = [],
+    sockets = [];
+  const AppState = { currentState: "active", addEventListener: () => ({ remove() {} }) };
+  const render = sessionHost(
+    {
+      call: async (method, args) => {
+        if (method === "project:recent") return [];
+        if (method === "agent:models" || method === "agent:cli-status") {
+          requests.push([method, ...(args || [])]);
+          if (args?.[0] === "A") return stale.promise;
+          return { source: args?.[0] || "default" };
+        }
+        return {};
+      },
+      snapshot: async (path) => snapshot(path),
+      live: (_path, options) => {
+        sockets.push(options);
+        return { close() {} };
+      },
+    },
+    { effects: true, AppState },
+  );
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    await render().connect({ address: "mac", token: "token" });
+    await render().open("A");
+    render();
+    await render().open("B");
+    render();
+    await settle();
+    assert.equal(render().models.source, "B");
+    stale.resolve({ source: "A" });
+    await settle();
+    assert.equal(render().models.source, "B");
+    assert.equal(render().cliStatus.source, "B");
+    const before = render().providerRevision;
+    sockets.at(-1).onSignal("accounts");
+    await settle();
+    assert.ok(render().providerRevision > before);
+    assert.ok(requests.some((request) => request.join(":") === "agent:models:B"));
+    assert.ok(requests.some((request) => request.join(":") === "agent:cli-status:B"));
+  } finally {
+    render.unmount();
+  }
+});
+
+test("mobile Project Accounts opens from Settings as a native stack screen", () => {
+  const opened = [];
+  const { SettingsView } = load("app/settings.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { View: "View" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", styles: {} },
+  });
+  find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
+  assert.deepEqual(opened, ["project-accounts"]);
+  const { default: Screen } = load("app/project-accounts.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "../ui": { PageScroll: "PageScroll" },
+    "../project-accounts-section": { ProjectAccountsSection: "ProjectAccountsSection" },
+  });
+  assert.equal(find(Screen(), (n) => n.type === "Screen").props.options.title, "Project Accounts");
+  assert.ok(find(Screen(), (n) => n.type === "ProjectAccountsSection"));
 });
 
 test("new mobile Chat has no simulator pill; an existing Chat carries its identity", () => {

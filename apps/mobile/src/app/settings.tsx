@@ -8,7 +8,7 @@ import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
 import { ListRow, PageScroll, styles } from "../ui";
 
-type SettingsPage = "notifications" | "usage" | "accounts";
+type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts";
 
 export default function SettingsScreen() {
   return (
@@ -47,6 +47,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
   return (
     <View style={{ gap: 8 }}>
       <View style={[styles.card, { paddingVertical: 4, gap: 0 }]}>
+        <ListRow compact title="Project Accounts" leading={<Icon icon={UserMultipleIcon} tone="ink" size={20} />} onPress={() => onOpen("project-accounts")} />
+        <View style={styles.separator} />
         <ListRow compact title="Accounts" leading={<Icon icon={UserMultipleIcon} tone="ink" size={20} />} onPress={() => onOpen("accounts")} />
         <View style={styles.separator} />
         <ListRow

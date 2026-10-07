@@ -1055,3 +1055,15 @@ test("drawer snapshots are marked and cached separately from full snapshots", as
   assert.equal((await (await request(route)).json()).result.previewOnly, undefined);
   assert.equal((await request(route + "&view=chats", { headers: { "if-none-match": response.headers.get("etag") } })).status, 304);
 });
+
+test("account assignment changes notify live phones independently of Project state signals", async (t) => {
+  const { project, bridge, rpc, request, token } = await fixture(t);
+  await rpc("project:open", [project]);
+  const chat = Object.values((await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result.project.state.sessions)[0].id;
+  const phone = await openLive(bridge, project, { authorization: `Bearer ${token}` });
+  await rpc("chat:patch", [project, chat, { title: "Changed while assigning" }]);
+  const result = await rpc("accounts:assign", [project, "claude", null]);
+  assert.equal(result.status, 200);
+  await until(() => phone.messages.includes("accounts") && phone.messages.includes("project"));
+  assert.equal(phone.messages.filter((type) => type === "accounts").length, 1);
+});

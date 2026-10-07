@@ -190,6 +190,18 @@ function createSimulatorHelper(options = {}) {
       starting = null;
     }
   }
+  // Once Xcode 27's Device Hub attaches to a simulator it sets this flag and the guest drops legacy HID touches
+  // (EvanBacon/serve-sim#153). serve-sim's repair-input: clear the flag, then restart backboardd so it starts at
+  // zero. The restart also restarts SpringBoard and closes running apps, so it runs only while the flag is set.
+  async function repairInput(deviceId) {
+    const flag = "com.apple.coredevice.dtuhidd.active";
+    const spawnIn = (...args) => execFile("/usr/bin/xcrun", ["simctl", "spawn", deviceId, ...args], { timeout: 10000, encoding: "utf8" });
+    try {
+      if ((await spawnIn("notifyutil", "-g", flag)).stdout.trim() !== `${flag} 1`) return;
+      await spawnIn("notifyutil", "-s", flag, "0");
+      await spawnIn("launchctl", "kickstart", "-k", "system/com.apple.backboardd");
+    } catch {} // Older runtimes do not publish the flag; input then works as before.
+  }
   async function request(instance, deviceId, route, body) {
     if (!validDevice.test(deviceId)) throw new Error("Invalid simulator device.");
     if (instance.exited || instance.terminated) throw new Error("Simulator helper stopped. Reopen the viewer.");
@@ -256,6 +268,7 @@ function createSimulatorHelper(options = {}) {
     },
     async connect(deviceId) {
       if (!validDevice.test(deviceId)) throw new Error("Invalid simulator device.");
+      if (!android) await repairInput(deviceId);
       const instance = await ensure();
       const socket = new WebSocket(`${instance.base.replace("http:", "ws:")}${prefix}/ws?device=${encodeURIComponent(deviceId)}${android ? "&video=0" : ""}`, [
         `${android ? "serve-emu" : "serve-sim"}.token.${instance.token}`,

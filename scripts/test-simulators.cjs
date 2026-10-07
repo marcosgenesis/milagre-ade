@@ -161,7 +161,7 @@ async function browserChecks() {
     assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), "pressing the chat keeps the docked viewer");
     await screenshot("docked-dark");
     const footerMatches =
-      '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
+      '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover] > div")).backgroundColor})()';
     await waitFor(footerMatches);
     await evaluate("window.setDark(false)");
     await waitFor(footerMatches);

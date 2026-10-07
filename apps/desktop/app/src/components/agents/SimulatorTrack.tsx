@@ -254,7 +254,8 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                 data-slot="simulator-popover"
                 data-docked
                 style={{ top: dock?.top ?? 40, right: (dock?.right ?? 0) + 12, bottom: dock?.bottom ?? 12 }}
-                className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
+                className="fixed z-50 focus:outline-none"
+                panelClassName="overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised"
               >
                 {panelContent}
               </DockSlide>

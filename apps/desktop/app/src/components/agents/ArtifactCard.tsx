@@ -496,7 +496,8 @@ function ArtifactDock({
               bottom: area?.bottom ?? 12,
             }
       }
-      className="fixed z-40 flex flex-col overflow-hidden rounded-window bg-surface text-ink shadow-card"
+      className="fixed z-40"
+      panelClassName="overflow-hidden rounded-window bg-surface text-ink shadow-card"
     >
       <header className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-2">
         <HugeiconsIcon icon={PaintBoardIcon} size={16} aria-hidden />

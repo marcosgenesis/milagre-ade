@@ -14,11 +14,14 @@ export const DockSlide = forwardRef<
     width: number | null;
     reserve: string;
     style: CSSProperties;
+    /** Where it sits (position, z-index): the slot that opens and closes. */
     className: string;
+    /** What it looks like (surface, border, radius, shadow): the card that slides through the slot. */
+    panelClassName: string;
     children: ReactNode;
     onEntered?: () => void;
   } & Omit<React.HTMLAttributes<HTMLDivElement>, "style" | "className" | "children">
->(function DockSlide({ width, reserve, style, className, children, onEntered, ...rest }, ref) {
+>(function DockSlide({ width, reserve, style, className, panelClassName, children, onEntered, ...rest }, ref) {
   const reduced = useReducedMotion();
   const shown = useMotionValue(reduced || width === null ? (width ?? 0) : 0);
   const [sliding, setSliding] = useState(!reduced && width !== null);
@@ -53,7 +56,9 @@ export const DockSlide = forwardRef<
       // Laid out by its own style, the width it sprang to must go too, or it would outrank `right`.
       style={width === null ? { ...style, width: "auto" } : { ...style, width: shown }}
       // Clipped only while the width moves: clipped at rest it would cut the panel's shadow.
-      className={`${className} ${sliding ? "overflow-hidden" : ""}`}
+      // An invisible slot, like the changes panel's: as it narrows, its left edge moves right over the card, which keeps
+      // its width and so slides out to the window's edge instead of shrinking. Clipped only while the width moves.
+      className={`${className} flex ${sliding ? "overflow-hidden" : ""}`}
       exit={
         reduced
           ? { opacity: 0, transition: { duration: 0 } }
@@ -66,7 +71,7 @@ export const DockSlide = forwardRef<
       }}
     >
       <motion.div
-        className="flex min-h-0 flex-1 flex-col"
+        className={`flex min-h-0 flex-1 flex-col ${panelClassName}`}
         style={width === null ? undefined : { width, minWidth: width }}
         initial={reduced ? false : { opacity: 0, x: 24 }}
         animate={{ opacity: 1, x: 0 }}

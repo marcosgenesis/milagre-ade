@@ -29,6 +29,8 @@ import { SimulatorChip } from "../simulator";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
+import { takeDesignMessage } from "../design-outbox";
+import { chosenDesign } from "@milagre/shared/artifact";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
@@ -172,6 +174,9 @@ export default function ChatScreen() {
         : savedMessages,
     [pending, pendingCanonicalId, allMessages, savedMessages],
   );
+  // The design the user last chose on the design sheet, which its cards mark.
+  const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
+  const designChoice = chosen ? `${chosen.id}:${chosen.version}` : undefined;
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
@@ -238,6 +243,15 @@ export default function ChatScreen() {
     <Stack.Toolbar placement="left">
       <Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show("left")} />
     </Stack.Toolbar>
+  );
+  // A comment or a choice from the design sheet is sent from here when the Chat comes back into view.
+  const sendDesign = useRef<(text: string) => void>(() => {});
+  const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
+  useFocusEffect(
+    useCallback(() => {
+      const text = designKey && params.id ? takeDesignMessage(designKey) : null;
+      if (text) sendDesign.current(text);
+    }, [designKey, params.id]),
   );
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;
   if (!session.snapshot || !targetMatches || needsWorktree) {
@@ -315,6 +329,7 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
+  sendDesign.current = (text) => void send(text, false);
   async function send(body = draft, withAttachments = true) {
     if (busy || sendingRef.current || pending || picking || (!body && !(withAttachments && attachments.length))) return;
     sendingRef.current = true;
@@ -604,7 +619,15 @@ export default function ChatScreen() {
   const question = run?.questions[0];
   const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
   const liveReply = run ? (
-    <ChatReply key="run" run={run} media={media} basePath={worktree?.path || project.path} chatId={chatId} onActivity={openActivity} />
+    <ChatReply
+      key="run"
+      run={run}
+      media={media}
+      basePath={worktree?.path || project.path}
+      chatId={chatId}
+      designChoice={designChoice}
+      onActivity={openActivity}
+    />
   ) : null;
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
@@ -691,7 +714,14 @@ export default function ChatScreen() {
                 }
               }}
             >
-              <ChatReply message={message} media={media} basePath={worktree?.path || project.path} chatId={chatId} onActivity={openActivity} />
+              <ChatReply
+                message={message}
+                media={media}
+                basePath={worktree?.path || project.path}
+                chatId={chatId}
+                designChoice={designChoice}
+                onActivity={openActivity}
+              />
             </View>,
           ])}
           {!pendingInput && liveReply}

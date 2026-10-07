@@ -750,6 +750,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
+    "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
+    "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
@@ -3806,7 +3808,7 @@ test("mobile Ports sheet stops only this Chat's process and refuses another host
   assert.deepEqual(calls, []);
 });
 
-function artifactHost(client, pushes = []) {
+function artifactHost(client, pushes = [], router = { back() {} }) {
   const react = hookHost({ effects: true }),
     files = new Map();
   class File {
@@ -3828,13 +3830,14 @@ function artifactHost(client, pushes = []) {
     {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
-      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
-      "expo-router": { router: { back() {}, push: (route) => pushes.push(route) } },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
+      "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
       "@hugeicons/core-free-icons": {},
       "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./design-outbox": require("../apps/mobile/src/design-outbox.ts"),
       "./session": { useSession: () => ({ client }) },
       "./icons": { Icon: "Icon" },
       "./ui": { CircleButton: "CircleButton", PillButton: "PillButton", colors: {}, styles: {} },
@@ -3871,14 +3874,18 @@ test("the design sheet loads the version it opened under the design policy, in a
     url: "mac",
     call: async (method, args) => {
       calls.push([method, args]);
-      return { id: "login", version: 1, latest: 2, versions: 2, title: "Login", html: "<html><head></head><body>hi</body></html>" };
+      if (method === "artifact:list") return [{ id: "login", version: 2, title: "Login", versions: 2, width: 390, height: 844 }];
+      return { id: "login", version: 1, latest: 2, versions: 2, title: "Login", width: 390, height: 844, html: "<html><head></head><body>hi</body></html>" };
     },
   };
   const h = artifactHost(client);
   h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
   await settle();
   const tree = h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
-  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["artifact:get", [{ chatId: "/p#7", id: "login", version: 1 }]]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["artifact:list", [{ chatId: "/p#7" }]],
+    ["artifact:get", [{ chatId: "/p#7", id: "login", version: 1 }]],
+  ]);
   const view = find(tree, (node) => node.props?.html);
   assert.ok(view, "the design shows once loaded");
   const web = artifactHost(client);
@@ -3889,5 +3896,41 @@ test("the design sheet loads the version it opened under the design policy, in a
   assert.match(web.files.get(frame.props.source.uri), /<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'/);
   web.cleanup();
   assert.equal(web.files.size, 0);
+  h.cleanup();
+});
+
+test("on the design sheet, choosing and commenting wait for Send, which hands one message to the Chat", async () => {
+  const outbox = require("../apps/mobile/src/design-outbox.ts");
+  let backs = 0;
+  const client = {
+    url: "mac",
+    call: async (method) =>
+      method === "artifact:list"
+        ? [{ id: "home", version: 1, title: "Home", versions: 1, width: 390, height: 844 }]
+        : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" },
+  };
+  const h = artifactHost(client, [], { back: () => backs++ });
+  const props = { hostId: "mac", chatId: "/p#7", id: "home", version: "1" };
+  h.render("ArtifactSheet", props);
+  await settle();
+  let tree = h.render("ArtifactSheet", props);
+  assert.ok(!find(tree, (node) => (node.props?.title ?? "").startsWith("Send")), "nothing to send yet");
+  find(tree, (node) => node.props?.title === "Choose").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  assert.equal(outbox.takeDesignMessage("mac|/p#7"), null, "choosing alone sends nothing");
+  assert.ok(find(tree, (node) => node.props?.title === "Chosen ✓"));
+  find(tree, (node) => node.props?.title === "Comment").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.type === "TextInput").props.onChangeText("Bigger title");
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Done").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Send 2").props.onPress();
+  assert.equal(
+    outbox.takeDesignMessage("mac|/p#7"),
+    'I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids.',
+  );
+  assert.equal(outbox.takeDesignMessage("mac|/p#7"), null, "a message is sent once");
+  assert.equal(backs, 1);
   h.cleanup();
 });

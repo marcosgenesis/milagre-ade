@@ -17,24 +17,31 @@ export type DesignComment = { design: ArtifactRef; x?: number; y?: number; text:
 // Plain text: the message shows in the user's bubble as typed, without markdown.
 const designName = (design: ArtifactRef) => `the design "${design.title}" (${design.id}, version ${design.version})`;
 
-/** The message that sends the user's comments on designs to the agent. */
-export function designCommentsMessage(comments: DesignComment[]): string {
-  const lines = comments.map((comment, index) => {
-    const at = comment.x === undefined || comment.y === undefined ? "" : `, ${Math.round(comment.x * 100)}% across and ${Math.round(comment.y * 100)}% down`;
-    return `${index + 1}. On ${designName(comment.design)}${at}: ${comment.text.trim()}`;
-  });
-  return `${comments.length === 1 ? "A comment" : "Comments"} on the designs:\n\n${lines.join("\n")}\n\nRevise them with artifact_show and keep their ids.`;
+const CHOICE = /^I chose the design ".*?" \(([a-z0-9-]+), version (\d+)\)\. Continue from this one\.(?:\n|$)/;
+
+/**
+ * The message that sends the user's feedback on designs to the agent: the design they chose, if they chose one, then
+ * their comments. The choice comes first, on a line of its own, where chosenDesign reads it back.
+ */
+export function designFeedbackMessage({ choice, comments }: { choice?: ArtifactRef | null; comments: DesignComment[] }): string {
+  const parts: string[] = [];
+  if (choice) parts.push(`I chose ${designName(choice)}. Continue from this one.`);
+  if (comments.length) {
+    const lines = comments.map((comment, index) => {
+      const at = comment.x === undefined || comment.y === undefined ? "" : `, ${Math.round(comment.x * 100)}% across and ${Math.round(comment.y * 100)}% down`;
+      return `${index + 1}. On ${designName(comment.design)}${at}: ${comment.text.trim()}`;
+    });
+    parts.push(
+      `${comments.length === 1 ? "A comment" : "Comments"} on the designs:\n\n${lines.join("\n")}\n\nRevise them with artifact_show and keep their ids.`,
+    );
+  }
+  return parts.join("\n\n");
 }
 
-/** The message that tells the agent which design the user chose. */
-export function designChoiceMessage(design: ArtifactRef): string {
-  return `I chose ${designName(design)}. Continue from this one.`;
-}
-
-/** The design the user last chose in these messages, read back from the message designChoiceMessage wrote. */
+/** The design the user last chose in these messages, read back from the message designFeedbackMessage wrote. */
 export function chosenDesign(bodies: string[]): { id: string; version: number } | null {
   for (const body of [...bodies].reverse()) {
-    const [, id, version] = /^I chose the design ".*" \(([a-z0-9-]+), version (\d+)\)\. Continue from this one\.$/s.exec(body) ?? [];
+    const [, id, version] = CHOICE.exec(body) ?? [];
     if (id && version) return { id, version: Number(version) };
   }
   return null;

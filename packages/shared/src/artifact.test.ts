@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ARTIFACT_CSP, artifactDocument, chosenDesign, designChoiceMessage, designCommentsMessage } from "./artifact.ts";
+import { ARTIFACT_CSP, artifactDocument, chosenDesign, designFeedbackMessage } from "./artifact.ts";
 import { replyActivity } from "./reply-parts.ts";
 
 const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
@@ -41,20 +41,48 @@ test("a finished design leaves the activity to show as a card; one still running
   assert.deepEqual(reply.activity, [{ type: "step", step: running }]);
 });
 
-test("comments name each design and where on it they were pinned", () => {
+test("feedback names each design and where on it a comment was pinned", () => {
   const login = { id: "login", version: 2, title: "Login" };
   assert.equal(
-    designCommentsMessage([
-      { design: login, x: 0.42, y: 0.181, text: " Bigger button " },
-      { design: { id: "home", version: 1, title: "Home" }, text: "Too busy" },
-    ]),
+    designFeedbackMessage({
+      comments: [
+        { design: login, x: 0.42, y: 0.181, text: " Bigger button " },
+        { design: { id: "home", version: 1, title: "Home" }, text: "Too busy" },
+      ],
+    }),
     'Comments on the designs:\n\n1. On the design "Login" (login, version 2), 42% across and 18% down: Bigger button\n2. On the design "Home" (home, version 1): Too busy\n\nRevise them with artifact_show and keep their ids.',
   );
 });
 
-test("the chosen design reads back from the last choice message", () => {
-  const choice = designChoiceMessage({ id: "home-b", version: 3, title: "Home, variant B" });
-  assert.equal(choice, 'I chose the design "Home, variant B" (home-b, version 3). Continue from this one.');
-  assert.deepEqual(chosenDesign(["hi", designChoiceMessage({ id: "a", version: 1, title: "A" }), choice, "thanks"]), { id: "home-b", version: 3 });
+test("a choice leads the feedback, and reads back as the chosen design", () => {
+  const choice = { id: "home-b", version: 3, title: "Home, variant B" };
+  const alone = designFeedbackMessage({ choice, comments: [] });
+  assert.equal(alone, 'I chose the design "Home, variant B" (home-b, version 3). Continue from this one.');
+  const both = designFeedbackMessage({ choice, comments: [{ design: choice, text: "Darker" }] });
+  assert.match(both, /^I chose the design "Home, variant B" \(home-b, version 3\)\. Continue from this one\.\n\nA comment on the designs:/);
+  assert.deepEqual(chosenDesign(["hi", designFeedbackMessage({ choice: { id: "a", version: 1, title: "A" }, comments: [] }), both, "thanks"]), {
+    id: "home-b",
+    version: 3,
+  });
   assert.equal(chosenDesign(['I chose the design "x" (y, version 1). Continue from this one. And more']), null);
+});
+
+test("a reply shows each design once, at the newest version it made", () => {
+  const show = (id: string, version: number) => ({
+    id: `${id}${version}`,
+    kind: "artifact" as const,
+    title: "Showed",
+    status: "done" as const,
+    offset: 0,
+    artifact: { id, version, title: id },
+  });
+  const reply = replyActivity("Three designs.", [show("home", 1), show("alt-b", 1), show("home", 2), show("alt-c", 1)]);
+  assert.deepEqual(
+    reply.artifacts.map((step) => [step.artifact.id, step.artifact.version]),
+    [
+      ["home", 2],
+      ["alt-b", 1],
+      ["alt-c", 1],
+    ],
+  );
 });

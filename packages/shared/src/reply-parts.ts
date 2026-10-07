@@ -35,7 +35,8 @@ export type ActivityEntry = { type: "text"; text: string } | { type: "step"; ste
  * everything else (thinking, tool steps and the text between them) in the order it happened.
  * The worktree's setup is neither: it comes back apart, to show as a row of its own before both.
  * Generated images come back apart too, to show between the activity and the answer, and so do the designs the agent
- * showed (an artifact step still running, or one that failed, stays in the activity as a row).
+ * showed, once each at the newest version this reply made (an artifact step still running, or one that failed, stays in
+ * the activity as a row).
  */
 export function replyActivity(
   body: string,
@@ -43,7 +44,13 @@ export function replyActivity(
 ): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; artifacts: ArtifactStep[]; answer: string } {
   const setup = allSteps.filter((step) => step.kind === "setup");
   const images = allSteps.filter((step) => step.kind === "image");
-  const artifacts = allSteps.filter(isArtifactCard);
+  // One entry per design, at its newest version in this reply, where it was first shown.
+  const artifacts: ArtifactStep[] = [];
+  for (const step of allSteps.filter(isArtifactCard)) {
+    const at = artifacts.findIndex((item) => item.artifact.id === step.artifact.id);
+    if (at === -1) artifacts.push(step);
+    else if (artifacts[at]!.artifact.version < step.artifact.version) artifacts[at] = step;
+  }
   const parts = replyParts(
     body,
     allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image" && !isArtifactCard(step)),

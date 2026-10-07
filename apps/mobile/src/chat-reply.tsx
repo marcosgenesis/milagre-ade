@@ -11,7 +11,7 @@ import { Markdown } from "./markdown";
 import { Icon } from "./icons";
 import { ActivityTitle } from "./activity-item";
 import { ToolRow } from "./tool-row";
-import { ArtifactCard } from "./artifact";
+import { ArtifactCards } from "./artifact";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
 import { colors, styles } from "./ui";
@@ -186,6 +186,7 @@ export const ChatReply = memo(function ChatReply({
   media,
   basePath,
   chatId,
+  designChoice,
 }: {
   message?: ChatMessage;
   run?: AgentRun;
@@ -194,6 +195,8 @@ export const ChatReply = memo(function ChatReply({
   basePath?: string;
   /** The Chat's key, to open the designs its replies showed. */
   chatId?: string;
+  /** The design the user last chose, as "id:version". */
+  designChoice?: string;
 }) {
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");
@@ -243,9 +246,7 @@ export const ChatReply = memo(function ChatReply({
           <GeneratedImage step={step} media={savedMedia} />
         </View>
       ))}
-      {reply.artifacts.map((step) => (
-        <ArtifactCard key={step.id} step={step} chatId={chatId} />
-      ))}
+      <ArtifactCards steps={reply.artifacts} chatId={chatId} chosen={designChoice} />
       {!!answer && <Markdown text={answer} streaming={!!run} media={savedMedia} basePath={basePath} />}
       {run?.tasks?.length ? (
         <View style={[styles.card, { gap: 8 }]}>

@@ -43,7 +43,7 @@ window.milagre = {
       if (id === "home") return { id, version: 1, title: "Home", versions: 1, latest: 1, width: 390, height: 844, html: home };
       const latest = window.latest;
       const shown = version ?? latest;
-      return { id, version: shown, title: shown === 1 ? "Login screen" : "Login screen, warmer", versions: latest, latest, width: 1280, height: 800, html: designs[shown] };
+      return { id, version: shown, title: shown === 1 ? "Login screen" : "Login screen, warmer", versions: latest, latest, ...(shown === 1 ? {} : { width: 1280, height: 800 }), html: designs[shown] };
     },
   },
 };
@@ -68,7 +68,7 @@ function Fixture() {
     ...said.map((body, index) => ({ id: 10 + index, session_id: 1, context: null, role: "user", body })),
   ];
   // The app's layout: the chat pane inside the workspace, beside a 260px sidebar.
-  return <div style={{ display: "flex", height: "100%" }}><aside style={{ width: 260, flexShrink: 0 }} /><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane className={diff ? "hidden" : undefined} style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
+  return <div style={{ display: "flex", height: "100%" }}><div style={{ width: 260, flexShrink: 0, padding: "56px 12px 12px", boxSizing: "border-box" }}><aside aria-label="Workspace navigation" style={{ height: "100%" }} /></div><main data-workspace-main style={{ display: "flex", flex: 1, minWidth: 0, height: "100%" }}><div data-chat-pane className={diff ? "hidden" : undefined} style={{ flex: 1, minWidth: 0, height: "100%", padding: 12 }}>
     <ChatComposer messages={messages} onSendDesignMessage={onSendDesignMessage}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false}
@@ -108,10 +108,16 @@ async function browserChecks() {
     throw new Error(`Timed out: ${source}`);
   }
   const cards = 'document.querySelectorAll("[data-slot=artifact-card]")';
+  const group = 'document.querySelector("[data-slot=artifact-group]")';
+  const thumb = (id) => `${group}.querySelector("[data-slot=artifact-thumb][data-artifact=${id}]")`;
   const dock = 'document.querySelector("[data-slot=artifact-dock]")';
   try {
     await window.loadURL(process.argv[2]);
-    await waitFor(`${cards}.length === 3 && [...${cards}].every((card) => card.querySelector("iframe"))`);
+    // The reply that showed two designs has one card for both, a thumbnail each.
+    await waitFor(
+      `${cards}.length === 1 && !!${cards}[0].querySelector("iframe") && ${group}?.querySelectorAll("[data-slot=artifact-thumb] iframe").length === 2`,
+    );
+    assert.match(await evaluate(`${group}.textContent`), /2 designs.*Login screen, warmer · Home/);
     assert.equal(await evaluate(`[...${cards}].some((card) => card.closest("[data-slot=activity]"))`), false, "designs are not folded into the activity");
     assert.deepEqual(await evaluate("window.calls"), [
       ["/fixture#1", "login", 1],
@@ -126,18 +132,25 @@ async function browserChecks() {
     assert.deepEqual(await evaluate("window.requests"), ["blocked", "blocked"], "a design can't make requests of its own");
     assert.ok(
       await evaluate(
-        `(() => { const f = ${cards}[2].querySelector("iframe").parentElement; return f.style.width === "390px" && f.style.height === "844px"; })()`,
+        `(() => { const f = ${thumb("home")}.querySelector("iframe").parentElement; return f.style.width === "390px" && f.style.height === "844px"; })()`,
       ),
       "a phone design previews at the phone screen it was made for",
     );
+    // Version 1 comes from a host that sends no screen size: it previews at the default size, not as a blank card.
+    assert.deepEqual(
+      await evaluate(
+        `(() => { const f = ${cards}[0].querySelector("iframe").parentElement; return { width: f.style.width, scaled: /scale\\(0\\.\\d+\\)/.test(f.style.transform) }; })()`,
+      ),
+      { width: "1280px", scaled: true },
+    );
     assert.match(await evaluate(`${cards}[0].textContent`), /Login screen.*Version 1.*version 2 is newer/);
-    await evaluate(`${cards}[1].scrollIntoView()`);
+    await evaluate(`${group}.scrollIntoView()`);
     await screenshot("card");
 
     // Open docks the canvas beside the chat with every design of the Chat, and brings the opened one into view.
     const frames = `${dock}.querySelectorAll("[data-slot=artifact-frame]")`;
     const frame = (id) => `${dock}.querySelector("[data-slot=artifact-frame][data-artifact=${id}]")`;
-    await evaluate(`${cards}[1].querySelector("button").click()`);
+    await evaluate(`${thumb("login")}.click()`);
     await waitFor(`${frames}?.length === 2 && [...${frames}].every((f) => f.querySelector("iframe"))`);
     assert.match(await evaluate(`${frame("login")}.textContent`), /Login screen, warmer.*v2 of 2/);
     assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock").trim()'), "572px");
@@ -149,17 +162,45 @@ async function browserChecks() {
     );
     assert.ok(layout.pane <= layout.dock, "the chat ends where the canvas begins");
     assert.ok(layout.dock - 260 > 400, "the chat keeps its room: the workspace reserves the dock once, not again in the chat pane");
-    assert.equal(layout.top, 40, "the canvas docks at the top right");
+    assert.equal(layout.top, 56, "the canvas lines up with the top of the sidebar's card");
+    assert.equal(
+      await evaluate(`Math.round(${dock}.getBoundingClientRect().bottom) === Math.round(document.querySelector("aside").getBoundingClientRect().bottom)`),
+      true,
+      "and with its bottom",
+    );
     await screenshot("docked");
+    // The group card's Open frames every design it showed.
+    await evaluate(`${group}.querySelector(":scope > div:last-child button").click()`);
+    await waitFor(`${inView("login")} && ${inView("home")}`);
     // Fit shows every design, the phone one at its own size beside the laptop one.
     await evaluate(`${dock}.querySelector("[aria-label='Fit every design']").click()`);
     await waitFor(`${inView("login")} && ${inView("home")}`);
-    assert.equal(await evaluate(`${frame("home")}.querySelector("[data-design-body]").style.width`), "390px");
+    assert.equal(await evaluate(`${frame("home")}.querySelector("[data-design-body]").parentElement.style.width`), "390px");
     const zoom = await evaluate(`${dock}.querySelector("[data-slot=artifact-zoom]").textContent`);
     await evaluate(`${dock}.querySelector("[aria-label='Zoom in']").click()`);
     await waitFor(`${dock}.querySelector("[data-slot=artifact-zoom]").textContent !== ${JSON.stringify(zoom)}`);
     await evaluate(`${dock}.querySelector("[aria-label='Fit every design']").click()`);
     await screenshot("canvas");
+
+    // Wheel over a design pans the canvas until the design is clicked; then the design takes the mouse, and Escape hands
+    // it back without closing the canvas.
+    const board = `${dock}.querySelector("[data-slot=artifact-canvas] > div").style.transform`;
+    const over = await evaluate(
+      `(() => { const r = ${frame("login")}.querySelector("[data-design-body]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`,
+    );
+    const before = await evaluate(board);
+    window.webContents.sendInputEvent({ type: "mouseWheel", x: over.x, y: over.y, deltaX: 0, deltaY: -120 });
+    await waitFor(`${board} !== ${JSON.stringify(before)}`);
+    const moved = await evaluate(
+      `(() => { const r = ${frame("login")}.querySelector("[data-design-body]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`,
+    );
+    window.webContents.sendInputEvent({ type: "mouseDown", x: moved.x, y: moved.y, button: "left", clickCount: 1 });
+    window.webContents.sendInputEvent({ type: "mouseUp", x: moved.x, y: moved.y, button: "left", clickCount: 1 });
+    await waitFor(`${frame("login")}.querySelector("[data-design-body]").dataset.active === "true"`);
+    assert.equal(await evaluate(`!!${frame("login")}.querySelector("[data-slot=artifact-shield]")`), false, "the design has the mouse");
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    await waitFor(`!${frame("login")}.querySelector("[data-design-body]").dataset.active && !!${dock}`);
+    await evaluate(`${dock}.querySelector("[aria-label='Fit every design']").click()`);
 
     // A revision from the agent replaces what its frame shows, since the frame follows the newest.
     await evaluate("window.revise()");
@@ -169,33 +210,49 @@ async function browserChecks() {
     await waitFor(`/v2 of 3/.test(${frame("login")}.textContent)`);
     await screenshot("earlier-version");
 
-    // Choosing a design tells the agent, and the frame shows it as chosen.
+    // Choosing marks the design but sends nothing until Send.
     await evaluate(`${frame("home")}.querySelector("[aria-label='Choose Home, version 1']").click()`);
-    await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]")`);
-    assert.deepEqual(await evaluate("window.sent"), ['I chose the design "Home" (home, version 1). Continue from this one.']);
+    await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-choice-pending]")`);
+    assert.deepEqual(await evaluate("window.sent"), [], "choosing alone sends nothing");
+    assert.match(await evaluate(`${dock}.querySelector("[data-slot=artifact-send]").textContent`), /Send\s*1/);
 
-    // In comment mode a click on a design pins a numbered comment; the comments go to the agent together.
+    // In comment mode a click on a design drops a numbered pin with its bubble open, Figma-like; the comment is written
+    // there, and Enter keeps it for Send.
     await evaluate(`${dock}.querySelector("[aria-label='Comment on a design']").click()`);
     await waitFor(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-layer]")`);
+    assert.equal(await evaluate(`/pin a comment/i.test(${dock}.textContent)`), false, "no instruction banner");
     const point = await evaluate(
       `(() => { const r = ${frame("login")}.querySelector("[data-slot=artifact-comment-layer]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 4) }; })()`,
     );
     window.webContents.sendInputEvent({ type: "mouseDown", x: point.x, y: point.y, button: "left", clickCount: 1 });
     window.webContents.sendInputEvent({ type: "mouseUp", x: point.x, y: point.y, button: "left", clickCount: 1 });
-    await waitFor(`${frame("login")}.querySelectorAll("[data-slot=artifact-pin]").length === 1 && document.activeElement?.tagName === "TEXTAREA"`);
+    await waitFor(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble] textarea") && document.activeElement?.tagName === "TEXTAREA"`);
+    const bubble = await evaluate(
+      `(() => { const p = ${frame("login")}.querySelector("[data-slot=artifact-pin]").getBoundingClientRect(); const b = ${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]").getBoundingClientRect(); return { gap: b.left - p.right, top: Math.abs(b.top - p.top), width: Math.round(b.width) }; })()`,
+    );
+    assert.ok(bubble.gap >= 0 && bubble.gap < 16 && bubble.top < 2 && bubble.width === 256, "the bubble opens beside its pin, at screen size");
+    assert.equal(await evaluate(`!!${dock}.querySelector("footer")`), false, "comments are written on the canvas, not in a list below it");
     await evaluate(`(() => {
       const box = document.activeElement;
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(box, "Make the button bigger");
       box.dispatchEvent(new Event("input", { bubbles: true }));
     })()`);
     await screenshot("comment");
-    await evaluate(`${dock}.querySelector("[data-slot=artifact-comments] > button").click()`);
-    await waitFor("window.sent.length === 2");
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+    await waitFor(`!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]") && !!${dock}`);
+    assert.match(await evaluate(`${frame("login")}.querySelector("[data-slot=artifact-pin]").getAttribute("aria-label")`), /Comment 1: Make the button bigger/);
+    assert.match(await evaluate(`${dock}.querySelector("[data-slot=artifact-send]").textContent`), /Send\s*2/);
+    await screenshot("pending-feedback");
+
+    // Send carries the choice and the comments in one message.
+    await evaluate(`${dock}.querySelector("[data-slot=artifact-send]").click()`);
+    await waitFor("window.sent.length === 1");
     assert.match(
-      await evaluate("window.sent[1]"),
-      /^A comment on the designs:\n\n1\. On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger/,
+      await evaluate("window.sent[0]"),
+      /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger/,
     );
-    await waitFor(`!${dock}.querySelector("[data-slot=artifact-comments]") && !${dock}.querySelector("[data-slot=artifact-comment-layer]")`);
+    await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]") && !${dock}.querySelector("[data-slot=artifact-send]")`);
+    assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "sent comments leave the canvas");
 
     // The git changes panel opens at the window's right edge: the design docks beside it instead of covering it.
     await evaluate("window.setChanges(true)");
@@ -227,7 +284,7 @@ async function browserChecks() {
     await waitFor(`!${dock}`);
     assert.equal(await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'), "", "closing gives the chat its width back");
     console.log(
-      "PASS: a shown design is a card outside the activity with a sandboxed preview at its own screen size that can't make requests; Open docks a canvas of every design at the top right beside the chat (beside the git changes panel, away while the diff replaces the chat, filling the workspace when expanded or narrow), where frames follow revisions and step back through versions, zoom and fit work, choosing and pinned comments reach the agent, and Escape closes it",
+      "PASS: a shown design is a card outside the activity with a sandboxed preview at its own screen size that can't make requests; Open docks a canvas of every design at the top right beside the chat (beside the git changes panel, away while the diff replaces the chat, filling the workspace when expanded or narrow), where frames follow revisions and step back through versions, zoom and fit work, wheel over a design pans until the design is clicked, choosing and Figma-like pinned comments wait for Send and reach the agent in one message, and Escape closes it",
     );
     app.exit(0);
   } catch (error) {

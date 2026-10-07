@@ -1,7 +1,7 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
-import { ArtifactCard, ArtifactsProvider } from "./agents/ArtifactCard";
+import { ArtifactCards, ArtifactsProvider } from "./agents/ArtifactCard";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import type { AgentPort, AgentTask, ContextUsage, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
@@ -97,9 +97,7 @@ function ReplyContent({
       {images.map((step) => (
         <GeneratedImage key={step.id} step={step} />
       ))}
-      {artifacts.map((step) => (
-        <ArtifactCard key={step.id} step={step} />
-      ))}
+      <ArtifactCards steps={artifacts} />
       {answer.trim() && <div data-slot="message-content">{streaming ? <StreamingMarkdown text={answer} /> : <Markdown text={answer} />}</div>}
       {thought && (
         <div data-slot="message-thought" className="text-ink-2">

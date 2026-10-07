@@ -517,3 +517,37 @@ test("onLost is not called for a failed handshake", async () => {
   assert.equal(lost, 0);
   transport.close();
 });
+
+test("a throwing consumer during close() does not leave the transport unable to report a later loss", async () => {
+  const fake = relay();
+  let lost = 0;
+  const { transport } = transportFor(fake, { onLost: () => lost++ });
+  transport.live(
+    "/live",
+    () => {},
+    (up) => {
+      if (!up) throw new Error("consumer bug");
+    },
+  );
+  await settle();
+  assert.throws(() => transport.close(), /consumer bug/);
+  await transport.ready();
+  fake.sockets.at(-1)!.drop(1006);
+  await settle();
+  assert.equal(lost, 1, "the closing flag must not stay set after a throwing close()");
+  transport.close();
+});
+
+test("an onLost that throws cannot skip the teardown: what was pending still fails", async () => {
+  const fake = relay(() => "never");
+  const { transport } = transportFor(fake, {
+    onLost: () => {
+      throw new Error("supervisor bug");
+    },
+  });
+  const pending = GET(transport);
+  await settle();
+  fake.sockets[0].drop(1006);
+  await assert.rejects(pending, { message: LOST });
+  transport.close();
+});

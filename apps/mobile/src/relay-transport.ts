@@ -212,7 +212,13 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
         if (refusal) refused = error;
         if (c) {
           c.over = true;
-          if (!closing) options.onLost?.();
+          if (!closing) {
+            try {
+              options.onLost?.();
+            } catch {
+              /* the owner's bug must not leave the pending requests hanging */
+            }
+          }
           teardown(c, error);
         } else reject(error);
       };
@@ -384,18 +390,22 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
     },
     close() {
       closing = true;
-      for (const live of lives) {
-        live.closed = true;
-        timers.clearTimeout(live.retry);
+      try {
+        for (const live of lives) {
+          live.closed = true;
+          timers.clearTimeout(live.retry);
+        }
+        lives.clear();
+        refused = null;
+        const current = conn;
+        conn = null;
+        connecting = null;
+        abortConnect?.(fail("lost"));
+        current?.end(fail("lost"));
+      } finally {
+        // A consumer callback that throws during teardown must not leave later losses unreported.
+        closing = false;
       }
-      lives.clear();
-      refused = null;
-      const current = conn;
-      conn = null;
-      connecting = null;
-      abortConnect?.(fail("lost"));
-      current?.end(fail("lost"));
-      closing = false;
     },
   };
 }

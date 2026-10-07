@@ -35,6 +35,8 @@ import { ProjectSearch } from "./project-search";
 import { chatMenu, runChatAction } from "./chat-actions";
 import { confirm } from "./confirm-store";
 import { ArchiveProgress } from "./archive-progress";
+import { AttentionDot, useAttention } from "./attention";
+import { projectOfKey } from "@milagre/shared/agent-runs";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -73,6 +75,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
+  const attention = useAttention();
   const { reloadProjects, previewProject, cachedProject } = session;
   const currentPath = session.snapshot?.project.path;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([currentPath || session.recent[0]?.path].filter(Boolean) as string[]));
@@ -503,6 +506,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                     <Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: "500", color: colors.ink }]}>
                       {item.name}
                     </Text>
+                    {attention.some((key) => projectOfKey(key) === item.path) && <AttentionDot />}
                     <Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} />
                   </View>
                 </PullDown>

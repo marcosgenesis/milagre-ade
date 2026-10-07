@@ -6,7 +6,8 @@ import { useAppUpdates } from "../update-sheet";
 import { Icon } from "../icons";
 import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
-import { ListRow, PageScroll, styles } from "../ui";
+import { ListRow, PageScroll, Toggle, styles } from "../ui";
+import { useAttentionButton } from "../attention";
 
 type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills";
 
@@ -24,6 +25,7 @@ export default function SettingsScreen() {
 /** Settings pages stay on the native stack for the header and interactive back gesture. */
 export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void }) {
   const push = usePush();
+  const [attentionButton, setAttentionButton] = useAttentionButton();
   const updates = useAppUpdates();
   const session = useSession();
   const projects = session.recent.filter((project) => !project.link);
@@ -58,6 +60,10 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
           leading={<Icon icon={Notification01Icon} tone="ink" size={20} />}
           onPress={() => onOpen("notifications")}
         />
+        <View style={styles.separator} />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Toggle title="Attention button" selected={attentionButton} onPress={() => setAttentionButton(!attentionButton)} />
+        </View>
         <View style={styles.separator} />
         <ListRow compact title="Plan usage" leading={<Icon icon={ChartBarLineIcon} tone="ink" size={20} />} onPress={() => onOpen("usage")} />
         <View style={styles.separator} />

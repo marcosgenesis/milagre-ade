@@ -680,6 +680,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
   const { default: ChatScreen } = load("app/chat.tsx", {
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
+    "../attention": { AttentionPill: () => null },
     "../chat-actions": load("chat-actions.ts", {
       "react-native": { Alert: { alert } },
       "expo-clipboard": { setStringAsync: async () => {} },
@@ -1090,6 +1091,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
     "./ui": { ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])), colors: {}, styles: {} },
     "./archive-progress": archiveProgress,
+    "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
+    "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
     "./chat-actions": load("chat-actions.ts", {
       "react-native": native,
       "expo-clipboard": { setStringAsync: async () => {} },
@@ -3565,7 +3568,8 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
-    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", styles: {} },
+    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
   assert.deepEqual(opened, ["project-accounts"]);

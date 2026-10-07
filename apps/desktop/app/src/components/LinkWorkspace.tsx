@@ -4,7 +4,7 @@ import { LinkChangesPanel } from "./changes/LinkChangesPanel";
 import { useLinkDiffLists } from "./changes/useLinkDiffLists";
 import { ChangesPanelSlot } from "./changes/ChangesPanelSlot";
 import { DiffView } from "./changes/DiffView";
-import { ChangesToggle, DiffBar } from "./changes/ChangesChrome";
+import { AttentionButton, ChangesToggle, DiffBar } from "./changes/ChangesChrome";
 import { DiffToolbar, useDiffPreferences } from "./changes/DiffPrefs";
 import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
@@ -12,6 +12,9 @@ import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNo
 import type { AgentPorts, LinkState, ModelProvider, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
 import { chatTitle } from "@milagre/shared/chats";
+import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
+import { useSettings } from "../lib/settings";
+import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { DotBackground } from "./DotBackground";
 import SidebarNav from "./SidebarNav";
@@ -107,6 +110,11 @@ export function LinkWorkspace({
   const session = sessionId == null ? undefined : state.sessions[sessionId];
   const chatId = session ? chatKeyForScope(scope, session.id) : null;
   const run = chatId ? agents.runs[chatId] : undefined;
+  // Every project's chats that wait on the user; the Link's own are marked in its sidebar.
+  const attentionKey = chatsNeedingAttention(agents.runs).join("\n");
+  const attentionChats = useMemo(() => (attentionKey ? attentionKey.split("\n") : []), [attentionKey]);
+  const { showAttentionButton } = useSettings();
+  const attentionPaths = useMemo(() => [...new Set(attentionChats.map(projectOfKey))], [attentionChats]);
   const messages = state.messages.filter((message) => message.session_id === sessionId);
   const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
   const [preparing, setPreparing] = useState(false);
@@ -358,6 +366,7 @@ export function LinkWorkspace({
         <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
           <SidebarNav
             fill
+            attentionPaths={attentionPaths}
             workspaceName={opened.link.name}
             selectedLink={{ id: opened.link.id, projects: opened.projects }}
             onSwitchLink={onSwitchLink}
@@ -544,6 +553,19 @@ export function LinkWorkspace({
         </ChangesPanelSlot>
       </div>
       {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+      {showAttentionButton && attentionChats[0] && (
+        <AttentionButton
+          label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}
+          items={attentionChats.map((key) => ({
+            key,
+            project: projectOfKey(key).split("/").pop() ?? key,
+            asking: !agents.runs[key]?.approvals.length,
+            waitingFor: waitingFor(agents.runs[key]),
+          }))}
+          offset={!canvasOpen && !!session}
+          onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
+        />
+      )}
       {gitChoice !== null && (
         <dialog
           ref={memberDialog}

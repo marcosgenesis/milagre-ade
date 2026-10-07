@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, CoordinatorState } from "./model.ts";
-import { attentionContext, attentionNotice } from "./attention.mjs";
+import { attentionContext, attentionLabel, attentionNotice, chatsNeedingAttention, waitingFor } from "./attention.mjs";
 
 const context = { projectName: "rd-events", worktreeName: "new-events-structure", chatTitle: "Split the events table", provider: "claude" as const };
 const question = (text: string) => ({ id: text, header: "", question: text, options: [], multiSelect: false, allowOther: true, secret: false });
@@ -56,4 +56,32 @@ test("the context names a chat's worktree, title and agent, or only its project 
     provider: "codex",
   });
   assert.deepEqual(attentionContext(state, "shop", 9), { projectName: "shop" });
+});
+
+test("other Projects' chats that wait on the user need attention; the open Project and Links don't", () => {
+  const run = (approvals: number, questions: number) => ({
+    approvals: Array.from({ length: approvals }, () => ({})),
+    questions: Array.from({ length: questions }, () => ({})),
+  });
+  const runs = {
+    "/a#1": run(1, 0),
+    "/ab#2": run(0, 1),
+    "/b#3": run(0, 0),
+    "/c#4": run(1, 0),
+    "milagre-link:12345678-1234-1234-1234-123456789abc#5": run(1, 0),
+  } as never;
+  assert.deepEqual(chatsNeedingAttention(runs, "/a"), ["/ab#2", "/c#4"]);
+  assert.deepEqual(chatsNeedingAttention(undefined), []);
+});
+
+test("the attention button names one or two projects and counts the rest", () => {
+  assert.equal(attentionLabel(["shop"]), "shop needs attention");
+  assert.equal(attentionLabel(["shop", "api"]), "shop and api need attention");
+  assert.equal(attentionLabel(["shop", "api", "web", "docs"]), "shop and 3 more need attention");
+});
+
+test("a waiting run reads as its command, its approval title, or its first question", () => {
+  assert.equal(waitingFor({ approvals: [{ title: "Run?", command: "git log --oneline\ngit status" }], questions: [] } as never), "git log --oneline");
+  assert.equal(waitingFor({ approvals: [{ title: "Edit README.md" }], questions: [] } as never), "Edit README.md");
+  assert.equal(waitingFor({ approvals: [], questions: [{ questions: [{ question: "Which branch?" }] }] } as never), "Which branch?");
 });

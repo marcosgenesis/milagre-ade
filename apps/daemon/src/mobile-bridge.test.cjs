@@ -864,6 +864,13 @@ test("a live socket signals runs and state changes of its Project only, and /run
   );
   assert.equal((await request("/runs?projectPath=relative")).status, 400);
   assert.equal((await fetch(bridge.url + "/runs?projectPath=" + encodeURIComponent(project))).status, 401);
+  // A question puts the chat on the attention list every Project's phone view polls.
+  assert.deepEqual((await (await request("/attention")).json()).result, []);
+  session.emit({ type: "question-request", requestId: "question-1", questions: [{ question: "Which branch?" }] });
+  let attention = [];
+  for (const start = Date.now(); !attention.length && Date.now() - start < 3000; await delay(10))
+    attention = (await (await request("/attention")).json()).result;
+  assert.deepEqual(attention, [`${project}#${chat}`]);
 
   // The turn's end saves its reply: one prompt "project" signal, so the reply never disappears between fetches.
   const started = Date.now();

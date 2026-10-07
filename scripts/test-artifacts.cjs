@@ -157,6 +157,10 @@ async function browserChecks() {
     const inView = (id) =>
       `(() => { const c = ${dock}.querySelector("[data-slot=artifact-canvas]").getBoundingClientRect(); const f = ${frame(id)}.getBoundingClientRect(); return f.left >= c.left - 1 && f.right <= c.right + 1 && f.top >= c.top - 1 && f.bottom <= c.bottom + 1; })()`;
     await waitFor(inView("login"));
+    // Once the canvas has slid in and the chat has made room for it.
+    await waitFor(
+      `(() => { const d = ${dock}.getBoundingClientRect(); const p = document.querySelector("[data-chat-pane]").getBoundingClientRect(); return p.right <= d.left && Math.round(d.top) === 56; })()`,
+    );
     const layout = await evaluate(
       `(() => { const d = ${dock}.getBoundingClientRect(); const p = document.querySelector("[data-chat-pane]").getBoundingClientRect(); return { dock: d.left, pane: p.right, top: d.top }; })()`,
     );

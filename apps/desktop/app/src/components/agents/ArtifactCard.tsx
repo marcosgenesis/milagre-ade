@@ -1,5 +1,7 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { EASE_OUT } from "../../lib/ease";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowExpand01Icon,
@@ -232,18 +234,21 @@ export function ArtifactsProvider({
     <Artifacts.Provider value={value}>
       <span ref={anchor} aria-hidden className="pointer-events-none absolute top-0 left-0 h-px w-px" />
       {children}
-      {opened && chatId && chatShown && (
-        <ArtifactDock
-          chatId={chatId}
-          designs={[...latest.values()]}
-          focus={opened.focus}
-          versions={opened.versions}
-          onVersion={(id, version) => setOpenedIn({ ...opened, versions: { ...opened.versions, [id]: version } })}
-          chosen={chosen}
-          onSend={onSend}
-          onClose={() => setOpenedIn(null)}
-        />
-      )}
+      <AnimatePresence>
+        {opened && chatId && chatShown && (
+          <ArtifactDock
+            key="designs"
+            chatId={chatId}
+            designs={[...latest.values()]}
+            focus={opened.focus}
+            versions={opened.versions}
+            onVersion={(id, version) => setOpenedIn({ ...opened, versions: { ...opened.versions, [id]: version } })}
+            chosen={chosen}
+            onSend={onSend}
+            onClose={() => setOpenedIn(null)}
+          />
+        )}
+      </AnimatePresence>
     </Artifacts.Provider>
   );
 }
@@ -269,6 +274,7 @@ function ArtifactDock({
 }) {
   const [expanded, setExpanded] = useState(false);
   const area = useDockArea();
+  const reduced = useReducedMotion();
   const cramped = !!area && area.width - DOCK_WIDTH - 12 < MIN_CHAT_WIDTH;
   const full = expanded || cramped;
   const canvas = useRef<CanvasHandle>(null);
@@ -334,7 +340,12 @@ function ArtifactDock({
   };
   const icon = "rounded p-1 text-ink-2 hover:bg-hover disabled:opacity-40";
   return createPortal(
-    <div
+    <motion.div
+      // Slides in from the right like the git changes panel, and back out when closed.
+      initial={reduced ? false : { opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, x: 24 }}
+      transition={{ duration: 0.24, ease: EASE_OUT }}
       role="dialog"
       aria-label="Designs"
       aria-modal="false"
@@ -441,7 +452,7 @@ function ArtifactDock({
         }}
         onView={setView}
       />
-    </div>,
+    </motion.div>,
     document.body,
   );
 }

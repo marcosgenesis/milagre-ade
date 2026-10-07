@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { EASE_OUT } from "../../lib/ease";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
@@ -34,6 +36,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   }, []);
   // Docked, the viewer is a side panel: pressing the chat or focusing the iframe must not dismiss it.
   const dock = useDockArea();
+  const reduced = useReducedMotion();
   useCloseWhenDesignsExpand(close);
   const bounds = useAnchoredPopover({
     opened: opened && !docked,
@@ -134,10 +137,16 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
           Simulators <span className="tabular-nums">{attachedCount}</span>
         </button>
       </Tooltip>
-      {opened &&
-        createPortal(
-          <>
-            <div
+      {createPortal(
+        <AnimatePresence>
+          {opened && (
+            <motion.div
+              key="simulator"
+              // Docked, it slides in from the right like the git changes panel; anchored, it rises from its pill.
+              initial={reduced ? false : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
+              animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+              exit={reduced ? { opacity: 0, transition: { duration: 0 } } : docked ? { opacity: 0, x: 24 } : { opacity: 0, y: 6, scale: 0.98 }}
+              transition={{ duration: 0.24, ease: EASE_OUT }}
               ref={panel}
               id={panelId}
               role="dialog"
@@ -257,10 +266,11 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                   )}
                 </ScrollArea>
               )}
-            </div>
-          </>,
-          document.body,
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }

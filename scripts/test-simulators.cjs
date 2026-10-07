@@ -144,11 +144,9 @@ async function browserChecks() {
       false,
       "no dock toggle",
     );
-    assert.ok(
-      await evaluate(
-        '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
-      ),
-      "docked viewer sits beside the chat pane",
+    // Once the viewer has slid in and the chat has made room for it.
+    await waitFor(
+      '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
     );
     await click("textarea");
     await delay(100);

@@ -1,11 +1,7 @@
-const { createGit } = require("./git/client.cjs");
+const { createGit, GitError } = require("./git/client.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const client = createGit().read;
-
-async function git(cwd, ...args) {
-  return (await client.text(cwd, args)).trim();
-}
 
 const listedWorktrees = (cwd) => client.worktreeList(cwd);
 
@@ -28,7 +24,13 @@ async function activeWorktrees(projectPath) {
 async function resolveProject(openedPath) {
   if (typeof openedPath !== "string" || !path.isAbsolute(openedPath)) throw new Error("Choose a Git worktree.");
   const opened = await fs.realpath(openedPath);
-  const top = await fs.realpath(await git(opened, "rev-parse", "--show-toplevel"));
+  const toplevel = await client.run(opened, ["rev-parse", "--show-toplevel"]);
+  if (!toplevel.ok) {
+    if (toplevel.code === 128 && /not a git repository/i.test(toplevel.stderr))
+      throw new Error(`${path.basename(opened)} isn't a Git repository. Choose a folder that contains a Git project, or run git init there first.`);
+    throw new GitError(toplevel);
+  }
+  const top = await fs.realpath(toplevel.stdout.trim());
   const commonDir = await client.commonDir(top);
   const main = (await listedWorktrees(top))[0]?.path;
   if (!main || !(await isDirectory(main))) throw new Error("The Project's main checkout is missing.");

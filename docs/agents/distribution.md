@@ -48,6 +48,8 @@ The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook
 
 **Build package candidates** runs on every push to `main`, on dispatch, and on a PR once it carries the `preview:installers` label. Windows pipe, ACL and process tests and Linux repository signing run on every PR in CI's `native-tests` job without an installer. It builds on native macOS, Windows and Ubuntu runners. It installs the NSIS/DEB packages and runs the real desktop against temporary profiles, including saved Chats, shared-host updates, crash recovery, and ownership errors. Windows also runs real named-pipe, NTFS ACL and process tests. Candidate installers are unsigned/ad-hoc Actions artifacts, kept for 14 days.
 
+The `release` job of CI cuts a candidate (a tag and a draft release) for every push to `main` once `javascript` and `native-tests` pass. The non-required `desktop-checks` job does not gate it. Drafts are invisible to installed apps.
+
 **Publish installers** defaults to `platforms=macos`. Selecting `all` adds Windows and Linux builds. Windows requires Authenticode signing; Linux signs the RPM and APT/RPM indexes. All selected platforms must pass before the draft becomes public. The final stage verifies complete updater feeds and regenerates combined checksums/manifests from the signed assets. DMG notarization and RPM signing are followed by feed hash refreshes.
 
 ## Beta channel

@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process')
 const { test } = require('node:test')
 const YAML = require('yaml')
 
-const releaseWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf8'))
+const ciWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/ci.yml'), 'utf8'))
 const publishWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-installers.yml'), 'utf8'))
 const buildWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/build-macos.yml'), 'utf8'))
 const candidateWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/package-candidates.yml'), 'utf8'))
@@ -130,20 +130,18 @@ test('an accepted disk image is stapled', t => {
   assert.match(f.calls(), /xcrun stapler staple/)
 })
 
-test('a candidate is created only after CI succeeded on that main commit, and from that commit', () => {
-  assert.deepEqual(releaseWorkflow.on, { workflow_run: { workflows: ['CI'], types: ['completed'], branches: ['main'] } })
-  const job = releaseWorkflow.jobs.release
-  assert.equal(
-    job.if,
-    "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}",
-  )
+test('a candidate is cut by the release job of CI after the required checks pass on main', () => {
+  const job = ciWorkflow.jobs.release
+  assert.equal(job.if, "github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'the-ptf/milagre-ade'")
+  assert.deepEqual(job.needs, ['javascript', 'native-tests'])
+  assert.equal(job.permissions.contents, 'write')
   const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout'))
-  assert.equal(checkout.with.ref, '${{ github.event.workflow_run.head_sha }}')
   assert.equal(checkout.with['fetch-depth'], 0)
   assert.equal(checkout.with['persist-credentials'], false)
   const runs = job.steps.map(step => step.run).filter(Boolean)
   assert.deepEqual(runs, ['npm ci', 'npm run release'])
-  assert.ok(!JSON.stringify(releaseWorkflow).includes('package:mac'))
+  assert.ok(!JSON.stringify(ciWorkflow.jobs.release).includes('package:mac'))
+  assert.ok(!fs.existsSync(path.join(__dirname, '../.github/workflows/release.yml')), 'no separate workflow_run release workflow')
 })
 
 test('release candidates are created as drafts', () => {

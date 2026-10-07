@@ -44,7 +44,9 @@ export function createRouteSupervisor({ lan, probe, openLan, now = Date.now }: R
     const previous = active;
     if (previous === next) return;
     active = next;
-    for (const listener of listeners) {
+    // The copy is deliberate: a listener may (un)subscribe during notification, and a live Set would revisit it.
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const listener of [...listeners]) {
       try {
         listener(next);
       } catch {

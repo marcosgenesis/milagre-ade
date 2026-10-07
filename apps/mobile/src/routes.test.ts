@@ -162,3 +162,18 @@ test("a transport whose close() throws cannot stick the supervisor on LAN", asyn
   assert.doesNotThrow(() => suspended.supervisor.close());
   assert.equal(suspended.supervisor.current().kind, "primary");
 });
+
+test("a listener that re-subscribes itself during notification is called once per switch", async () => {
+  const { supervisor, state } = harness({ lan: route([A]) });
+  let calls = 0;
+  const listener = () => {
+    calls += 1;
+    unsubscribe();
+    unsubscribe = supervisor.subscribe(listener);
+  };
+  let unsubscribe = supervisor.subscribe(listener);
+  assert.equal((await supervisor.check()).kind, "lan");
+  assert.equal(calls, 1);
+  state.lost.get(A)!();
+  assert.equal(calls, 2);
+});

@@ -29,6 +29,47 @@ async function compatibleClient(dataDir, timeoutMs = 30000) {
   }
 }
 
+function numbers(version) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ""));
+  return match ? match.slice(1).map(Number) : null;
+}
+
+// A host from another app version is replaced, unless it is certainly newer: an older desktop reusing a newer host keeps
+// working while its capabilities allow. A host with no version predates this check.
+function hostIsStale(hostVersion, appVersion) {
+  if (!hostVersion) return true;
+  if (hostVersion === appVersion) return false;
+  const host = numbers(hostVersion);
+  const app = numbers(appVersion);
+  if (!host || !app) return true;
+  for (let index = 0; index < 3; index++) if (host[index] !== app[index]) return host[index] < app[index];
+  return true;
+}
+
+const failure = () =>
+  Object.assign(new Error("An older Milagre host is still running and did not stop. Quit Milagre, then run: pkill -f 'milagre.* serve'"), {
+    code: "STALE_DAEMON",
+  });
+
+// Stops the host the way an update does (it saves running chats, which the next host resumes), then waits for it to go.
+async function stopStaleHost(client, timeoutMs) {
+  let timer;
+  let onClose;
+  const closed = new Promise((resolve, reject) => {
+    onClose = resolve;
+    client.once("close", onClose);
+    timer = setTimeout(() => reject(failure()), timeoutMs);
+  });
+  try {
+    // A failed call is not fatal by itself: another desktop may have stopped the host first. Only the close counts.
+    await Promise.all([client.call("daemon:stop").catch(() => {}), closed]);
+  } finally {
+    clearTimeout(timer);
+    client.off("close", onClose);
+    client.close();
+  }
+}
+
 // Only connection establishment is retried. A caller must never replay a command
 // that may already have reached the runtime.
 async function ensureDaemon({
@@ -45,7 +86,9 @@ async function ensureDaemon({
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   if (process.platform === "win32") preparePrivateDirectory(dataDir);
   try {
-    return await compatibleClient(dataDir);
+    const existing = await compatibleClient(dataDir);
+    if (!hostIsStale(existing.status.version, version)) return existing;
+    await stopStaleHost(existing, startupTimeoutMs);
   } catch (error) {
     if (!HOST_GONE.includes(error.code)) throw error;
   }

@@ -13,7 +13,7 @@ async function waitFor(check) {
   }
 }
 
-async function fixture(t, mode = "normal") {
+async function fixture(t, mode = "normal", execFile = async () => ({ stdout: "" })) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "milagre-simulator-test-"));
   const log = path.join(dir, "log.jsonl"),
     address = path.join(dir, "address.json");
@@ -60,7 +60,13 @@ server.listen(0, '127.0.0.1', () => {
 });
 `,
   );
-  const helper = createSimulatorHelper({ platform: mode === "android" ? "android" : "ios", helperPath, admissionTimeoutMs: 1000, startupTimeoutMs: 10000 });
+  const helper = createSimulatorHelper({
+    platform: mode === "android" ? "android" : "ios",
+    helperPath,
+    execFile,
+    admissionTimeoutMs: 1000,
+    startupTimeoutMs: 10000,
+  });
   t.after(async () => {
     await helper.stop();
     await rm(dir, { recursive: true, force: true });
@@ -171,6 +177,22 @@ test("discovery filters running iOS devices and never spawns the helper", async 
   assert.deepEqual(await helper.list(), [{ id: DEVICE, name: "iPhone", platform: "ios", version: "27.0" }]);
   await helper.list();
   assert.equal(calls, 1);
+});
+
+test("Device Hub's input flag is cleared and backboardd restarted before connecting, only while set", async (t) => {
+  for (const shadowed of [true, false]) {
+    const calls = [];
+    const f = await fixture(t, "normal", async (file, args) => {
+      calls.push([file, ...args].join(" "));
+      return { stdout: args.includes("-g") ? `com.apple.coredevice.dtuhidd.active ${shadowed ? 1 : 0}\n` : "" };
+    });
+    await (await f.helper.connect(DEVICE)).close();
+    const spawn = `/usr/bin/xcrun simctl spawn ${DEVICE}`;
+    assert.deepEqual(calls, [
+      `${spawn} notifyutil -g com.apple.coredevice.dtuhidd.active`,
+      ...(shadowed ? [`${spawn} notifyutil -s com.apple.coredevice.dtuhidd.active 0`, `${spawn} launchctl kickstart -k system/com.apple.backboardd`] : []),
+    ]);
+  }
 });
 
 test("admission alone allows open so offer can start capture, but input waits for config", async (t) => {

@@ -867,17 +867,19 @@ test("a computer's first pairing is announced with its kind", async (t) => {
   assert.equal(relays[0].options.phones.kindOf("deskA"), "computer");
 });
 
-test("the relay and LAN hosts get openPeer, and a confined phone never hosts a desktop", async (t) => {
+test("the relay and LAN hosts get openPeer and allowComputer, and a confined phone never hosts a desktop", async (t) => {
   const openPeer = () => ({ receive() {}, invalid() {}, close() {} });
   const open = await fixture(t, { phoneOptions: { openPeer } });
   await open.phone.setEnabled(true);
   await open.phone.settled();
   assert.equal(open.relays[0].options.openPeer, openPeer);
+  assert.equal(typeof open.relays[0].options.allowComputer, "function");
   assert.equal(open.lans[0].options.openPeer, openPeer);
   const confined = await fixture(t, { phoneOptions: { openPeer, allowedRoot: "/tmp/milagre-demo" } });
   await confined.phone.setEnabled(true);
   await confined.phone.settled();
   assert.equal(confined.relays[0].options.openPeer, undefined);
+  assert.equal(confined.relays[0].options.allowComputer, undefined);
   assert.equal(confined.lans.length, 0);
 });
 
@@ -888,4 +890,121 @@ test("peerRoutes names this Mac's relay identity and LAN routes, and refuses whi
   await phone.settled();
   const identity = await readIdentity(dataDir);
   assert.deepEqual(phone.peerRoutes(), { hostId: identity.hostId, key: b64url(identity.box.publicKey), lan: ["ws://192.168.1.20:8798"] });
+});
+
+/** Phone access on, with every pending list it announced, and a way to ask as a computer's hello does. */
+async function asking(t, options = {}) {
+  const announced = [];
+  const fixed = await fixture(t, { ...options, phoneOptions: { openPeer: () => ({}), onPending: (list) => announced.push(list) } });
+  await fixed.phone.setEnabled(true);
+  await fixed.phone.settled();
+  const ask = (key, name = null) => {
+    const abort = new AbortController();
+    const request = { waited: false, abort };
+    request.verdict = fixed.relays[0].options.allowComputer({
+      key,
+      name,
+      signal: abort.signal,
+      waiting: () => {
+        request.waited = true;
+      },
+    });
+    return request;
+  };
+  return { ...fixed, announced, ask };
+}
+
+test("a new computer waits for its owner: listed, then allowed or denied", async (t) => {
+  const { phone, announced, ask } = await asking(t);
+  const studio = ask("deskA", "studio");
+  const nameless = ask("deskB");
+  assert.equal(studio.waited && nameless.waited, true, "both told to wait");
+  assert.deepEqual(phone.pendingDevices(), [
+    { key: "deskA", name: "studio", at: 0 },
+    { key: "deskB", name: null, at: 0 },
+  ]);
+  assert.deepEqual(
+    announced.at(-1).map((request) => request.key),
+    ["deskA", "deskB"],
+  );
+  assert.deepEqual(
+    phone.allowDevice("deskA").map((request) => request.key),
+    ["deskB"],
+  );
+  assert.equal(await studio.verdict, "allowed");
+  assert.deepEqual(phone.denyDevice("deskB"), []);
+  assert.equal(await nameless.verdict, "denied");
+  assert.deepEqual(announced.at(-1), []);
+  assert.throws(() => phone.allowDevice("deskA"), /no longer waiting/);
+  assert.throws(() => phone.denyDevice("nope"), /no longer waiting/);
+});
+
+test("a request expires with the pairing window it arrived in, and one after the window isn't held at all", async (t) => {
+  const { phone, clock, ask } = await asking(t);
+  clock.now = PAIRING_WINDOW_MS - 30;
+  const late = ask("deskA", "studio");
+  assert.equal(late.waited, true);
+  assert.equal(await late.verdict, "expired");
+  assert.deepEqual(phone.pendingDevices(), []);
+  clock.now = PAIRING_WINDOW_MS;
+  const after = ask("deskB", "lab");
+  assert.equal(await after.verdict, "expired");
+  assert.equal(after.waited, false, "never shown");
+});
+
+test("a request whose computer left is dropped, and a late Allow finds nothing", async (t) => {
+  const { phone, announced, ask } = await asking(t);
+  const gone = ask("deskA", "studio");
+  gone.abort.abort();
+  assert.equal(await gone.verdict, "dropped");
+  assert.deepEqual(announced.at(-1), []);
+  assert.throws(() => phone.allowDevice("deskA"), /no longer waiting/);
+});
+
+test("a computer's second hello replaces its first request, and a fifth computer at once is busy", async (t) => {
+  const { phone, ask } = await asking(t);
+  const first = ask("deskA", "studio");
+  const second = ask("deskA", "studio");
+  assert.equal(await first.verdict, "dropped");
+  assert.deepEqual(
+    phone.pendingDevices().map((request) => request.key),
+    ["deskA"],
+  );
+  for (const key of ["deskB", "deskC", "deskD"]) ask(key);
+  const fifth = ask("deskE");
+  assert.equal(await fifth.verdict, "busy");
+  assert.equal(fifth.waited, false);
+  assert.equal(phone.pendingDevices().length, 4);
+  phone.allowDevice("deskA");
+  assert.equal(await second.verdict, "allowed");
+});
+
+test("turning phone access off drops every waiting request", async (t) => {
+  const { phone, ask } = await asking(t);
+  const waiting = ask("deskA", "studio");
+  await phone.setEnabled(false);
+  await phone.settled();
+  assert.equal(await waiting.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+});
+
+test("a reset and a close drop waiting requests, and a replaced request's abort doesn't touch its successor", async (t) => {
+  const { phone, ask } = await asking(t);
+  const first = ask("deskA", "studio");
+  const second = ask("deskA", "studio");
+  assert.equal(await first.verdict, "dropped");
+  first.abort.abort();
+  assert.deepEqual(
+    phone.pendingDevices().map((request) => request.key),
+    ["deskA"],
+    "the superseded channel closing leaves the new request waiting",
+  );
+  await phone.reset();
+  await phone.settled();
+  assert.equal(await second.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+  const third = ask("deskB", "lab");
+  await phone.close();
+  assert.equal(await third.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
 });

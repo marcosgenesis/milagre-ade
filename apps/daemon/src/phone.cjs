@@ -24,6 +24,9 @@ const RETIRED_MS = 14 * 24 * 60 * 60 * 1000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const TOKEN = /^[a-f0-9]{64}$/;
 const PHONE_KEY = /^[A-Za-z0-9_-]{43}$/;
+// Computers waiting for Allow at once; more are turned away ("busy") so a leaked link can't flood the window's prompt.
+const MAX_PENDING_COMPUTERS = 4;
+const NOT_WAITING = "That computer is no longer waiting. Ask it to pair again.";
 const message = (error) => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -44,6 +47,9 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * `openPeer` (server.cjs) opens a paired desktop's daemon connection; the relay and LAN hosts get it unless phone access
  * is confined, since a desktop drives the daemon directly, past the bridge's confinement. `peerRoutes()` tells a paired
  * desktop where to reach this Mac.
+ * A computer's first pairing waits for its owner: `allowComputer` (handed to the relay host with `openPeer`) holds the
+ * request until `allowDevice` or `denyDevice`, the end of the pairing window it arrived in, or its channel closing.
+ * `onPending(requests)` hears the list of waiting `{ key, name, at }` after each change; `pendingDevices()` reads it.
  */
 function createPhone({
   dataDir,
@@ -54,6 +60,7 @@ function createPhone({
   now = Date.now,
   onChange = () => {},
   onPaired = () => {},
+  onPending = () => {},
   localPort = LOCAL_PORT,
   retryDelaysMs = RETRY_DELAYS_MS,
   retiredMs = RETIRED_MS,
@@ -82,7 +89,51 @@ function createPhone({
   // A confined phone (the review demo) never opens a door on the network.
   const lanAllowed = lanPort !== null && allowedRoot === undefined;
   // What the relay and LAN hosts get to serve paired desktops: nothing on a confined phone.
-  const peer = openPeer && allowedRoot === undefined ? { openPeer } : {};
+  const peer = openPeer && allowedRoot === undefined ? { openPeer, allowComputer } : {};
+  /** Computers waiting for Allow, by key, oldest first: { key, name, at, settle(verdict) }. */
+  const pending = new Map();
+  const pendingList = () => [...pending.values()].map(({ key, name, at }) => ({ key, name, at }));
+  function pendingChanged() {
+    try {
+      onPending(pendingList());
+    } catch {
+      /* a listener must not break the setting */
+    }
+  }
+  /**
+   * Holds a computer's first hello (phone-channels.cjs) until its owner answers. It expires when the pairing window
+   * open at its hello closes; its channel closing (`signal`) or a second hello from the same key drops it.
+   */
+  function allowComputer({ key, name = null, signal, waiting }) {
+    return new Promise((resolve) => {
+      if (signal?.aborted) return resolve("dropped");
+      const left = pairingUntil - now();
+      if (left <= 0) return resolve("expired");
+      pending.get(key)?.settle("dropped");
+      if (pending.size >= MAX_PENDING_COMPUTERS) return resolve("busy");
+      const entry = { key, name, at: now(), settle };
+      const timer = setTimeout(() => settle("expired"), left);
+      const onAbort = () => settle("dropped");
+      signal?.addEventListener("abort", onAbort, { once: true });
+      function settle(verdict) {
+        if (pending.get(key) !== entry) return;
+        pending.delete(key);
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        pendingChanged();
+        resolve(verdict);
+      }
+      pending.set(key, entry);
+      waiting?.();
+      pendingChanged();
+    });
+  }
+  function answerPending(key, verdict) {
+    const entry = pending.get(key);
+    if (!entry) throw new Error(NOT_WAITING);
+    entry.settle(verdict);
+    return pendingList();
+  }
   let queue = Promise.resolve();
   let closed = false;
   const enqueue = (work) => {
@@ -203,6 +254,8 @@ function createPhone({
   }
 
   async function teardown() {
+    // Their channels close with the hosts; a request whose channel outlives this run must not be answerable.
+    for (const entry of [...pending.values()]) entry.settle("dropped");
     generation++;
     clearTimeout(retryTimer);
     const old = live;
@@ -377,6 +430,12 @@ function createPhone({
     },
     settled: () => queue,
     devices,
+    /** Computers waiting for Allow, oldest first. */
+    pendingDevices: () => pendingList(),
+    /** Lets a waiting computer pair; returns the ones still waiting. */
+    allowDevice: (key) => answerPending(key, "allowed"),
+    /** Turns a waiting computer away; returns the ones still waiting. */
+    denyDevice: (key) => answerPending(key, "denied"),
     /** Forgets a device and closes its channels on every carrier. It may pair again only in a pairing window opened later. */
     async removeDevice(key) {
       if (typeof key !== "string" || !PHONE_KEY.test(key)) throw new Error("Expected a device key");

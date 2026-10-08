@@ -46,6 +46,10 @@
       "types": "./src/chats.d.mts",
       "default": "./src/chats.mjs"
     },
+    "./handoff": {
+      "types": "./src/handoff.d.mts",
+      "default": "./src/handoff.mjs"
+    },
     "./archive": {
       "types": "./src/archive.d.mts",
       "default": "./src/archive.mjs"

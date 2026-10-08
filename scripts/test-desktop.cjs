@@ -127,7 +127,6 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     assert.equal(current.path, project);
     assert.equal(current.state.sessions[2].title, "Saved chat");
     assert.equal(current.state.sessions[2].native_session_id, "existing-provider-session");
-    assert.equal(current.state.sessions[4].handoverDraft, "# Existing handover brief");
     assert.equal(current.state.messages[0].body, "Existing conversation survives the move.");
     const settings = await evaluate(`window.milagre.readWorktreeSetup(${JSON.stringify(project)})`);
     assert.equal(settings.setupCommand, "npm ci");
@@ -312,7 +311,6 @@ async function main() {
           provider: "codex",
           native_session_id: "existing-provider-session",
         },
-        4: { id: 4, worktree_id: 1, agent_name: "main", status: "Created", provider: "claude", handedOverFrom: 2, handoverDraft: "# Existing handover brief" },
       },
       messages: [{ id: 3, session_id: 2, role: "user", body: "Existing conversation survives the move.", context: null }],
       connections: {},

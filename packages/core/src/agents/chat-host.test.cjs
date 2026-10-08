@@ -624,7 +624,7 @@ test("a divider left preparing by a quit is marked failed on the next open", asy
   await states.update(ALPHA, (state) => ({
     ...state,
     next_id: 9,
-    sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex" } },
+    sessions: { 7: { id: 7, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", native_sessions: { claude: "claude-1" } } },
     messages: [
       {
         id: 8,
@@ -641,6 +641,34 @@ test("a divider left preparing by a quit is marked failed on the next open", asy
   assert.deepEqual(
     dividers(saved.get(ALPHA), 7).map(({ status }) => status),
     ["failed"],
+  );
+  assert.equal(saved.get(ALPHA).sessions[7].provider, "claude");
+  assert.equal(saved.get(ALPHA).sessions[7].native_session_id, "claude-1");
+});
+
+test("an abort that lands while the divider is marked done reverts the handoff and starts no agent", async (t) => {
+  const { host, manager, saved, session, created } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async () => "BRIEF" },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  const update = host.updateDivider.bind(host);
+  // The abort arrives once the divider is done, before the brief is handed on.
+  host.updateDivider = async (...args) => {
+    await update(...args);
+    if (args[2].status === "done") host.preparing.get(`${ALPHA}#${sessionId}`).controller.abort();
+  };
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => saved.get(ALPHA).messages.some((item) => item.context?.status === "failed"));
+  await host.states.flush();
+  assert.equal(saved.get(ALPHA).sessions[sessionId].provider, "claude");
+  assert.deepEqual(
+    dividers(saved.get(ALPHA), sessionId).map(({ status }) => status),
+    ["failed"],
+  );
+  assert.equal(
+    created.some((item) => item.provider === "codex"),
+    false,
   );
 });
 

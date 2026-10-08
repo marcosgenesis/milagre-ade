@@ -63,6 +63,14 @@ test("Node runtime preserves stored Chats and provider IDs across a restart", as
   await assert.rejects(second.invoke("not:a-command"), /Unknown command/);
 });
 
+test("the old handover commands are gone", async (t) => {
+  const { make } = await fixture(t);
+  const runtime = make();
+  assert.equal(runtime.methods.includes("chat:handover"), false);
+  assert.equal(runtime.methods.includes("chat:handover-draft"), false);
+  await assert.rejects(runtime.invoke("chat:handover", [{}]), /Unknown command/);
+});
+
 test("exclusive ownership rejects another profile owner and aliases of an open Project", async (t) => {
   const { project, dataDir, options, make } = await fixture(t);
   const first = make();

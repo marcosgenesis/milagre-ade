@@ -43,6 +43,16 @@ function revertSwitch(session, from, to) {
   return withNativeSessions({ ...session, provider: from }, resumeId, parked);
 }
 
+// A handoff that did not happen: its divider fails and the session goes back to the provider it was on.
+function failHandoff(latest, divider, sessionId, from, to) {
+  const session = latest.sessions[sessionId];
+  return {
+    ...latest,
+    sessions: session && from !== to && session.provider === to ? { ...latest.sessions, [sessionId]: revertSwitch(session, from, to) } : latest.sessions,
+    messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, status: "failed" } } : item)),
+  };
+}
+
 function withNativeSessions(session, current, parked) {
   const { native_session_id: _current, native_sessions: _parked, ...rest } = session;
   return { ...rest, ...(current ? { native_session_id: current } : {}), ...(Object.keys(parked).length ? { native_sessions: parked } : {}) };
@@ -534,7 +544,12 @@ class ChatHost {
       ]);
       if (handoffBrief === null || controller.signal.aborted) return null;
       await this.updateDivider(projectPath, dividerId, { status: "done", brief: handoffBrief, transcriptPath });
-      return controller.signal.aborted ? null : handoffBrief;
+      // An abort that landed while the divider was being marked done still cancels the handoff.
+      if (controller.signal.aborted) {
+        await this.abandonHandoff(projectPath, preparation, { aborted: true }).catch(() => {});
+        return null;
+      }
+      return handoffBrief;
     } catch (error) {
       if (!controller.signal.aborted) await this.abandonHandoff(projectPath, preparation).catch(() => {});
       throw error;
@@ -550,18 +565,14 @@ class ChatHost {
 
   /**
    * A handoff that did not happen (cancelled, failed or cut off by a quit): its divider fails and the chat goes back to
-   * the provider and native sessions it had, so the next send redoes the handoff.
+   * the provider and native sessions it had, so the next send redoes the handoff. `aborted` also accepts a divider
+   * already marked done, for an abort that landed while that update was in flight.
    */
-  async abandonHandoff(projectPath, { dividerId, sessionId, from, to }) {
+  async abandonHandoff(projectPath, { dividerId, sessionId, from, to }, { aborted = false } = {}) {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const divider = latest.messages.find((item) => item.id === dividerId);
-      if (!isHandoff(divider) || divider.context.status !== "preparing") return latest;
-      const session = latest.sessions[sessionId];
-      return {
-        ...latest,
-        sessions: session && from !== to && session.provider === to ? { ...latest.sessions, [sessionId]: revertSwitch(session, from, to) } : latest.sessions,
-        messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, status: "failed" } } : item)),
-      };
+      if (!isHandoff(divider) || !(divider.context.status === "preparing" || (aborted && divider.context.status === "done"))) return latest;
+      return failHandoff(latest, divider, sessionId, from, to);
     });
     if (changed) this.broadcast(projectPath, state);
   }
@@ -669,13 +680,20 @@ class ChatHost {
         const { handoverPending: _pending, ...rest } = session;
         sessions = { ...sessions, [session.id]: rest };
       }
-      const messages = latest.messages.map((item) =>
-        isHandoff(item) && item.context.status === "preparing" && !this.preparing.has(chatKey(projectPath, item.session_id))
-          ? { ...item, context: { ...item.context, status: "failed" } }
-          : item,
-      );
-      const touched = sessions !== latest.sessions || messages.some((item, index) => item !== latest.messages[index]);
-      return touched ? { ...latest, sessions, messages } : latest;
+      let next = { ...latest, sessions };
+      for (const item of latest.messages) {
+        if (isHandoff(item) && item.context.status === "preparing" && !this.preparing.has(chatKey(projectPath, item.session_id))) {
+          next = failHandoff(
+            next,
+            next.messages.find((message) => message.id === item.id),
+            item.session_id,
+            item.context.from.provider,
+            item.context.to.provider,
+          );
+        }
+      }
+      const touched = next.sessions !== latest.sessions || next.messages.some((item, index) => item !== latest.messages[index]);
+      return touched ? next : latest;
     });
     if (changed) this.broadcast(projectPath, state);
   }

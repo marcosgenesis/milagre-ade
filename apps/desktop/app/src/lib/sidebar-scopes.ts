@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import type { CoordinatorState, LinkState } from "@milagre/shared/model";
+import type { CoordinatorState, LinkState, OpenProject } from "@milagre/shared/model";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { isListedChat } from "@milagre/shared/chats";
 import type { SidebarRecent } from "../components/sidebar/ChatRow";
 import { chatMark, chatTitle, orderChats, type ChatOrder } from "./chat-list.ts";
+
+// The last full copy of each Project the sidebar read, so opening one of its chats shows it before the main process answers.
+const projectCopies = new Map<string, OpenProject>();
+export function cachedProjectCopy(path: string): OpenProject | undefined {
+  return projectCopies.get(path);
+}
+/** The open Project's latest copy, so the group it leaves behind on a switch shows its chats without a reload. */
+export function rememberProjectCopy(project: OpenProject) {
+  projectCopies.set(project.path, project);
+}
 
 /**
  * Chat keys (`<scope>#<id>`, Links included) with a turn streaming, waiting on the user, or asking a question next,
@@ -69,7 +79,11 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
       // A state too large to send arrives without its sessions; the last full one stays.
       if (wanted.current.has(key) && state?.sessions) setStates((previous) => ({ ...previous, [key]: state }));
     };
-    const offProject = window.milagre.onProjectState?.(({ path, state }) => keep(path, state));
+    const offProject = window.milagre.onProjectState?.(({ path, state }) => {
+      const copy = projectCopies.get(path);
+      if (copy && state?.sessions) projectCopies.set(path, { ...copy, state: state as CoordinatorState });
+      keep(path, state);
+    });
     const offLink = window.milagre.onLinkState?.(({ linkId, state }) => keep(`milagre-link:${linkId}`, state));
     return () => {
       offProject?.();
@@ -84,6 +98,7 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
       const read = isLinkScopeKey(key) ? window.milagre.readLink(key.slice("milagre-link:".length)) : window.milagre.readProject(key);
       read.then(
         (opened) => {
+          if (!isLinkScopeKey(key) && opened.state?.sessions) projectCopies.set(key, opened as OpenProject);
           if (live && opened.state?.sessions) setStates((previous) => ({ ...previous, [key]: opened.state }));
         },
         () => {},

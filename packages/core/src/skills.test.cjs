@@ -193,6 +193,7 @@ test("bundles tldr with its checklist for machines without installed skills", as
   assert.deepEqual(
     skills.map(({ name, scope, provider }) => ({ name, scope, provider })),
     [
+      { name: "orchestrate", scope: "bundled", provider: "milagre" },
       { name: "simulator", scope: "bundled", provider: "milagre" },
       { name: "tldr", scope: "bundled", provider: "milagre" },
     ],

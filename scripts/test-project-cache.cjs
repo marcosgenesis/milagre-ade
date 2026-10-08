@@ -38,6 +38,7 @@ window.milagre = new Proxy({
   listRecentProjects: async () => ['alpha', 'beta', 'gamma'].map(name => ({ path: '/' + name, name })),
   listNamedLinks: async () => [],
   listProjects: async () => [],
+  readProject: () => new Promise(() => {}),
   listBranches: async () => ['main'],
   listEditors: async () => [],
   getCachedUsage: async () => ({ providers: [] }),
@@ -148,8 +149,7 @@ async function browserChecks() {
   const contains = (text) => `document.body.textContent.includes(${JSON.stringify(text)})`;
   const sidebar = (text) => `document.querySelector('aside')?.textContent.includes(${JSON.stringify(text)})`;
   async function switchTo(current, next) {
-    await click(current);
-    const target = `document.querySelector('[data-project-row="/${next}"]')`;
+    const target = `document.querySelector('[data-sidebar-scope="/${next}"] [data-scope-action]')`;
     await waitFor(`!!${target}`);
     await evaluate(`${target}.click()`);
   }

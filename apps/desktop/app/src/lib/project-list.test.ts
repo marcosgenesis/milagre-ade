@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectRows, type RecentProject } from "./project-list.ts";
+import { projectRows, stableOrder, type RecentProject } from "./project-list.ts";
 
 const recent: RecentProject[] = [
   { path: "/code/milagre-ade", name: "milagre-ade", openedAt: "2026-10-02T10:00:00.000Z" },
@@ -49,4 +49,14 @@ test("a project listed twice shows once, and an empty name falls back to M", () 
     ["/code/milagre-ade", "/code/happiergym", "/code/rd-mobile", "/code/blank"],
   );
   assert.equal(rows[3].initial, "M");
+});
+
+test("the sidebar's order keeps shown keys in place, drops removed ones, and puts new ones on top", () => {
+  assert.deepEqual(stableOrder([], ["a", "b", "c"]), ["a", "b", "c"]);
+  // A known key moving to the front of the recent list keeps its old place.
+  assert.deepEqual(stableOrder(["a", "b", "c"], ["c", "a", "b"]), ["a", "b", "c"]);
+  // A key that left the list drops out.
+  assert.deepEqual(stableOrder(["a", "b", "c"], ["c", "a"]), ["a", "c"]);
+  // A key seen for the first time goes on top.
+  assert.deepEqual(stableOrder(["a", "b"], ["b", "d", "a"]), ["d", "a", "b"]);
 });

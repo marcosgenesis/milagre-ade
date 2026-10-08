@@ -78,6 +78,7 @@ export function LinkWorkspace({
   initialSessionId,
   hostConnection,
   ports,
+  onNewChatInScope,
 }: {
   opened: OpenLink;
   state: LinkState;
@@ -95,6 +96,7 @@ export function LinkWorkspace({
   linkedWork: LinkedWork;
   onCanvasChat: (path: string, id: number) => void;
   usage?: ReactNode;
+  onNewChatInScope?: (scopeKey: string) => void;
 }) {
   const scope = { kind: "link" as const, linkId: opened.link.id },
     owner = scopeKey(scope);
@@ -414,6 +416,7 @@ export function LinkWorkspace({
             waitingKeys={sidebarRunKeys.waiting}
             askingKeys={sidebarRunKeys.asking}
             onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
+            onNewChatInScope={onNewChatInScope}
             chatActions={{
               onRename: (id, title) => void window.milagre.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
               onMarkUnread: (id, unread) => void window.milagre.patchChat(owner, Number(id), { unread }),

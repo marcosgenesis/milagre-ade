@@ -267,9 +267,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
             ]}
           />
         </Row>
-        <Row label="Show every project" description="List each project and Link with its chats. Hide a project in its own settings.">
-          <Switch label="Show every project" checked={settings.sidebarAllProjects} onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })} />
-        </Row>
       </Group>
       <Group title="Editor">
         <Row

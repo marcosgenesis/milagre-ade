@@ -1,4 +1,4 @@
-// Browser check: another project's waiting chat dots the project button and its menu row, and the top-right
+// Browser check: another project's waiting chat dots that project's sidebar header, and the top-right
 // "Project needs attention" button opens it. No agent calls.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -14,6 +14,7 @@ import "/src/styles.css";
 window.milagre = {
   listRecentProjects: async () => [{ path: "/work/arketa", name: "arketa" }, { path: "/work/milagre-ade", name: "milagre-ade" }],
   listProjects: async () => [], listNamedLinks: async () => [], getProjectImage: async () => null,
+  readProject: () => new Promise(() => {}),
 };
 function Fixture() {
   const [waiting, setWaiting] = useState(["/work/milagre-ade", "/work/shop"]);
@@ -61,19 +62,16 @@ async function browserChecks() {
     await delay(200);
   };
   const dots = (scope) => evaluate(`document.querySelectorAll(${JSON.stringify(scope + ' [aria-label="Needs attention"]')}).length`);
+  const milagreHeader = '[data-sidebar-scope="/work/milagre-ade"] [data-scope-toggle]';
+  const arketaHeader = '[data-sidebar-scope="/work/arketa"] [data-scope-toggle]';
   try {
     await window.loadURL(process.argv[2]);
-    await waitFor(`!!document.querySelector("[data-workspace-trigger]")`);
-    assert.equal(await dots("[data-workspace-trigger]"), 1, "The project button shows a dot");
+    await waitFor(`!!document.querySelector("[data-sidebar-scope][data-current]")`);
+    assert.equal(await dots(milagreHeader), 1, "The waiting project's header shows a dot");
+    assert.equal(await dots(arketaHeader), 0, "The open project's header does not");
     assert.equal(await evaluate(`document.querySelector("[data-attention-button]")?.textContent`), "milagre-ade and shop need attention");
     await screenshot("button");
-
-    await click("[data-workspace-trigger]");
-    await waitFor(`!!document.querySelector('[data-project-row="/work/milagre-ade"]')`);
-    assert.equal(await dots('[data-project-row="/work/milagre-ade"]'), 1, "The waiting project's row shows a dot");
-    assert.equal(await dots('[data-project-row="/work/arketa"]'), 0, "The open project's row does not");
-    await screenshot("menu");
-    await click("[data-workspace-trigger]");
+    await screenshot("headers");
 
     // Two waiting: the button opens a menu to pick one.
     await click("[data-attention-button]");
@@ -89,10 +87,10 @@ async function browserChecks() {
     await click("[data-attention-button]");
     await waitFor(`!document.querySelector("[data-attention-button]")`);
     assert.equal(await evaluate("window.opened"), "/work/milagre-ade#4", "The button opens the only waiting chat");
-    assert.equal(await dots("[data-workspace-trigger]"), 0, "The dot goes once nothing waits");
+    assert.equal(await dots(milagreHeader), 0, "The dot goes once nothing waits");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: other projects' waiting chats dot the project button and menu row; the attention button opens one chat, or a menu to pick among several",
+      "PASS: another project's waiting chat dots its sidebar header (not the open project's), clears once nothing waits; the attention button opens one chat, or a menu to pick among several",
     );
     app.exit(0);
   } catch (error) {

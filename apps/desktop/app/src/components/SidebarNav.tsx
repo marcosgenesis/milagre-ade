@@ -3,6 +3,7 @@ import { ProjectAvatarStack } from "./ProjectAvatarStack";
 import { useProjectImages } from "../lib/project-images";
 
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -26,12 +27,11 @@ import {
   FolderOpenIcon,
   GitMergeIcon,
   Link04Icon,
+  MoreVerticalIcon,
   Search01Icon,
   Settings01Icon,
   SidebarLeft01Icon,
   SidebarRight01Icon,
-  SparklesIcon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
@@ -39,7 +39,7 @@ import { WorkspaceIcon } from "./WorkspaceIcon";
 import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
-import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
+import { projectRows, stableOrder, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
@@ -47,7 +47,7 @@ import type { ProjectLink } from "@/electron";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
-import { scopeChats, useScopeStates } from "../lib/sidebar-scopes";
+import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -57,6 +57,7 @@ function HugeIcon({ icon, size = 16, className }: HugeIconProps & { icon: HugeIc
 }
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
 const PROJECT_MENU_ICONS: Record<ProjectMenuKey, HugeIconData> = {
   reveal: FolderOpenIcon,
   "copy-path": Copy01Icon,
@@ -64,20 +65,18 @@ const PROJECT_MENU_ICONS: Record<ProjectMenuKey, HugeIconData> = {
   settings: Settings01Icon,
 };
 
-const IconCheckmark1Small = (props: HugeIconProps) => <HugeIcon icon={Tick02Icon} {...props} />;
 const IconChevronDownSmall = (props: HugeIconProps) => <HugeIcon icon={ArrowDown01Icon} {...props} />;
-const IconCrossSmall = (props: HugeIconProps) => <HugeIcon icon={Cancel01Icon} {...props} />;
 const IconFolderAdd = (props: HugeIconProps) => <HugeIcon icon={FolderAddIcon} {...props} />;
 const IconMagnifyingGlass = (props: HugeIconProps) => <HugeIcon icon={Search01Icon} {...props} />;
 const IconPlusMedium = (props: HugeIconProps) => <HugeIcon icon={Add01Icon} {...props} />;
-const IconPopsicle2 = (props: HugeIconProps) => <HugeIcon icon={SparklesIcon} {...props} />;
 const IconSettingsGear1 = (props: HugeIconProps) => <HugeIcon icon={Settings01Icon} {...props} />;
 
 /* ─────────────────────────────────────────────────────────
  * SIDEBAR NAV
  * Shared by the design-system preview and the harness shell:
- * compact workspace switcher, primary navigation, searchable
- * chat history, and a collapse that preserves icon alignment.
+ * every Project and Link with its chats, primary navigation,
+ * searchable chat history, and a collapse that preserves icon
+ * alignment.
  * ───────────────────────────────────────────────────────── */
 
 const WORKSPACE = { key: "creamery", name: "Creamery Ops", monogram: "C" };
@@ -119,7 +118,10 @@ type SidebarNavProps = {
   onSwitchProject?: (path: string) => void;
   /** Other projects with a chat that waits on the user: their rows and the project button get a dot. */
   attentionPaths?: string[];
-  onOpenProjectSettings?: () => void;
+  /** Opens a Project's settings, by its path. */
+  onOpenProjectSettings?: (path: string) => void;
+  /** Starts a new chat in another Project (its path) or Link (`milagre-link:` key), switching to it first. */
+  onNewChatInScope?: (scopeKey: string) => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
   chatActions?: ChatRowActions;
@@ -137,8 +139,6 @@ type SidebarNavProps = {
 
 const NO_CHAT_ACTIONS: ChatRowActions = {};
 const NEVER_ACTIVE = () => false;
-const showAllPaths = (enabled: boolean, scopes: Array<{ key: string; link: unknown }>) =>
-  enabled ? scopes.filter((scope) => !scope.link).map((scope) => scope.key) : NO_PATHS;
 // Groups of the all-Projects sidebar the user folded, by Project path or Link key; the rest stay open.
 const CLOSED_SCOPES_KEY = "milagre.sidebarClosedScopes";
 function readClosedScopes(): string[] {
@@ -150,7 +150,17 @@ function readClosedScopes(): string[] {
   }
 }
 
-/** A Project or Link heading in the all-Projects sidebar: folds its chats; the trailing button starts a chat here or opens that one. */
+type ScopeMenuItem = {
+  key: string;
+  label: string;
+  icon: HugeIconData;
+  run: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+  separatorBefore?: boolean;
+};
+
+/** A Project or Link heading in the sidebar: folds its chats. Hovered, the chevron takes the icon's place, as in Paseo; the ⋯ menu and the + sit on the right. */
 function ScopeHeader({
   name,
   icon,
@@ -158,7 +168,8 @@ function ScopeHeader({
   current,
   attention,
   onToggle,
-  onAction,
+  onNewChat,
+  menu,
 }: {
   name: string;
   icon: ReactNode;
@@ -166,7 +177,9 @@ function ScopeHeader({
   current: boolean;
   attention: boolean;
   onToggle: () => void;
-  onAction: () => void;
+  onNewChat: () => void;
+  /** The ⋯ menu's rows; none hides the button. */
+  menu: ScopeMenuItem[];
 }) {
   return (
     <div className="group/scope relative mx-2 flex h-8 items-center">
@@ -174,30 +187,150 @@ function ScopeHeader({
         type="button"
         data-scope-toggle
         aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${name}`}
         onClick={onToggle}
-        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-9 text-left hover:bg-hover-2"
+        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-[68px] text-left hover:bg-hover-2"
       >
-        <span className="flex h-5 shrink-0 items-center justify-center text-ink">{icon}</span>
-        <span className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>{name}</span>
-        {attention && <AttentionDot />}
-        <span className={`flex shrink-0 text-ink-3 transition-transform duration-150 ${open ? "" : "-rotate-90"}`}>
-          <IconChevronDownSmall size={14} />
+        <span className="relative flex size-5 shrink-0 items-center justify-center text-ink">
+          <span className="flex items-center justify-center transition-opacity duration-100 group-hover/scope:opacity-0 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-0">
+            {icon}
+          </span>
+          <span
+            aria-hidden
+            data-scope-chevron
+            className={`absolute inset-0 flex items-center justify-center text-ink-3 opacity-0 transition-[opacity,transform] duration-150 group-hover/scope:opacity-100 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-100 ${open ? "" : "-rotate-90"}`}
+          >
+            <IconChevronDownSmall size={14} />
+          </span>
         </span>
+        <span data-scope-name className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>
+          {name}
+        </span>
+        {attention && <AttentionDot />}
       </button>
-      <Tooltip label={current ? "New chat" : `Open ${name}`} shortcut={current ? "⌘N" : undefined} align="end" className="absolute right-0">
-        <button
-          type="button"
-          data-scope-action
-          aria-label={current ? "New chat" : `Open ${name}`}
-          onClick={onAction}
-          className={`${CHATS_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
-        >
-          {current ? <IconPlusMedium size={16} /> : <HugeIcon icon={FolderOpenIcon} size={15} />}
-        </button>
-      </Tooltip>
+      <div className="absolute right-0 flex items-center">
+        {menu.length > 0 && <ScopeMenuButton name={name} items={menu} />}
+        <Tooltip label="New chat" shortcut={current ? "⌘N" : undefined} align="end">
+          <button
+            type="button"
+            data-scope-action
+            aria-label={current ? "New chat" : `New chat in ${name}`}
+            onClick={onNewChat}
+            className={`${CHATS_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+          >
+            <IconPlusMedium size={16} />
+          </button>
+        </Tooltip>
+      </div>
     </div>
   );
 }
+
+/** A Project's or Link's ⋯ button; its rows open in a panel on the body, under the button. */
+function ScopeMenuButton({ name, items }: { name: string; items: ScopeMenuItem[] }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  const place = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    // Right-aligned to the button, but never past the window's left edge in a narrow sidebar.
+    setPosition({ top: rect.bottom + 4, left: Math.max(8, rect.right - 224) });
+    return true;
+  };
+  const close = () => setOpen(false);
+  const openMenu = () => {
+    if (place()) setOpen(true);
+  };
+
+  useDismiss(open, close, (target) => !!target.closest("[data-scope-menu], [data-scope-menu-panel]"), place);
+  useLayoutEffect(() => {
+    if (open) panelRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
+  }, [open]);
+
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = [...(panelRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
+    const index = rows.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      rows[(index + step + rows.length) % rows.length]?.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      buttonRef.current?.focus();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+    }
+  };
+
+  return (
+    <>
+      <Tooltip label="More" align="end">
+        <button
+          ref={buttonRef}
+          type="button"
+          data-scope-menu
+          aria-label={`${name} actions`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => (open ? close() : openMenu())}
+          className={`${CHATS_HEADER_BUTTON} ${open ? "opacity-100" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+        >
+          <HugeIcon icon={MoreVerticalIcon} size={16} />
+        </button>
+      </Tooltip>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="menu"
+            aria-label={`${name} actions`}
+            onKeyDown={moveFocus}
+            data-scope-menu-panel
+            className="fixed z-50 flex max-h-[calc(100vh-16px)] w-56 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
+            style={{
+              top: position.top,
+              left: position.left,
+              animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both",
+              transformOrigin: "top right",
+            }}
+          >
+            <ScrollArea className="p-1.5">
+              <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
+                {items.map((item) => (
+                  <Fragment key={item.key}>
+                    {item.separatorBefore && <div className="my-1 h-px bg-line" />}
+                    <button
+                      data-menu-row
+                      data-scope-menu-item={item.key}
+                      role="menuitem"
+                      type="button"
+                      disabled={item.disabled}
+                      onClick={() => {
+                        close();
+                        item.run();
+                      }}
+                      className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
+                    >
+                      <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
+                        <HugeIcon icon={item.icon} size={16} />
+                      </span>
+                      <span className={`min-w-0 flex-1 truncate text-[13.5px] ${item.destructive ? "text-red" : "text-ink"}`}>{item.label}</span>
+                    </button>
+                  </Fragment>
+                ))}
+              </GlideMenu>
+            </ScrollArea>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 const NO_PATHS: string[] = [];
 
 function AttentionDot({ className = "" }: { className?: string }) {
@@ -272,240 +405,11 @@ export function RailButton({
   );
 }
 
-function WorkspaceMenu({
-  position,
-  onClose,
-  workspace,
-  projectPath,
-  onOpenProjectSettings,
-  projects,
-  onSwitchProject,
-  onOpenProject,
-  onForgetProject,
-  selectedLink,
-  links,
-  registeredProjects,
-  onSwitchLink,
-  onLinkProject,
-  attentionPaths,
-}: {
-  position: { top: number; left: number };
-  onClose: () => void;
-  workspace: { name: string; monogram: string; image?: string | null };
-  projectPath?: string;
-  onOpenProjectSettings?: () => void;
-  projects: ProjectRow[];
-  onSwitchProject?: (path: string) => void;
-  onOpenProject?: () => void;
-  onForgetProject?: (path: string) => void;
-  selectedLink?: SidebarNavProps["selectedLink"];
-  links: NamedProjectLink[];
-  registeredProjects: Array<{ id: string; path: string; name: string }>;
-  onSwitchLink?: (id: string) => void;
-  onLinkProject?: () => void;
-  attentionPaths: string[];
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
-  useLayoutEffect(() => {
-    menuRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
-  }, []);
-
-  // Switching projects stops nothing: the other project's turns keep running in the background.
-  const go = (open: () => void) => {
-    onClose();
-    open();
-  };
-  // Focus inside the row (its own button, or the × just clicked) moves to a neighbour before the row goes,
-  // so the arrow keys keep working.
-  const forget = (path: string, item: HTMLElement | null) => {
-    if (item?.contains(document.activeElement)) {
-      const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
-      const index = rows.findIndex((row) => item.contains(row));
-      (rows[index + 1] ?? rows[index - 1])?.focus();
-    }
-    onForgetProject?.(path);
-  };
-
-  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      rows[(index + step + rows.length) % rows.length]?.focus();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-    } else if (event.key === "Tab") {
-      event.preventDefault();
-    }
-  };
-
-  const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
-  const projectActions: Record<ProjectMenuKey, { run: () => void; disabled: boolean }> = {
-    reveal: { run: () => void window.milagre?.revealInFolder(projectPath ?? "").catch(() => {}), disabled: !projectPath },
-    "copy-path": { run: () => copy(projectPath ?? ""), disabled: !projectPath },
-    "copy-name": { run: () => copy(workspace.name), disabled: false },
-    settings: { run: () => onOpenProjectSettings?.(), disabled: !onOpenProjectSettings },
-  };
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      role="menu"
-      aria-label={`${workspace.name} actions`}
-      onKeyDown={moveFocus}
-      data-workspace-menu
-      className="fixed z-50 flex max-h-[calc(100vh-16px)] w-64 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
-      style={{
-        top: position.top,
-        left: position.left,
-        animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both",
-        transformOrigin: "top left",
-      }}
-    >
-      <ScrollArea className="p-1.5">
-        <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
-          {!selectedLink &&
-            projectMenuActions(IS_MAC).map((item) => (
-              <button
-                key={item.key}
-                data-menu-row
-                data-project-action={item.key}
-                role="menuitem"
-                type="button"
-                disabled={projectActions[item.key].disabled}
-                onClick={() => {
-                  onClose();
-                  projectActions[item.key].run();
-                }}
-                className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
-              >
-                <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
-                  <HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
-              </button>
-            ))}
-          {!selectedLink && <div className="my-1 h-px bg-line" />}
-          <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Projects</p>
-          {projects.map((row) => {
-            return (
-              <div key={row.path} data-project-item className="group/project relative">
-                <button
-                  data-menu-row
-                  data-project-row={row.path}
-                  role="menuitemradio"
-                  aria-checked={row.current}
-                  type="button"
-                  title={row.current ? row.path : `${row.path}\nPress Delete to remove from the list`}
-                  {...(row.current ? {} : { "aria-keyshortcuts": "Delete" })}
-                  onClick={() => (row.current ? onClose() : go(() => onSwitchProject?.(row.path)))}
-                  onKeyDown={(event) => {
-                    if (row.current || (event.key !== "Delete" && event.key !== "Backspace")) return;
-                    event.preventDefault();
-                    forget(row.path, event.currentTarget.closest("[data-project-item]"));
-                  }}
-                  className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
-                >
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
-                    <WorkspaceIcon src={row.current ? workspace.image : imageOf(row.path)} fallback={row.initial} />
-                  </span>
-                  <span className={`min-w-0 flex-1 truncate text-[13.5px] text-ink ${row.current ? "font-medium" : "group-hover/project:pr-6"}`}>
-                    {row.name}
-                  </span>
-                  {row.current && (
-                    <span className="shrink-0 text-ink">
-                      <IconCheckmark1Small size={18} />
-                    </span>
-                  )}
-                  {!row.current && attentionPaths.includes(row.path) && <AttentionDot className="mr-1 group-hover/project:opacity-0" />}
-                </button>
-                {!row.current && (
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    data-forget-project={row.path}
-                    aria-label={`Remove ${row.name} from the list`}
-                    title="Remove from the list"
-                    onClick={(event) => forget(row.path, event.currentTarget.closest("[data-project-item]"))}
-                    className="absolute right-1.5 top-2 z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 opacity-0 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink group-hover/project:opacity-100"
-                  >
-                    <IconCrossSmall size={14} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {links.length > 0 && (
-            <>
-              <div className="my-1 h-px bg-line" />
-              <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Links</p>
-              {links.map((link) => (
-                <button
-                  key={link.id}
-                  data-menu-row
-                  data-link-row={link.id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selectedLink?.id === link.id}
-                  onClick={() => go(() => onSwitchLink?.(link.id))}
-                  className="relative z-10 flex min-h-10 items-center gap-2 rounded-[8px] px-2 py-1 text-left outline-none focus-visible:bg-hover-2"
-                >
-                  <ProjectAvatarStack
-                    projects={link.projectIds.map((id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" })}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13.5px] text-ink">{link.name}</span>
-                    <span className="block text-[11px] text-ink-3">{link.projectIds.length} Projects</span>
-                  </span>
-                  {selectedLink?.id === link.id && <IconCheckmark1Small size={18} />}
-                </button>
-              ))}
-            </>
-          )}
-          <div className="my-1 h-px bg-line" />
-          <button
-            data-menu-row
-            data-open-project
-            role="menuitem"
-            type="button"
-            onClick={() => go(() => onOpenProject?.())}
-            className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
-          >
-            <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
-              <IconPlusMedium size={16} />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Open project…</span>
-          </button>
-          {onLinkProject && (
-            <button
-              data-menu-row
-              type="button"
-              role="menuitem"
-              onClick={() => go(onLinkProject)}
-              className="relative z-10 flex h-9 items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
-            >
-              <span className="flex size-5 items-center justify-center text-ink-2">
-                <HugeIcon icon={Link04Icon} size={16} />
-              </span>
-              <span className="text-[13.5px]">Link projects…</span>
-            </button>
-          )}
-        </GlideMenu>
-      </ScrollArea>
-    </div>,
-    document.body,
-  );
-}
-
 // memo: App rebuilds on every streamed batch and keystroke elsewhere; the sidebar only follows its own props.
 export default memo(function SidebarNav({
   workspaceName = WORKSPACE.name,
   workspaceImage,
   selectedLink,
-  onSwitchLink,
   onLinkProject,
   onOpenProject,
   activeTitle,
@@ -521,7 +425,6 @@ export default memo(function SidebarNav({
   hintsEnabled = true,
   projectPath,
   onOpenProjectSettings,
-  onSwitchProject,
   attentionPaths = NO_PATHS,
   recents = DEFAULT_RECENTS,
   chatActions = NO_CHAT_ACTIONS,
@@ -530,8 +433,9 @@ export default memo(function SidebarNav({
   waitingKeys = "",
   askingKeys = "",
   onOpenScopeChat,
+  onNewChatInScope,
 }: SidebarNavProps) {
-  const { sidebarAllProjects, chatOrder } = useSettings();
+  const { chatOrder } = useSettings();
   const [listsChanged, setListsChanged] = useState(0);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
@@ -539,13 +443,13 @@ export default memo(function SidebarNav({
   const [expandedWidth, setExpandedWidth] = useState(readSidebarWidth);
   const [resizing, setResizing] = useState(false);
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
   const [namedLinks, setNamedLinks] = useState<NamedProjectLink[]>([]);
   const [registeredProjects, setRegisteredProjects] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
-  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
+  const [recentLoaded, setRecentLoaded] = useState(false);
+  // The Projects' group order for this session; see stableOrder.
+  const scopeOrder = useRef<string[]>([]);
+  const showHints = useShortcutHints() && hintsEnabled;
 
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
   // One identity for every row, so memo(ChatRow) skips when the sidebar re-renders.
@@ -566,7 +470,10 @@ export default memo(function SidebarNav({
     let live = true;
     window.milagre?.listRecentProjects?.().then(
       (list) => {
-        if (live) setRecentProjects(Array.isArray(list) ? list : []);
+        if (live) {
+          setRecentProjects(Array.isArray(list) ? list : []);
+          setRecentLoaded(true);
+        }
       },
       () => {},
     );
@@ -585,7 +492,7 @@ export default memo(function SidebarNav({
     return () => {
       live = false;
     };
-  }, [projectPath, workspaceOpen, selectedLink?.id, sidebarAllProjects, listsChanged]);
+  }, [projectPath, selectedLink?.id, listsChanged]);
   useEffect(() => {
     const changed = () => setListsChanged((count) => count + 1);
     window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
@@ -594,14 +501,18 @@ export default memo(function SidebarNav({
 
   // Every recent Project the user didn't hide, then every Link, like the phone's list. The open one is always there.
   const currentKey = selectedLink ? `milagre-link:${selectedLink.id}` : (projectPath ?? "");
-  const scopes = [
-    ...projects
-      .filter((row) => row.current || !recentProjects.find((project) => project.path === row.path)?.hidden)
-      .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null })),
-    ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link })),
-  ];
-  const scopeImage = useProjectImages(showAllPaths(sidebarAllProjects, scopes));
-  const showAll = sidebarAllProjects && !collapsed;
+  const projectScopes = projects
+    .filter((row) => row.current || !recentProjects.find((project) => project.path === row.path)?.hidden)
+    .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null }));
+  if (recentLoaded)
+    scopeOrder.current = stableOrder(
+      scopeOrder.current,
+      projectScopes.map((scope) => scope.key),
+    );
+  const orderedProjects = recentLoaded ? scopeOrder.current.map((key) => projectScopes.find((scope) => scope.key === key)!).filter(Boolean) : projectScopes;
+  const scopes = [...orderedProjects, ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link }))];
+  const scopeImage = useProjectImages(scopes.filter((scope) => !scope.link).map((scope) => scope.key));
+  const showAll = !collapsed;
   const scopeStates = useScopeStates(
     showAll,
     scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
@@ -644,7 +555,8 @@ export default memo(function SidebarNav({
   const groups = showAll
     ? scopes.map((scope) => {
         const current = scope.key === currentKey;
-        const state = scopeStates[scope.key];
+        // The Project just left has no read of its own yet; the copy it was shown from fills in until one arrives.
+        const state = scopeStates[scope.key] ?? (scope.link ? undefined : cachedProjectCopy(scope.key)?.state);
         const rows = current ? recents : state ? scopeChats(scope.key, state, chatOrder, marks) : [];
         const list = current
           ? {
@@ -677,27 +589,25 @@ export default memo(function SidebarNav({
     );
   };
 
-  const placeWorkspaceMenu = () => {
-    const rect = workspaceButtonRef.current?.getBoundingClientRect();
-    if (!rect) return false;
-    // Collapsed, the menu opens beside the rail instead of covering it.
-    setWorkspacePosition(collapsed ? { top: rect.top, left: rect.right + 8 } : { top: rect.bottom + 6, left: rect.left });
-    return true;
+  // A Project's ⋯ rows: the four actions, and removing it from the list unless it's the open one. A Link gets its name copied.
+  const scopeMenu = (scope: { key: string; name: string; link: NamedProjectLink | null }, current: boolean): ScopeMenuItem[] => {
+    if (scope.link) return [{ key: "copy-name", label: "Copy Link name", icon: Copy01Icon, run: () => copy(scope.name) }];
+    const actions: Record<ProjectMenuKey, Pick<ScopeMenuItem, "run" | "disabled">> = {
+      reveal: { run: () => void window.milagre?.revealInFolder(scope.key).catch(() => {}) },
+      "copy-path": { run: () => copy(scope.key) },
+      "copy-name": { run: () => copy(scope.name) },
+      settings: { run: () => onOpenProjectSettings?.(scope.key), disabled: !onOpenProjectSettings },
+    };
+    return [
+      ...projectMenuActions(IS_MAC).map((item) => ({ key: item.key, label: item.label, icon: PROJECT_MENU_ICONS[item.key], ...actions[item.key] })),
+      ...(current
+        ? []
+        : [{ key: "remove", label: "Remove from list", icon: Cancel01Icon, destructive: true, separatorBefore: true, run: () => forgetProject(scope.key) }]),
+    ];
   };
-  const openWorkspaceMenu = () => {
-    if (placeWorkspaceMenu()) setWorkspaceOpen(true);
-  };
-
-  useDismiss(
-    workspaceOpen,
-    () => setWorkspaceOpen(false),
-    (target) => !!target.closest("[data-workspace-trigger], [data-workspace-menu]"),
-    placeWorkspaceMenu,
-  );
 
   const collapse = () => {
     setCollapsed(true);
-    setWorkspaceOpen(false);
   };
 
   // A manual toggle is the user's choice: the window width stops overriding it until the next crossing.
@@ -715,7 +625,6 @@ export default memo(function SidebarNav({
           if (!current) autoCollapsed.current = true;
           return true;
         });
-        setWorkspaceOpen(false);
       } else if (autoCollapsed.current) {
         autoCollapsed.current = false;
         setCollapsed(false);
@@ -814,60 +723,7 @@ export default memo(function SidebarNav({
         }
       >
         <div className="flex min-h-0 w-full shrink-0 flex-col">
-          <div className="relative h-10 shrink-0">
-            <button
-              ref={workspaceButtonRef}
-              data-workspace-trigger
-              type="button"
-              aria-expanded={workspaceOpen}
-              aria-label={workspace.name}
-              onClick={() => (workspaceOpen ? setWorkspaceOpen(false) : openWorkspaceMenu())}
-              className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
-            >
-              <span className={`sidebar-logo relative flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
-                {selectedLink ? (
-                  <ProjectAvatarStack projects={selectedLink.projects} />
-                ) : (
-                  <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />
-                )}
-                {/* Collapsed, the copy beside the logo hides, so the dot moves onto its corner. */}
-                {attentionPaths.length > 0 && (
-                  <span
-                    aria-hidden
-                    className="absolute -top-0.5 -right-0.5 hidden size-2 rounded-full bg-orange ring-2 ring-surface in-data-[sidebar-collapsed=true]:block"
-                  />
-                )}
-              </span>
-              <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">{workspace.name}</span>
-              {selectedLink && <span className="sidebar-copy mr-1 text-[11px] text-ink-3">Link</span>}
-              {attentionPaths.length > 0 && <AttentionDot className="sidebar-copy mr-1" />}
-              <span className="sidebar-copy ml-1 flex shrink-0 text-ink-3">
-                <IconChevronDownSmall size={16} />
-              </span>
-            </button>
-
-            {workspaceOpen && (
-              <WorkspaceMenu
-                selectedLink={selectedLink}
-                links={namedLinks}
-                registeredProjects={registeredProjects}
-                onSwitchLink={onSwitchLink}
-                onLinkProject={onLinkProject}
-                position={workspacePosition}
-                workspace={workspace}
-                projectPath={projectPath}
-                onOpenProjectSettings={onOpenProjectSettings}
-                projects={projects}
-                onSwitchProject={onSwitchProject}
-                onOpenProject={onOpenProject}
-                onForgetProject={forgetProject}
-                attentionPaths={attentionPaths}
-                onClose={() => setWorkspaceOpen(false)}
-              />
-            )}
-          </div>
-
-          <ScrollArea className="sidebar-scroll flex-1 overflow-x-hidden">
+          <ScrollArea className="sidebar-scroll flex-1 overflow-x-hidden pt-2">
             {onOpenCanvas && (
               <div className="mb-2">
                 <GlideGroup>
@@ -907,7 +763,7 @@ export default memo(function SidebarNav({
                 {groups.map(({ scope, current, state, rest, pinned, list }, index) => {
                   const open = !closedScopes.includes(scope.key);
                   return (
-                    <section key={scope.key} data-sidebar-scope={scope.key} aria-label={scope.name} className="mb-2">
+                    <section key={scope.key} data-sidebar-scope={scope.key} data-current={current || undefined} aria-label={scope.name} className="mb-2">
                       {scope.link && !scopes[index - 1]?.link && (
                         <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
                       )}
@@ -930,14 +786,15 @@ export default memo(function SidebarNav({
                         current={current}
                         attention={!current && attentionPaths.includes(scope.key)}
                         onToggle={() => toggleScope(scope.key)}
-                        onAction={
+                        onNewChat={
                           current
                             ? () => {
                                 if (activeTitle === undefined) setDemoActiveTitle(null);
                                 onNewChat?.();
                               }
-                            : () => (scope.link ? onSwitchLink?.(scope.link.id) : onSwitchProject?.(scope.key))
+                            : () => onNewChatInScope?.(scope.key)
                         }
+                        menu={scopeMenu(scope, current)}
                       />
                       {open &&
                         (rest.length > 0 ? (
@@ -985,16 +842,31 @@ export default memo(function SidebarNav({
           <div
             className={`flex border-t border-line py-1.5 ${usage ? "mt-1.5" : "mt-3"} ${collapsed ? "mx-auto w-8 flex-col-reverse items-center gap-1" : "mx-2 w-[calc(100%-16px)] items-center justify-between"}`}
           >
-            <Tooltip label="Add project" shortcut="⌘O">
-              <button
-                type="button"
-                aria-label="Add project"
-                onClick={() => onOpenProject?.()}
-                className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}
-              >
-                <IconFolderAdd size={17} />
-              </button>
-            </Tooltip>
+            <div className={collapsed ? "flex flex-col-reverse items-center gap-1" : "flex items-center gap-1"}>
+              <Tooltip label="Add project" shortcut="⌘O">
+                <button
+                  type="button"
+                  aria-label="Add project"
+                  onClick={() => onOpenProject?.()}
+                  className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}
+                >
+                  <IconFolderAdd size={17} />
+                </button>
+              </Tooltip>
+              {onLinkProject && (
+                <Tooltip label="Link projects">
+                  <button
+                    type="button"
+                    aria-label="Link projects"
+                    data-link-projects
+                    onClick={onLinkProject}
+                    className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}
+                  >
+                    <HugeIcon icon={Link04Icon} size={17} />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
             <Tooltip label="Settings" shortcut="⌘," align={collapsed ? "start" : "end"}>
               <button type="button" aria-label="Settings" onClick={onOpenSettings} className={`${BOTTOM_BAR_BUTTON} ${collapsed ? "size-8" : "size-9"}`}>
                 <IconSettingsGear1 size={17} />

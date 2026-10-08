@@ -80,21 +80,24 @@ test("an Electron check is retried once, only on Linux CI", () => {
   assert.equal(shouldRetry({ platform: "darwin", ci: "true", attempt: 1 }), false);
 });
 
-test("--shard partitions the runnable Electron checks evenly and leaves unit tests alone", () => {
+test("--shard partitions the unit files and the runnable Electron checks, balancing the Electron time", () => {
+  const unit = discoverUnitTests(root);
   const electron = discoverElectronChecks(root);
-  const select = (args) => selectTests({ unit: ["x.test.ts"], electron, filters: { ...parseArgs(args), platform: "linux", commandExists: () => true } });
-  const all = select(["--electron"]);
-  for (const count of [1, 2, 3, 4]) {
+  const select = (args) => selectTests({ unit, electron, filters: { ...parseArgs(args), platform: "linux", commandExists: () => true } });
+  const all = select([]);
+  const seconds = (file) => MANIFEST[path.basename(file)]?.seconds ?? 8;
+  for (const count of [1, 2, 3, 8]) {
     const shards = Array.from({ length: count }, (_, i) => select(["--shard", `${i + 1}/${count}`]));
-    // Every runnable check runs on exactly one shard, so nothing is dropped or run twice.
-    assert.deepEqual(shards.flatMap((shard) => shard.electron).toSorted(), all.electron, `${count} shards`);
-    // Skips are removed before the split, so shard sizes differ by at most one.
-    const sizes = shards.map((shard) => shard.electron.length);
-    assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `${count} shards: ${sizes}`);
-    for (const shard of shards) {
-      assert.deepEqual(shard.unit, ["x.test.ts"]);
-      assert.deepEqual(shard.skipped, all.skipped);
-    }
+    // Every runnable test runs on exactly one shard, so nothing is dropped or run twice.
+    assert.deepEqual(shards.flatMap((shard) => shard.unit).toSorted(), all.unit.toSorted(), `${count} shards`);
+    assert.deepEqual(shards.flatMap((shard) => shard.electron).toSorted(), all.electron.toSorted(), `${count} shards`);
+    for (const shard of shards) assert.deepEqual(shard.skipped, all.skipped);
+    const files = shards.map((shard) => shard.unit.length);
+    assert.ok(Math.max(...files) - Math.min(...files) <= 1, `${count} shards: ${files} unit files`);
+    // No shard runs longer than the average plus one check, so the slowest runner sets the pace only as much as it must.
+    const loads = shards.map((shard) => shard.electron.reduce((sum, file) => sum + seconds(file), 0));
+    const average = loads.reduce((sum, load) => sum + load, 0) / count;
+    assert.ok(Math.max(...loads) <= Math.max(average + 8, ...all.electron.map(seconds)), `${count} shards: ${loads} seconds`);
   }
 });
 

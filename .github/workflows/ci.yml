@@ -37,23 +37,15 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
-  javascript:
+  # The JavaScript checks run as three parallel jobs; the `javascript` job below is the required check that gathers them.
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-          cache: npm
-      - name: Check lockfile sources and integrity
-        run: npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
       - name: Install dependencies
-        run: npm ci
-      - name: Verify package signatures
-        run: npm audit signatures
+        uses: ./.github/actions/install-dependencies
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -70,8 +62,46 @@ jobs:
         run: npm run lint --workspace @milagre/mobile
       - name: Build renderer
         run: npm run build:renderer --workspace milagre
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check lockfile sources and integrity
+        run: npx --yes lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
+      - name: Install dependencies
+        uses: ./.github/actions/install-dependencies
+      - name: Verify package signatures
+        run: npm audit signatures
+  unit:
+    name: unit (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install dependencies
+        uses: ./.github/actions/install-dependencies
       - name: Test
-        run: npm test -- --unit
+        run: npm test -- --unit --shard ${{ matrix.shard }}/2
+  javascript:
+    # The required check: green only when every JavaScript job passed.
+    if: always()
+    needs: [static, supply-chain, unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every JavaScript job to have passed
+        env:
+          RESULTS: ${{ needs.static.result }} ${{ needs.supply-chain.result }} ${{ needs.unit.result }}
+        run: |
+          echo "static, supply-chain, unit: $RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
   native-tests:
     name: native-tests (${{ matrix.os }})
     needs: changes
@@ -89,8 +119,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+      # These tests load only Node built-ins and two workspace packages, so they skip npm ci (about a minute on Windows).
+      - name: Link the workspace packages the Windows tests load
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force node_modules/@milagre | Out-Null
+          foreach ($name in 'core', 'shared') { New-Item -ItemType Junction -Path "node_modules/@milagre/$name" -Target "$PWD/packages/$name" | Out-Null }
       - name: Test Windows agent protocol
         if: matrix.os == 'windows-latest'
         timeout-minutes: 5
@@ -131,7 +166,7 @@ jobs:
           case "$RESULT" in success|skipped) exit 0 ;; *) exit 1 ;; esac
   desktop-checks:
     # The Electron checks run one at a time (each boots Vite and Electron), so they are split across runners.
-    name: desktop-checks (${{ matrix.shard }}/3)
+    name: desktop-checks (${{ matrix.shard }}/8)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
     timeout-minutes: 45
@@ -139,16 +174,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-          cache: npm
+      - name: Install dependencies
+        uses: ./.github/actions/install-dependencies
+      # The runner image ships most of these; apt only runs for what is missing, since a slow mirror once took 12 minutes.
       - name: Install display and Electron libraries
-        run: sudo apt-get update && sudo apt-get install -y xvfb libgbm1 libgtk-3-0 libnss3 libasound2t64 lsof ffmpeg
-      - run: npm ci
+        run: |
+          missing=$(for package in xvfb libgbm1 libgtk-3-0t64 libnss3 libasound2t64 lsof ffmpeg; do
+            dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed' || echo "$package"
+          done)
+          echo "missing: ${missing:-none}"
+          if [ -n "$missing" ]; then sudo apt-get update && sudo apt-get install -y --no-install-recommends $missing; fi
       - name: Allow Electron's sandbox in the runner
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run Electron checks
@@ -156,7 +194,7 @@ jobs:
           MILAGRE_SCREENSHOT_DIR: ${{ runner.temp }}/electron-screenshots
           LIBGL_ALWAYS_SOFTWARE: "1"
           ELECTRON_ENABLE_LOGGING: "1"
-        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/3
+        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/8
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -6,6 +6,8 @@ const YAML = require("yaml");
 
 const read = (name) => YAML.parse(fs.readFileSync(path.join(__dirname, "../.github/workflows", name), "utf8"));
 const ci = read("ci.yml");
+const installAction = ".github/actions/install-dependencies";
+const runs = (job) => job.steps.map((step) => step.run).filter(Boolean);
 const candidates = read("package-candidates.yml");
 
 test("CI and candidate runs on one ref cancel the previous PR run but never a main run", () => {
@@ -20,10 +22,10 @@ test("every CI job has a timeout", () => {
 });
 
 test("CI typechecks once and builds the renderer without a second typecheck", () => {
-  const runs = new Set(ci.jobs.javascript.steps.map((step) => step.run).filter(Boolean));
-  assert.ok(runs.has("npm run typecheck"));
-  assert.ok(runs.has("npm run build:renderer --workspace milagre"));
-  assert.ok(!runs.has("npm run build"));
+  const steps = new Set(runs(ci.jobs.static));
+  assert.ok(steps.has("npm run typecheck"));
+  assert.ok(steps.has("npm run build:renderer --workspace milagre"));
+  assert.ok(!steps.has("npm run build"));
 });
 
 test("desktop agent tests do not repeat the renderer logic tests", () => {
@@ -33,8 +35,9 @@ test("desktop agent tests do not repeat the renderer logic tests", () => {
 });
 
 test("every action is pinned to a full SHA with its version in a comment", () => {
-  for (const name of fs.readdirSync(path.join(__dirname, "../.github/workflows"))) {
-    const text = fs.readFileSync(path.join(__dirname, "../.github/workflows", name), "utf8");
+  const files = [...fs.readdirSync(path.join(__dirname, "../.github/workflows")).map((name) => `workflows/${name}`), `actions/install-dependencies/action.yml`];
+  for (const name of files) {
+    const text = fs.readFileSync(path.join(__dirname, "../.github", name), "utf8");
     for (const line of text.split("\n").filter((line) => /^\s*-?\s*uses:/.test(line))) {
       assert.match(line, /uses: (\.\/\S+|[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+)/, `${name}: ${line.trim()}`);
     }
@@ -48,10 +51,25 @@ test("the release job waits for the required checks, not the change filter or de
   assert.ok(!needs.includes("changes"));
 });
 
-test("CI runs the unit suite through the single test command", () => {
-  const runs = ci.jobs.javascript.steps.map((step) => step.run).filter(Boolean);
-  assert.ok(runs.includes("npm test -- --unit"));
-  assert.ok(!runs.some((run) => /npm run test:/.test(run)), "no per-suite scripts left in CI");
+test("CI runs the unit suite through the single test command, one shard per matrix leg", () => {
+  const job = ci.jobs.unit;
+  const shards = job.strategy.matrix.shard;
+  assert.deepEqual(
+    shards,
+    Array.from({ length: shards.length }, (_, i) => i + 1),
+  );
+  assert.ok(runs(job).includes(`npm test -- --unit --shard \${{ matrix.shard }}/${shards.length}`));
+  assert.ok(!Object.values(ci.jobs).some((other) => runs(other).some((run) => /npm run test:/.test(run))), "no per-suite scripts left in CI");
+});
+
+test("the required javascript check passes only when every JavaScript job passed", () => {
+  const gate = ci.jobs.javascript;
+  assert.equal(gate.if, "always()");
+  assert.deepEqual(gate.needs, ["static", "supply-chain", "unit"]);
+  // A skipped or cancelled job must fail the gate, or branch protection would accept a PR whose checks never ran.
+  const script = runs(gate).join("\n");
+  for (const need of gate.needs) assert.ok(gate.steps[0].env.RESULTS.includes(`needs.${need}.result`), need);
+  assert.match(script, /\[ "\$result" = success \] \|\| exit 1/);
 });
 
 test("Windows and Linux native tests run on PRs without building an installer", () => {
@@ -85,7 +103,7 @@ test("native tests and Electron checks run only when a PR touches desktop code; 
     assert.equal(ci.jobs[name].needs, "changes", `${name} waits for the change detection`);
     assert.equal(ci.jobs[name].if, "needs.changes.outputs.desktop == 'true'", `${name} is skipped on PRs without desktop changes`);
   }
-  assert.equal(ci.jobs.javascript.if, undefined);
+  for (const name of ["static", "supply-chain", "unit"]) assert.equal(ci.jobs[name].if, undefined, `${name} always runs`);
 });
 
 test("installers build on main, on dispatch, and on PRs only with the preview:installers label", () => {
@@ -118,13 +136,13 @@ test("Electron checks run on Ubuntu under xvfb, one shard per matrix leg, with s
 });
 
 test("CI lints every workspace with oxlint and keeps the mobile ESLint rules", () => {
-  const runs = new Set(ci.jobs.javascript.steps.map((step) => step.run).filter(Boolean));
-  assert.ok(runs.has("npm run lint"));
-  assert.ok(runs.has("npm run lint --workspace @milagre/mobile"));
+  const steps = new Set(runs(ci.jobs.static));
+  assert.ok(steps.has("npm run lint"));
+  assert.ok(steps.has("npm run lint --workspace @milagre/mobile"));
 });
 
 test("CI checks formatting right after linting", () => {
-  const steps = ci.jobs.javascript.steps;
+  const steps = ci.jobs.static.steps;
   const lint = steps.findIndex((step) => step.run === "npm run lint");
   assert.equal(steps[lint + 1].name, "Format check");
   assert.equal(steps[lint + 1].run, "npm run format:check");
@@ -132,7 +150,7 @@ test("CI checks formatting right after linting", () => {
 });
 
 test("CI looks for dead code right after the format check", () => {
-  const steps = ci.jobs.javascript.steps;
+  const steps = ci.jobs.static.steps;
   const format = steps.findIndex((step) => step.run === "npm run format:check");
   assert.equal(steps[format + 1].name, "Dead code");
   assert.equal(steps[format + 1].run, "npm run knip");
@@ -140,10 +158,20 @@ test("CI looks for dead code right after the format check", () => {
 });
 
 test("CI lints the lockfile before installing and verifies signatures after", () => {
-  const steps = ci.jobs.javascript.steps;
-  const install = steps.findIndex((step) => step.run === "npm ci");
-  assert.equal(steps[install - 1].run, "npx lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity");
+  const steps = ci.jobs["supply-chain"].steps;
+  const install = steps.findIndex((step) => step.uses === `./${installAction}`);
+  assert.equal(steps[install - 1].run, "npx --yes lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity");
   assert.equal(steps[install + 1].run, "npm audit signatures");
+});
+
+test("a cached install is keyed on the lockfile and installs with npm ci only on a miss", () => {
+  const action = YAML.parse(fs.readFileSync(path.join(__dirname, "..", installAction, "action.yml"), "utf8"));
+  const cache = action.runs.steps.find((step) => step.uses?.startsWith("actions/cache@"));
+  // A key without the lockfile hash would restore a stale tree after a dependency change.
+  assert.match(cache.with.key, /hashFiles\('package-lock\.json'\)/);
+  assert.match(cache.with.key, /runner\.os/);
+  const install = action.runs.steps.find((step) => step.run === "npm ci");
+  assert.equal(install.if, `steps.${cache.id}.outputs.cache-hit != 'true'`);
 });
 
 test("PR titles must be Conventional Commits", () => {

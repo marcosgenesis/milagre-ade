@@ -16,7 +16,7 @@ runs:
           apps/*/node_modules
           packages/*/node_modules
         # The mobile postinstall applies apps/mobile/patches inside node_modules, so a patch change needs a new tree.
-        key: node-modules-measure-2-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json', 'apps/mobile/patches/**') }}
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json', 'apps/mobile/patches/**') }}
     # On a miss, npm ci spent most of a minute downloading. The download cache from the closest earlier lockfile
     # holds nearly every tarball, so only the changed packages come from the registry. npm checks each tarball
     # against the lockfile's integrity hash, so an older cache can't put the wrong bytes in the tree.

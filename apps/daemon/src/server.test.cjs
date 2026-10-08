@@ -439,7 +439,7 @@ test("many paged reads at once on one connection all finish, waiting instead of 
 });
 
 test("a paged response stays while its reader keeps going and expires once it stops", async (t) => {
-  const { dataDir, project, client } = await fixture(t, { pagesTtlMs: 300 });
+  const { dataDir, project, client } = await fixture(t, { pagesTtlMs: 1000 });
   await notedProject(await client(), project);
   const socket = net.createConnection(require("./paths.cjs").socketPath(dataDir));
   t.after(() => socket.destroy());
@@ -450,13 +450,14 @@ test("a paged response stays while its reader keeps going and expires once it st
   assert.ok(steady.pageCount >= 3);
   const parts = [];
   for (let index = 0; index < steady.pageCount; index++) {
-    if (index) await delay(200); // Each gap is under the limit; the whole read is well over it.
+    // Each gap is well under the limit (a busy CI runner once stretched 200ms gaps past 300ms); the whole read is over it.
+    if (index) await delay(600);
     parts.push((await ask("daemon:result-page", [steady.pageId, index])).result);
   }
   assert.equal(JSON.parse(parts.join("")).state.messages.length, 2);
   const stalled = (await ask("project:snapshot", [project], { pages: true })).pages;
   assert.equal(typeof (await ask("daemon:result-page", [stalled.pageId, 0])).result, "string");
-  await delay(500);
+  await delay(1500);
   assert.match((await ask("daemon:result-page", [stalled.pageId, 1])).error.message, /expired/);
 });
 
@@ -746,7 +747,7 @@ test("replies waiting for paging room do not hold the slots a reader needs for i
 });
 
 test("paged snapshots follow the result-page rules: two at once, re-armed by each read, expiring when left", async (t) => {
-  const { project, client } = await fixture(t, { pagesTtlMs: 300 });
+  const { project, client } = await fixture(t, { pagesTtlMs: 1000 });
   const first = await client();
   await notedProject(first, project);
   const one = await first.call("daemon:snapshot", [{ paged: true }]);
@@ -755,7 +756,7 @@ test("paged snapshots follow the result-page rules: two at once, re-armed by eac
   // Both are read, side by side: the second capture didn't evict the first, and each read re-arms its limit.
   const parts = [[], []];
   for (let index = 0; index < Math.max(one.pageCount, two.pageCount); index++) {
-    if (index) await delay(120);
+    if (index) await delay(400);
     for (const [slot, manifest] of [one, two].entries()) {
       if (index < manifest.pageCount) parts[slot].push(await first.call("daemon:snapshot-page", [manifest.snapshotId, index]));
     }
@@ -763,7 +764,7 @@ test("paged snapshots follow the result-page rules: two at once, re-armed by eac
   for (const text of parts) assert.equal(JSON.parse(text.join("")).projects.length, 1);
   const stalled = await first.call("daemon:snapshot", [{ paged: true }]);
   await first.call("daemon:snapshot-page", [stalled.snapshotId, 0]);
-  await delay(500);
+  await delay(1500);
   await assert.rejects(first.call("daemon:snapshot-page", [stalled.snapshotId, 1]), /expired/);
 });
 

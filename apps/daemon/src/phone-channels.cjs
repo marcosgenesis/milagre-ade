@@ -6,6 +6,10 @@ const OPEN = 1,
   DATA = 2,
   CLOSE = 3;
 const ERROR_MARK = 0x04;
+// Sent before a computer's first hello is answered: the Mac is waiting for its owner's Allow (phone.cjs).
+const PENDING_MARK = 0x05;
+// Repeated while the owner decides, so the desktop knows the Mac is still there and the relay doesn't drop an idle socket.
+const PENDING_REPEAT_MS = 20_000;
 const LIVE_ORIGIN = "milagre-app://phone";
 const MAX_LIVE = 8;
 const MAX_INFLIGHT = 16;
@@ -16,6 +20,9 @@ const REQUEST_TIMEOUT = 340_000;
 const BLOCKED_HEADERS = new Set(["host", "origin", "authorization", "connection", "content-length", "transfer-encoding", "upgrade", "cookie"]);
 const FORWARDED_HEADERS = ["content-type", "etag"];
 const encoder = new TextEncoder();
+const PENDING_NOTICE = new Uint8Array([PENDING_MARK, ...encoder.encode('{"t":"pending"}')]);
+// What a refused computer hears for each answer that isn't Allow; "expired" and "dropped" add nothing to unknown-phone.
+const NOT_ALLOWED = { denied: { reason: "denied" }, busy: { reason: "busy" } };
 
 function frame(type, conn, payload = new Uint8Array()) {
   const out = new Uint8Array(9 + payload.length);
@@ -39,8 +46,24 @@ const routeOk = (path) => typeof path === "string" && path.startsWith("/") && !p
  * A phone speaks HTTP-over-channel to the loopback bridge. A desktop (hello `kind: "desktop"`, saved as a "computer")
  * is one more client of the daemon instead: `openPeer(carrier)` opens its connection and peer-channel.cjs carries its
  * frames. Without `openPeer` desktops are turned away. `phones` is the devices store (`isKnown`, `kindOf`, `add`, `seen`).
+ * A computer's first hello waits for `allowComputer({ key, name, signal, waiting })` (phone.cjs), which resolves
+ * "allowed", "denied", "expired", "busy" or "dropped" and calls `waiting()` once it holds the request.
  */
-function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired = false, WebSocket, fetch: fetchBridge, random, helloMs, openPeer }) {
+function createPhoneChannels({
+  identity,
+  phones,
+  token,
+  bridgeUrl,
+  canPair,
+  retired = false,
+  WebSocket,
+  fetch: fetchBridge,
+  random,
+  helloMs,
+  openPeer,
+  allowComputer,
+  pendingRepeatMs = PENDING_REPEAT_MS,
+}) {
   const sendFrame = (current, type, conn, payload) => current.send(frame(type, conn, payload));
   function sendMessage(current, conn, record, message) {
     if (current.conns.get(conn) !== record || !record.channel) return;
@@ -63,6 +86,9 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     if (!record) return;
     current.conns.delete(conn);
     clearTimeout(record.helloTimer);
+    // A computer still waiting for Allow: its request goes with its channel, and the notices stop even if the owner never answers the abort.
+    record.abort?.abort();
+    clearInterval(record.pendingTimer);
     closeLives(record);
     // A desktop's daemon connection goes with its channel.
     record.peer?.close();
@@ -72,6 +98,41 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
   function refuse(current, conn, code, extra) {
     sendFrame(current, DATA, conn, new Uint8Array([ERROR_MARK, ...encoder.encode(JSON.stringify({ t: "error", code, ...extra }))]));
     dropConn(current, conn, true);
+  }
+
+  /**
+   * Holds a computer's first hello until this Mac's owner answers. The channel stays open with no daemon connection;
+   * the desktop hears PENDING_NOTICE (outside the channel, which isn't open yet) now and every pendingRepeatMs, and
+   * anything it sends meanwhile drops it (onFrame only reads open channels). No `allowComputer`: no one can say yes.
+   */
+  async function waitForAllow(current, conn, record, accepted) {
+    if (!allowComputer) return "expired";
+    record.state = "pending";
+    clearTimeout(record.helloTimer);
+    const abort = new AbortController();
+    record.abort = abort;
+    const notice = () => sendFrame(current, DATA, conn, PENDING_NOTICE);
+    try {
+      return await allowComputer({
+        key: accepted.phoneKey,
+        name: accepted.name,
+        signal: abort.signal,
+        waiting() {
+          // Once per request, and not after it is over.
+          if (record.pendingTimer || record.abort !== abort) return;
+          notice();
+          record.pendingTimer = setInterval(notice, pendingRepeatMs);
+        },
+      });
+    } catch {
+      // The request may have registered before it threw: tell it to stop, so it doesn't keep holding a slot.
+      abort.abort();
+      return "dropped";
+    } finally {
+      clearInterval(record.pendingTimer);
+      record.pendingTimer = null;
+      record.abort = null;
+    }
   }
 
   async function hello(current, conn, record, bytes) {
@@ -95,6 +156,12 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     if (stored && stored !== kind) return refuse(current, conn, "bad-hello", { reason: "kind" });
     // Set before any wait, so a removal that lands meanwhile finds this channel.
     record.key = accepted.phoneKey;
+    // A computer's first pairing waits for its owner's Allow on this Mac; nothing is saved before it.
+    if (accepted.firstPairing && kind === "computer") {
+      const verdict = await waitForAllow(current, conn, record, accepted);
+      if (current.conns.get(conn) !== record) return;
+      if (verdict !== "allowed") return refuse(current, conn, "unknown-phone", NOT_ALLOWED[verdict]);
+    }
     if (accepted.firstPairing) {
       try {
         await phones.add(accepted.phoneKey, { kind, name: accepted.name });
@@ -309,6 +376,8 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
         key: null,
         kind: null,
         peer: null,
+        abort: null,
+        pendingTimer: null,
       };
       current.conns.set(conn, record);
       record.helloTimer = setTimeout(() => {

@@ -190,25 +190,57 @@ function PercentSlider({
 function ExperimentalSettings() {
   const settings = useSettings();
   return (
-    <Group title="Beta">
-      <Row
-        label="Every project in the sidebar"
-        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Choose which projects show with the checklist button at the bottom of the sidebar, or in each project's settings."
-      >
-        <Switch
+    <>
+      <Group title="Beta">
+        <Row
           label="Every project in the sidebar"
-          checked={settings.sidebarAllProjects}
-          onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
-        />
-      </Row>
-      <Row
-        label="Murilo mode"
-        description="Shows every tool call in the chat, one row each, with the agent's notes between them. Replies no longer fold their activity into one line."
-      >
-        <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
-      </Row>
-      <LinearSettings />
-    </Group>
+          description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Choose which projects show with the checklist button at the bottom of the sidebar, or in each project's settings."
+        >
+          <Switch
+            label="Every project in the sidebar"
+            checked={settings.sidebarAllProjects}
+            onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
+          />
+        </Row>
+        <Row
+          label="Murilo mode"
+          description="Shows every tool call in the chat, one row each, with the agent's notes between them. Replies no longer fold their activity into one line."
+        >
+          <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
+        </Row>
+        <LinearSettings />
+      </Group>
+      {navigator.platform.startsWith("Mac") && (
+        <Group title="Window">
+          <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
+            <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+          </Row>
+          {settings.windowTranslucent && (
+            <>
+              <Row label="Window" description="How much of the desktop shows through the window itself.">
+                <PercentSlider
+                  label="Window translucency"
+                  value={settings.windowTranslucency}
+                  range={WINDOW_TRANSLUCENCY_RANGE}
+                  onChange={(windowTranslucency) => updateSettings({ windowTranslucency })}
+                />
+              </Row>
+              <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
+                <PercentSlider
+                  label="Panel translucency"
+                  value={settings.panelTranslucency}
+                  range={PANEL_TRANSLUCENCY_RANGE}
+                  onChange={(panelTranslucency) => updateSettings({ panelTranslucency })}
+                />
+              </Row>
+              <Row label="Dot grid" description="Keep the dots on the window background.">
+                <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
+              </Row>
+            </>
+          )}
+        </Group>
+      )}
+    </>
   );
 }
 
@@ -372,36 +404,6 @@ function AppearanceSettings() {
           />
         </Row>
       </Group>
-      {navigator.platform.startsWith("Mac") && (
-        <Group title="Window">
-          <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
-            <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
-          </Row>
-          {settings.windowTranslucent && (
-            <>
-              <Row label="Window" description="How much of the desktop shows through the window itself.">
-                <PercentSlider
-                  label="Window translucency"
-                  value={settings.windowTranslucency}
-                  range={WINDOW_TRANSLUCENCY_RANGE}
-                  onChange={(windowTranslucency) => updateSettings({ windowTranslucency })}
-                />
-              </Row>
-              <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
-                <PercentSlider
-                  label="Panel translucency"
-                  value={settings.panelTranslucency}
-                  range={PANEL_TRANSLUCENCY_RANGE}
-                  onChange={(panelTranslucency) => updateSettings({ panelTranslucency })}
-                />
-              </Row>
-              <Row label="Dot grid" description="Keep the dots on the window background.">
-                <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
-              </Row>
-            </>
-          )}
-        </Group>
-      )}
     </>
   );
 }

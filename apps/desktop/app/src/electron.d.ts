@@ -100,6 +100,9 @@ export type PairedDevice = {
   route: "lan" | "relay" | null;
 };
 
+/** A computer pairing with this Mac for the first time, waiting for Allow in its window (devices:pending). */
+export type PendingComputer = { key: string; name: string | null; at: number };
+
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
@@ -356,6 +359,13 @@ declare global {
       listDevices: () => Promise<PairedDevice[]>;
       /** Forgets one and closes its connections; resolves with the devices left. */
       removeDevice: (key: string) => Promise<PairedDevice[]>;
+      /** Computers waiting for Allow, oldest first. */
+      listPendingDevices: () => Promise<PendingComputer[]>;
+      /** Lets a waiting computer pair; resolves with the ones still waiting. */
+      allowDevice: (key: string) => Promise<PendingComputer[]>;
+      /** Turns a waiting computer away; resolves with the ones still waiting. */
+      denyDevice: (key: string) => Promise<PendingComputer[]>;
+      onDevicesPending: (callback: (payload: { requests: PendingComputer[] }) => void) => () => void;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       accountAction: (

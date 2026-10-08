@@ -10,6 +10,7 @@ const { setTimeout: delay } = require("node:timers/promises");
 const { startDaemon } = require("./server.cjs");
 const { connect } = require("./client.cjs");
 const { MAX_FRAME_BYTES } = require("./protocol.cjs");
+const { applyStatePatch } = require("@milagre/shared/state-patch");
 
 const gitConfig = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 
@@ -832,4 +833,65 @@ test("a phone reset or disable answers with the status it settled on, not the on
   assert.notEqual(new URL(reset.pairingLink).searchParams.get("token"), new URL(on.pairingLink).searchParams.get("token"));
   const off = await desktop.call("phone:set-enabled", [false]);
   assert.equal(off.state, "off");
+});
+
+test("a client that takes state patches gets what changed, one that doesn't still gets the whole state", async (t) => {
+  const { project, client } = await fixture(t);
+  const patched = await client();
+  const whole = await client();
+  const patchEvents = [];
+  const wholeEvents = [];
+  patched.on("event", (event) => patchEvents.push(event));
+  whole.on("event", (event) => wholeEvents.push(event));
+  assert.ok((await patched.call("daemon:status")).capabilities.includes("state-patches-v1"));
+  const { epoch } = await patched.call("daemon:state-patches");
+  const opened = await patched.call("project:open", [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  const held = await patched.call("state:read", [project]);
+  assert.equal(held.epoch, epoch);
+  assert.deepEqual(held.state, (await patched.call("project:snapshot", [project])).state);
+
+  await patched.call("chat:patch", [project, session.id, { title: "Renamed" }]);
+  const change = await waitFor(() => patchEvents.find((event) => event.channel === "project:state" && event.payload.version > held.version));
+  assert.equal(change.payload.base, held.version);
+  assert.equal(change.payload.epoch, epoch);
+  assert.equal("state" in change.payload, false);
+  const applied = applyStatePatch(held.state, change.payload.patch);
+  assert.deepEqual(applied, (await patched.call("project:snapshot", [project])).state);
+  assert.equal(applied.messages, held.state.messages);
+  const wholeChange = await waitFor(() =>
+    wholeEvents.find((event) => event.channel === "project:state" && event.payload.state?.sessions[session.id].title === "Renamed"),
+  );
+  assert.equal("patch" in wholeChange.payload, false);
+
+  // The next change follows on from that one.
+  await patched.call("chat:patch", [project, session.id, { title: "Again" }]);
+  const next = await waitFor(() => patchEvents.find((event) => event.channel === "project:state" && event.payload.version > change.payload.version));
+  assert.equal(next.payload.base, change.payload.version);
+  assert.equal(applyStatePatch(applied, next.payload.patch).sessions[session.id].title, "Again");
+});
+
+test("a state the client can't patch from, or a patch over the event limit, says to read the state again", async (t) => {
+  // An 8 KB frame: the event limit is 2 KB, so a reply longer than that can't go as a patch.
+  const { project, client } = await fixture(t);
+  const desktop = await client();
+  const events = [];
+  desktop.on("event", (event) => events.push(event));
+  await desktop.call("daemon:state-patches");
+  const opened = await desktop.call("project:open", [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  const states = () => events.filter((event) => event.channel === "project:state");
+  await desktop.call("chat:patch", [project, session.id, { title: "First" }]);
+  // The first state sent for this Project has nothing before it to patch from, so it says to read it.
+  const first = await waitFor(() => states()[0]);
+  assert.equal(first.payload.resync, true);
+  assert.equal("state" in first.payload, false);
+  const held = await desktop.call("state:read", [project]);
+  await desktop.call("chat:git-note", [`${project}#${session.id}`, "x".repeat(5000)]);
+  const large = await waitFor(() => states().find((event) => event.payload.version > held.version));
+  assert.equal(large.payload.resync, true);
+  assert.equal("patch" in large.payload, false);
+  const again = await desktop.call("state:read", [project]);
+  assert.equal(again.version, large.payload.version);
+  assert.equal(again.state.messages.at(-1).body.length, 5000);
 });

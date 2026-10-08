@@ -310,6 +310,8 @@ async function startMobileBridge({
   let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
+  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it.
+  await client.call("daemon:state-patches").catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
   async function readScope(owner) {
     await confine?.check(owner);
@@ -413,8 +415,8 @@ async function startMobileBridge({
       else if (channel === "agent:event" && typeof payload?.chatId === "string" && chatInProject(entry.projectPath, payload.chatId)) {
         // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs
         // fetch first would hide the reply until the Project caught up. Subagents live only in the Project state.
-        // A large Project's state is left out of the event (stateTooLarge); the turn's end still needs the snapshot.
-        if (payload.state || payload.stateTooLarge) signal(entry, "project", LIVE_DELAY.runs);
+        // The state can come whole, as a patch (version), or left out (stateTooLarge); the turn's end needs the snapshot.
+        if (payload.state || payload.stateTooLarge || typeof payload.version === "number") signal(entry, "project", LIVE_DELAY.runs);
         else signal(entry, payload.event?.type === "subagent-update" ? "project" : "runs");
       }
     }

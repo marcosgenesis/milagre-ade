@@ -8,6 +8,7 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
 import { reportChatAction } from "./lib/chat-action";
+import { stateEvents } from "./lib/state-events";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
@@ -384,7 +385,7 @@ function App() {
   useEffect(() => {
     void loadInitialProject();
   }, []);
-  useEffect(() => window.milagre.onLinkState?.((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
+  useEffect(() => stateEvents.onLinkState((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
     let updated = false;
@@ -569,7 +570,7 @@ function App() {
     if (seen) rememberProjectCopy({ ...seen, state: statesRef.current[projectPath] });
   }
 
-  useEffect(() => window.milagre.onProjectState(({ path, state: next }) => receiveState(path, next)), []);
+  useEffect(() => stateEvents.onProjectState(({ path, state: next }) => receiveState(path, next)), []);
 
   // Approvals never time out, so mark chats that wait on one (the open chat too: its card may be scrolled away).
   // The sets are rebuilt on every streamed batch; keeping the old one while its members hold keeps the sidebar rows still.

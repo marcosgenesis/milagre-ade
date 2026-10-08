@@ -3,6 +3,7 @@ import type { CoordinatorState, LinkState, OpenProject } from "@milagre/shared/m
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { isListedChat } from "@milagre/shared/chats";
+import { stateEvents } from "./state-events.ts";
 import type { SidebarRecent } from "../components/sidebar/ChatRow";
 import { chatMark, chatTitle, orderChats, type ChatOrder } from "./chat-list.ts";
 
@@ -87,15 +88,15 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
       scopeStateCache[key] = state;
       setStates((previous) => ({ ...previous, [key]: state }));
     };
-    const offProject = window.milagre.onProjectState?.(({ path, state }) => {
+    const offProject = stateEvents.onProjectState(({ path, state }) => {
       const copy = projectCopies.get(path);
       if (copy && state?.sessions) projectCopies.set(path, { ...copy, state: state as CoordinatorState });
       keep(path, state);
     });
-    const offLink = window.milagre.onLinkState?.(({ linkId, state }) => keep(`milagre-link:${linkId}`, state));
+    const offLink = stateEvents.onLinkState(({ linkId, state }) => keep(`milagre-link:${linkId}`, state));
     return () => {
-      offProject?.();
-      offLink?.();
+      offProject();
+      offLink();
       listening--;
       // With no sidebar listening, the copies can go stale: read them again next time. A switch unmounts one
       // sidebar and mounts the other in the same commit, so wait a turn before deciding nobody listens.

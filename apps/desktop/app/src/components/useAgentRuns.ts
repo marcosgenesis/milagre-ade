@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSendRequest, CoordinatorState, LinkState, PermissionDecision, QuestionAnswers } from "../model";
 import { applyRunEvent, clearAnswered, markAnswered, projectOfKey } from "../lib/agent-runs";
 import { answerSummary } from "../lib/question-answers";
+import { stateEvents } from "../lib/state-events";
 import type { AgentRuns, SentAnswer } from "../lib/agent-runs";
 
 /**
@@ -28,7 +29,7 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
   useEffect(() => {
     let taken = 0;
     let recovered = false;
-    const unsubscribe = window.milagre.onAgentEvent(({ chatId, event, state, seq }) => {
+    const unsubscribe = stateEvents.onAgentEvent(({ chatId, event, state, seq }) => {
       if (seq === undefined || seq > taken)
         setAll(applyRunEvent(runsRef.current, chatId, event, event.type === "turn-started" ? modelForRef.current(chatId) : ""));
       if (state) onStateRef.current(projectOfKey(chatId), state);

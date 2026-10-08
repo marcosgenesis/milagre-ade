@@ -441,11 +441,12 @@ export function LinkWorkspace({
                     onSend={() => void send()}
                     onStop={chatId && run ? () => void agents.interrupt(chatId) : undefined}
                     isSending={Boolean(run && !approval && !question)}
-                    sendBlocked={preparing || Boolean(session?.handoverPending)}
+                    sendBlocked={preparing}
                     streamingText={run?.text}
                     streamingSteps={run?.steps}
                     runStartedAt={run?.startedAt}
                     runModelName={run?.model}
+                    sessionProvider={session?.provider}
                     tasks={run?.tasks}
                     contextUsage={run?.contextUsage ?? session?.contextUsage}
                     subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}

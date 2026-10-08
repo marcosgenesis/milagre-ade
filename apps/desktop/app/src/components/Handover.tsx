@@ -20,7 +20,13 @@ export function HandoffDivider({ context, models }: { context: HandoffContext; m
   const label = handoffLabel(context, models);
   const canOpen = context.status === "done" && Boolean(context.brief);
   return (
-    <div data-handoff-divider data-status={context.status} className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-3" role="separator">
+    <div
+      data-handoff-divider
+      data-status={context.status}
+      className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-3"
+      role="group"
+      aria-label={label.restored ? `Context restored to ${label.to}` : `Context handoff from ${label.from} to ${label.to}`}
+    >
       <span className="h-px flex-1 bg-line" />
       <button
         type="button"

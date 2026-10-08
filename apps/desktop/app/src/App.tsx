@@ -1838,6 +1838,7 @@ function App() {
                   onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}
+                  sessionProvider={selectedSession?.provider}
                   runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
                   resume={
                     project && selectedSession?.resumeTurn

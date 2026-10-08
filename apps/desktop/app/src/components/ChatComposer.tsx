@@ -361,6 +361,8 @@ interface ChatComposerProps {
   asking?: boolean;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
+  /** The provider the open chat runs on; the picker may already show the other one. */
+  sessionProvider?: ModelProvider;
   /** The active turn's start time, independent of the chat view. */
   runStartedAt?: number;
   /** Opens the Chat a Delegation, report or agreement came from, in whichever Project it is. */
@@ -593,6 +595,7 @@ export function ChatComposer({
   waitingStepIds,
   asking = false,
   runModelName,
+  sessionProvider,
   runStartedAt,
   onOpenLinkedChat,
   resume,
@@ -781,7 +784,7 @@ export function ChatComposer({
           <SubagentTrack
             key={chatId}
             agents={subagents}
-            provider={selectedModel.provider}
+            provider={sessionProvider ?? selectedModel.provider}
             onOpenCanvas={() => setCanvasChat(chatId)}
             onArchiveFinished={onArchiveFinishedSubagents}
             onArchive={onArchiveSubagent}

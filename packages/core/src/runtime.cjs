@@ -13,6 +13,7 @@ const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 const { migrateImages, withDetails } = require("./project-content.cjs");
+const { chatPage, chatSearch } = require("./chat-pages.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -1243,6 +1244,13 @@ function createRuntime(options) {
     if (!message) throw new Error("That message is no longer in this Project.");
     return withDetails(scopeStates.storageDirectory(scope), message);
   });
+  // A page of one Chat's messages, and search across a Project's Chats, for a client that doesn't hold every message.
+  const readScope = async (scope) => {
+    if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
+    return scopeStates.get(scope);
+  };
+  commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
+  commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {

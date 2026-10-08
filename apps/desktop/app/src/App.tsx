@@ -2,7 +2,7 @@ import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
-import type { LinkState, OpenLink } from "@milagre/shared/model";
+import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
 import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
@@ -92,7 +92,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands } from "./lib/message-commands";
-import type { RecentProject } from "./lib/project-list";
+import { RECENT_PROJECTS_CHANGED, type RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore, draftKey } from "./lib/draft-store";
@@ -152,7 +152,8 @@ function App() {
   const selectedLinkRef = useRef(selectedLink);
   selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  // `true` creates a Link; a Link edits that one.
+  const [linkDialogOpen, setLinkDialogOpen] = useState<boolean | NamedProjectLink>(false);
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
@@ -634,11 +635,13 @@ function App() {
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
+  // Chats with an archive under way, by chat key: each keeps its row, under the progress, until the archive ends.
+  const [archivingChats, setArchivingChats] = useState<ReadonlySet<string>>(() => new Set());
   const chats = useMemo(() => {
     const state = sidebarState;
     if (!state) return [];
     const withMessages = Object.values(state.sessions)
-      .filter((session) => !session.archived)
+      .filter((session) => !session.archived || (project && archivingChats.has(chatKey(project.path, session.id))))
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
       .filter(({ session, sessionMessages }) => isListedChat(session, chatSummary(session, sessionMessages).count));
     const rows = orderChats(withMessages, chatOrder).map(({ session, sessionMessages }) => {
@@ -694,6 +697,7 @@ function App() {
     chatPrs,
     agentPorts,
     project,
+    archivingChats,
   ]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
@@ -770,6 +774,7 @@ function App() {
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
     const wasOpen = selectedSessionId === sessionId;
+    setArchivingChats((current) => new Set(current).add(key));
     return runArchive(
       {
         projectPath,
@@ -804,7 +809,15 @@ function App() {
       sessionId,
       mode,
       plan,
-    ).catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
+    )
+      .catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`))
+      .finally(() =>
+        setArchivingChats((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        }),
+      );
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -1423,7 +1436,8 @@ function App() {
       onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-      onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+      // The row shows the progress until this settles.
+      onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
     }),
     [],
   );
@@ -1519,12 +1533,34 @@ function App() {
     );
   }
 
+  async function editLink(id: string) {
+    try {
+      const link = (await window.milagre.listNamedLinks()).find((item) => item.id === id);
+      if (!link) throw new Error("Link no longer exists");
+      setLinkDialogOpen(link);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
+  // An edited Link that is open reloads in place, so its header and member Projects follow.
+  async function linkEdited(link: NamedProjectLink) {
+    window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+    if (selectedLinkRef.current?.link.id !== link.id) return;
+    try {
+      const next = await window.milagre.openNamedLink(link.id);
+      if (selectedLinkRef.current?.link.id === link.id) setSelectedLink(next);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
   const linkDialog = linkDialogOpen ? (
     <LinkProjectDialog
+      link={typeof linkDialogOpen === "object" ? linkDialogOpen : undefined}
       onClose={() => setLinkDialogOpen(false)}
       onCreated={(link) => {
+        const edited = typeof linkDialogOpen === "object";
         setLinkDialogOpen(false);
-        void selectLink(link.id);
+        void (edited ? linkEdited(link) : selectLink(link.id));
       }}
     />
   ) : null;
@@ -1578,6 +1614,7 @@ function App() {
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
           onLinkProject={() => setLinkDialogOpen(true)}
+          onEditLink={(id) => void editLink(id)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
             setSettingsSection("project-accounts");
@@ -1817,6 +1854,7 @@ function App() {
               workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
+              onEditLink={(id) => void editLink(id)}
               onOpenProject={openProjectFromSidebar}
               recents={chats}
               activeId={

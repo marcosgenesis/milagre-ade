@@ -196,3 +196,34 @@ test("shared Chats retain canvas reads and external readers see the canonical tr
     /Delegation into a shared Link Chat is not supported/,
   );
 });
+test("editing a Link adds and removes member Projects for new Chats; existing Chats keep their Worktrees", async (t) => {
+  const { dir, runtime, projects } = await fixture(t);
+  const folder = path.join(dir, "admin");
+  await fs.mkdir(folder);
+  execFileSync("git", ["init", "-qb", "main", folder]);
+  execFileSync("git", ["-C", folder, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Initial"]);
+  await runtime.openProject(folder);
+  const admin = (await runtime.invoke("project:registry")).find((project) => project.path === folder);
+  const link = await runtime.invoke("link:create", [{ name: "Food", projectIds: projects.map((project) => project.id) }]);
+  await runtime.invoke("link:open", [link.id]);
+  const request = { linkId: link.id, sessionId: null, provider: "codex", model: "test", permissionMode: "auto", body: "Edit" };
+  const first = await runtime.invoke("link:send", [{ ...request, operationId: randomUUID() }]);
+  await runtime.flush();
+  assert.ok(runtime.methods.includes("link:update"), "Link membership can be edited");
+  const edited = await runtime.invoke("link:update", [{ id: link.id, name: " Food v2 ", projectIds: [projects[1].id, admin.id] }]);
+  assert.deepEqual(edited, { ...link, name: "Food v2", projectIds: [projects[1].id, admin.id] });
+  assert.deepEqual(await runtime.invoke("link:list"), [edited]);
+  await assert.rejects(runtime.invoke("link:update", [{ id: link.id, name: "Food", projectIds: [admin.id] }]), /two/);
+  const second = await runtime.invoke("link:send", [{ ...request, operationId: randomUUID() }]);
+  await runtime.flush();
+  const state = (await runtime.invoke("link:snapshot", [link.id])).state;
+  assert.deepEqual(
+    state.sessions[second.sessionId].worktrees.map((member) => member.projectId),
+    [projects[1].id, admin.id],
+  );
+  assert.deepEqual(
+    state.sessions[first.sessionId].worktrees.map((member) => member.projectId),
+    projects.map((project) => project.id),
+  );
+  await runtime.invoke("link:send", [{ ...request, sessionId: first.sessionId, operationId: randomUUID() }]);
+});

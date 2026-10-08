@@ -101,6 +101,8 @@ export interface ChatSummary {
   lastModel?: string;
   /** A handoff divider still preparing, by message id. */
   openHandoff?: number;
+  /** The clientMessageId of the Chat's last few sends, so a window without messages finds the Chat its preview became. */
+  clientMessageIds?: string[];
 }
 
 export interface AgentSession {
@@ -180,6 +182,8 @@ export interface LinkPreparation {
   retainedPaths?: string[];
 }
 export interface LinkState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   sessions: Record<string, LinkChatSession>;
   messages: ChatMessage[];
@@ -513,6 +517,8 @@ export interface WorktreeRequest {
 }
 
 export interface CoordinatorState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   projects: Record<string, Project>;
   worktrees: Record<string, Worktree>;

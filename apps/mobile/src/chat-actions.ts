@@ -3,7 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import type { AgentSession, OpenLink } from "@milagre/shared/model";
 import type { Client } from "./client";
 import type { MenuSection } from "./ui";
-import { archiveFromPhone, type ArchiveRequest } from "./archive";
+import { archiveFromPhone, startArchiving, type ArchiveRequest } from "./archive";
 import { confirm, confirmSheet } from "./confirm-store";
 import { pinPatch } from "./pins";
 
@@ -44,7 +44,8 @@ export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: 
 
 /**
  * Runs a choice from `chatMenu` against the Chat's Project. Archive asks first, as desktop does, with what removing the
- * Chat's worktree would lose, and stops a running Chat. Returns what archiving did, so a screen showing the Chat can leave.
+ * Chat's worktree would lose, and stops a running Chat. `onConfirm` runs once the archive goes ahead: a screen showing
+ * the Chat leaves then, not when the archive ends, by which time the phone may be somewhere else.
  */
 export async function runChatAction({
   action,
@@ -81,11 +82,16 @@ export async function runChatAction({
         ))
       )
         return;
-      onConfirm?.();
-      expectActivity();
-      await client.call("agent:interrupt", [`${projectPath}#${chat.id}`]);
-      await client.call("chat:patch", [projectPath, chat.id, { archived: true }]);
-      await refresh();
+      const done = startArchiving(`${projectPath}#${chat.id}`);
+      try {
+        onConfirm?.();
+        expectActivity();
+        await client.call("agent:interrupt", [`${projectPath}#${chat.id}`]);
+        await client.call("chat:patch", [projectPath, chat.id, { archived: true }]);
+        await refresh();
+      } finally {
+        done();
+      }
       return "hidden";
     }
     return archiveFromPhone({

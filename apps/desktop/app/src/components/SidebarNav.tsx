@@ -28,6 +28,7 @@ import {
   GitMergeIcon,
   Link04Icon,
   MoreVerticalIcon,
+  PencilEdit02Icon,
   Search01Icon,
   Settings01Icon,
   SidebarLeft01Icon,
@@ -102,6 +103,8 @@ type SidebarNavProps = {
   selectedLink?: { id: string; projects: Array<{ path: string; name: string }> };
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  /** Opens the dialog that renames a Link or changes its member Projects. */
+  onEditLink?: (id: string) => void;
   workspaceName?: string;
   workspaceImage?: string | null;
   /** Runs the folder dialog. */
@@ -440,6 +443,7 @@ function WorkspaceMenu({
   registeredProjects,
   onSwitchLink,
   onLinkProject,
+  onEditLink,
   attentionPaths,
 }: {
   position: { top: number; left: number };
@@ -456,6 +460,7 @@ function WorkspaceMenu({
   registeredProjects: Array<{ id: string; path: string; name: string }>;
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  onEditLink?: (id: string) => void;
   attentionPaths: string[];
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -646,6 +651,21 @@ function WorkspaceMenu({
               <span className="text-[13.5px]">Link projects…</span>
             </button>
           )}
+          {selectedLink && onEditLink && (
+            <button
+              data-menu-row
+              data-edit-link
+              type="button"
+              role="menuitem"
+              onClick={() => go(() => onEditLink(selectedLink.id))}
+              className="relative z-10 flex h-9 items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2"
+            >
+              <span className="flex size-5 items-center justify-center text-ink-2">
+                <HugeIcon icon={PencilEdit02Icon} size={16} />
+              </span>
+              <span className="text-[13.5px]">Edit Link…</span>
+            </button>
+          )}
         </GlideMenu>
       </ScrollArea>
     </div>,
@@ -659,6 +679,7 @@ export default memo(function SidebarNav({
   workspaceImage,
   selectedLink,
   onLinkProject,
+  onEditLink,
   onOpenProject,
   onSwitchLink,
   onSwitchProject,
@@ -846,9 +867,14 @@ export default memo(function SidebarNav({
     );
   };
 
-  // A Project's ⋯ rows: the four actions, and removing it from the list unless it's the open one. A Link gets its name copied.
+  // A Project's ⋯ rows: the four actions, and removing it from the list unless it's the open one. A Link gets its name copied and can be edited.
   const scopeMenu = (scope: { key: string; name: string; link: NamedProjectLink | null }, current: boolean): ScopeMenuItem[] => {
-    if (scope.link) return [{ key: "copy-name", label: "Copy Link name", icon: Copy01Icon, run: () => copy(scope.name) }];
+    const link = scope.link;
+    if (link)
+      return [
+        { key: "copy-name", label: "Copy Link name", icon: Copy01Icon, run: () => copy(scope.name) },
+        ...(onEditLink ? [{ key: "edit", label: "Edit Link…", icon: PencilEdit02Icon, run: () => onEditLink(link.id) }] : []),
+      ];
     const actions: Record<ProjectMenuKey, Pick<ScopeMenuItem, "run" | "disabled">> = {
       reveal: { run: () => void window.milagre?.revealInFolder(scope.key).catch(() => {}) },
       "copy-path": { run: () => copy(scope.key) },
@@ -1040,6 +1066,7 @@ export default memo(function SidebarNav({
                   registeredProjects={registeredProjects}
                   onSwitchLink={onSwitchLink}
                   onLinkProject={onLinkProject}
+                  onEditLink={onEditLink}
                   position={workspacePosition}
                   workspace={workspace}
                   projectPath={projectPath}

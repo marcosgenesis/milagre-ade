@@ -6,7 +6,7 @@ const path = require("node:path");
 // This is everything AcpSession needs to know about it. Verified against agy 1.3.0 on macOS arm64.
 
 const { AMBIENT_ENV, HARNESS } = require("./antigravity-install.cjs");
-const { ANTIGRAVITY_AGENT_OPTIONS, antigravityFamilies, resolveAntigravityModel } = require("@milagre/shared/model-options");
+const { ANTIGRAVITY_AGENT_OPTIONS, antigravityFamilies, resolveAntigravityModel } = require("@milagre/shared/antigravity-models");
 
 // Ambient credentials and settings that would pick another account, project or token store, or open a
 // browser on the agent's own; the account's own GEMINI_HOME is set again after the scrub.

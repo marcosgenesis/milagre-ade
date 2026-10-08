@@ -1,4 +1,5 @@
 import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
+import type { LinearStatus } from "@milagre/shared/linear";
 import type {
   ProjectAccountScope,
   ProjectAccountsSnapshot,
@@ -192,6 +193,13 @@ declare global {
       saveMainSyncDefault: (value: boolean) => Promise<{ syncMain: boolean }>;
       /** A main branch sync finished, before a new Worktree. */
       onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
+      readLinearStatus: () => Promise<LinearStatus>;
+      /** Opens Linear in the browser and resolves once the Mac is connected. A second call replaces a waiting one. */
+      connectLinear: () => Promise<LinearStatus>;
+      disconnectLinear: () => Promise<LinearStatus>;
+      readLinearEnabled: () => Promise<{ enabled: boolean }>;
+      saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
+      onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */

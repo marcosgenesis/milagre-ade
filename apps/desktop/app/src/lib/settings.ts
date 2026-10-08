@@ -33,6 +33,8 @@ export interface AppSettings {
   chatOrder: ChatOrder;
   /** Experimental: the sidebar lists every recent Project and Link with its chats, not only the open one's. */
   sidebarAllProjects: boolean;
+  /** Experimental: a reply's tool calls and the text between them show in the chat, one row each, instead of folding into one line. */
+  muriloMode: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -69,6 +71,7 @@ const DEFAULTS: AppSettings = {
   tldrEnabled: true,
   chatOrder: "created",
   sidebarAllProjects: false,
+  muriloMode: false,
   windowTranslucent: false,
   windowTranslucency: 80,
   panelTranslucency: 40,
@@ -100,6 +103,7 @@ function load(): AppSettings {
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
       sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
+      muriloMode: typeof saved.muriloMode === "boolean" ? saved.muriloMode : DEFAULTS.muriloMode,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),

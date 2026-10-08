@@ -6,6 +6,7 @@ const { createChatScopes } = require("./chat-scopes.cjs");
 const { registerLinkRuntime } = require("./link-runtime.cjs");
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
+const { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } = require("@milagre/shared/pr-action");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
 const { syncMainBranch } = require("./main-sync.cjs");
@@ -43,6 +44,7 @@ const { registerGitHandlers } = require("./git-ipc.cjs");
 const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
+const { createLinear } = require("./linear/index.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -852,6 +854,14 @@ function createRuntime(options) {
       return pending;
     });
 
+  // The Mac's Linear connection. Phones read it and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
+  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  commands.handle("linear:status", () => linear.status());
+  commands.handle("linear:connect", () => linear.connect());
+  commands.handle("linear:disconnect", () => linear.disconnect());
+  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
+  commands.handle("linear:enabled:save", (_event, value) => ({ enabled: linear.setEnabled(value === true) }));
+
   const chatTitles = new ChatTitles({
     states: scopeStates,
     update: updateProject,
@@ -885,8 +895,15 @@ function createRuntime(options) {
 
   commands.handle("chat:send", (_event, request) => {
     if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
-    // Only Milagre marks a message as coming from another Chat.
-    return chats.send({ ...request, context: undefined }).then(({ sessionId }) => ({ sessionId }));
+    // Only Milagre marks a message as coming from another Chat. A PR-blocker pill is the one context a renderer can ask
+    // for, and Milagre checks it and writes its message and skill prompt itself.
+    const { prAction, ...rest } = request;
+    const action = prAction === undefined ? null : pullRequestActionContext(prAction);
+    if (prAction !== undefined && !action) throw new Error("That pull request action isn't valid.");
+    const message = action
+      ? { ...rest, body: pullRequestActionBody(action), prompt: pullRequestActionPrompt(action), images: [], files: [], context: action }
+      : { ...rest, context: undefined };
+    return chats.send(message).then(({ sessionId }) => ({ sessionId }));
   });
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
@@ -1359,6 +1376,8 @@ function createRuntime(options) {
       await advisorStore.close();
       // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
       await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
+      // A waiting Linear sign-in is an accepted command too: end it, or the wait below lasts until its timeout.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -1418,6 +1437,8 @@ function createRuntime(options) {
         return readOpenChat(view ? view.chatId : chats.openChat);
       }),
     flush: async () => {
+      // A waiting Linear sign-in is an accepted command, but its window is gone when this runs on quit: end it.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       await scopeStates.flush();
       await usageStore.idle();

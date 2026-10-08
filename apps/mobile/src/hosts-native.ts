@@ -40,6 +40,22 @@ export async function saveAttentionButton(on: boolean) {
     /* best effort */
   }
 }
+const muriloModeKey = "milagre.murilo-mode.v1";
+/** Experimental: whether a reply's tool calls show in the Chat one row each instead of folding into one line; off unless turned on. */
+export async function readMuriloMode(): Promise<boolean> {
+  try {
+    return (await SecureStore.getItemAsync(muriloModeKey)) === "on";
+  } catch {
+    return false;
+  }
+}
+export async function saveMuriloMode(on: boolean) {
+  try {
+    await SecureStore.setItemAsync(muriloModeKey, on ? "on" : "off");
+  } catch {
+    /* best effort */
+  }
+}
 export async function savePermission(mode: string) {
   try {
     await SecureStore.setItemAsync(permissionKey, mode);

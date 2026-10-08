@@ -571,6 +571,19 @@ test("a confined phone reads the main sync default but can't change it", async (
   await assert.rejects(confine.checkCall("main-sync:default:save", [true]), { status: 403, message: REFUSED });
 });
 
+// Linear is the Mac's connection: a confined phone sees whether it is on and connected, and changes nothing.
+test("a confined phone reads Linear status and the switch but can't change it", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  await confine.checkCall("linear:status", []);
+  await confine.checkCall("linear:enabled:read", []);
+  await assert.rejects(confine.checkCall("linear:enabled:save", [true]), { status: 403, message: REFUSED });
+});
+
+test("phones can't connect or disconnect Linear", () => {
+  assert.equal(METHODS.has("linear:connect"), false);
+  assert.equal(METHODS.has("linear:disconnect"), false);
+});
+
 test("advisor controls are allowlisted and confined to the owning Project", async (t) => {
   const f = await fixture(t);
   for (const method of ["advisor:stop", "advisor:retry"]) {

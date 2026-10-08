@@ -18,6 +18,7 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/main-sync.ts",
+    "src/linear.ts",
     "src/simulator.ts",
     "src/browser.ts",
     "src/terminal.ts",
@@ -30,6 +31,10 @@
   ],
   "type": "module",
   "exports": {
+    "./pr-action": {
+      "types": "./src/pr-action.d.mts",
+      "default": "./src/pr-action.mjs"
+    },
     "./prompt-skills": {
       "types": "./src/prompt-skills.d.mts",
       "default": "./src/prompt-skills.mjs"
@@ -131,6 +136,7 @@
     "./diff-layout": "./src/diff-layout.ts",
     "./usage": "./src/usage.ts",
     "./main-sync": "./src/main-sync.ts",
+    "./linear": "./src/linear.ts",
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",

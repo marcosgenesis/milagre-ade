@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE } from "@milagre/shared/main-sync";
 import { Text, View } from "react-native";
 import { Stack, router, useFocusEffect } from "expo-router";
-import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, TestTube01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import { usePush } from "../push";
 import { useAppUpdates } from "../update-sheet";
 import { Icon } from "../icons";
@@ -11,7 +11,7 @@ import { ProjectIcon } from "../project-icon";
 import { ErrorNotice, ListRow, PageScroll, Toggle, styles } from "../ui";
 import { useAttentionButton } from "../attention";
 
-type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills";
+type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills" | "experimental";
 
 export default function SettingsScreen() {
   return (
@@ -100,6 +100,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
         <ListRow compact title="Plan usage" leading={<Icon icon={ChartBarLineIcon} tone="ink" size={20} />} onPress={() => onOpen("usage")} />
         <View style={styles.separator} />
         <ListRow compact title="Skills" leading={<Icon icon={MagicWand01Icon} tone="ink" size={20} />} onPress={() => onOpen("skills")} />
+        <View style={styles.separator} />
+        <ListRow compact title="Experimental" leading={<Icon icon={TestTube01Icon} tone="ink" size={20} />} onPress={() => onOpen("experimental")} />
         <View style={styles.separator} />
         {/* Checks now and shows the update sheet, which follows the check to Up to date or Update now. */}
         <ListRow

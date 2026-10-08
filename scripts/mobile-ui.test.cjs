@@ -784,6 +784,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
     "@hugeicons/core-free-icons": icons,
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
@@ -805,7 +806,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "../attachment-picker": { pickAttachments },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
-    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
+    // A test can show the Chat's open PR with globalThis.chatPullRequest.
+    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => globalThis.chatPullRequest ?? null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
     "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
@@ -2070,6 +2072,42 @@ test("text typed during the first send follows the created Chat into its compose
   assert.equal(screen.params.id, "42");
   assert.equal(screen.field().value, "next message typed during send");
   assert.equal(screen.session.drafts["/p#new:1"], undefined);
+});
+
+test("the PR pill sends a PR action whose preview is already a card", async () => {
+  const url = "https://github.com/o/r/pull/77";
+  globalThis.chatPullRequest = { number: 77, url, state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    find(screen.render(), (node) => node.type === "PullRequestAction").props.onRun();
+    await settle();
+    const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+    assert.equal(sent.body, "Fix CI on pull request #77");
+    // An older Mac ignores prAction: the prompt still carries the URL and the skill token.
+    assert.equal(sent.prompt, `Fix CI on pull request #77 (${url}). /milagre-fix-ci`);
+    assert.equal(JSON.stringify(sent.prAction), JSON.stringify({ action: "checks-failed", pr: 77, url }));
+    const [pending] = Object.values(screen.session.pendingChats);
+    assert.equal(JSON.stringify(pending.preview.message.context), JSON.stringify({ kind: "pr-action", action: "checks-failed", pr: 77, url }));
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
+});
+
+test("a PR without a number yet shows no PR pill", () => {
+  globalThis.chatPullRequest = { url: "https://github.com/o/r/pull/77", state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    assert.equal(
+      find(screen.render(), (node) => node.type === "PullRequestAction"),
+      undefined,
+    );
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
 });
 
 test("a successful first send clears the sent draft", async () => {
@@ -4273,6 +4311,7 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
     "../icons": { Icon: "Icon" },
     "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
   assert.deepEqual(opened, ["project-accounts"]);
@@ -4715,6 +4754,9 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./tool-row": { ToolRow: "ToolRow" },
     "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
     "./answer-card": { AnswerCard: "AnswerCard" },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
@@ -4730,6 +4772,20 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   const findType = (node, type) =>
     Array.isArray(node) ? node.some((child) => findType(child, type)) : !!node?.props && (node.type === type || findType(node.props.children, type));
   assert.ok(findType(answerTree, "AnswerCard"));
+  // So does a PR-blocker pill's action, instead of its body text.
+  const prTree = ChatReply({
+    message: {
+      id: 2,
+      session_id: 1,
+      body: "Fix CI on pull request #77",
+      context: { kind: "pr-action", action: "checks-failed", pr: 77, url: "https://github.com/o/r/pull/77" },
+      role: "user",
+    },
+    onActivity() {},
+    media: (path) => path,
+  });
+  assert.ok(findType(prTree, "PullRequestActionCard"));
+  assert.ok(!findType(prTree, "Text"), "no bubble with the body text");
   const conclusion = "T3 Code tries every route in parallel.";
   const steps = [
     { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },
@@ -4758,6 +4814,61 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   assert.deepEqual(
     markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
     ["Checking. Done."],
+  );
+});
+
+test("mobile Murilo mode shows each tool call and the notes between them in the Chat, with no activity fold", () => {
+  const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
+  const reply = (murilo) =>
+    load("chat-reply.tsx", {
+      "@milagre/shared/advisor-result": require("@milagre/shared/advisor-result"),
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+      "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
+      "react-native-svg": { default: "Svg", Path: "Path" },
+      "expo-router": { router: {} },
+      "@hugeicons/core-free-icons": new Proxy({}, { get: (_, key) => key }),
+      "@milagre/shared/reply-parts": require("@milagre/shared/reply-parts"),
+      "./file-chip": { FileChip: "FileChip" },
+      "./markdown": { Markdown: "Markdown" },
+      "./icons": { Icon: "Icon" },
+      "./activity-item": { ActivityTitle: "ActivityTitle" },
+      "./tool-row": { ToolRow: "ToolRow" },
+      "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+      "./answer-card": { AnswerCard: "AnswerCard" },
+      "./murilo-mode": { useMuriloMode: () => [murilo, () => {}] },
+      "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+      "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./theme": { hex: () => "#000" },
+      "./viewer-store": { showImages() {} },
+      "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
+    }).ChatReply;
+  const body = "Running the tests.Tests pass, reading the config.Done.";
+  const steps = [
+    { id: "a", kind: "shell", title: "Ran `npm test`", status: "done", offset: 18 },
+    { id: "b", kind: "read", title: "Read `package.json`", status: "done", offset: 49 },
+    { id: "c", kind: "search", title: "Searched for `muriloMode`", status: "done", offset: 49 },
+  ];
+  const props = { media: () => null, onActivity() {}, message: { id: 1, session_id: 1, role: "assistant", body, steps } };
+  const shown = (tree) => {
+    const rows = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.type === "ToolRow") rows.push(node.props.step.id);
+      else if (node.type === "Markdown") rows.push(node.props.text);
+      else if (typeof node.type === "function" && node.type.name === "ActivityRow") rows.push("fold");
+      walk(node.props?.children);
+    };
+    walk(tree);
+    return rows;
+  };
+  assert.deepEqual(shown(reply(false)(props)), ["fold", "Done."], "off: the activity folds into one row");
+  assert.deepEqual(
+    shown(reply(true)(props)),
+    ["Running the tests.", "a", "Tests pass, reading the config.", "b", "c", "Done."],
+    "on: every step and note, in order",
   );
 });
 
@@ -4836,6 +4947,7 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
     "../icons": { Icon: "Icon" },
     "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
   });
   const render = () => {
     react.begin();
@@ -4856,6 +4968,110 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
   await settle();
   assert.equal(toggle().props.selected, true, "a refused save puts the switch back");
   assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
+});
+
+test("mobile Settings opens Experimental as its own page, like desktop's section", () => {
+  const opened = [];
+  const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const tree = SettingsView({ onOpen: (page) => opened.push(page) });
+  assert.equal(
+    find(tree, (n) => n.props?.title === "Linear"),
+    undefined,
+    "the Linear switch lives on the Experimental page",
+  );
+  find(tree, (n) => n.type === "ListRow" && n.props.title === "Experimental").props.onPress();
+  assert.deepEqual(opened, ["experimental"]);
+  const { default: Screen } = load("app/experimental.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "../ui": { PageScroll: "PageScroll" },
+    "../experimental-section": { ExperimentalSection: "ExperimentalSection" },
+  });
+  const page = Screen();
+  assert.equal(find(page, (n) => n.type === "Screen").props.options.title, "Experimental");
+  assert.ok(find(page, (n) => n.type === "ExperimentalSection"));
+});
+
+test("mobile Experimental page shows the Mac's Linear switch and status, re-read on focus", async () => {
+  const react = hookHost();
+  const focused = [];
+  let status = { connected: false };
+  const saves = [];
+  const client = {
+    async call(method, args) {
+      if (method === "linear:enabled:read") return { enabled: true };
+      if (method === "linear:status") return status;
+      if (method === "linear:enabled:save") {
+        saves.push(args[0]);
+        return { enabled: args[0] };
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+  const modules = (session) => ({
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": {
+      LINEAR_TITLE: "Linear",
+      LINEAR_HINT: "hint",
+      linearStatusLine: (value, where) => (value.connected ? "Connected as Victor to Acme" : `not connected on ${where}`),
+    },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./session": { useSession: () => session },
+    "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
+  });
+  const { ExperimentalSection } = load("experimental-section.tsx", modules({ client }));
+  const render = () => {
+    react.begin();
+    return ExperimentalSection();
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const text = (tree, value) => find(tree, (n) => n.type === "Text" && n.props.children === value);
+  render();
+  focused.at(-1)();
+  await settle();
+  let tree = render();
+  assert.equal(find(tree, (n) => n.props?.title === "Linear").props.selected, true);
+  assert.ok(text(tree, "not connected on phone"));
+  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it.
+  status = { connected: true };
+  focused.at(-1)();
+  await settle();
+  tree = render();
+  assert.ok(text(tree, "Connected as Victor to Acme"));
+  find(tree, (n) => n.props?.title === "Linear").props.onPress();
+  await settle();
+  assert.deepEqual(saves, [false]);
+  assert.equal(text(render(), "Connected as Victor to Acme"), undefined, "the status hides while the switch is off");
+
+  const offline = load("experimental-section.tsx", modules({ client: null })).ExperimentalSection;
+  react.begin();
+  const empty = offline();
+  assert.ok(text(empty, "Connect to a Mac to change its experimental features."));
+  assert.ok(
+    find(empty, (n) => n.props?.title === "Murilo mode"),
+    "Murilo mode is this phone's own switch and shows without a Mac",
+  );
+  assert.equal(
+    find(empty, (n) => n.props?.title === "Linear"),
+    undefined,
+  );
 });
 
 test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {

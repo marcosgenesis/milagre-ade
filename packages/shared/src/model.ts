@@ -211,6 +211,15 @@ export interface ChatMessage {
   /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
   detailFile?: string;
   operationId?: string;
+  /** On the user's answers to an agent's questions: each question with what they answered, shown as a card. */
+  answered?: AnsweredQuestion[];
+}
+
+/** One question the user answered, as their message keeps it. A typed answer to a secret question is masked. */
+export interface AnsweredQuestion {
+  header: string;
+  question: string;
+  answers: string[];
 }
 
 /** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */

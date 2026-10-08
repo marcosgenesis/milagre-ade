@@ -46,7 +46,14 @@ test("demo sends, approves, answers, stops and reconnects through the real HTTP/
     ]),
     true,
   );
-  await wait((state) => !state.runs.runs[chatId]);
+  const answeredState = await wait((state) => !state.runs.runs[chatId]);
+  // The answers reach the phone as the user's message, with each question for the answer card.
+  const answers = answeredState.project.state.messages.find((message) => message.role === "user" && message.answered);
+  assert.equal(answers.body, "Read a Chat");
+  assert.deepEqual(
+    answers.answered.map((item) => item.answers),
+    [["Read a Chat"]],
+  );
   await send("slow");
   await wait((state) => !!state.runs.runs[chatId]);
   await client.call("agent:interrupt", [chatId]);

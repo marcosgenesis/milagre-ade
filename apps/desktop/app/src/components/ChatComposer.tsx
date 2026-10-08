@@ -3,6 +3,7 @@ import { SubagentTrack } from "./agents/SubagentTrack";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
+import { AnswerCard } from "./agents/AnswerCard";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import { useEvent } from "../lib/stable";
@@ -150,7 +151,9 @@ const MessageSection = memo(function MessageSection({
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
   // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
   const feedback = isUser && !linked && !advisor ? parseDesignFeedback(message.body) : null;
-  const bubble = isUser && !linked && !advisor && !feedback;
+  // So do the answers to the agent's questions.
+  const answered = isUser && !linked && !advisor && !feedback && message.answered?.length ? message.answered : null;
+  const bubble = isUser && !linked && !advisor && !feedback && !answered;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -163,7 +166,7 @@ const MessageSection = memo(function MessageSection({
       data-from={messageSender(message)}
       data-linked={linked?.kind}
       data-streaming={streaming || undefined}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback ? "items-end pl-12" : ""}`}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback || answered ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       {advisor && (
@@ -173,11 +176,13 @@ const MessageSection = memo(function MessageSection({
       )}
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div
-        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
+        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback || answered ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
       >
         <Attachments images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)} files={message.files} />
         {feedback ? (
           <DesignFeedbackCard feedback={feedback} messageId={message.id} />
+        ) : answered ? (
+          <AnswerCard answered={answered} />
         ) : isUser ? (
           message.body.trim() ? (
             <UserBody body={message.body} />

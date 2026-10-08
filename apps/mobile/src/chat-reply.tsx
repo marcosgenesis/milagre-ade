@@ -14,6 +14,7 @@ import { ToolRow } from "./tool-row";
 import { ArtifactCards, DesignFeedbackCard } from "./artifact";
 import { advisorResultLabel } from "@milagre/shared/advisor-result";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
+import { AnswerCard } from "./answer-card";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
 import { colors, styles } from "./ui";
@@ -232,6 +233,8 @@ export const ChatReply = memo(function ChatReply({
           ))}
         {feedback ? (
           <DesignFeedbackCard feedback={feedback} chatId={chatId} moved={designsMoved} />
+        ) : message.answered?.length ? (
+          <AnswerCard answered={message.answered} />
         ) : (
           !!text && (
             <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: "continuous", paddingVertical: 10, paddingHorizontal: 14 }}>

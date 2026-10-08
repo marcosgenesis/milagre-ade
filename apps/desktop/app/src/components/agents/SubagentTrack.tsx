@@ -5,6 +5,7 @@ import { Archive02Icon, Cancel01Icon, ViewIcon } from "@hugeicons/core-free-icon
 import { advisorAction, subagentRoleLabel, subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { ModelProvider, Subagent } from "../../model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
+import { useSubagentTranscript } from "../../lib/subagent-transcripts";
 import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
@@ -43,10 +44,13 @@ function AdvisorControls({ agent, onStop, onRetry }: { agent: Subagent; onStop?:
   );
 }
 export const SubagentTranscript = memo(function SubagentTranscript({
+  chatKey,
   agent,
   onStop,
   onRetry,
 }: {
+  /** The Chat the subagent belongs to, to read its whole transcript when the host sends only the end of it. */
+  chatKey?: string | null;
   agent: Subagent;
   onStop?: (id: string) => void;
   onRetry?: (id: string) => void;
@@ -54,6 +58,7 @@ export const SubagentTranscript = memo(function SubagentTranscript({
   // oxlint-disable-next-line react/purity -- Date.now() only seeds the initial clock state; an effect keeps it current
   const [now, setNow] = useState(Date.now());
   const running = subagentActive(agent);
+  const transcript = useSubagentTranscript(chatKey, agent);
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -75,7 +80,7 @@ export const SubagentTranscript = memo(function SubagentTranscript({
         </div>
       )}
       {agent.latestActivity && <p className="break-words text-[12px] text-ink-3">{agent.latestActivity}</p>}
-      {agent.transcript.map((entry) => (
+      {transcript.map((entry) => (
         <div key={entry.id} className="min-w-0 break-words text-[13px]">
           {entry.kind === "tool" ? (
             <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-line p-3 font-mono text-[12px]">{entry.text}</pre>
@@ -84,13 +89,14 @@ export const SubagentTranscript = memo(function SubagentTranscript({
           )}
         </div>
       ))}
-      {!agent.transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
+      {!transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
     </div>
   );
 });
 
 /** A nonmodal list anchored above the composer. Archiving affects views, not provider execution. */
 export function SubagentTrack({
+  chatKey,
   agents,
   provider = "codex",
   onOpenCanvas,
@@ -99,6 +105,7 @@ export function SubagentTrack({
   onStop,
   onRetry,
 }: {
+  chatKey?: string | null;
   agents: Subagent[];
   provider?: ModelProvider;
   onOpenCanvas: () => void;
@@ -185,7 +192,7 @@ export function SubagentTrack({
                   </button>
                 </header>
                 <ScrollArea>
-                  <SubagentTranscript agent={child} onStop={onStop} onRetry={onRetry} />
+                  <SubagentTranscript chatKey={chatKey} agent={child} onStop={onStop} onRetry={onRetry} />
                 </ScrollArea>
               </>
             ) : (

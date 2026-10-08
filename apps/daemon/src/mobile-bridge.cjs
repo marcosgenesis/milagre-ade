@@ -111,7 +111,7 @@ const METHODS = new Set([
   "worktree:remove",
 ]);
 const MAX_BODY = 1024 * 1024;
-// Subagent entries the phone shows under each agent.
+// Subagent entries the phone shows under each agent, no more than the host sends the bridge (subagent-transcript.mjs).
 const TRANSCRIPT_TAIL = 4;
 
 // Characters of each subagent entry the phone shows (six lines at most).
@@ -362,8 +362,9 @@ async function startMobileBridge({
   let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
-  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it.
-  await client.call("daemon:state-patches").catch(() => {});
+  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it. A
+  // phone shows the last few entries of a subagent's transcript, so the bridge takes only their tails.
+  await client.call("daemon:state-patches", [{ transcripts: false }]).catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
   // The Projects phones opened lately, kept current from the host's state patches (and subagent updates, which carry
   // none), so a phone's snapshot doesn't read and parse the whole state from the host each time. A missed patch drops

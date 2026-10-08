@@ -138,3 +138,19 @@ const attribute = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&
 export function artifactShell(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}; frame-src 'none'"><style>html,body{margin:0;height:100%;background:#fff}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${attribute(artifactDocument(html))}"></iframe></body></html>`;
 }
+
+/** The step the transcript shows for the agent resolving a design comment (core's agents/steps.cjs names it). */
+export const RESOLVED_STEP = "Resolved a design comment";
+
+/** The agent's notes on the comments it resolved, by comment id. */
+export function resolutionNotes(comments: ArtifactComment[]): Map<string, string> {
+  return new Map(comments.flatMap((comment) => (comment.resolved ? [[comment.id, comment.resolved.note] as const] : [])));
+}
+
+/**
+ * Changes when the Chat's design comments may have: a comment resolved (its step done) or feedback sent. Resolutions
+ * are read again only then, not on every step or message.
+ */
+export function designActivity(steps: { title: string; status?: string }[], userBodies: string[]): number {
+  return steps.filter((step) => step.title === RESOLVED_STEP && step.status === "done").length + userBodies.filter((body) => parseDesignFeedback(body)).length;
+}

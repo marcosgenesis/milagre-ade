@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ARTIFACT_CSP, artifactDocument, artifactShell, chosenDesign, designFeedbackMessage, parseDesignFeedback } from "./artifact.ts";
+import {
+  ARTIFACT_CSP,
+  RESOLVED_STEP,
+  artifactDocument,
+  artifactShell,
+  chosenDesign,
+  designActivity,
+  designFeedbackMessage,
+  newCommentId,
+  parseDesignFeedback,
+  resolutionNotes,
+} from "./artifact.ts";
 import { replyActivity } from "./reply-parts.ts";
 
 const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
@@ -122,4 +133,31 @@ test("the phone's shell frames the design with no say over the page, and loads n
   assert.doesNotMatch(shell.replace(/srcdoc="[^"]*"/, ""), /<script/, "the page itself runs nothing");
   const srcdoc = /srcdoc="([^"]*)"/.exec(shell)?.[1] ?? "";
   assert.ok(srcdoc.includes("&quot;hi&quot; &amp; bye"), srcdoc);
+});
+
+test("resolutions are read again only when a comment resolves or feedback is sent", () => {
+  const home = { id: "home", version: 1, title: "Home" };
+  const feedback = designFeedbackMessage({ comments: [{ design: home, text: "Bigger", id: newCommentId() }] });
+  const steps = [
+    { title: "Read a file", status: "done" },
+    { title: RESOLVED_STEP, status: "running" },
+  ];
+  const before = designActivity(steps, ["hi", feedback]);
+  assert.equal(
+    designActivity([...steps, { title: "Edited a file", status: "done" }], ["hi", feedback, "more"]),
+    before,
+    "other steps and messages don't count",
+  );
+  assert.equal(designActivity([steps[0]!, { title: RESOLVED_STEP, status: "done" }], ["hi", feedback]), before + 1);
+  assert.equal(designActivity(steps, ["hi", feedback, feedback]), before + 1);
+  assert.match(newCommentId(), /^[a-f0-9]{8}$/);
+  assert.deepEqual(
+    [
+      ...resolutionNotes([
+        { id: "a", design: home, text: "x", createdAt: 1, resolved: { note: "Done", at: 2 } },
+        { id: "b", design: home, text: "y", createdAt: 1 },
+      ]),
+    ],
+    [["a", "Done"]],
+  );
 });

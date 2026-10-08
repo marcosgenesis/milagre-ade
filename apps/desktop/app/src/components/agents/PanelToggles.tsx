@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { PaintBoardIcon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import Tooltip from "../primitives/Tooltip";
@@ -21,17 +21,20 @@ const snapshot = () => panels;
 /** Offers this panel's button while `panel` is set; null takes it away (the Chat has no designs, or no simulator). */
 export function useSidePanel(name: PanelName, panel: SidePanel | null) {
   const open = panel?.open;
-  const toggle = panel?.toggle;
+  // The button calls the newest toggle, so a toggle made anew each render doesn't publish the panel again: only
+  // opening and closing it does.
+  const toggle = useRef(panel?.toggle);
+  toggle.current = panel?.toggle;
   useEffect(() => {
-    if (open === undefined || !toggle) return;
-    panels = { ...panels, [name]: { open, toggle } };
+    if (open === undefined) return;
+    panels = { ...panels, [name]: { open, toggle: () => toggle.current?.() } };
     listeners.forEach((listener) => listener());
     return () => {
       const { [name]: _gone, ...rest } = panels;
       panels = rest;
       listeners.forEach((listener) => listener());
     };
-  }, [name, open, toggle]);
+  }, [name, open]);
 }
 
 /** The panels with a button now. */

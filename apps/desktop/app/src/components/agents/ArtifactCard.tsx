@@ -13,7 +13,15 @@ import {
   Add01Icon,
   PaintBoardIcon,
 } from "@hugeicons/core-free-icons";
-import { chosenDesign, designFeedbackMessage, newCommentId, parseDesignFeedback, type DesignComment } from "@milagre/shared/artifact";
+import {
+  chosenDesign,
+  designActivity,
+  designFeedbackMessage,
+  newCommentId,
+  parseDesignFeedback,
+  resolutionNotes,
+  type DesignComment,
+} from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 import { DESIGNS_EXPANDED, dockLayer, useDockArea } from "./dock-area";
@@ -62,8 +70,8 @@ const Artifacts = createContext<ArtifactsValue>({
 });
 
 /**
- * The agent's notes on the comments it resolved, by comment id, read again as the Chat moves on (each new step or
- * message): the agent resolves comments with a tool call, which the transcript shows as a step.
+ * The agent's notes on the comments it resolved, by comment id, read again when `moved` (designActivity) changes: the
+ * agent resolves comments with a tool call, which the transcript shows as a step.
  */
 function useResolutions(chatId: string | null, moved: number) {
   const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
@@ -73,7 +81,7 @@ function useResolutions(chatId: string | null, moved: number) {
     let live = true;
     comments({ chatId })
       .then((comments) => {
-        if (live) setResolutions(new Map(comments.flatMap((comment) => (comment.resolved ? [[comment.id, comment.resolved.note] as const] : []))));
+        if (live) setResolutions(resolutionNotes(comments));
       })
       // A host from before comments were kept has none to resolve.
       .catch(() => {});
@@ -120,10 +128,20 @@ function ScaledPreview({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  // A design runs only once its preview scrolls near the view: a long Chat's earlier designs don't all run at once.
+  // Seen once, it stays.
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const element = box.current;
+    if (!element || seen) return;
+    const observer = new IntersectionObserver((entries) => entries.some((entry) => entry.isIntersecting) && setSeen(true), { rootMargin: "400px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [seen]);
   const scale = size.width && size.height ? Math.min(size.width / width, size.height / height) : 0;
   return (
     <div ref={box} className="absolute inset-0 bg-canvas">
-      {scale > 0 && (
+      {scale > 0 && seen && (
         <div
           className="absolute top-0 left-0 origin-top-left"
           style={{ width, height, transform: `translate(${(size.width - width * scale) / 2}px, ${(size.height - height * scale) / 2}px) scale(${scale})` }}
@@ -348,7 +366,15 @@ export function ArtifactsProvider({
 }) {
   const latest = useMemo(() => latestArtifacts(steps), [steps]);
   const chosen = useMemo(() => chosenDesign(userMessages.map((message) => message.body)), [userMessages]);
-  const resolutions = useResolutions(chatId, steps.length + userMessages.length);
+  const moved = useMemo(
+    () =>
+      designActivity(
+        steps,
+        userMessages.map((message) => message.body),
+      ),
+    [steps, userMessages],
+  );
+  const resolutions = useResolutions(chatId, moved);
   // Comments already sent stay on the canvas, where the user left them, resolved once the agent has addressed them.
   const sent = useMemo<DesignPin[]>(
     () =>
@@ -413,6 +439,10 @@ export function ArtifactsProvider({
   // The window's top-right corner offers the designs too, while this Chat has any.
   const toggleDesigns = useCallback(() => (opened ? setOpenedIn(null) : value.openAll([...latest.values()])), [opened, value, latest]);
   useSidePanel("designs", chatId && latest.size ? { open: !!opened, toggle: toggleDesigns } : null);
+  const onVersion = useCallback(
+    (id: string, version: number | null) => setOpenedIn((current) => current && { ...current, versions: { ...current.versions, [id]: version } }),
+    [],
+  );
   // The canvas belongs to the chat: while something else takes the chat's place, it steps aside and comes back with it.
   const [anchor, chatShown] = useShown();
   return (
@@ -427,7 +457,7 @@ export function ArtifactsProvider({
             designs={[...latest.values()]}
             focus={opened.focus}
             versions={opened.versions}
-            onVersion={(id, version) => setOpenedIn({ ...opened, versions: { ...opened.versions, [id]: version } })}
+            onVersion={onVersion}
             chosen={chosen}
             sent={sent}
             openComment={opened.comment}

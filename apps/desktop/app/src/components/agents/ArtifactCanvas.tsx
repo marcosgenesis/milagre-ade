@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, ArrowRight01Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { ARTIFACT_CSP, artifactDocument, type Artifact } from "@milagre/shared/artifact";
@@ -34,13 +34,42 @@ const MIN_SCALE = 0.05;
 const MAX_SCALE = 2;
 const clamp = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 
+// A version of a design never changes, so each is read from the host once and shared by every card, thumbnail and frame
+// showing it. The newest (no version asked) can change, so it is read each time. Kept for the last few dozen.
+const versionsRead = new Map<string, Promise<Artifact>>();
+const versionsKept = new Map<string, Artifact>();
+const KEEP = 48;
+function readArtifact(chatId: string, id: string, version: number | null): Promise<Artifact> {
+  if (version === null) return window.milagre.artifacts.get({ chatId, id });
+  const key = `${chatId}\n${id}\n${version}`;
+  let read = versionsRead.get(key);
+  if (!read) {
+    read = window.milagre.artifacts.get({ chatId, id, version });
+    versionsRead.set(key, read);
+    read.then(
+      (artifact) => {
+        versionsKept.set(key, artifact);
+        for (const old of versionsKept.keys()) {
+          if (versionsKept.size <= KEEP) break;
+          versionsKept.delete(old);
+          versionsRead.delete(old);
+        }
+      },
+      // A read that failed is tried again next time.
+      () => versionsRead.delete(key),
+    );
+  }
+  return read;
+}
+const keptArtifact = (chatId: string | null, id: string, version: number | null) =>
+  (chatId && version !== null && versionsKept.get(`${chatId}\n${id}\n${version}`)) || null;
+
 export function useArtifact(chatId: string | null, id: string, version: number | null) {
-  const [state, setState] = useState<{ artifact: Artifact | null; error: string | null }>({ artifact: null, error: null });
+  const [state, setState] = useState<{ artifact: Artifact | null; error: string | null }>(() => ({ artifact: keptArtifact(chatId, id, version), error: null }));
   useEffect(() => {
     if (!chatId) return;
     let live = true;
-    window.milagre.artifacts
-      .get({ chatId, id, ...(version === null ? {} : { version }) })
+    readArtifact(chatId, id, version)
       .then((artifact) => live && setState({ artifact, error: null }))
       .catch((error: unknown) => live && setState({ artifact: null, error: error instanceof Error ? error.message : String(error) }));
     return () => {
@@ -97,7 +126,8 @@ export const ArtifactCanvas = forwardRef<
   const moved = useRef(false);
   const viewRef = useRef(view);
   viewRef.current = view;
-  useEffect(() => onView(view), [view, onView]);
+  // The dock shows only the zoom: panning doesn't re-render it.
+  useEffect(() => onView({ x: viewRef.current.x, y: viewRef.current.y, scale: view.scale }), [view.scale, onView]);
 
   const fit = useCallback((id?: string) => {
     const port = viewport.current,
@@ -246,7 +276,7 @@ export const ArtifactCanvas = forwardRef<
             design={design}
             number={index + 1}
             version={versions[design.id] ?? null}
-            onVersion={(version) => onVersion(design.id, version)}
+            onVersion={onVersion}
             commenting={commenting}
             comments={comments}
             choice={choice}
@@ -260,7 +290,8 @@ export const ArtifactCanvas = forwardRef<
   );
 });
 
-function DesignFrame({
+// Memoized: panning re-renders the canvas, not its frames.
+const DesignFrame = memo(function DesignFrame({
   chatId,
   design,
   number,
@@ -277,7 +308,7 @@ function DesignFrame({
   design: ArtifactRef;
   number: number;
   version: number | null;
-  onVersion: (version: number | null) => void;
+  onVersion: (id: string, version: number | null) => void;
   commenting: boolean;
   comments: PinControls;
   choice: ChoiceControls;
@@ -300,7 +331,7 @@ function DesignFrame({
   const isChosen = pendingHere || sentHere;
   const framePins = comments.pins.filter((pin) => pin.design.id === design.id && pin.design.version === shown.version);
   const sentPins = comments.sent.filter((pin) => pin.design.id === design.id && pin.design.version === shown.version);
-  const go = (next: number) => onVersion(next >= last ? null : next);
+  const go = (next: number) => onVersion(design.id, next >= last ? null : next);
   // Too narrow on screen for the title and its controls on one row, the controls go under the title.
   const narrow = width * scale < 300;
   const button = "grid size-6 place-items-center rounded-[6px] text-ink-2 hover:bg-hover disabled:opacity-40";
@@ -411,7 +442,7 @@ function DesignFrame({
       </div>
     </div>
   );
-}
+});
 
 /**
  * A pinned comment, Figma-like: the pin marks the spot, and its bubble beside it holds the comment. Enter or a click

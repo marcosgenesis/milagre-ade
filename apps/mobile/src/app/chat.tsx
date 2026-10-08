@@ -30,7 +30,7 @@ import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
 import { designMessageSent, peekDesignMessage } from "../design-outbox";
-import { chosenDesign } from "@milagre/shared/artifact";
+import { chosenDesign, designActivity } from "@milagre/shared/artifact";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
@@ -284,6 +284,11 @@ export default function ChatScreen() {
   const attachments = composer.attachments[chatId] || [];
   const attachmentDisabled = busy || picking || attachments.length >= 4;
   const run = chat ? runs.runs[chatId] : undefined;
+  // Feedback cards read the agent's resolutions again only when a comment may have changed.
+  const designsMoved = designActivity(
+    [...messages.flatMap((message) => message.steps ?? []), ...(run?.steps ?? [])],
+    messages.filter((message) => message.role === "user").map((message) => message.body),
+  );
   const contextUsage = run?.contextUsage ?? chat?.contextUsage;
   const preferences = composer.preferences[chatId] || composer.defaults;
   const actualProvider = chat?.provider || preferences.provider;
@@ -641,7 +646,7 @@ export default function ChatScreen() {
       basePath={worktree?.path || project.path}
       chatId={chatId}
       designChoice={designChoice}
-      designsMoved={messages.length}
+      designsMoved={designsMoved}
       onActivity={openActivity}
     />
   ) : null;
@@ -736,7 +741,7 @@ export default function ChatScreen() {
                 basePath={worktree?.path || project.path}
                 chatId={chatId}
                 designChoice={designChoice}
-                designsMoved={messages.length}
+                designsMoved={designsMoved}
                 onActivity={openActivity}
               />
             </View>,

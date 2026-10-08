@@ -12,6 +12,7 @@ import {
   type ArtifactComment,
   type ArtifactSummary,
   type DesignComment,
+  resolutionNotes,
 } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "@milagre/shared/model";
 import type { ArtifactStep } from "@milagre/shared/reply-parts";
@@ -41,9 +42,7 @@ export function DesignFeedbackCard({
     let live = true;
     client
       .call<ArtifactComment[]>("artifact:comments", [{ chatId }])
-      .then(
-        (comments) => live && setResolutions(new Map(comments.flatMap((comment) => (comment.resolved ? [[comment.id, comment.resolved.note] as const] : [])))),
-      )
+      .then((comments) => live && setResolutions(resolutionNotes(comments)))
       .catch(() => {});
     return () => {
       live = false;

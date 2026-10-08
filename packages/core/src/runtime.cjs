@@ -33,7 +33,7 @@ const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
-const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
+const { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, newSuffix, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
@@ -45,6 +45,7 @@ const { createPullRequestReader, readPullRequests } = require("./pull-request.cj
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { createLinear } = require("./linear/index.cjs");
+const { createLinearIssues } = require("./linear/issues.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -607,6 +608,13 @@ function createRuntime(options) {
   commands.handle("main-sync:default:read", () => projectSettings().getMainSyncDefault());
   commands.handle("main-sync:default:save", (_event, value) => projectSettings().setMainSyncDefault(value === true));
 
+  // A Linear issue's current copy, or a thrown error when Linear no longer has the key (nothing is created then).
+  async function readLinearIssue(key) {
+    const issue = await linearIssues.readIssue(key);
+    if (!issue) throw new Error(`${key} no longer exists in Linear.`);
+    return issue;
+  }
+
   // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
   // picks one, so the chat never waits on it.
   async function nameWorktree(projectPath, created, prompt) {
@@ -621,11 +629,15 @@ function createRuntime(options) {
     emit("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
   }
 
-  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt }) => {
+  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt, issueKey }) => {
     // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
     const request = { projectPath, baseBranch, prompt };
     await ownProject(projectPath);
     await environmentReady;
+    // A Chat started from a Linear issue reads the issue again, never the renderer's copy. A missing issue creates nothing.
+    const issue = typeof issueKey === "string" ? await readLinearIssue(issueKey) : null;
+    const suffix = newSuffix();
+    const branch = issue ? await issueBranch({ projectPath, issue, suffix }) : undefined;
     const settings = await projectSettings().get(projectPath);
     // Brings main up to its remote first, when the user asked for it. Never throws: a skipped or failed sync
     // leaves main as it was and the Worktree starts from it as before.
@@ -633,6 +645,8 @@ function createRuntime(options) {
     // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
     const created = await createWorktree({
       ...request,
+      branch,
+      suffix,
       root: worktreeRoot(),
       copyPatterns: settings.filesToCopy,
       // The sync already fetched main's upstream (or timed out trying): don't wait on it a second time.
@@ -647,9 +661,12 @@ function createRuntime(options) {
     if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
     const state = await updateProject(request.projectPath, (latest) => {
       const worktree = latest.worktrees[listed.id];
-      return worktree ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base } } } : latest;
+      return worktree
+        ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key } : {}) } } }
+        : latest;
     });
-    void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
+    // A branch named after an issue keeps that name; only a chat named from its prompt gets the Haiku name.
+    if (!issue) void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
   });
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
@@ -860,7 +877,23 @@ function createRuntime(options) {
   commands.handle("linear:connect", () => linear.connect());
   commands.handle("linear:disconnect", () => linear.disconnect());
   commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
-  commands.handle("linear:enabled:save", (_event, value) => ({ enabled: linear.setEnabled(value === true) }));
+  commands.handle("linear:enabled:save", (_event, value) => {
+    const enabled = linear.setEnabled(value === true);
+    emit("linear:enabled-changed", { enabled });
+    return { enabled };
+  });
+  // Issues are read through the same connection; both answer without throwing (see linear/issues.cjs).
+  const linearIssues = createLinearIssues({ linear });
+  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query));
+  commands.handle("linear:worktree-issues", async (_event, projectPath) => {
+    try {
+      await environmentReady;
+      const project = await readProject(projectPath);
+      return await linearIssues.worktreeIssues(Object.values(project.state.worktrees));
+    } catch {
+      return {};
+    }
+  });
 
   const chatTitles = new ChatTitles({
     states: scopeStates,

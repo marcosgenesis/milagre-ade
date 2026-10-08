@@ -13,3 +13,21 @@ export function linearStatusLine(status: LinearStatus, where: "mac" | "phone"): 
   if (status.connected) return `Connected as ${status.viewer.name} to ${status.organization.name}`;
   return where === "mac" ? "Not connected" : "Connect Linear from Settings on your Mac";
 }
+
+export type LinearIssueState = { name: string; type: "triage" | "backlog" | "unstarted" | "started" | "completed" | "canceled"; color: string };
+export type LinearIssue = { key: string; title: string; url: string; branchName: string; description?: string; state: LinearIssueState };
+export type LinearIssuesResult = { issues: LinearIssue[] } | { error: string; notConnected?: boolean };
+
+/** First message of a Chat started from an issue; text the user had typed goes after the URL. */
+export function issueFirstMessage(issue: LinearIssue, typed?: string): string {
+  return (
+    `Work on Linear issue ${issue.key}: ${issue.title}` +
+    (issue.description ? `\n\n${issue.description}` : "") +
+    `\n\n${issue.url}` +
+    (typed?.trim() ? `\n\n${typed.trim()}` : "")
+  );
+}
+
+export function issueChipLabel(issue: LinearIssue): string {
+  return `${issue.key} · ${issue.state.name}`;
+}

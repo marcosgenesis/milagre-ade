@@ -20,7 +20,8 @@
     "src/browser.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
-    "src/message-search.ts",
+    "src/message-search.mjs",
+    "src/message-search.d.mts",
     "src/agent-activity.ts",
     "src/advisor-result.ts"
   ],
@@ -122,7 +123,10 @@
       "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
-    "./message-search": "./src/message-search.ts",
+    "./message-search": {
+      "types": "./src/message-search.d.mts",
+      "default": "./src/message-search.mjs"
+    },
     "./file-syntax": {
       "types": "./src/file-syntax.d.mts",
       "default": "./src/file-syntax.mjs"

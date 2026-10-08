@@ -245,6 +245,10 @@ function codexSubagents(method, params, state) {
     }
     if (!foreign && item.tool === "wait") events.push({ type: "subagents-waiting", waiting: method === "item/started" });
   }
+  if (foreign && method === "item/started" && item) {
+    const activity = codexStep(item)?.title ?? (item.type === "reasoning" ? "Thinking" : item.type === "agentMessage" ? "Responding" : undefined);
+    if (activity) events.push(update(state, params.threadId, { latestActivity: activity }));
+  }
   if (foreign && method === "item/completed" && item) {
     const step = codexStep(item);
     const text =

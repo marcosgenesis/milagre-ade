@@ -2245,7 +2245,11 @@ function activityItemHost() {
     "./theme": { colors: palette, fonts: { mono: "mono" }, hex: () => palette },
   });
   const shared = load("activity-item.tsx", { ...common, "./running-logo": running, "./theme": { fonts: { mono: "mono" } } });
-  const SubagentItem = load("subagent-item.tsx", { ...common, "./activity-item": shared }).SubagentItem;
+  const SubagentItem = load("subagent-item.tsx", {
+    ...common,
+    "./activity-item": shared,
+    "@milagre/shared/agent-activity": require("@milagre/shared/agent-activity"),
+  }).SubagentItem;
   const ToolRow = load("tool-row.tsx", {
     ...common,
     "./activity-item": shared,
@@ -3933,4 +3937,21 @@ test("mobile usage identifies the account by email, falls back to its label, and
     );
   }
   assert.doesNotThrow(() => ProviderRows({ provider, now: Date.now() }));
+});
+
+test("mobile subagent rows show current activity and preserve terminal states", () => {
+  const { SubagentItem } = load("subagent-item.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Text: "Text" },
+    "@hugeicons/core-free-icons": { AiBrainIcon: "brain" },
+    "@milagre/shared/agent-activity": require("@milagre/shared/agent-activity"),
+    "./activity-item": { ActivityItem: "ActivityItem" },
+    "./ui": { colors: {}, styles: {} },
+  });
+  const agent = { title: "Review authentication", status: "running", latestActivity: "Reading auth.ts", transcript: [] };
+  assert.equal(SubagentItem({ agent }).props.status, "Reading files");
+  assert.equal(SubagentItem({ agent: { ...agent, latestActivity: "Running auth tests" } }).props.status, "Running tests");
+  const failed = SubagentItem({ agent: { ...agent, status: "failed" } });
+  assert.equal(failed.props.status, "Needs attention");
+  assert.equal(failed.props.state, "failed");
 });

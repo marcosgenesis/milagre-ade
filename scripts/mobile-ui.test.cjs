@@ -315,15 +315,50 @@ function markdownHost({ media, basePath } = {}) {
     return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
   }
   return {
-    render(text) {
+    render(text, streaming = false) {
       react.begin();
-      return expand(Markdown({ text, media, basePath }));
+      return expand(Markdown({ text, streaming, media, basePath }));
     },
     routes,
     links,
     viewer,
   };
 }
+
+test("plain URLs in mobile replies render as links and open the exact address", async () => {
+  for (const streaming of [false, true]) {
+    for (const [text, url] of [
+      ["The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. It fixes both banners.", "https://github.com/the-ptf/milagre-ade/pull/289"],
+      ["See (https://example.org/a_(b)).", "https://example.org/a_(b)"],
+      ["Visit www.example.org or ask me later.", "http://www.example.org"],
+      ["Email hello@example.org.", "mailto:hello@example.org"],
+      ["[Pull request](https://github.com/the-ptf/milagre-ade/pull/289)", "https://github.com/the-ptf/milagre-ade/pull/289"],
+    ]) {
+      const screen = markdownHost();
+      const link = find(screen.render(text, streaming), (node) => node.props?.accessibilityRole === "link");
+      assert.ok(link, `Missing link in ${text} (streaming: ${streaming})`);
+      assert.ok(link.props.style.some((style) => style.textDecorationLine === "underline"));
+      await link.props.onPress();
+      assert.deepEqual(screen.links, [url]);
+    }
+  }
+});
+
+test("mobile replies keep code URLs and unsafe links inert", () => {
+  for (const text of [
+    "`https://example.org`",
+    "```text\nhttps://example.org\n```",
+    "[local](file:///etc/passwd)",
+    "[command](javascript:alert(1))",
+    "[pair](milagre-local://connect)",
+  ]) {
+    assert.equal(
+      find(markdownHost().render(text), (node) => node.props?.accessibilityRole === "link"),
+      undefined,
+      text,
+    );
+  }
+});
 
 test("Markdown screenshot links render image previews outside Text and open the image viewer", () => {
   const screen = markdownHost();

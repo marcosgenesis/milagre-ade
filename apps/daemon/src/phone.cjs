@@ -7,7 +7,8 @@ const { startMobileBridge } = require("./mobile-bridge.cjs");
 const { readCloudflare } = require("./mobile-cloudflare.cjs");
 const { pairingLink, relayPairingLink, computerName } = require("./mobile-pairing.cjs");
 const { startRelayHost } = require("./relay-host.cjs");
-const { readIdentity, rotateIdentity, readRetired, createPhones } = require("./relay-identity.cjs");
+const { readIdentity, rotateIdentity, readRetired } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
 const { b64url } = require("@milagre/shared/relay-crypto");
 const defaultTunnels = require("./mobile-tunnel.cjs");
 const { startLanHost, LAN_PORT } = require("./lan-host.cjs");
@@ -239,7 +240,7 @@ function createPhone({
         ...(allowedRoot ? { allowedRoot } : {}),
       });
       const identity = await readIdentity(dataDir);
-      relayPhones ??= createPhones(dataDir);
+      relayPhones ??= createDevices(dataDir, { now });
       await relayPhones.load();
       const known = relayPhones;
       const phones = {
@@ -356,7 +357,7 @@ function createPhone({
           config.token = randomBytes(32).toString("hex");
           await save();
           if (!relayPhones) {
-            relayPhones = createPhones(dataDir);
+            relayPhones = createDevices(dataDir, { now });
             await relayPhones.load();
           }
           const hadPhones = relayPhones.count() > 0;

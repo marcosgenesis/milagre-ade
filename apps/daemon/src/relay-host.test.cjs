@@ -8,7 +8,8 @@ const { randomBytes } = require("node:crypto");
 const { WebSocketServer } = require("ws");
 const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
 const { createAssembler, fromBase64 } = require("@milagre/shared/relay-rpc");
-const { readIdentity, createPhones } = require("./relay-identity.cjs");
+const { readIdentity } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
 const { startRelayHost } = require("./relay-host.cjs");
 const { random, TOKEN, LIVE_ORIGIN, sleep, listen, until, startFakeBridge, connectPhone } = require("./relay-test-kit.cjs");
 
@@ -55,7 +56,7 @@ async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token =
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const statuses = [];
   const host = startRelayHost({
@@ -179,7 +180,7 @@ test("a new phone outside the pairing window gets unknown-phone; inside it, it p
   assert.deepEqual(await inside.next(), { t: "pong" });
   const id = b64url(key.publicKey);
   assert.equal(mac.phones.isKnown(id), true);
-  assert.match(await fs.readFile(path.join(mac.dir, "relay-phones.json"), "utf8"), new RegExp(id));
+  assert.match(await fs.readFile(path.join(mac.dir, "devices.json"), "utf8"), new RegExp(id));
   inside.close();
 
   open = false;

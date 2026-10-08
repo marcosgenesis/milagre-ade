@@ -5,7 +5,8 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
-const { readIdentity, createPhones } = require("./relay-identity.cjs");
+const { readIdentity } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
 const { startLanHost } = require("./lan-host.cjs");
 const { random, startFakeBridge, connectPhone, until } = require("./relay-test-kit.cjs");
 
@@ -13,7 +14,7 @@ async function lanMac(t, { knownPhone = true, ...hostOptions } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const key = boxKeyPair(random);
   if (knownPhone) await phones.add(b64url(key.publicKey));
@@ -162,7 +163,7 @@ test("a port that is taken rejects without leaving a liveness timer behind", asy
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const taken = net.createServer();
   await new Promise((resolve) => taken.listen(0, "127.0.0.1", resolve));

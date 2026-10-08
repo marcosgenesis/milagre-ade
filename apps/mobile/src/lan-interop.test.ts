@@ -11,7 +11,8 @@ import { b64url, boxKeyPair } from "@milagre/shared/relay-crypto";
 import { createRelayTransport, RelayTransportError } from "./relay-transport.ts";
 
 const require = createRequire(import.meta.url);
-const { readIdentity, createPhones } = require("../../daemon/src/relay-identity.cjs");
+const { readIdentity } = require("../../daemon/src/relay-identity.cjs");
+const { createDevices } = require("../../daemon/src/devices.cjs");
 const { startLanHost } = require("../../daemon/src/lan-host.cjs");
 const { startFakeBridge, TOKEN } = require("../../daemon/src/relay-test-kit.cjs");
 
@@ -22,7 +23,7 @@ async function lanPair(t: TestContext, { known }: { known: boolean }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-interop-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const key = boxKeyPair(random);
   if (known) await phones.add(b64url(key.publicKey));

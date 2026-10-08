@@ -40,13 +40,13 @@ async function desk(t, options = {}) {
     ...options,
   });
   t.after(async () => {
-    await computers.close();
+    await within(computers.close(), "computers to close");
     await fs.rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   await computers.setEnabled(true);
   return { computers, sockets, events, dataDir };
 }
-const linkOf = async (mac) => (await mac.client.call("phone:status")).pairingLink;
+const linkOf = async (mac) => (await within(mac.client.call("phone:status"), "phone:status")).pairingLink;
 /** Every request list this Mac's window heard (devices:pending), newest last. */
 function pendingHeard(mac) {
   const heard = [];
@@ -59,53 +59,57 @@ const first = (computers) => computers.list()[0];
 /** A promise that must settle soon: a pairing that never answers fails the test instead of hanging it. */
 const within = (promise, label, ms = 10_000) =>
   Promise.race([promise, delay(ms, undefined, { ref: false }).then(() => Promise.reject(new Error(`Timed out waiting for ${label}`)))]);
-const DISCONNECTED = "Milagre host is disconnected. Your command was not sent.";
-/**
- * daemon:status through the computer. Right after it comes online, peer:routes moves its runtime to the LAN, and a call
- * that lands in that few-millisecond switch is refused with DISCONNECTED (the view still reads online / lan while the
- * runtime reconnects). Only that refusal is retried; any other error fails the test.
- */
-const statusOf = (computers, id) =>
-  until(
-    () =>
-      computers.invoke(id, "daemon:status").catch((error) => {
-        if (error.message !== DISCONNECTED) throw error;
-        return null;
-      }),
-    "daemon:status to answer",
-  );
 
 test("a new computer waits for Allow, then drives the Mac over the relay and moves to its LAN", async (t) => {
   const { computers, events, dataDir } = await desk(t);
   const mac = await startTestMac(t, { autoAllow: false });
   const heard = pendingHeard(mac);
   const link = await linkOf(mac);
-  assert.deepEqual(Object.keys(await computers.preview(link)).toSorted(), ["hostId", "name", "relayHost"]);
+  assert.deepEqual(Object.keys(await within(computers.preview(link), "the preview")).toSorted(), ["hostId", "name", "relayHost"]);
   let told = 0;
   const adding = computers.add(link, { name: "studio" }, { onPending: () => told++ });
+  adding.catch(() => {}); // surfaced where it is awaited; a failure before then must not crash the run
   const [request] = await until(() => heard.at(-1)?.length && heard.at(-1), "the Mac's window to hear the request");
   assert.equal(request.name, "desk");
   await until(() => told === 1, "this Mac to hear it waits");
-  assert.deepEqual(await mac.client.call("devices:list"), [], "nothing saved before Allow");
+  assert.deepEqual(await within(mac.client.call("devices:list"), "devices:list"), [], "nothing saved before Allow");
   await within(mac.client.call("devices:allow", [request.key]), "devices:allow");
   const added = await within(adding, "the computer to be added");
   assert.equal(added.name, "studio");
   await until(() => first(computers)?.state === "online", "online");
-  assert.equal((await statusOf(computers, added.id)).version, "9.8.7");
+  assert.equal((await computers.invoke(added.id, "daemon:status")).version, "9.8.7");
 
   // peer:routes taught it the Mac's LAN address; the supervisor moves the runtime there.
   await until(() => first(computers).route === "lan", "the LAN route");
   assert.equal(first(computers).lan, true);
-  assert.equal((await statusOf(computers, added.id)).version, "9.8.7");
-  await until(async () => (await mac.client.call("devices:list"))[0]?.route === "lan", "the Mac to see it on the LAN");
+  assert.equal((await computers.invoke(added.id, "daemon:status")).version, "9.8.7");
+  await until(async () => (await within(mac.client.call("devices:list"), "devices:list"))[0]?.route === "lan", "the Mac to see it on the LAN");
 
   // A change made on the Mac reaches this desktop's runtime as an event.
-  const opened = await mac.client.call("project:open", [mac.project]);
+  // The window opens the project on the computer, as it would; the Mac's own window opens it too.
+  await within(computers.invoke(added.id, "project:open", [mac.project]), "project:open on the computer");
+  const opened = await within(mac.client.call("project:open", [mac.project]), "project:open");
   const chatId = Object.values(opened.state.sessions)[0].id;
-  await mac.client.call("chat:patch", [mac.project, chatId, { title: "Set on the Mac" }]);
+  // A host sends a scope's first state as `resync` (read it with project:snapshot) and every later change as a patch on
+  // it, so one patch sets the baseline and the next one is the change that must arrive.
+  const patch = (title) => within(mac.client.call("chat:patch", [mac.project, chatId, { title }]), "chat:patch");
+  await patch("Before");
   await until(
     () => events.some((event) => event.id === added.id && event.channel === "project:state" && event.payload?.path === mac.project),
-    "the state event",
+    "the first state event",
+  );
+  await patch("Set on the Mac");
+  await until(
+    () =>
+      events.some(
+        (event) =>
+          event.id === added.id &&
+          event.channel === "project:state" &&
+          event.payload?.path === mac.project &&
+          !event.payload.resync &&
+          JSON.stringify(event.payload.patch).includes("Set on the Mac"),
+      ),
+    "the state event carrying the new title",
   );
 
   // The token and the Mac's key are sealed in computer-keys.json; computers.json has neither.
@@ -125,11 +129,12 @@ test("Deny, and a link whose window closed, turn the computer away and save noth
   const link = await linkOf(mac);
   const { name } = await within(computers.preview(link), "the preview");
   const adding = computers.add(link, { name: "studio" });
+  adding.catch(() => {});
   const [request] = await until(() => heard.at(-1)?.length && heard.at(-1), "the request");
-  await mac.client.call("devices:deny", [request.key]);
+  await within(mac.client.call("devices:deny", [request.key]), "devices:deny");
   await assert.rejects(within(adding, "Deny to turn the computer away"), { message: `${name} didn't allow this Mac.` });
   assert.deepEqual(computers.list(), []);
-  assert.deepEqual(await mac.client.call("devices:list"), []);
+  assert.deepEqual(await within(mac.client.call("devices:list"), "devices:list"), []);
   mac.clock.now += 11 * 60_000;
   await assert.rejects(within(computers.add(link, { name: "studio" }), "the expired link to be refused"), {
     message: `This link expired. Copy a new one on ${name}.`,
@@ -142,8 +147,8 @@ test("a computer removed on the Mac it drives stops dialing and says so", async 
   const mac = await startTestMac(t, { lan: false });
   const added = await within(computers.add(await linkOf(mac), { name: "studio" }), "the computer to be added");
   await until(() => first(computers)?.state === "online", "online");
-  const [device] = await mac.client.call("devices:list");
-  await mac.client.call("devices:remove", [device.key]);
+  const [device] = await within(mac.client.call("devices:list"), "devices:list");
+  await within(mac.client.call("devices:remove", [device.key]), "devices:remove");
   await until(() => first(computers)?.state === "refused", "refused");
   assert.equal(first(computers).message, "Removed on studio. Pair again with a new link.");
   const dialed = sockets.length;
@@ -158,12 +163,10 @@ test("a computer whose relay drops reads Reconnecting, comes back by itself and 
   const mac = await startTestMac(t, { lan: false });
   await within(computers.add(await linkOf(mac), { name: "studio" }), "the computer to be added");
   await until(() => first(computers)?.state === "online", "online");
+  const snapshots = () => events.filter((event) => event.channel === "runtime:snapshot").length;
+  const before = snapshots();
   mac.relay.hostSockets.at(-1).terminate();
   await until(() => states.includes("reconnecting"), "reconnecting");
-  await until(
-    () => first(computers).state === "online" && events.some((event) => event.channel === "runtime:snapshot"),
-    "back online with a fresh snapshot",
-    10_000,
-  );
+  await until(() => first(computers).state === "online" && snapshots() > before, "back online with a fresh snapshot", 10_000);
   assert.equal(first(computers).route, "relay");
 });

@@ -29,6 +29,13 @@ function toIssue(node) {
   };
 }
 
+// Linear reports a missing entity as a failed GraphQL query whose message or extensions say "not found".
+function isNotFound(error) {
+  if (error?.code !== "failed") return false;
+  const extensions = error.extensions ?? {};
+  return [error.message, extensions.type, extensions.code].some((text) => typeof text === "string" && /not[ _]?found/i.test(text));
+}
+
 function createLinearIssues({ linear, now = Date.now }) {
   const cache = new Map(); // key -> { at, issue }, the issue null when Linear has no such key
   let teams = null; // { at, keys }, the workspace's team keys in upper case
@@ -40,13 +47,13 @@ function createLinearIssues({ linear, now = Date.now }) {
     return null;
   }
 
-  // A key the workspace doesn't have is a missing issue, not a failed read.
+  // A key the workspace doesn't have is a missing issue, not a failed read. Any other failure is thrown.
   async function fetchOne(key) {
     try {
       const data = await linear.query(ONE, { id: key });
       return toIssue(data?.issue);
     } catch (error) {
-      if (error.code === "failed") return null;
+      if (isNotFound(error)) return null;
       throw error;
     }
   }
@@ -127,7 +134,8 @@ function createLinearIssues({ linear, now = Date.now }) {
           named.push([worktree.path, String(worktree.linearIssue).toUpperCase()]);
           continue;
         }
-        known ??= await teamKeys();
+        // Best effort: without the team keys only the worktrees that store their issue still resolve.
+        known ??= await teamKeys().catch(() => new Set());
         const key = issueKeyInBranch(worktree.name, known);
         if (key) named.push([worktree.path, key]);
       }

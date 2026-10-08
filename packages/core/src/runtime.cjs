@@ -610,6 +610,9 @@ function createRuntime(options) {
 
   // A Linear issue's current copy, or a thrown error when Linear no longer has the key (nothing is created then).
   async function readLinearIssue(key) {
+    // Checked before any query, so a Chat that can't reach Linear never creates a Worktree.
+    if (!linear.enabled()) throw new Error("Linear is off in Settings › Experimental.");
+    if (!linear.status().connected) throw new Error("Linear isn't connected.");
     const issue = await linearIssues.readIssue(key);
     if (!issue) throw new Error(`${key} no longer exists in Linear.`);
     return issue;

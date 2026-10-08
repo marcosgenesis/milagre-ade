@@ -31,3 +31,8 @@ export function issueFirstMessage(issue: LinearIssue, typed?: string): string {
 export function issueChipLabel(issue: LinearIssue): string {
   return `${issue.key} · ${issue.state.name}`;
 }
+
+/** The composer text a failed send gives back: an issue's message is never restored, only what the user typed. */
+export function restoredDraft(body: string, typed: string, fromIssue: boolean): string {
+  return fromIssue ? typed : typed || body;
+}

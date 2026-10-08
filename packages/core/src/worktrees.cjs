@@ -80,6 +80,7 @@ const newSuffix = () => Math.random().toString(36).slice(2, 6);
 // allow that command. A name starting with "-" can never be read as an option; git refuses the rest on `worktree add`.
 function validBranchName(branch) {
   if (typeof branch !== "string" || branch === "" || branch.startsWith("-") || branch === "@" || branch.includes("@{")) return false;
+  if (branch === "HEAD" || branch.startsWith("refs/")) return false;
   if ([...branch].some((char) => char.charCodeAt(0) < 0x21 || char.charCodeAt(0) === 0x7f || " ~^:?*[\\".includes(char))) return false;
   if (branch.includes("..")) return false;
   if (branch.startsWith("/") || branch.endsWith("/") || branch.endsWith(".") || branch.includes("//")) return false;
@@ -91,7 +92,10 @@ function validBranchName(branch) {
 async function issueBranch({ projectPath, issue, suffix }) {
   let branch = issue.branchName;
   if (!validBranchName(branch)) branch = [issue.key.toLowerCase(), slugify(issue.title)].filter(Boolean).join("-");
-  if (await client.read.refExists(projectPath, `refs/heads/${branch}`)) branch = `${branch}-${suffix}`;
+  // A teammate's remote-tracking branch counts as taken too: a local copy of it would shadow their work.
+  const taken =
+    (await client.read.refExists(projectPath, `refs/heads/${branch}`)) || (await client.read.refExists(projectPath, `refs/remotes/origin/${branch}`));
+  if (taken) branch = `${branch}-${suffix}`;
   return branch;
 }
 

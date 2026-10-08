@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { issueChipLabel, issueFirstMessage, linearStatusLine, type LinearIssue, type LinearStatus } from "./linear.ts";
+import { issueChipLabel, issueFirstMessage, linearStatusLine, restoredDraft, type LinearIssue, type LinearStatus } from "./linear.ts";
 
 const connected: LinearStatus = {
   connected: true,
@@ -37,4 +37,12 @@ test("a Chat started from an issue opens with its key, title, description and UR
 
 test("an issue chip reads its key and state name", () => {
   assert.equal(issueChipLabel(issue), "ENG-12 · In Progress");
+});
+
+test("a failed send from an issue restores only what the user typed, never the issue message", () => {
+  const message = issueFirstMessage(issue, "fix it");
+  assert.equal(restoredDraft(message, "fix it", true), "fix it");
+  assert.equal(restoredDraft(message, "", true), "");
+  assert.equal(restoredDraft("plain text", "plain text", false), "plain text");
+  assert.equal(restoredDraft("plain text", "", false), "plain text");
 });

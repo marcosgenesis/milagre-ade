@@ -310,3 +310,19 @@ test("a failed token save after refresh is a LinearError", async () => {
     return true;
   });
 });
+
+test("a GraphQL error keeps its extensions, so a caller can tell a missing entity from a broken query", async () => {
+  const extensions = { type: "entity not found", code: "NOT_FOUND" };
+  const client = createLinearClient({
+    store: memoryStore({ accessToken: "a", refreshToken: "r", expiresAt: 10_000_000 }),
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async () => json(200, { errors: [{ message: "Entity not found", extensions }] }),
+  });
+  await assert.rejects(client.query("q"), (error) => {
+    assert.equal(error.code, "failed");
+    assert.deepEqual(error.extensions, extensions);
+    return true;
+  });
+});

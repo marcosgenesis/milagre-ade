@@ -23,7 +23,12 @@ async function postGraphql({ fetchImpl, apiBase, accessToken, query, variables =
   if (response.status === 429 || errors.some((error) => error?.extensions?.code === "RATELIMITED"))
     throw new LinearError("Linear is limiting requests. Try again in a minute.", "rate-limited");
   if (response.status >= 500) throw new LinearError("Linear is having trouble. Try again in a minute.", "offline");
-  if (!response.ok || errors.length) throw new LinearError(errors[0]?.message || `Linear answered ${response.status}.`, "failed");
+  if (!response.ok || errors.length) {
+    const error = new LinearError(errors[0]?.message || `Linear answered ${response.status}.`, "failed");
+    // Kept so a caller can tell a missing entity from a broken query (see linear/issues.cjs).
+    error.extensions = errors[0]?.extensions;
+    throw error;
+  }
   return body.data;
 }
 

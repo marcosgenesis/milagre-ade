@@ -838,3 +838,36 @@ test("linear:worktree-issues names a worktree's issue and linear:issues reports 
   const [only] = Object.values(mapped);
   assert.equal(only?.key, "ENG-12");
 });
+
+test("worktree:create from a Linear issue refuses while Linear is off or disconnected, before any query", async (t) => {
+  const { project, dataDir, make } = await fixture(t);
+  execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+    stdio: "ignore",
+  });
+  const queried = [];
+  const linear = {
+    clientId: "cid",
+    apiBase: "https://api.test",
+    port: 0,
+    fetchImpl: async (url, init) => {
+      queried.push(init.body);
+      return { ok: true, status: 200, json: async () => ({ data: {} }) };
+    },
+    openBrowser: () => {},
+  };
+  const runtime = make({ worktreeRoot: path.join(path.dirname(project), "worktrees"), linear });
+  await runtime.openProject(project);
+  const before = execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  const attempt = () => runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "x", issueKey: "ENG-12" }]);
+
+  // Off: nothing stored, so the switch is off and no token exists.
+  await assert.rejects(attempt(), { message: "Linear is off in Settings › Experimental." });
+
+  // On, but never connected.
+  await fs.mkdir(path.join(dataDir, "linear"), { recursive: true });
+  await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true }));
+  await assert.rejects(attempt(), { message: "Linear isn't connected." });
+
+  assert.deepEqual(queried, [], "No Linear query while Linear is off or disconnected");
+  assert.equal(execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" }), before, "Nothing is created");
+});

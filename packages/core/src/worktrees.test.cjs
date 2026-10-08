@@ -382,3 +382,22 @@ test("issueBranch uses the issue's branch name, falls back when git refuses it, 
   git("branch", "eng-12-fix-login-redirect");
   assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-fix-login-redirect-ab12");
 });
+
+test("issueBranch suffixes a name a teammate already pushed to origin", async (t) => {
+  const { project, git } = await fixture(t);
+  const issue = { key: "ENG-12", title: "Fix the login redirect!", branchName: "eng-12-fix-login-redirect" };
+  git("update-ref", "refs/remotes/origin/eng-12-fix-login-redirect", "HEAD");
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-fix-login-redirect-ab12");
+});
+
+test("validBranchName refuses HEAD, and createWorktree refuses it as a branch", async (t) => {
+  const { project } = await fixture(t);
+  const issue = { key: "ENG-12", title: "Head", branchName: "HEAD" };
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-head");
+  assert.equal(await issueBranch({ projectPath: project, issue: { ...issue, branchName: "refs/heads/x" }, suffix: "ab12" }), "eng-12-head");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-head-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await assert.rejects(createWorktree({ projectPath: project, baseBranch: "main", branch: "HEAD", root, suffix: "ab12" }), {
+    message: '"HEAD" is not a valid branch name.',
+  });
+});

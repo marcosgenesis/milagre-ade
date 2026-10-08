@@ -74,7 +74,7 @@ import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { useLinear } from "./components/useLinear";
 import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
-import { issueFirstMessage, type LinearIssue } from "@milagre/shared/linear";
+import { issueFirstMessage, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
@@ -1297,7 +1297,7 @@ function App() {
         setNewChatError(message);
         if (!preserveComposer) {
           const nextDraft = draftStore.get();
-          setDraft([submittedDraft || body, nextDraft].filter(Boolean).join("\n\n"));
+          setDraft([restoredDraft(body, submittedDraft, issueKey !== undefined), nextDraft].filter(Boolean).join("\n\n"));
           imageDraft.restore(images, files);
         }
       } else {
@@ -1310,7 +1310,7 @@ function App() {
               projectPath: project.path,
               originSessionId: selectedSession?.id ?? null,
               originWorktreeId: selectedWorktree.id,
-              draft: submittedDraft || body,
+              draft: restoredDraft(body, submittedDraft, issueKey !== undefined),
               error: message,
               target: target ? { ...target, view, projectPath: project.path } : null,
             },

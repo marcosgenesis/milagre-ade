@@ -162,3 +162,36 @@ test("worktree issues are cached for a minute, team keys for ten, and empty when
   assert.deepEqual(await createLinearIssues({ linear: fakeLinear({ enabled: false }) }).worktreeIssues(worktrees), {});
   assert.deepEqual(await createLinearIssues({ linear: fakeLinear({ connected: false }) }).worktreeIssues(worktrees), {});
 });
+
+test("only Linear's not-found reads as a missing issue; any other failure is thrown", async () => {
+  const notFound = fakeLinear({
+    answer: (document) => {
+      if (document.includes("i0:")) throw new LinearError("Entity not found", "failed");
+      throw Object.assign(new LinearError("Something odd", "failed"), { extensions: { type: "entity not found" } });
+    },
+  });
+  assert.equal(await createLinearIssues({ linear: notFound }).readIssue("ENG-5"), null);
+
+  const broken = fakeLinear({
+    answer: () => {
+      throw Object.assign(new LinearError("Field 'x' doesn't exist", "failed"), { extensions: { code: "GRAPHQL_VALIDATION_FAILED" } });
+    },
+  });
+  await assert.rejects(createLinearIssues({ linear: broken }).readIssue("ENG-5"), { code: "failed", message: "Field 'x' doesn't exist" });
+  await assert.rejects(createLinearIssues({ linear: broken }).readIssues(["ENG-5", "ENG-6"], { fresh: true }), { code: "failed" });
+});
+
+test("a failed team-key lookup still resolves the worktrees that store their issue", async () => {
+  const linear = fakeLinear({
+    answer: (document) => {
+      if (document.includes("teams(")) throw new LinearError("Couldn't reach Linear", "offline");
+      return { i0: node("ENG-12") };
+    },
+  });
+  const found = await createLinearIssues({ linear, now: () => 0 }).worktreeIssues([
+    { name: "milagre/fix-x-ab12", path: "/wt/a", linearIssue: "ENG-12" },
+    { name: "eng-13-plain", path: "/wt/b" },
+  ]);
+  assert.deepEqual(Object.keys(found), ["/wt/a"]);
+  assert.equal(found["/wt/a"].key, "ENG-12");
+});

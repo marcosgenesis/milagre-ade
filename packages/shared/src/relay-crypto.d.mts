@@ -1,6 +1,8 @@
 export type KeyPair = { publicKey: Uint8Array; secretKey: Uint8Array };
 export type Channel = {
   seal(value: unknown): Uint8Array;
+  /** Seals the UTF-8 bytes of a message already encoded as JSON; the other side opens it as it opens seal()'s. */
+  sealEncoded(plain: Uint8Array): Uint8Array;
   open(frame: Uint8Array): unknown;
 };
 export type Random = (n: number) => Uint8Array;

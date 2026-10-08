@@ -41,6 +41,9 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * with `setLan` or the phone is confined): `status().lan` reports it, and a phone asks `routes` for the Mac's addresses.
  * A LAN port that cannot be bound never stops phone access; it shows up as `lan.error`.
  * `allowedRoot` confines a paired phone to one folder (see the bridge); the owner's app never sets it.
+ * `openPeer` (server.cjs) opens a paired desktop's daemon connection; the relay and LAN hosts get it unless phone access
+ * is confined, since a desktop drives the daemon directly, past the bridge's confinement. `peerRoutes()` tells a paired
+ * desktop where to reach this Mac.
  */
 function createPhone({
   dataDir,
@@ -60,6 +63,7 @@ function createPhone({
   lanPort = LAN_PORT,
   lanHostname = "0.0.0.0",
   addresses = lanAddresses,
+  openPeer,
 }) {
   const file = path.join(dataDir, "mobile.json");
   let config; // { enabled, token | null, lan }, read once
@@ -77,6 +81,8 @@ function createPhone({
   let lanError;
   // A confined phone (the review demo) never opens a door on the network.
   const lanAllowed = lanPort !== null && allowedRoot === undefined;
+  // What the relay and LAN hosts get to serve paired desktops: nothing on a confined phone.
+  const peer = openPeer && allowedRoot === undefined ? { openPeer } : {};
   let queue = Promise.resolve();
   let closed = false;
   const enqueue = (work) => {
@@ -216,6 +222,7 @@ function createPhone({
         phones: current.phones,
         token: config.token,
         bridgeUrl: current.bridge.url,
+        ...peer,
       });
       lanError = undefined;
     } catch (failure) {
@@ -232,6 +239,11 @@ function createPhone({
     const current = live;
     if (!current) throw Object.assign(new Error("Phone access is starting. Try again."), { status: 409 });
     if (!current.phones.isKnown(phoneKey) && relayPhones.removedAt(phoneKey) === null) await relayPhones.add(phoneKey);
+    return routesOf(current);
+  }
+
+  /** Where a device finds this Mac: its relay identity and, while the LAN listener runs, its addresses. */
+  function routesOf(current) {
     const port = current.lan?.port;
     return { hostId: current.identity.hostId, key: b64url(current.identity.box.publicKey), lan: port ? addresses().map((ip) => `ws://${ip}:${port}`) : [] };
   }
@@ -267,6 +279,7 @@ function createPhone({
       const known = relayPhones;
       const phones = {
         isKnown: (id) => known.isKnown(id),
+        kindOf: (id) => known.kindOf(id),
         seen: (id, info) => known.seen(id, info),
         async add(id, info) {
           await known.add(id, info);
@@ -274,7 +287,7 @@ function createPhone({
           if (mine !== generation) return;
           changed();
           try {
-            onPaired({ pairedPhones: known.count() });
+            onPaired({ pairedPhones: known.count(), kind: info?.kind ?? "phone" });
           } catch {
             /* a listener must not break the setting */
           }
@@ -292,6 +305,7 @@ function createPhone({
           token: config.token,
           bridgeUrl: bridge.url,
           canPair: (key) => mayPair(key),
+          ...peer,
           onStatus: (next) => {
             if (mine !== generation) return;
             relayStatus = next;
@@ -356,6 +370,11 @@ function createPhone({
   return {
     status,
     routes,
+    /** Asked by a paired desktop over its channel: it has no phone:routes, which the bridge answers. */
+    peerRoutes() {
+      if (!live) throw Object.assign(new Error("Phone access is starting. Try again."), { status: 409 });
+      return routesOf(live);
+    },
     settled: () => queue,
     devices,
     /** Forgets a device and closes its channels on every carrier. It may pair again only in a pairing window opened later. */

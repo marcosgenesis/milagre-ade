@@ -113,3 +113,65 @@ test("comments the app names are kept by that id, once", async (t) => {
     "a retried send records nothing twice",
   );
 });
+
+const chatFolder = async (directory) => path.join(directory, (await fs.readdir(directory))[0]);
+
+test("a design is a folder: metadata without HTML, and one HTML file per version", async (t) => {
+  const { api, directory } = await fixture(t);
+  const { id } = await api.show({ chatId: CHAT, title: "Login", html: "<p>one</p>" });
+  await api.show({ chatId: CHAT, id, title: "Login", html: "<p>two</p>" });
+  const folder = path.join(await chatFolder(directory), id);
+  assert.deepEqual((await fs.readdir(folder)).sort(), ["meta.json", "v1.html", "v2.html"]);
+  const meta = JSON.parse(await fs.readFile(path.join(folder, "meta.json"), "utf8"));
+  assert.equal(meta.id, id);
+  for (const entry of meta.versions) assert.deepEqual(Object.keys(entry).sort(), ["createdAt", "height", "title", "version", "width"]);
+  assert.equal(await fs.readFile(path.join(folder, "v2.html"), "utf8"), "<p>two</p>");
+  // The list needs only the metadata: with every HTML file gone it still lists the design.
+  await fs.rm(path.join(folder, "v1.html"));
+  await fs.rm(path.join(folder, "v2.html"));
+  assert.deepEqual(
+    (await api.list({ chatId: CHAT })).map((item) => [item.id, item.version]),
+    [[id, 2]],
+  );
+});
+
+test("trimming old versions deletes their HTML", async (t) => {
+  const { api, directory } = await fixture(t);
+  const { id } = await api.show({ chatId: CHAT, title: "Loop", html: "<p>1</p>" });
+  for (let n = 2; n <= 52; n++) await api.show({ chatId: CHAT, id, title: "Loop", html: `<p>${n}</p>` });
+  const files = await fs.readdir(path.join(await chatFolder(directory), id));
+  assert.equal(files.length, 51);
+  assert.ok(!files.includes("v1.html") && !files.includes("v2.html") && files.includes("v3.html") && files.includes("v52.html"));
+  assert.equal((await api.list({ chatId: CHAT }))[0].versions, 50);
+});
+
+test("a design saved in the old single-file format is converted on first access", async (t) => {
+  const { api, directory } = await fixture(t);
+  const { id } = await api.show({ chatId: CHAT, title: "Seed", html: "<p>seed</p>" });
+  const folder = await chatFolder(directory);
+  await fs.rm(path.join(folder, id), { recursive: true });
+  const versions = [
+    { version: 1, title: "Old", html: "<p>a</p>", width: 390, height: 844, createdAt: 1 },
+    { version: 2, title: "Older, newer", html: "<p>b</p>", width: 390, height: 844, createdAt: 2 },
+  ];
+  await fs.writeFile(path.join(folder, "legacy.json"), JSON.stringify({ id: "legacy", versions }));
+  assert.deepEqual(
+    (await api.list({ chatId: CHAT })).map((item) => [item.id, item.title, item.versions, item.width]),
+    [["legacy", "Older, newer", 2, 390]],
+  );
+  assert.equal((await api.get({ chatId: CHAT, id: "legacy", version: 1 })).html, "<p>a</p>");
+  assert.deepEqual((await fs.readdir(folder)).sort(), ["legacy"]);
+  assert.equal((await api.show({ chatId: CHAT, id: "legacy", title: "Third", html: "<p>c</p>" })).version, 3);
+});
+
+test("removing a Chat deletes its designs and comments, and only its own", async (t) => {
+  const { api, directory } = await fixture(t);
+  await api.show({ chatId: CHAT, title: "Mine", html: "<p>x</p>" });
+  await api.show({ chatId: "/repo#4", title: "Other", html: "<p>y</p>" });
+  await api.addComments({ chatId: CHAT, comments: [{ design: { id: "a", version: 1 }, text: "hi" }] });
+  await api.removeChat(CHAT);
+  assert.equal((await fs.readdir(directory)).length, 1);
+  assert.deepEqual(await api.list({ chatId: CHAT }), []);
+  assert.equal((await api.list({ chatId: "/repo#4" })).length, 1);
+  await api.removeChat(CHAT);
+});

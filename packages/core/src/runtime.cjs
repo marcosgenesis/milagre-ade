@@ -429,6 +429,10 @@ function createRuntime(options) {
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
+    // The chats on this worktree go with it, and so do their designs.
+    const goneChats = Object.values((await states.get(projectPath)).sessions)
+      .filter((session) => session.worktree_id === worktree.id)
+      .map((session) => `${projectPath}#${session.id}`);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -448,7 +452,10 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await pruneLinks();
+    if (result.removed) {
+      await Promise.all(goneChats.map((id) => artifacts.removeChat(id).catch(() => {})));
+      await pruneLinks();
+    }
     return result;
   }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {

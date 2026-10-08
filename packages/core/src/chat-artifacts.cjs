@@ -4,7 +4,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const { z } = require("zod");
 
 // Design artifacts: HTML an agent shows in its Chat. Each artifact keeps its versions, so a reply's card shows the
-// design as it was then while the docked viewer follows the latest. They live in the host profile, one file each.
+// design as it was then while the docked viewer follows the latest. They live in the host profile, one folder each (meta.json and a v<N>.html per version).
 const MAX_HTML = 1_000_000;
 const MAX_VERSIONS = 50;
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -17,9 +17,9 @@ const MAX_COMMENTS = 2000;
 const COMMENT_ID = /^[a-f0-9]{8}$/;
 const size = (value, fallback) => (Number.isInteger(value) && value >= 240 && value <= 3840 ? value : fallback);
 
-function fileOf(folder, id) {
-  if (typeof id !== "string" || !ID.test(id)) throw Error("Artifact ids are lowercase letters, digits and dashes.");
-  return path.join(folder, `${id}.json`);
+function checkId(id) {
+  if (typeof id !== "string" || !ID.test(id) || id === COMMENTS) throw Error("Artifact ids are lowercase letters, digits and dashes.");
+  return id;
 }
 const summary = (artifact, entry) => ({
   id: artifact.id,
@@ -43,24 +43,48 @@ function createChatArtifacts({ directory, validateChat }) {
     await validateChat(chatId);
     return chatDirectory(chatId);
   }
-  async function load(folder, id) {
-    try {
-      return JSON.parse(await fs.readFile(fileOf(folder, id), "utf8"));
-    } catch (error) {
-      if (error.code === "ENOENT") return null;
-      throw error;
-    }
-  }
-  async function store(folder, artifact) {
-    await fs.mkdir(folder, { recursive: true, mode: 0o700 });
-    const file = fileOf(folder, artifact.id);
+  const designFolder = (folder, id) => path.join(folder, checkId(id));
+  const htmlFile = (folder, id, version) => path.join(designFolder(folder, id), `v${version}.html`);
+  async function atomicWrite(file, content) {
     const temporary = `${file}.${randomUUID()}.tmp`;
     try {
-      await fs.writeFile(temporary, JSON.stringify(artifact), { mode: 0o600 });
+      await fs.writeFile(temporary, content, { mode: 0o600 });
       await fs.rename(temporary, file);
     } finally {
       await fs.rm(temporary, { force: true });
     }
+  }
+  // The metadata of a design: { id, versions: [{ version, title, width, height, createdAt }] }, no HTML.
+  async function writeMeta(folder, meta) {
+    await fs.mkdir(designFolder(folder, meta.id), { recursive: true, mode: 0o700 });
+    await atomicWrite(path.join(designFolder(folder, meta.id), "meta.json"), JSON.stringify(meta));
+  }
+  // The first layout kept a design in one `<id>.json` with every version's HTML inside; it is converted on first access.
+  async function migrate(folder, id) {
+    const old = path.join(folder, `${checkId(id)}.json`);
+    let legacy;
+    try {
+      legacy = JSON.parse(await fs.readFile(old, "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    await fs.mkdir(designFolder(folder, id), { recursive: true, mode: 0o700 });
+    for (const entry of legacy.versions) await atomicWrite(htmlFile(folder, id, entry.version), entry.html);
+    await writeMeta(folder, { id, versions: legacy.versions.map((entry) => ({ ...entry, html: undefined })) });
+    await fs.rm(old, { force: true });
+  }
+  async function load(folder, id) {
+    const file = path.join(designFolder(folder, id), "meta.json");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return JSON.parse(await fs.readFile(file, "utf8"));
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        if (attempt === 0) await migrate(folder, id);
+      }
+    }
+    return null;
   }
   return {
     show: (request) =>
@@ -76,14 +100,17 @@ function createChatArtifacts({ directory, validateChat }) {
         const entry = {
           version: (previous.at(-1)?.version ?? 0) + 1,
           title: title.trim().slice(0, 120),
-          html,
           // A revision keeps the screen size it doesn't name.
           width: size(request.width, previous.at(-1)?.width ?? VIEWPORT.width),
           height: size(request.height, previous.at(-1)?.height ?? VIEWPORT.height),
           createdAt: Date.now(),
         };
         const artifact = { id, versions: [...previous, entry].slice(-MAX_VERSIONS) };
-        await store(folder, artifact);
+        await fs.mkdir(designFolder(folder, id), { recursive: true, mode: 0o700 });
+        await atomicWrite(htmlFile(folder, id, entry.version), html);
+        await writeMeta(folder, artifact);
+        const kept = new Set(artifact.versions.map((item) => item.version));
+        await Promise.all(previous.filter((item) => !kept.has(item.version)).map((item) => fs.rm(htmlFile(folder, id, item.version), { force: true })));
         return summary(artifact, entry);
       }),
     async get(request) {
@@ -92,12 +119,18 @@ function createChatArtifacts({ directory, validateChat }) {
       if (!artifact) throw Error("This design is no longer available.");
       const entry = request.version === undefined ? artifact.versions.at(-1) : artifact.versions.find((item) => item.version === request.version);
       if (!entry) throw Error(`Version ${request.version} of this design is no longer kept.`);
-      return { ...summary(artifact, entry), latest: artifact.versions.at(-1).version, html: entry.html };
+      const html = await fs.readFile(htmlFile(folder, artifact.id, entry.version), "utf8").catch((error) => {
+        if (error.code === "ENOENT") throw Error("This design is no longer available.");
+        throw error;
+      });
+      return { ...summary(artifact, entry), latest: artifact.versions.at(-1).version, html };
     },
     async list(request) {
       const folder = await chat(request?.chatId);
       const names = await fs.readdir(folder).catch((error) => (error.code === "ENOENT" ? [] : Promise.reject(error)));
-      const artifacts = await Promise.all(names.filter((name) => name.endsWith(".json")).map((name) => load(folder, name.slice(0, -5))));
+      // A design is a subfolder (or, before its migration, an `<id>.json`); only the metadata is read.
+      const ids = new Set(names.map((name) => (name.endsWith(".json") ? name.slice(0, -5) : name)).filter((name) => ID.test(name) && name !== COMMENTS));
+      const artifacts = await Promise.all([...ids].map((id) => load(folder, id)));
       // In the order the agent first showed them, as the canvas lays them out.
       return artifacts
         .filter(Boolean)
@@ -146,6 +179,12 @@ function createChatArtifacts({ directory, validateChat }) {
         comment.resolved = { note, at: Date.now() };
         await writeComments(folder, all);
         return comment;
+      }),
+    /** Deletes every design and comment of a Chat that is gone. */
+    removeChat: (chatId) =>
+      serial(async () => {
+        if (typeof chatId !== "string" || !chatId || chatId.length > 8192) return;
+        await fs.rm(chatDirectory(chatId), { recursive: true, force: true });
       }),
     close: () => queue,
   };

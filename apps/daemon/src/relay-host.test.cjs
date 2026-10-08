@@ -54,7 +54,7 @@ async function startRelay(t, { autoPong = true, hostBehavior } = {}) {
 
 async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-host-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
   const phones = createDevices(dir);
   await phones.load();
@@ -151,7 +151,7 @@ test('an unknown phone with a stale token gets {t:"error",code:"bad-token"} and 
 test("a retired host holds its old room only to tell every phone the Mac was reset", async (t) => {
   const relay = await startRelay(t);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-retired-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const old = await readIdentity(dir);
   const host = startRelayHost({ relayUrl: relay.url, identity: { hostId: old.hostId, sign: old.sign }, retired: true });
   t.after(() => host.close());
@@ -481,6 +481,11 @@ test("a phone's hello names it: a first pairing saves the name, a later hello re
   t.after(() => second.close());
   assert.ok((await second.hello()).channel);
   await until(() => mac.phones.list().find((device) => device.key === id).name === "Victor's iPhone", "renamed by the hello");
+  // The hello does not wait for the write, so wait for the file before the test's cleanup removes the directory.
+  await until(
+    async () => (await fs.readFile(path.join(mac.dir, "devices.json"), "utf8").catch(() => "")).includes("Victor's iPhone"),
+    "the name written to devices.json",
+  );
   mac.host.drop(id);
   await second.closed;
   assert.deepEqual(mac.host.connectedKeys(), []);

@@ -1,14 +1,17 @@
 // Browser check: Settings > About lets the user pick the Beta release channel and hands the choice to the main process.
+// With a Chat open, the update pill floats centred above the composer, on the chip row's line.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const fixture = `
-import React from "react";
+import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { UpdateShell, useAppUpdates } from "/src/components/UpdateNotice";
 import { AboutSettings } from "/src/components/Settings";
+import { ChatComposer } from "/src/components/ChatComposer";
+import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 let listener;
 window.__installs = 0;
@@ -24,9 +27,29 @@ window.milagre = {
 };
 document.documentElement.classList.add("dark");
 function Settings() { return <AboutSettings update={useAppUpdates()} />; }
-createRoot(document.getElementById("root")).render(
-  <UpdateShell><div style={{ maxWidth: 640, margin: "60px auto" }}><Settings /></div></UpdateShell>
-);
+const noop = () => {};
+const model = MODEL_CATALOG[0];
+const messages = [
+  { id: 1, session_id: 1, context: null, role: "user", body: "Review authentication and run the relevant tests." },
+  { id: 2, session_id: 1, context: null, role: "assistant", body: "I started a subagent. Its progress is available below." },
+];
+const subagents = [{ id: "review", title: "Review authentication", status: "running", startedAt: Date.now(), updatedAt: Date.now(), transcript: [] }];
+function Chat() {
+  return <div className="flex h-full flex-col text-ink"><ChatComposer messages={messages}
+    imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
+    projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={true} sendBlocked={false} subagents={subagents}
+    models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+    capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
+    fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
+    onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
+    isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} /></div>;
+}
+function Fixture() {
+  const [chat, setChat] = useState(false);
+  window.__chat = setChat;
+  return chat ? <div style={{ height: "100vh" }}><Chat /></div> : <div style={{ maxWidth: 640, margin: "60px auto" }}><Settings /></div>;
+}
+createRoot(document.getElementById("root")).render(<UpdateShell><Fixture /></UpdateShell>);
 `;
 
 async function browserChecks() {
@@ -102,6 +125,28 @@ async function browserChecks() {
     await evaluate(`${button("Update available")}.click()`);
     await evaluate("document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
     await waitFor("!document.querySelector('[role=dialog]')");
+    // An open Chat holds the pill centred above its composer, bottom-aligned with the chip row, outside the row's flow.
+    await evaluate("window.__chat(true)");
+    await waitFor("[...document.querySelectorAll('button')].some(n => n.textContent.includes('Subagents'))");
+    const placement = await evaluate(`(() => {
+      const pill = ${button("Update available")}.getBoundingClientRect();
+      const chip = [...document.querySelectorAll('button')].find(n => n.textContent.includes('Subagents')).getBoundingClientRect();
+      const column = document.querySelector('textarea[aria-label="Prompt"]').closest('.max-w-3xl').getBoundingClientRect();
+      return { pillCenter: (pill.left + pill.right) / 2, columnCenter: (column.left + column.right) / 2, pillBottom: pill.bottom, chipBottom: chip.bottom, fixed: getComputedStyle(${button("Update available")}.parentElement).position };
+    })()`);
+    assert.ok(Math.abs(placement.pillCenter - placement.columnCenter) < 1, `pill is centred: ${JSON.stringify(placement)}`);
+    assert.ok(Math.abs(placement.pillBottom - placement.chipBottom) < 1, `pill shares the chip row's line: ${JSON.stringify(placement)}`);
+    assert.notEqual(placement.fixed, "fixed");
+    await screenshot("update-pill-chat");
+    await evaluate(`${button("Update available")}.click()`);
+    await waitFor("!!document.querySelector('[role=dialog]')");
+    await screenshot("update-pill-chat-open");
+    await evaluate("document.querySelector('[aria-label=\"Dismiss update\"]').click()");
+    await waitFor("!document.querySelector('[role=dialog]')");
+    // Leaving the Chat returns the pill to the window's bottom left.
+    await evaluate("window.__chat(false)");
+    await waitFor(`getComputedStyle(${button("Update available")}.parentElement).position === 'fixed'`);
+    console.log("PASS: update pill above the chat composer, falling back to the bottom left without a Chat");
     console.log("PASS: update progress, ready card, dismissal, settings warning, installation, retries and keyboard access");
     app.exit(0);
   } catch (error) {

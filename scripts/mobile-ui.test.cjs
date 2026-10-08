@@ -315,15 +315,50 @@ function markdownHost({ media, basePath } = {}) {
     return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
   }
   return {
-    render(text) {
+    render(text, streaming = false) {
       react.begin();
-      return expand(Markdown({ text, media, basePath }));
+      return expand(Markdown({ text, streaming, media, basePath }));
     },
     routes,
     links,
     viewer,
   };
 }
+
+test("plain URLs in mobile replies render as links and open the exact address", async () => {
+  for (const streaming of [false, true]) {
+    for (const [text, url] of [
+      ["The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. It fixes both banners.", "https://github.com/the-ptf/milagre-ade/pull/289"],
+      ["See (https://example.org/a_(b)).", "https://example.org/a_(b)"],
+      ["Visit www.example.org or ask me later.", "http://www.example.org"],
+      ["Email hello@example.org.", "mailto:hello@example.org"],
+      ["[Pull request](https://github.com/the-ptf/milagre-ade/pull/289)", "https://github.com/the-ptf/milagre-ade/pull/289"],
+    ]) {
+      const screen = markdownHost();
+      const link = find(screen.render(text, streaming), (node) => node.props?.accessibilityRole === "link");
+      assert.ok(link, `Missing link in ${text} (streaming: ${streaming})`);
+      assert.ok(link.props.style.some((style) => style.textDecorationLine === "underline"));
+      await link.props.onPress();
+      assert.deepEqual(screen.links, [url]);
+    }
+  }
+});
+
+test("mobile replies keep code URLs and unsafe links inert", () => {
+  for (const text of [
+    "`https://example.org`",
+    "```text\nhttps://example.org\n```",
+    "[local](file:///etc/passwd)",
+    "[command](javascript:alert(1))",
+    "[pair](milagre-local://connect)",
+  ]) {
+    assert.equal(
+      find(markdownHost().render(text), (node) => node.props?.accessibilityRole === "link"),
+      undefined,
+      text,
+    );
+  }
+});
 
 test("Markdown screenshot links render image previews outside Text and open the image viewer", () => {
   const screen = markdownHost();
@@ -721,6 +756,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../context-ring": { ContextRing: "ContextRing" },
     "../theme": { hex: () => ({ surface: "#ffffff" }) },
     "../simulator": { SimulatorChip: "SimulatorChip" },
+    "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -3222,6 +3258,208 @@ test("simulator sheet preserves its native header and bounds chooser/viewer cont
   }
 });
 
+function browserHost(client) {
+  const react = hookHost({ effects: true }),
+    files = new Map(),
+    listeners = new Set(),
+    pushed = [],
+    writes = [];
+  const native = {
+    useColorScheme: () => "light",
+    Text: "Text",
+    View: "View",
+    Pressable: "Pressable",
+    AppState: {
+      currentState: "active",
+      addEventListener(_name, fn) {
+        listeners.add(fn);
+        return {
+          remove() {
+            listeners.delete(fn);
+          },
+        };
+      },
+    },
+  };
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value, options) {
+      files.set(this.uri, value);
+      writes.push([this.uri, options?.encoding ?? "utf8"]);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "browser.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": native,
+      "expo-router": {
+        router: {
+          back() {},
+          push(value) {
+            pushed.push(value);
+          },
+        },
+        useFocusEffect: (fn) => react.effect(fn, [fn]),
+      },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 34 }) },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/browser-receiver": require("../packages/shared/src/browser-receiver.mjs"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./theme": {
+        hex: () => ({ page: "#fafafb", surface: "#ffffff", ink: "#1f2124", ink2: "#62656b", line: "#ecedef", hover: "#f4f5f6", accent: "#0285ff" }),
+      },
+      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestBrowserWebView = BrowserWebView;",
+  );
+  return {
+    source,
+    files,
+    writes,
+    pushed,
+    background() {
+      native.AppState.currentState = "background";
+      for (const fn of listeners) fn("background");
+    },
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+const BROWSER_PAGE = { id: "browser-1:" + "A".repeat(32), title: "Login", url: "https://example.com/login", browser: "Chrome 141", source: "agent" };
+
+test("mobile browser pill lists only this Chat and hides when there is nothing to show or attach", async (t) => {
+  for (const [list, visible] of [
+    [{ supported: true, targets: [], others: [] }, false],
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, true],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserChip", { chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserChip", { chatId: "/p#1" });
+    assert.equal(!!tree, visible);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["browser:list", [{ chatId: "/p#1" }]]]);
+    if (visible) {
+      tree.props.onPress();
+      assert.deepEqual(JSON.parse(JSON.stringify(h.pushed[0])), { pathname: "/browser-sheet", params: { hostId: "mac", chatId: "/p#1" } });
+    }
+    h.cleanup();
+  }
+  const h = browserHost({
+    url: "mac",
+    call: async () => {
+      throw new Error("unexpected");
+    },
+  });
+  assert.equal(h.render("BrowserChip", {}), null, "a new Chat has no agent yet");
+  h.cleanup();
+});
+
+test("mobile browser sheet opens a sole page directly, lists several, and attaches explicitly", async (t) => {
+  const other = { id: "b", browser: "Chrome 141", pages: 2, title: "Mine" };
+  for (const [list, direct] of [
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [BROWSER_PAGE, { ...BROWSER_PAGE, id: "browser-1:" + "B".repeat(32) }], others: [other] }, false],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return method === "browser:attach"
+          ? { ...list, targets: [...list.targets, { ...BROWSER_PAGE, id: "b:" + "C".repeat(32), source: "attached" }], others: [] }
+          : list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    assert.equal(tree.props.style.paddingBottom, 34, "controls clear the phone home indicator");
+    const [header, body] = tree.props.children;
+    assert.equal(header.props.collapsable, false);
+    assert.equal(body.props.collapsable, false);
+    assert.equal(!!find(body, (node) => node.props?.targetId === BROWSER_PAGE.id), direct);
+    assert.deepEqual(
+      calls.map(([method]) => method),
+      ["browser:list"],
+      "listing starts no capture",
+    );
+    if (!direct) {
+      const attach = find(body, (node) => node.type === "PillButton" && node.props.title === "Attach");
+      attach.props.onPress();
+      await settle();
+      assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:attach", [{ chatId: "/p#1", browserId: "b" }]]);
+    }
+    h.cleanup();
+  }
+});
+
+test("mobile browser frames are written to local files; only their address enters the WebView", async () => {
+  const injected = [];
+  const client = {
+    call: async (method) =>
+      method === "browser:open"
+        ? { viewerId: "viewer", target: BROWSER_PAGE }
+        : method === "browser:frame"
+          ? { sequence: 7, data: "anBlZw==", viewport: { width: 800, height: 600 }, generation: 1 }
+          : null,
+  };
+  const h = browserHost(client);
+  h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  await settle();
+  const tree = h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  assert.equal(tree.type, "DomWebView");
+  assert.equal(tree.props.useExpoModulesBridge, false);
+  assert.match(h.files.get(tree.props.source.uri), /milagre-browser/);
+  tree.props.ref.current = { injectJavaScript: (value) => injected.push(value) };
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 1, method: "open", args: { chatId: "/p#1", targetId: BROWSER_PAGE.id } }) },
+  });
+  await settle();
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 2, method: "frame", args: { viewerId: "viewer", after: 0 } }) },
+  });
+  await settle();
+  const reply = injected.find((script) => script.includes('"id":2'));
+  assert.ok(reply.includes("file:///cache/browser-"), "the WebView gets a file address");
+  assert.ok(!reply.includes("anBlZw=="), "frame bytes stay out of injected script");
+  assert.deepEqual(h.writes.at(-1)[1], "base64");
+  h.background();
+  await settle();
+  assert.ok(injected.some((script) => script.includes("browserDispose")));
+  h.cleanup();
+  assert.equal(h.files.size, 0, "the viewer page and frames are deleted");
+});
+
 for (const provider of ["claude", "codex"])
   test(`mobile Accounts selects by tapping the row and manages accounts through its menu (${provider})`, async () => {
     const react = hookHost({ effects: true });
@@ -4047,6 +4285,7 @@ function artifactHost(client, pushes = [], router = { back() {} }) {
       "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
       "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "react-native-keyboard-controller": { KeyboardAvoidingView: "KeyboardAvoidingView" },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
       "@hugeicons/core-free-icons": {},

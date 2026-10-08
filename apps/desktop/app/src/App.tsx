@@ -10,7 +10,7 @@ import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shar
 import { reportChatAction } from "./lib/chat-action";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import {
   ChatMessage,
@@ -72,7 +72,7 @@ import { usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
 import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
-import { runKeys } from "./lib/sidebar-scopes";
+import { cachedProjectCopy, rememberProjectCopy, runKeys } from "./lib/sidebar-scopes";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
 import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat, type PendingChat } from "@milagre/shared/chats";
@@ -92,7 +92,7 @@ import { messageCommands } from "./lib/message-commands";
 import type { RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
-import { createDraftStore } from "./lib/draft-store";
+import { createDraftStore, draftKey } from "./lib/draft-store";
 import { restoredChatsNotice } from "./lib/restored-chats";
 import { lazyView } from "./lib/lazy-view";
 import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
@@ -152,13 +152,23 @@ function App() {
   /** The open project's latest state. */
   const openState = () => (projectRef.current ? statesRef.current[projectRef.current.path] : undefined);
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
+  const [selectedSessionId, setSelectedSessionState] = useState<number | null>(null);
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const draftStore = useMemo(createDraftStore, []);
   const setDraft = draftStore.set;
+  // Each Chat, and each project's new-chat screen, keeps its own draft. The store switches with the selection, before
+  // the render, so a draft written right after picking a Chat lands in that Chat.
+  function setSelectedSessionId(next: SetStateAction<number | null>) {
+    const value = typeof next === "function" ? next(selectedSessionRef.current) : next;
+    selectedSessionRef.current = value;
+    draftStore.select(draftKey(projectRef.current?.path ?? "", value));
+    setSelectedSessionState(value);
+  }
+  // Catches a project change that did not go through the setter above.
+  useLayoutEffect(() => draftStore.select(draftKey(project?.path ?? "", selectedSessionId)), [project?.path, selectedSessionId]);
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() =>
     resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)),
   );
@@ -203,6 +213,7 @@ function App() {
         if (live()) {
           setLoadedAccountScope(accountScope);
           setCliStatus((previous) => keepIfSame(previous, next));
+          if (accountScope) providerCache.current.set(accountScope, { reported: providerCache.current.get(accountScope)?.reported ?? null, cliStatus: next });
         }
       })
       .catch(() => undefined);
@@ -212,18 +223,24 @@ function App() {
         if (live()) {
           setLoadedAccountScope(accountScope);
           setReported((previous) => keepIfSame(previous, next));
+          if (accountScope) providerCache.current.set(accountScope, { reported: next, cliStatus: providerCache.current.get(accountScope)?.cliStatus ?? null });
         }
       })
       .catch(() => undefined);
   };
+  // Each Project's or Link's last model lists and CLI status, shown at once when switching back while they reload.
+  const providerCache = useRef(new Map<string, { reported: AgentModels | null; cliStatus: AgentCliStatus | null }>());
   useEffect(() => {
-    const reset = () => {
-      setReported(null);
-      setCliStatus(null);
+    const reset = (dropCache: boolean) => {
+      if (dropCache) providerCache.current.clear();
+      const hit = accountScope ? providerCache.current.get(accountScope) : undefined;
+      setReported(hit?.reported ?? null);
+      setCliStatus(hit?.cliStatus ?? null);
+      if (hit) setLoadedAccountScope(accountScope);
       refreshCliStatus();
     };
-    reset();
-    const off = window.milagre.onAccountsChanged?.(reset);
+    reset(false);
+    const off = window.milagre.onAccountsChanged?.(() => reset(true));
     return () => {
       accountGeneration.current++;
       off?.();
@@ -548,6 +565,8 @@ function App() {
     if (!("worktrees" in next)) return;
     statesRef.current = { ...statesRef.current, [projectPath]: reconcileState(statesRef.current[projectPath], next) };
     setStates(statesRef.current);
+    const seen = projectsSeen.current.get(projectPath);
+    if (seen) rememberProjectCopy({ ...seen, state: statesRef.current[projectPath] });
   }
 
   useEffect(() => window.milagre.onProjectState(({ path, state: next }) => receiveState(path, next)), []);
@@ -937,12 +956,13 @@ function App() {
     [],
   );
 
-  function startNewChat() {
+  function startNewChat(draftText = "") {
     advanceChatView();
     const latest = openState();
     if (latest && projectRef.current) restoreProjectChoices(latest, projectRef.current.path);
     setSelectedSessionId(null);
-    setDraft("");
+    // The new-chat screen keeps its own draft; only text handed in replaces it.
+    if (draftText) setDraft(draftText);
     setNewChatError(null);
     setView("chat");
     // The composer may only mount on this render (coming from settings), so focus after it lands.
@@ -977,7 +997,6 @@ function App() {
       selectInitialChat(nextProject.state, nextProject.path);
       const remembered = scopeDrafts.read({ kind: "project", projectPath: nextProject.path });
       if (remembered.sessionId !== null && nextProject.state.sessions[remembered.sessionId]) setSelectedSessionId(remembered.sessionId);
-      setDraft(remembered.text);
       setGitDialog(null);
       setView("chat");
     });
@@ -990,7 +1009,9 @@ function App() {
     const navigation = ++projectNavigation.current;
     const cached = path ? projectsSeen.current.get(path) : undefined;
     const cachedState = path ? statesRef.current[path] : undefined;
-    if (cached && cachedState && (cached.path !== projectRef.current?.path || selectedLinkRef.current)) adoptProject({ ...cached, state: cachedState });
+    const instant = cached && cachedState ? { ...cached, state: cachedState } : path ? cachedProjectCopy(path) : undefined;
+    if (instant && (instant.path !== projectRef.current?.path || selectedLinkRef.current)) adoptProject(instant);
+    const adopted = path ? statesRef.current[path] : undefined;
     try {
       const next = await load();
       if (navigation !== projectNavigation.current || !next) return;
@@ -999,7 +1020,7 @@ function App() {
         // Revalidation updates the list without resetting a Chat or draft picked while it was in flight.
         projectsSeen.current.set(next.path, { path: next.path, name: next.name });
         // Host events may have supplied a newer state while this request was pending.
-        if (!path || statesRef.current[next.path] === cachedState) receiveState(next.path, next.state);
+        if (!path || statesRef.current[next.path] === adopted) receiveState(next.path, next.state);
         setProject(next);
         const restored = restoredChatsNotice(next.restoredChats);
         if (restored) setNotice(restored);
@@ -1040,13 +1061,28 @@ function App() {
       return;
     }
     const navigation = ++projectNavigation.current;
-    try {
-      if (projectRef.current?.path !== projectPath || selectedLinkRef.current) {
-        const next = await window.milagre.openCanvasProject(projectPath);
-        if (navigation !== projectNavigation.current) return;
-        adoptProject(next);
-      }
+    // The last copy shows at once; the main process's answer then refreshes it in place, so the switch never waits.
+    const cachedState = statesRef.current[projectPath];
+    const seen = projectsSeen.current.get(projectPath);
+    const instant = cachedState && seen ? { ...seen, state: cachedState } : cachedProjectCopy(projectPath);
+    if (instant) {
+      adoptProject(instant);
       openChat(sessionId);
+    }
+    const adopted = statesRef.current[projectPath];
+    try {
+      const next = await window.milagre.openCanvasProject(projectPath);
+      if (navigation !== projectNavigation.current) return;
+      if (!instant || next.path !== projectRef.current?.path || selectedLinkRef.current) {
+        adoptProject(next);
+        openChat(sessionId);
+        return;
+      }
+      projectsSeen.current.set(next.path, { path: next.path, name: next.name });
+      if (statesRef.current[next.path] === adopted) receiveState(next.path, next.state);
+      setProject(next);
+      const restored = restoredChatsNotice(next.restoredChats);
+      if (restored) setNotice(restored);
     } catch (error) {
       if (navigation === projectNavigation.current) setNotice(ipcErrorMessage(error));
     }
@@ -1157,7 +1193,11 @@ function App() {
           : pending,
       );
       if (stillHere()) {
+        // Text typed while a new chat was being created belongs to that chat, not to the next new one.
+        const carried = draftStore.get();
+        setDraft("");
         setSelectedSessionId(sessionId);
+        setDraft([draftStore.get(), carried].filter(Boolean).join("\n\n"));
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
       }
       return true;
@@ -1366,6 +1406,26 @@ function App() {
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
   const switchProjectFromSidebar = useEvent((path: string) => void switchProject(path));
+  // "+" on another Project's header switches to it (from its last copy, so at once) and starts a chat there.
+  const newChatInScope = useEvent((key: string) => {
+    if (isLinkScopeKey(key)) {
+      void selectLink(key.slice("milagre-link:".length));
+      return;
+    }
+    if (!selectedLinkRef.current && projectRef.current?.path === key) {
+      startNewChat();
+      return;
+    }
+    // A new chat left unsent there comes back with its draft; a draft for one of its chats stays with that chat.
+    const remembered = scopeDrafts.read({ kind: "project", projectPath: key });
+    const start = () => startNewChat(remembered.sessionId === null ? remembered.text : "");
+    const switched = switchProject(key);
+    if (!selectedLinkRef.current && projectRef.current?.path === key) start();
+    else
+      void switched.then(() => {
+        if (!selectedLinkRef.current && projectRef.current?.path === key) start();
+      });
+  });
   const sidebarRunKeys = runKeys(agentRuns.runs);
   const openScopeChat = useEvent((scopeKey: string, id: string) => void openCanvasChat(scopeKey, Number(id)));
   const openSettings = useEvent(() => setView("settings"));
@@ -1373,8 +1433,8 @@ function App() {
     changes.closeDiff();
     setView("canvas");
   });
-  const openProjectSettings = useEvent(() => {
-    setSettingsProject(null);
+  const openProjectSettings = useEvent((path?: string) => {
+    setSettingsProject(path && path !== projectRef.current?.path ? { path, name: projectName(path) } : null);
     setSettingsSection("project");
     setView("settings");
   });
@@ -1502,6 +1562,7 @@ function App() {
           linkedWork={linkedWork}
           onCanvasChat={(path, id) => void openCanvasChat(path, id)}
           usage={sidebarUsage}
+          onNewChatInScope={newChatInScope}
         />
         {linkDialog}
       </>
@@ -1518,7 +1579,7 @@ function App() {
       { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
       {
         id: "open-project",
-        label: "Open project…",
+        label: "Add project…",
         group: "Actions",
         icon: "folder",
         shortcut: `${modifier}O`,
@@ -1727,7 +1788,6 @@ function App() {
         >
           <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
             <SidebarNav
-              key={project.path}
               fill
               workspaceName={project.name}
               workspaceImage={projectImage(project.path)}
@@ -1756,6 +1816,7 @@ function App() {
               onSwitchProject={switchProjectFromSidebar}
               attentionPaths={attentionPaths}
               onOpenProjectSettings={openProjectSettings}
+              onNewChatInScope={newChatInScope}
               usage={sidebarUsage}
               runningKeys={sidebarRunKeys.running}
               waitingKeys={sidebarRunKeys.waiting}
@@ -1855,6 +1916,7 @@ function App() {
                   tasks={run?.tasks}
                   contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
                   ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+                  agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
                   onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}

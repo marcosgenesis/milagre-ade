@@ -6,6 +6,9 @@ const { spawnCommand, execCommand } = require("./agents/command.cjs");
 const { CodexRpc } = require("./agents/codex-rpc.cjs");
 const { killTree } = require("./agents/process-tree.cjs");
 const { preparePrivateDirectory } = require("./private-files.cjs");
+const { AMBIENT_ENV } = require("./agents/antigravity-install.cjs");
+const { SUBSCRIPTION_MESSAGE, inspectAntigravityAccount, prepareAntigravityProfile, signInAntigravity } = require("./antigravity-account.cjs");
+const { PROVIDERS } = require("@milagre/shared/providers");
 
 const { scopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
 const validScope = (key) => {
@@ -13,11 +16,15 @@ const validScope = (key) => {
   return key;
 };
 
-const PROVIDERS = ["claude", "codex"];
+// Antigravity has no terminal login to inherit (Milagre installs it itself, and its ACP server keeps its
+// own state), so its "default" Account is a Milagre-owned private profile, accounts/antigravity-default, never
+// ~/.gemini. It is signed in from Settings like an added Account.
+const ANTIGRAVITY_DEFAULT = "antigravity-default";
 const text = (value) => (typeof value === "string" ? value.slice(0, 200) : undefined);
 
 // Only public identity fields leave the host. Never forward raw CLI output or parsing errors.
 async function inspectAccount(provider, { command, env }) {
+  if (provider === "antigravity") return inspectAntigravityAccount({ env });
   if (provider === "claude")
     return new Promise((resolve) => {
       execCommand(command, ["auth", "status"], { env, encoding: "utf8", timeout: 10000 }, (_error, stdout) => {
@@ -58,10 +65,11 @@ function createAccounts({
   inspect = inspectAccount,
   spawn = spawnCommand,
   changed = () => {},
+  signInAntigravity: antigravitySignIn = signInAntigravity,
 }) {
   const root = path.join(dataDir, "accounts");
   const file = path.join(root, "accounts.json");
-  let saved = { scopes: {}, accounts: [], selected: { claude: "default", codex: "default" } };
+  let saved = { scopes: {}, accounts: [], selected: Object.fromEntries(PROVIDERS.map((provider) => [provider, "default"])) };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     if (
@@ -70,9 +78,10 @@ function createAccounts({
       parsed.accounts.some((a) => !PROVIDERS.includes(a.provider) || !/^[a-f0-9-]{36}$/.test(a.id) || typeof a.label !== "string")
     )
       throw new Error();
+    // A provider added after the file was written starts on its default.
     for (const provider of PROVIDERS) {
-      if (parsed.selected[provider] !== "default" && !parsed.accounts.some((a) => a.provider === provider && a.id === parsed.selected[provider]))
-        throw new Error();
+      const id = parsed.selected[provider] ?? "default";
+      if (id !== "default" && !parsed.accounts.some((a) => a.provider === provider && a.id === id)) throw new Error();
     }
     const scopes = parsed.scopes ?? {};
     if (!scopes || typeof scopes !== "object" || Array.isArray(scopes)) throw new Error();
@@ -85,7 +94,7 @@ function createAccounts({
     saved = {
       scopes,
       accounts: parsed.accounts.map(({ id, provider, label }) => ({ id, provider, label })),
-      selected: { claude: parsed.selected.claude, codex: parsed.selected.codex },
+      selected: Object.fromEntries(PROVIDERS.map((provider) => [provider, parsed.selected[provider] ?? "default"])),
     };
   } catch (error) {
     if (error.code !== "ENOENT") throw new Error("Could not read saved accounts. Restore accounts/accounts.json before switching accounts.");
@@ -100,15 +109,38 @@ function createAccounts({
   }
   function account(provider, id) {
     providerCheck(provider);
-    if (id === "default") return { id, provider, label: "Connected CLI account" };
+    if (id === "default") return { id, provider, label: provider === "antigravity" ? "Default account" : "Connected CLI account" };
     const found = saved.accounts.find((a) => a.provider === provider && a.id === id);
     if (!found) throw new Error("Account not found. Refresh and try again.");
     return found;
   }
-  const directory = (provider, id) =>
-    id === "default" ? path.resolve(env[provider === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] || path.join(home, `.${provider}`)) : path.join(root, id);
+  const directory = (provider, id) => {
+    if (provider === "antigravity") return path.join(root, id === "default" ? ANTIGRAVITY_DEFAULT : id);
+    return id === "default"
+      ? path.resolve(env[provider === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] || path.join(home, `.${provider}`))
+      : path.join(root, id);
+  };
+  let antigravityDefaultReady = false;
+  function antigravityDefault() {
+    const dir = directory("antigravity", "default");
+    if (antigravityDefaultReady) return dir;
+    preparePrivateDirectory(root);
+    preparePrivateDirectory(dir);
+    prepareAntigravityProfile(dir, { home });
+    antigravityDefaultReady = true;
+    return dir;
+  }
   function environment(provider, id = saved.selected[provider]) {
     account(provider, id);
+    if (provider === "antigravity") {
+      // Every Antigravity Account, the default included, runs from its own profile with file token storage and
+      // without ambient Google credentials or BROWSER.
+      const next = { ...env };
+      for (const name of AMBIENT_ENV) delete next[name];
+      next.GEMINI_HOME = id === "default" ? antigravityDefault() : directory(provider, id);
+      next.AGY_ACP_FORCE_FILE_STORAGE = "1";
+      return next;
+    }
     if (id === "default") return { ...env };
     const next = { ...env };
     const names =
@@ -246,6 +278,12 @@ function createAccounts({
     const target = directory(provider, a.id);
     preparePrivateDirectory(target);
     // Credentials remain isolated. Share history so switching can resume an existing Chat.
+    if (provider === "antigravity") {
+      // Skills come from ~/.gemini when present; conversations are shared with the default profile.
+      prepareAntigravityProfile(target, { home, history: antigravityDefault() });
+      persist({ ...saved, accounts: [...saved.accounts, a] });
+      return login(provider, a.id);
+    }
     const source = directory(provider, "default");
     const folders =
       provider === "codex"
@@ -303,41 +341,57 @@ function createAccounts({
   }
   async function login(provider, id) {
     account(provider, id);
-    if (id === "default") throw new Error("Use Add account to sign in without replacing your connected CLI account.");
+    // Antigravity's default profile belongs to Milagre, so it signs in here; other defaults belong to the terminal.
+    if (id === "default" && provider !== "antigravity") throw new Error("Use Add account to sign in without replacing your connected CLI account.");
     if (closed) throw new Error("Account manager is closing.");
     if (logins.size) throw new Error("Finish or cancel the current sign-in first.");
     const status = await cli(provider);
     if (status.problem || !status.command) throw new Error(status.problem || "Install the provider CLI first.");
     const k = key(provider, id);
-    const child = spawn(status.command, provider === "codex" ? ["login"] : ["auth", "login", "--claudeai"], {
-      env: environment(provider, id),
-      cwd: home,
-      stdio: ["ignore", "ignore", "ignore"],
-      detached: true,
-      windowsHide: true,
-    });
-    const entry = { child, timer: null };
+    const entry = { stop: null, timer: null };
+    let flow = null;
+    if (provider === "antigravity") {
+      flow = antigravitySignIn({ command: status.command, args: status.args, harness: status.harness, env: environment(provider, id) });
+      entry.stop = () => flow.cancel();
+    } else {
+      const child = spawn(status.command, provider === "codex" ? ["login"] : ["auth", "login", "--claudeai"], {
+        env: environment(provider, id),
+        cwd: home,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+        windowsHide: true,
+      });
+      entry.stop = () => void killTree(child, { graceMs: 100 }).catch(() => {});
+      child.once("error", () => {
+        void finish(false);
+      });
+      child.once("close", (code) => {
+        void finish(code === 0);
+      });
+    }
     logins.set(k, entry);
-    const finish = async (success) => {
+    async function finish(success, failure) {
       if (logins.get(k) !== entry) return;
       clearTimeout(entry.timer);
       try {
         if (success) {
           const result = await check(provider, id, () => logins.get(k) === entry);
           if (logins.get(k) === entry && result.state === "ready" && !closed) changed(provider);
-        } else identities.set(k, { state: "signed-out", message: "Sign-in did not finish. Try again." });
+        } else
+          identities.set(
+            k,
+            failure?.subscription ? { state: "error", message: SUBSCRIPTION_MESSAGE } : { state: "signed-out", message: "Sign-in did not finish. Try again." },
+          );
       } catch {
         if (logins.get(k) === entry) identities.set(k, { state: "error", message: "Could not check this account. Try Refresh." });
       } finally {
         if (logins.get(k) === entry) logins.delete(k);
       }
-    };
-    child.once("error", () => {
-      void finish(false);
-    });
-    child.once("close", (code) => {
-      void finish(code === 0);
-    });
+    }
+    flow?.done.then(
+      () => finish(true),
+      (error) => finish(false, error),
+    );
     entry.timer = setTimeout(() => {
       cancel(provider, id);
     }, 5 * 60_000);
@@ -351,7 +405,7 @@ function createAccounts({
     if (entry) {
       clearTimeout(entry.timer);
       logins.delete(k);
-      void killTree(entry.child, { graceMs: 100 }).catch(() => {});
+      entry.stop();
     }
     identities.set(k, { state: "signed-out", message: "Sign-in cancelled. You can try again." });
     return snapshot();

@@ -118,6 +118,25 @@ test("Claude: usage fills the context gauge once a result names the window, and 
   );
 });
 
+test("Antigravity's CLI failures point at Milagre Settings, not a shell command", () => {
+  assert.equal(
+    missingCliMessage("antigravity"),
+    "Milagre couldn't find Antigravity. Install it from Milagre Settings \u2192 Accounts, then send your message again.",
+  );
+  assert.equal(
+    cliTooOldMessage("antigravity", "1.2.0", "1.3.0"),
+    "Milagre needs Antigravity 1.3.0 or later, and you have 1.2.0. Update it from Milagre Settings \u2192 Accounts, then send your message again.",
+  );
+  assert.equal(
+    cliBrokenMessage("antigravity", "/x/agy_acp_server.par", "Killed: 9"),
+    "Antigravity (/x/agy_acp_server.par) didn't start: Killed: 9. Reinstall it from Milagre Settings \u2192 Accounts, then send your message again.",
+  );
+  assert.equal(
+    loginMessage("antigravity"),
+    "Antigravity isn't signed in. Sign in to Antigravity from Milagre Settings \u2192 Accounts, then send your message again.",
+  );
+});
+
 test("CLI failures name the fix", () => {
   assert.equal(
     missingCliMessage("claude"),

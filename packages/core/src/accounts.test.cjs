@@ -164,8 +164,8 @@ test("Project and Link overrides are independent, inherit dynamically and surviv
   assert.equal(f.accounts.selected("claude", project), b.id);
   const scope = await f.accounts.scope(project);
   assert.equal(scope.scopeKey, project);
-  assert.equal(scope.providers[0].accountId, null);
-  assert.equal(scope.providers[0].effectiveId, b.id);
+  assert.equal(group(scope, "claude").accountId, null);
+  assert.equal(group(scope, "claude").effectiveId, b.id);
   f.accounts.assign(project, "claude", "default");
   assert.equal(f.accounts.selected("claude", project), "default");
   assert.equal(f.accounts.selected("codex", link), "default");
@@ -184,7 +184,7 @@ test("removing an explicitly assigned account never falls back to computer defau
   assert.equal(f.accounts.selected("claude", "/projects/work"), a.id);
   assert.throws(() => f.accounts.environment("claude", a.id), /not found/);
   const snapshot = await f.accounts.scope("/projects/work");
-  const missing = snapshot.providers[0].accounts.find((item) => item.id === a.id);
+  const missing = group(snapshot, "claude").accounts.find((item) => item.id === a.id);
   assert.equal(missing.state, "error");
   assert.match(missing.message, /removed/i);
   assert.equal(createAccounts(f.options).selected("claude", "/projects/work"), a.id);
@@ -200,4 +200,104 @@ test("scope assignment rejects invalid keys and unfinished or foreign-provider a
   assert.throws(() => f.accounts.assign("milagre-link:invalid", "claude", null), /valid Project or Link/);
   f.accounts.cancel("claude", a.id);
   assert.throws(() => f.accounts.assign("/projects/work", "claude", a.id), /Sign in/);
+});
+
+const FAKE_AGY = path.join(__dirname, "agents", "fixtures", "fake-agy-sign-in.cjs");
+const callback = (url) => void fetch(`${new URL(url).searchParams.get("redirect_uri")}?code=fake`);
+
+function antigravityFixture(t, openUrl = callback) {
+  const f = fixture(t);
+  f.env.GEMINI_API_KEY = "secret-gemini";
+  f.env.GEMINI_HOME = path.join(f.home, ".gemini");
+  const options = {
+    ...f.options,
+    cli: async (p) => (p === "antigravity" ? { command: process.execPath, args: [FAKE_AGY], harness: "/nonexistent" } : { command: `/cli/${p}` }),
+    signInAntigravity: (spec) => require("./antigravity-account.cjs").signInAntigravity({ ...spec, openUrl }),
+  };
+  delete options.inspect;
+  const accounts = createAccounts(options);
+  t.after(() => accounts.close());
+  return { ...f, accounts, options };
+}
+const settled = async (accounts, provider, id) => {
+  for (let i = 0; i < 300; i++) {
+    const found = group(await accounts.list(), provider).accounts.find((a) => a.id === id);
+    if (found.state !== "signing-in") return found;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Sign-in did not settle");
+};
+
+test("Antigravity's default is a Milagre-owned private profile that signs in from Milagre, never ~/.gemini", async (t) => {
+  const f = antigravityFixture(t);
+  const env = f.accounts.environment("antigravity", "default");
+  const dir = path.join(f.root, "profile", "accounts", "antigravity-default");
+  assert.equal(env.GEMINI_HOME, dir);
+  assert.equal(env.AGY_ACP_FORCE_FILE_STORAGE, "1");
+  assert.equal(env.GEMINI_API_KEY, undefined);
+  assert.equal(f.env.GEMINI_API_KEY, "secret-gemini");
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+  assert.equal(fs.existsSync(path.join(f.home, ".gemini")), false);
+  const before = group(await f.accounts.list(), "antigravity");
+  assert.equal(before.accounts[0].label, "Default account");
+  assert.equal(before.accounts[0].state, "signed-out");
+  assert.equal(group(await f.accounts.login("antigravity", "default"), "antigravity").accounts[0].state, "signing-in");
+  const done = await settled(f.accounts, "antigravity", "default");
+  assert.equal(done.state, "ready");
+  assert.equal(done.email, "person@example.test");
+  assert.deepEqual(f.changed, ["antigravity"]);
+  assert.doesNotMatch(JSON.stringify(await f.accounts.list()), /secret|GEMINI_HOME|token/);
+  assert.throws(() => f.accounts.remove("antigravity", "default"), /cannot be removed/);
+});
+
+test("an added Antigravity account gets its own profile, shares history and keeps its directory on remove", async (t) => {
+  const f = antigravityFixture(t);
+  const added = group(await f.accounts.add("antigravity", "Work"), "antigravity").accounts[1];
+  assert.equal(added.state, "signing-in");
+  assert.equal((await settled(f.accounts, "antigravity", added.id)).state, "ready");
+  const dir = f.accounts.environment("antigravity", added.id).GEMINI_HOME;
+  assert.equal(dir, path.join(f.root, "profile", "accounts", added.id));
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+  const shared = path.join(f.root, "profile", "accounts", "antigravity-default", "antigravity-acp", "conversations");
+  assert.equal(fs.realpathSync(path.join(dir, "antigravity-acp", "conversations")), fs.realpathSync(shared));
+  f.accounts.select("antigravity", added.id);
+  assert.equal(createAccounts(f.options).selected("antigravity"), added.id);
+  f.accounts.remove("antigravity", added.id);
+  assert.equal(f.accounts.selected("antigravity"), "default");
+  assert.ok(fs.existsSync(path.join(dir, "antigravity-acp", "acp_token.json")), "Remove forgets the account without deleting its profile");
+});
+
+test("an Antigravity sign-in can be cancelled, and a subscription failure is explained", async (t) => {
+  let captured;
+  const f = antigravityFixture(t, (url) => captured?.(url));
+  const opened = new Promise((resolve) => {
+    captured = resolve;
+  });
+  await f.accounts.login("antigravity", "default");
+  await opened;
+  const snapshot = f.accounts.cancel("antigravity", "default");
+  assert.equal(group(snapshot, "antigravity").accounts[0].state, "signed-out");
+  assert.match(group(snapshot, "antigravity").accounts[0].message, /cancelled/);
+  f.env.FAKE_AGY_SCENARIO = "subscription";
+  captured = callback;
+  const sub = createAccounts(f.options);
+  t.after(() => sub.close());
+  await sub.login("antigravity", "default");
+  const failed = await settled(sub, "antigravity", "default");
+  assert.equal(failed.state, "error");
+  assert.equal(failed.message, "This Google account needs an eligible Antigravity subscription.");
+});
+
+test("accounts saved before Antigravity existed still load and default Antigravity", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "profile", "accounts", "accounts.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, JSON.stringify({ accounts: [], selected: { claude: "default", codex: "default" }, scopes: {} }));
+  const accounts = createAccounts(f.options);
+  t.after(() => accounts.close());
+  assert.equal(accounts.selected("antigravity"), "default");
+  assert.deepEqual(
+    (await accounts.list()).providers.map((p) => p.provider),
+    ["codex", "claude", "antigravity"],
+  );
 });

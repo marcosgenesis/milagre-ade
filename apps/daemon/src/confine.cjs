@@ -46,6 +46,15 @@ const PATHS = Object.freeze({
   "simulator:control": denySimulator,
   "simulator:input": denySimulator,
   "simulator:close": denySimulator,
+  // Browsers on the host can hold the owner's signed-in sessions. A demo Project never reaches them.
+  "browser:list": denied,
+  "browser:attach": denied,
+  "browser:open": denied,
+  "browser:frame": denied,
+  "browser:status": denied,
+  "browser:control": denied,
+  "browser:input": denied,
+  "browser:close": denied,
   // A design is read through its Chat, which must be in the folder.
   "artifact:get": ([value]) => [chatProject(value?.chatId)],
   "artifact:list": ([value]) => [chatProject(value?.chatId)],

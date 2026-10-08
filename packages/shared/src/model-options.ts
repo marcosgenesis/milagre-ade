@@ -9,6 +9,11 @@ export function capabilityFor(model: ModelOption, capabilities: ModelCapabilitie
   if (reported) return reported;
   // Every GPT model codex-cli 0.160.0 lists has the "priority" tier.
   if (model.provider === "codex") return { efforts: ["low", "medium", "high"], ultracode: false, fastMode: true };
+  // Antigravity reports one model per thinking level; the catalog's families carry those levels as efforts. No fast tier.
+  if (model.provider === "antigravity") {
+    const family = antigravityFamilies(ANTIGRAVITY_AGENT_OPTIONS).find((item) => item.id === model.id);
+    return { efforts: family?.efforts ?? [], ...(family?.defaultEffort ? { defaultEffort: family.defaultEffort } : {}), ultracode: false, fastMode: false };
+  }
   const fastMode = CLAUDE_FAST_MODELS.includes(model.id);
   if (model.id.includes("haiku")) return { efforts: [], ultracode: false, fastMode };
   const modern = /claude-(opus|sonnet|fable)-5/.test(model.id);
@@ -24,8 +29,34 @@ export function effortFor(capability: ModelCapability, effort: EffortLevel): Eff
   return efforts.includes("high") ? "high" : efforts[Math.floor(efforts.length / 2)];
 }
 
+// Antigravity's per-level models are grouped into families in antigravity-models.mjs, which core loads too.
+export {
+  ANTIGRAVITY_AGENT_OPTIONS,
+  ANTIGRAVITY_FAMILY_COPY,
+  ANTIGRAVITY_TEXT_FAMILY,
+  antigravityFamilies,
+  familySlug,
+  resolveAntigravityModel,
+  splitModelName,
+} from "./antigravity-models.mjs";
+export type { AgentModelOption, AntigravityFamily } from "./antigravity-models.mjs";
+import { ANTIGRAVITY_AGENT_OPTIONS, ANTIGRAVITY_FAMILY_COPY, antigravityFamilies } from "./antigravity-models.mjs";
+
+function antigravityCatalog(): ModelOption[] {
+  return antigravityFamilies(ANTIGRAVITY_AGENT_OPTIONS).map((family) => {
+    const copy = ANTIGRAVITY_FAMILY_COPY[family.id];
+    return {
+      id: family.id,
+      name: family.name,
+      provider: "antigravity",
+      description: copy?.description ?? "",
+      ...(copy?.recommended ? { recommended: true } : {}),
+    };
+  });
+}
+
 /**
- * The maintained list: what codex-cli 0.160.0 and Claude Code 2.1.288 report, recommended model first.
+ * The maintained list: what codex-cli 0.160.0, Claude Code 2.1.288 and Antigravity 1.3.0 report, recommended model first.
  * The picker shows it until the agents report their own lists (agent:models), and for an agent whose
  * CLI is missing, too old or couldn't be asked.
  */
@@ -49,4 +80,5 @@ export const MODEL_CATALOG: ModelOption[] = [
   { id: "claude-opus-4-7", name: "Opus 4.7", provider: "claude", description: "Best for everyday, complex tasks" },
   { id: "claude-opus-4-6", name: "Opus 4.6", provider: "claude", description: "Best for everyday, complex tasks" },
   { id: "claude-sonnet-4-6", name: "Sonnet 4.6", provider: "claude", description: "Efficient for routine tasks" },
+  ...antigravityCatalog(),
 ];

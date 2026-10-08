@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { generateChatTitle } = require("./chat-title.cjs");
+const { generateChatTitle, createChatTitleModels } = require("./chat-title.cjs");
+const path = require("node:path");
 
 test("summarizes the first message with the selected provider", async () => {
   const title = await generateChatTitle(
@@ -18,6 +19,20 @@ test("summarizes the first message with the selected provider", async () => {
     },
   );
   assert.equal(title, "Preserve chat scroll position");
+});
+
+test("Antigravity names a chat through its one-shot agent session", async () => {
+  const fake = path.join(__dirname, "agents", "fixtures", "fake-acp-agent.cjs");
+  const models = createChatTitleModels({
+    cli: async (provider) =>
+      provider === "antigravity" ? { command: process.execPath, args: [fake], env: { ...process.env, FAKE_SCENARIO: "json" } } : { problem: "missing" },
+    clientVersion: "1.0.0",
+  });
+  assert.deepEqual(Object.keys(models).toSorted(), ["antigravity", "claude", "codex"]);
+  assert.equal(
+    await generateChatTitle({ prompt: "fix the login redirect bug on mobile", provider: "antigravity" }, { models, timeoutMs: 20_000 }),
+    "Fix mobile login redirect",
+  );
 });
 
 test("unavailable, malformed and overlong answers keep the initial title", async () => {

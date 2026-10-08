@@ -13,7 +13,8 @@ const SLOW_METHODS = Object.freeze({
   "git:generate": 180000,
   "worktree:create": 330000,
   "worktree:remove": 330000,
-  "agent:update-cli": 150000,
+  // Installing Antigravity downloads about 110 MB and unpacks it; a slow connection takes minutes.
+  "agent:update-cli": 1200000,
 });
 const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
 

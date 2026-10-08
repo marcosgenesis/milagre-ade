@@ -490,7 +490,8 @@ a {
 }
 
 /* The project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
-[data-workspace-menu] :focus-visible {
+[data-workspace-menu] :focus-visible,
+[data-scope-menu-panel] :focus-visible {
   outline: none;
 }
 

@@ -144,7 +144,10 @@ const demoSession = createDemoSession();
  * The CLI lookup answers with a path that does not exist, so a background helper that tries to start one fails.
  */
 function demoRuntimeOptions({ cwd, worktreeRoot, copy } = {}) {
-  const agentCliStatus = Object.assign(async () => ({ codex: { state: "ready" }, claude: { state: "missing", message: DEMO_ONLY } }), { invalidate() {} });
+  const agentCliStatus = Object.assign(
+    async () => ({ codex: { state: "ready" }, claude: { state: "missing", message: DEMO_ONLY }, antigravity: { state: "missing", message: DEMO_ONLY } }),
+    { invalidate() {} },
+  );
   return {
     cwd,
     worktreeRoot,
@@ -152,7 +155,7 @@ function demoRuntimeOptions({ cwd, worktreeRoot, copy } = {}) {
     titleModels: {},
     createSession: copy ? createDemoSession(copy) : demoSession,
     agentCli: Object.assign(async () => ({ command: "/nonexistent/milagre-demo-agent" }), { invalidate() {} }),
-    agentModels: async () => ({ codex: [{ ...DEMO_MODEL }], claude: null }),
+    agentModels: async () => ({ codex: [{ ...DEMO_MODEL }], claude: null, antigravity: null }),
     agentCliStatus,
     readUsage: async () => ({ providers: [] }),
     // The owner's personal skills stay on the Mac: `/skill` reaches the agent as typed.

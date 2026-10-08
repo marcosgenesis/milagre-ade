@@ -280,7 +280,7 @@ export const ChatRow = memo(function ChatRow({
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasPullRequests} />
+            <ChatMarkDot mark={mark} topAligned={hasPullRequests || item.worktreeCount !== undefined} />
             <span
               className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"

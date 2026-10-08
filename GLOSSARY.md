@@ -7,7 +7,7 @@ Milagre coordinates coding agents across projects and git worktrees on one machi
 ### Work
 
 **Account**:
-A saved Claude or Codex sign-in on one computer. Each provider has a computer default **Account**. Each **Project** and **Named Link** can select its own **Account** or inherit that default. Desktop and paired phones share these selections. A running reply and its active subagents keep their existing **Account**; subsequent idle turns use the owning Project or Named Link's selection. Switching the viewed Project never changes an Account assignment.
+A saved Claude, Codex or Antigravity sign-in on one computer. Each provider has a computer default **Account**. Each **Project** and **Named Link** can select its own **Account** or inherit that default. Desktop and paired phones share these selections. A running reply and its active subagents keep their existing **Account**; subsequent idle turns use the owning Project or Named Link's selection. Switching the viewed Project never changes an Account assignment.
 
 **Project**:
 A git repository that has been opened in Milagre at least once. Every **Worktree** of the repository belongs to the same **Project**, whichever of its folders was opened.
@@ -21,6 +21,10 @@ _Avoid_: branch (a **Worktree** has a branch, it isn't one)
 One conversation with one agent. A Project Chat is bound to exactly one **Worktree**; a named Link's shared Chat owns one isolated **Worktree** in each member **Project**. An ordinary **Worktree** can have many **Chats**; a shared Chat's owned Worktree does not receive an independent editable Project Chat.
 An archived **Chat** stays readable from a linked side but is never chosen to receive a **Delegation**.
 _Avoid_: session, thread (the providers' names for the agent process behind a **Chat**)
+
+**Browser page**:
+A page in a Chromium browser on the host that a **Chat** may view and control. It belongs to the **Chat** whose agent process started its browser, or to a **Chat** the user attached that browser to. See ADR-0006.
+_Avoid_: tab (a browser's own UI term), session (the page's sign-in state is part of it, not a separate thing)
 
 ### Linking
 

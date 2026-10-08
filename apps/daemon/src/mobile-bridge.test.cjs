@@ -288,6 +288,12 @@ test("mobile can manage Chat metadata and create Worktrees, and read changes onl
   assert.equal(created.status, 200);
   const result = (await created.json()).result;
   assert.ok(result.project.state.worktrees[result.worktreeId]);
+  // Only the new worktree and its Chat travel back: a large Project's whole state is too big for the phone's socket.
+  assert.deepEqual(Object.keys(result.project.state.worktrees), [String(result.worktreeId)]);
+  assert.deepEqual(result.project.state.messages, []);
+  assert.ok(Object.values(result.project.state.sessions).length >= 1);
+  assert.ok(Object.values(result.project.state.sessions).every((session) => session.worktree_id === result.worktreeId));
+  assert.equal(result.project.state.sessions[chat.id], undefined, "the main checkout's Chat stays out");
   await fs.writeFile(path.join(project, "mobile.txt"), "A change from the computer\n");
   const files = (await (await rpc("git:diff-files", [{ cwd: project, mode: "uncommitted" }])).json()).result;
   assert.ok(files.files.some((file) => file.path === "mobile.txt"));

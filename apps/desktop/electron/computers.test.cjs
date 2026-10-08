@@ -95,10 +95,12 @@ const STATUS = { version: "9.8.7", methods: ["project:recent"], capabilities: ["
 /**
  * A Mac as peer-client.test.cjs fakes one, for any number of sockets. `mac.hello` is how the next hello is answered
  * ("accept", "pending" until mac.accept(), "full" or a refusal body) and can change while the desktop is connected.
+ * `mac.hold(socket, frame)` returning true keeps that reply back until `mac.release()`.
  */
 function fakeMac({ lan = [], hello = "accept" } = {}) {
   const host = boxKeyPair(random);
-  const mac = { hostKey: b64url(host.publicKey), hello, lan, sockets: [], urls: [], calls: [], accepts: [] };
+  const mac = { hostKey: b64url(host.publicKey), hello, lan, sockets: [], urls: [], calls: [], accepts: [], held: [], hold: null };
+  mac.release = () => mac.held.splice(0).forEach((send) => send());
   mac.accept = () => mac.accepts.splice(0).forEach((accept) => accept());
   mac.drop = () => mac.sockets.forEach((socket) => socket.closeWith(1000));
   mac.push = (event) => mac.open().forEach((socket) => socket.push(event));
@@ -166,7 +168,11 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
         if (message.t === "ping") return socket.deliver(channel.seal({ t: "pong" }));
         const read = reader.read(message);
         if (!read) return;
-        for (const text of writer.write(JSON.stringify(answer(read.frame)))) socket.deliver(channel.sealEncoded(text));
+        const reply = () => {
+          for (const text of writer.write(JSON.stringify(answer(read.frame)))) socket.deliver(channel.sealEncoded(text));
+        };
+        if (mac.hold?.(socket, read.frame)) mac.held.push(reply);
+        else reply();
       },
     };
     mac.sockets.push(socket);
@@ -411,4 +417,49 @@ test("turning Other computers off cancels a hello in flight and quitting closes 
   await until(() => computers.list()[0].state === "online", "online");
   await computers.close();
   assert.equal(mac.open().length, 0);
+});
+
+// The runtime moves from the relay to the LAN; its snapshot on the LAN is held back so the test is inside the switch.
+const holdLanSnapshot = (mac) => {
+  mac.hold = (socket, frame) => socket.url.startsWith(LAN) && frame.method === "daemon:snapshot";
+};
+
+test("a call made while the runtime moves to the LAN waits for it and goes through", async (t) => {
+  const mac = fakeMac({ lan: [LAN] });
+  holdLanSnapshot(mac);
+  const { computers, state } = await paired(t, mac);
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => mac.held.length === 1, "the runtime to be recovering on the LAN");
+  assert.equal(state(), "online");
+  const id = computers.list()[0].id;
+  let settled = false;
+  const called = computers.invoke(id, "project:recent", ["x"]).finally(() => (settled = true));
+  await delay(40);
+  assert.equal(settled, false, "the call waits for the switch");
+  mac.hold = null;
+  mac.release();
+  assert.deepEqual(await called, { echo: ["x"] });
+  assert.equal(computers.list()[0].route, "lan");
+});
+
+test("a switch whose recovery fails reads Reconnecting… and the call waiting on it fails", async (t) => {
+  const mac = fakeMac({ lan: [LAN] });
+  holdLanSnapshot(mac);
+  const { computers, changes, state } = await paired(t, mac);
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => mac.held.length === 1, "the runtime to be recovering on the LAN");
+  const id = computers.list()[0].id;
+  const seen = changes.length;
+  const called = assert.rejects(computers.invoke(id, "project:recent"), /disconnected/);
+  mac.hold = null;
+  mac.held.length = 0;
+  for (const socket of mac.sockets.filter((item) => item.url.startsWith(LAN))) socket.closeWith(1006);
+  await called;
+  assert.ok(
+    changes.slice(seen).some((list) => list[0]?.state === "reconnecting"),
+    "the failed switch is not swallowed as part of the switch",
+  );
+  await until(() => state() === "online", "back online");
 });

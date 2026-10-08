@@ -18,6 +18,8 @@ const CHECK_EVERY_MS = 60_000;
 const NETWORK_MS = 5_000;
 // A computer that can't be reached at launch is tried again after these waits; a runtime then retries on its own.
 const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
+// A call made while the runtime moves between the relay and the LAN waits this long for it to be back.
+const SWITCH_WAIT_MS = 10_000;
 // Problems worth a line under a computer while it keeps retrying; the rest read as Reconnecting… or Offline.
 const SHOWN = new Set(["full", "outdated", "kind", "bad-hello", "busy"]);
 const NOT_A_LINK = "That isn't a Milagre pairing link. Copy it from Settings › Devices on the other Mac.";
@@ -51,9 +53,16 @@ function adopt(entry, client, route) {
   return client;
 }
 
+/** The runtime is back, or won't be: calls waiting on a switch (invoke) go on. */
+function recovered(entry) {
+  entry.recovery?.done();
+  entry.recovery = null;
+}
+
 async function stop(entry) {
   entry.stopped = true;
   entry.abort.abort();
+  recovered(entry);
   clearTimeout(entry.retryTimer);
   clearTimeout(entry.offlineTimer);
   const runtime = entry.runtime;
@@ -84,6 +93,7 @@ function createComputers({
   now = Date.now,
   random = (n) => new Uint8Array(randomBytes(n)),
   reconnectMs = 3000,
+  switchWaitMs = SWITCH_WAIT_MS,
   offlineAfterMs = OFFLINE_AFTER_MS,
   checkEveryMs = CHECK_EVERY_MS,
   networkMs = NETWORK_MS,
@@ -190,6 +200,7 @@ function createComputers({
       refused: false,
       stopped: false,
       switching: false,
+      recovery: null,
       abort: new AbortController(),
       supervisor: null,
     };
@@ -204,10 +215,16 @@ function createComputers({
       now,
     });
     // A LAN route that opens while the runtime is on the relay: closing the relay channel makes the runtime reconnect,
-    // and its connect takes the LAN one. Its brief disconnect is a switch, not an outage.
+    // and its connect takes the LAN one. Its brief disconnect is a switch, not an outage: `down` lets the first
+    // disconnect after it go by, and a call made meanwhile (invoke) waits for `recovery`.
     entry.supervisor.subscribe((route) => {
       if (route.kind !== "lan" || entry.route !== "relay" || !entry.client || route.transport.used) return;
       entry.switching = true;
+      if (!entry.recovery) {
+        let done;
+        const promise = new Promise((resolve) => (done = resolve));
+        entry.recovery = { promise, done };
+      }
       entry.client.close();
     });
     entries.set(id, entry);
@@ -242,13 +259,19 @@ function createComputers({
     entry.message = null;
     entry.lastError = null;
     entry.switching = false;
+    recovered(entry);
     void store.seen(entry.id).catch(() => {});
     void learnRoutes(entry);
     changed();
   }
 
   function down(entry, error) {
-    if (entry.switching) return;
+    // The disconnect a switch causes is not an outage; the flag is spent on it, so a recovery that then fails reads Reconnecting.
+    if (entry.switching) {
+      entry.switching = false;
+      return;
+    }
+    recovered(entry);
     const computer = store.get(entry.id);
     entry.message = error instanceof PeerError && SHOWN.has(error.code) && computer ? computerProblem(error.code, { name: computer.name }) : null;
     if (entry.state !== "reconnecting" && entry.state !== "offline") {
@@ -268,6 +291,8 @@ function createComputers({
     if (entry.refused) return;
     const computer = store.get(entry.id);
     entry.refused = true;
+    entry.switching = false;
+    recovered(entry);
     entry.state = "refused";
     entry.message = computerProblem(error.code, { name: computer?.name ?? "That computer" });
     clearTimeout(entry.offlineTimer);
@@ -494,6 +519,12 @@ function createComputers({
     /** One daemon call on a computer, through its runtime. */
     async invoke(id, method, args = []) {
       const entry = entries.get(id);
+      if (entry?.recovery) {
+        // Moving to the LAN takes a moment; the call goes through once the runtime is back, or fails as it would have.
+        let timer;
+        await Promise.race([entry.recovery.promise, new Promise((resolve) => (timer = setTimeout(resolve, switchWaitMs)))]);
+        clearTimeout(timer);
+      }
       if (!entry?.runtime) throw new Error(`${store.get(id)?.name ?? "That computer"} is offline.`);
       return entry.runtime.invoke(method, args);
     },

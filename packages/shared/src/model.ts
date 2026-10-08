@@ -428,8 +428,14 @@ export interface Subagent {
   endedAt?: number;
   latestActivity?: string;
   communications?: SubagentCommunication[];
-  transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
+  transcript: SubagentTranscriptEntry[];
+  /**
+   * How many entries the transcript has, when `transcript` holds only its last ones (a client that reads transcripts on
+   * demand, see subagent-transcript.mjs); absent when it holds them all.
+   */
+  transcriptLength?: number;
 }
+export type SubagentTranscriptEntry = { id: string; kind: "tool" | "message"; text: string };
 
 /** One item of the agent's to-do list. */
 export interface AgentTask {

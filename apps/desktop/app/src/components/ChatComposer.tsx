@@ -742,6 +742,7 @@ export function ChatComposer({
       >
         <SubagentCanvas
           key={`canvas-${chatId}`}
+          chatKey={runtimeChat}
           opened={canvasOpened}
           agents={subagents}
           working={isSending}
@@ -860,6 +861,7 @@ export function ChatComposer({
             {!isNewChat && runtimeChat && <SimulatorTrack key={`simulator-${runtimeChat}`} chatId={runtimeChat} />}
             <SubagentTrack
               key={chatId}
+              chatKey={runtimeChat}
               agents={subagents}
               provider={sessionProvider ?? selectedModel.provider}
               onOpenCanvas={() => setCanvasChat(chatId)}

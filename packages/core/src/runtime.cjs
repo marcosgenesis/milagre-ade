@@ -1331,6 +1331,13 @@ function createRuntime(options) {
   };
   commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
   commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
+  // One subagent with its whole transcript, for a client that takes only each transcript's last entries (the panel that
+  // shows it). `chatId` is the Chat's number in the scope.
+  commands.handle("chat:subagent", async (_event, scope, chatId, agentId) => {
+    const agent = (await readScope(scope)).sessions?.[chatId]?.subagents?.find((item) => item.id === agentId);
+    if (!agent) throw new Error("That subagent is no longer in this Chat.");
+    return agent;
+  });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {

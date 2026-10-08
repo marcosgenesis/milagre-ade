@@ -204,6 +204,37 @@ test("mobile archives finished subagents through the shared owner and restores t
   assert.equal(restored.transcript[0].text, "Preserved output");
 });
 
+test("the phone shows the end of a long subagent transcript from a bridge that holds only its tail", async (t) => {
+  const { project, rpc, request } = await fixture(t);
+  const transcript = Array.from({ length: 30 }, (_, index) => ({ id: `e${index + 1}`, kind: "message", text: `Entry ${index + 1}` }));
+  await fs.mkdir(path.join(project, ".milagre"));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 3,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: {
+        2: {
+          id: 2,
+          worktree_id: 1,
+          agent_name: "main",
+          status: "Created",
+          subagents: [{ id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, transcript }],
+        },
+      },
+      messages: [],
+      tasks: {},
+    }),
+  );
+  await rpc("project:open", [project]);
+  const phone = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
+  assert.deepEqual(
+    phone.project.state.sessions[2].subagents[0].transcript.map((item) => item.id),
+    ["e27", "e28", "e29", "e30"],
+  );
+});
+
 test("the phone can load the real skill catalog for its project", async (t) => {
   const { project, rpc } = await fixture(t);
   await rpc("project:open", [project]);

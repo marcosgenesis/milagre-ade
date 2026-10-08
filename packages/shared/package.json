@@ -34,6 +34,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./subagent-transcript": {
+      "types": "./src/subagent-transcript.d.mts",
+      "default": "./src/subagent-transcript.mjs"
+    },
     "./chat-summary": {
       "types": "./src/chat-summary.d.mts",
       "default": "./src/chat-summary.mjs"

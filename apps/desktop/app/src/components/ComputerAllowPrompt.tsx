@@ -74,6 +74,8 @@ export function ComputerAllowPrompt() {
     }
   }
 
+  // Nothing is mounted until a computer waits: other screens look for the page's one open dialog.
+  if (!request) return null;
   return createPortal(
     <dialog
       ref={dialog}

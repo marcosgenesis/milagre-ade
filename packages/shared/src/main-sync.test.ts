@@ -29,8 +29,8 @@ test("choices map to the stored override and back", () => {
   assert.equal(overrideOf("off"), false);
   assert.deepEqual(
     mainSyncChoices(false).map((choice) => choice.title),
-    ["Use default (Off)", "On", "Off"],
+    ["Default (Off)", "On", "Off"],
   );
-  assert.equal(mainSyncChoices(true)[0].title, "Use default (On)");
+  assert.equal(mainSyncChoices(true)[0].title, "Default (On)");
   assert.equal(mainSyncProjectTitle("trunk"), "Sync trunk before new Worktrees");
 });

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE } from "@milagre/shared/main-sync";
 import { Text, View } from "react-native";
 import { Stack, router } from "expo-router";
 import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
@@ -29,6 +31,30 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
   const updates = useAppUpdates();
   const session = useSession();
   const projects = session.recent.filter((project) => !project.link);
+  // The computer's global default for main branch sync; null until it answers (an older Mac never does).
+  const [syncMain, setSyncMain] = useState<boolean | null>(null);
+  useEffect(() => {
+    const client = session.client;
+    if (!client) return;
+    let live = true;
+    client.call<{ syncMain: boolean }>("main-sync:default:read", []).then(
+      (value) => live && setSyncMain(value.syncMain),
+      () => live && setSyncMain(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [session.client]);
+  async function changeSyncMain(next: boolean) {
+    const client = session.client;
+    if (!client) return;
+    setSyncMain(next);
+    try {
+      setSyncMain((await client.call<{ syncMain: boolean }>("main-sync:default:save", [next])).syncMain);
+    } catch {
+      setSyncMain(!next);
+    }
+  }
   const status = updates.state.status;
   const update =
     status === "disabled"
@@ -82,6 +108,15 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
           }}
         />
       </View>
+      {session.client && syncMain !== null && (
+        <>
+          <Text style={[styles.label, { marginTop: 16 }]}>Worktrees</Text>
+          <View style={[styles.card, { gap: 4 }]}>
+            <Toggle title={MAIN_SYNC_TITLE} selected={syncMain} onPress={() => void changeSyncMain(!syncMain)} />
+            <Text style={styles.caption}>{MAIN_SYNC_HINT}</Text>
+          </View>
+        </>
+      )}
       {/* The connected computer's Projects; each opens its own settings. */}
       {session.client && projects.length > 0 && (
         <>

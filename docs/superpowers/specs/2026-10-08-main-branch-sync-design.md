@@ -142,7 +142,7 @@ Copy is shared between platforms.
 
 **Per Project**
 - Desktop: a "Main branch" group in `ProjectSettings` (`apps/desktop/app/src/components/Settings.tsx:1032`), with a
-  `primitives/Select` offering "Use default (On|Off)", "On" and "Off". The label names the branch: "Sync main before
+  `primitives/Select` offering "Default (On|Off)", "On" and "Off". The label names the branch: "Sync main before
   new Worktrees".
 - Mobile: the same three choices in `apps/mobile/src/app/project-settings.tsx`, using the native menu the screen
   already uses.

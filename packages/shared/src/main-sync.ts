@@ -23,7 +23,7 @@ export function overrideOf(choice: MainSyncChoice): boolean | null {
 
 export function mainSyncChoices(defaultValue: boolean): { value: MainSyncChoice; title: string }[] {
   return [
-    { value: "default", title: `Use default (${defaultValue ? "On" : "Off"})` },
+    { value: "default", title: `Default (${defaultValue ? "On" : "Off"})` },
     { value: "on", title: "On" },
     { value: "off", title: "Off" },
   ];

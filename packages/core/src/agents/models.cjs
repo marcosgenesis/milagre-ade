@@ -1,5 +1,5 @@
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { ANTIGRAVITY_AGENT_OPTIONS, ANTIGRAVITY_FAMILY_COPY, antigravityFamilies } = require("@milagre/shared/model-options");
+const { ANTIGRAVITY_AGENT_OPTIONS, ANTIGRAVITY_FAMILY_COPY, antigravityFamilies } = require("@milagre/shared/antigravity-models");
 
 // The models each agent offers, asked from its CLI once per app run: Claude's supportedModels() and
 // Codex's model/list. A model is { id, name, description, recommended, efforts, defaultEffort?, ultracode, fastMode },

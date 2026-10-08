@@ -6,7 +6,7 @@ const { antigravityAcp, makeTempDir } = require("./antigravity-acp.cjs");
 const { loginMessage } = require("./events.cjs");
 const { pickOption } = require("./acp-session.cjs");
 const { readConfigOptions } = require("./acp-events.cjs");
-const { ANTIGRAVITY_TEXT_FAMILY } = require("@milagre/shared/model-options");
+const { ANTIGRAVITY_TEXT_FAMILY } = require("@milagre/shared/antigravity-models");
 
 // One-shot text generation through the Antigravity agent (docs/adr/0006-antigravity-over-acp.md), for the calls the
 // user never sees: chat titles, commit text, handover briefs. A fresh agent process in an empty temporary

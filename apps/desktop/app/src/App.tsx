@@ -621,11 +621,13 @@ function App() {
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
+  // Chats with an archive under way, by chat key: each keeps its row, under the progress, until the archive ends.
+  const [archivingChats, setArchivingChats] = useState<ReadonlySet<string>>(() => new Set());
   const chats = useMemo(() => {
     const state = sidebarState;
     if (!state) return [];
     const withMessages = Object.values(state.sessions)
-      .filter((session) => !session.archived)
+      .filter((session) => !session.archived || (project && archivingChats.has(chatKey(project.path, session.id))))
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
       .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
     const rows = orderChats(withMessages, chatOrder).map(({ session, sessionMessages }) => {
@@ -681,6 +683,7 @@ function App() {
     chatPrs,
     agentPorts,
     project,
+    archivingChats,
   ]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
@@ -747,6 +750,7 @@ function App() {
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
     const wasOpen = selectedSessionId === sessionId;
+    setArchivingChats((current) => new Set(current).add(key));
     return runArchive(
       {
         projectPath,
@@ -781,7 +785,15 @@ function App() {
       sessionId,
       mode,
       plan,
-    ).catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
+    )
+      .catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`))
+      .finally(() =>
+        setArchivingChats((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        }),
+      );
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -1400,7 +1412,8 @@ function App() {
       onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-      onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+      // The row shows the progress until this settles.
+      onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
     }),
     [],
   );

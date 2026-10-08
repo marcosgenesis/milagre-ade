@@ -110,11 +110,14 @@ function load(file, modules, extra = "") {
   return exports;
 }
 const jsx = (type, props, key) => ({ type, props, key });
+const archiveStore = require("../apps/mobile/src/archive.ts");
 const archiveProgress = load("archive-progress.tsx", {
+  react: { useSyncExternalStore: (_subscribe, read) => read() },
   "react/jsx-runtime": { jsx, jsxs: jsx },
-  "react-native": { Text: "Text", View: "View" },
+  "react-native": { Text: "Text", View: "View", StyleSheet: { absoluteFill: {}, create: (styles) => styles } },
+  "./archive": archiveStore,
   "./loading-logo": { LoadingLogo: "LoadingLogo" },
-  "./ui": { styles: {} },
+  "./ui": { styles: {}, colors: {} },
 });
 const enterAnimation = {
   duration() {
@@ -706,6 +709,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     refresh: async () => {
       session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex" };
     },
+    previewProject: async () => session.snapshot,
     expectActivity() {},
     rememberChat() {},
     isSelected: () => true,
@@ -1130,6 +1134,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
       calls.push(["reload"]);
     },
     cachedProject: () => undefined,
+    previewProject: async () => state,
     ...extra,
   };
   const native = { Alert: { alert, prompt() {} } };
@@ -1181,6 +1186,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
       styles: {},
     },
     "./archive-progress": archiveProgress,
+    "./archive": archiveStore,
     "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
     "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
     "./chat-actions": load("chat-actions.ts", {
@@ -4290,12 +4296,13 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   h.cleanup();
 });
 
+// The progress drawn over an archiving Chat's row.
 function archiveIndicator(tree) {
-  const component = find(tree, (node) => node.type === archiveProgress.ArchiveProgress);
+  const component = find(tree, (node) => node.type === archiveProgress.ArchivingOverlay);
   return component && find(component.type(component.props), (node) => node.props.accessibilityRole === "progressbar");
 }
 
-test("sidebar archive shows progress during a delayed request and clears it on failure", async () => {
+test("sidebar archive shows progress over the Chat's row and clears it on failure", async () => {
   const project = archiveProject();
   const patch = deferred();
   const nav = navigationHost(deferred().promise, {
@@ -4310,16 +4317,49 @@ test("sidebar archive shows progress during a delayed request and clears it on f
   });
   nav.more(nav.row("chat")).props.onSelect("archive");
   await settleAll();
-  assert.ok(archiveIndicator(nav.render()), "archive feedback must survive closing the action sheet");
-  nav.more(nav.row("chat")).props.onSelect("archive");
-  assert.equal(project.calls.filter(([method]) => method === "worktree:roots").length, 1);
+  assert.equal(
+    find(nav.render(), (node) => node.props?.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Archiving Chat"),
+    undefined,
+  );
+  const row = nav.row("chat");
+  assert.equal(archiveIndicator(row).props.accessibilityLabel, "Archiving Fix", "archive feedback sits on the row and survives closing the action sheet");
+  assert.equal(nav.more(row), undefined, "an archiving row offers no menu");
+  assert.equal(row.props.pointerEvents, "none");
+  // Hidden on the Mac while the worktree is still going: the row stays, under the progress.
+  project.snapshot.project.state.sessions[5].archived = true;
+  assert.ok(archiveIndicator(nav.row("chat")));
+  project.snapshot.project.state.sessions[5].archived = false;
   patch.reject(new Error("disk full"));
   await settleAll();
-  assert.equal(archiveIndicator(nav.render()), undefined);
-  assert.equal(find(nav.render(), (node) => node.type === "ErrorNotice").props.message, "disk full");
+  assert.equal(archiveIndicator(nav.row("chat")), undefined);
+  assert.equal(project.calls.filter(([method]) => method === "worktree:roots").length, 1);
+  assert.equal(find(nav.render(), (node) => node.type === "ErrorNotice").props.message, "Could not archive Chat: disk full");
+  archiveStore.clearArchiveNotice();
 });
 
-test("Chat header shows archive progress until the delayed request completes", async () => {
+test("archiving the open Chat from the sidebar leaves it on confirm and never navigates when it ends", async () => {
+  const project = archiveProject();
+  const patch = deferred();
+  const nav = navigationHost(deferred().promise, {
+    alert: pressDanger([]),
+    activeChatId: 5,
+    session: {
+      client: { ...project.client, url: "mac", call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) },
+      recent: [{ path: "/p" }],
+      snapshot: project.snapshot,
+      expectActivity() {},
+      refresh: async () => {},
+    },
+  });
+  nav.more(nav.row("chat")).props.onSelect("archive");
+  await settleAll();
+  assert.deepEqual(nav.routes, ["/projects"], "the Chat is left as soon as the archive is confirmed");
+  patch.resolve();
+  await settleAll();
+  assert.deepEqual(nav.routes, ["/projects"]);
+});
+
+test("the Chat screen leaves for the list on confirm; the archive ends without moving the phone again", async () => {
   const project = archiveProject();
   const patch = deferred();
   const screen = chatHost({ alert: pressDanger([]), call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) });
@@ -4330,13 +4370,14 @@ test("Chat header shows archive progress until the delayed request completes", a
   const menuAction = () => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === "Archive");
   menuAction().props.onPress();
   await settleAll();
-  const header = () => find(screen.render(), (node) => node.type === "Screen").props.options.headerTitle();
-  assert.ok(archiveIndicator(header()));
-  assert.equal(menuAction().props.disabled, true);
+  assert.equal(screen.router.replaced, "/projects", "leaves before the archive ends");
+  assert.ok(archiveStore.archiveActivity().chats.has("/p#5"), "the list shows the archive on the Chat's row");
+  // The phone moves on to another Chat while the archive runs.
+  screen.router.replaced = "/chat?id=9";
   patch.resolve();
   await settleAll();
-  assert.equal(archiveIndicator(header()), undefined);
-  assert.equal(screen.router.replaced, "/projects");
+  assert.equal(screen.router.replaced, "/chat?id=9", "the end of the archive does not pull the phone back to the list");
+  assert.equal(archiveStore.archiveActivity().chats.has("/p#5"), false);
 });
 
 test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {

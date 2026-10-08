@@ -1,8 +1,9 @@
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
-import { effortFor } from "@milagre/shared/model-options";
+import { contextWindowFor, effortFor } from "@milagre/shared/model-options";
+import { formatTokens } from "@milagre/shared/usage";
 import { effortCopy } from "@milagre/shared/model-copy";
 import { useState } from "react";
-import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
 import { Cancel01Icon, FlashIcon, Tick02Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
@@ -13,6 +14,12 @@ import { EffortMeter, Icon, ProviderLogo } from "../icons";
 import { CircleButton, colors, styles } from "../ui";
 
 /** Model, thinking effort, Ultracode and fast mode for one Chat. Cancel (✕) discards, Done (✓) applies, per Apple's sheet guidance. */
+/** The model's context window as the picker shows it: "1M", "272k". */
+function contextLabel(model: { provider: ModelProvider; id: string }) {
+  const size = contextWindowFor(model);
+  return size ? formatTokens(size) : undefined;
+}
+
 export default function ModelSheet() {
   const params = useLocalSearchParams<{ chatId: string; model?: string; provider?: string; on?: string; busy?: string }>();
   const session = useSession();
@@ -91,7 +98,7 @@ export default function ModelSheet() {
                   boxShadow: on ? "0 1px 3px #0000001a" : undefined,
                 }}
               >
-                <ProviderLogo provider={provider} size={14} tone={on ? "ink" : "ink3"} />
+                <ProviderLogo provider={provider} size={14} dim={!on} />
                 <Text style={{ color: colors.ink3, fontSize: 11 }}>{modelsFor(provider, session.models).length}</Text>
               </Pressable>
             );
@@ -112,7 +119,28 @@ export default function ModelSheet() {
               >
                 <ProviderLogo provider={item.provider} size={16} />
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={{ color: colors.ink, fontSize: 15, fontWeight: "500" }}>{item.name}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: colors.ink, fontSize: 15, fontWeight: "500", flexShrink: 1 }}>{item.name}</Text>
+                    {!!contextLabel(item) && (
+                      <Text
+                        accessibilityLabel={`${contextLabel(item)} context window`}
+                        style={{
+                          color: colors.ink3,
+                          fontSize: 11,
+                          fontWeight: "500",
+                          fontVariant: ["tabular-nums"],
+                          borderWidth: StyleSheet.hairlineWidth,
+                          borderColor: colors.lineStrong,
+                          borderRadius: 5,
+                          paddingHorizontal: 4,
+                          paddingVertical: 1,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {contextLabel(item)}
+                      </Text>
+                    )}
+                  </View>
                   {!!item.description && <Text style={styles.caption}>{item.description}</Text>}
                 </View>
                 {item.id === model.id && <Icon icon={Tick02Icon} tone="ink" size={18} strokeWidth={2.2} />}

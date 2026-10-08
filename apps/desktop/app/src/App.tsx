@@ -75,7 +75,7 @@ import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { useLinear } from "./components/useLinear";
 import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
-import { issueFirstMessage, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
+import { issueFirstMessage, LINK_PR_HINT, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
@@ -504,7 +504,7 @@ function App() {
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
   const linear = useLinear();
-  const linearIssues = useWorktreeLinearIssues(project?.path ?? "", linear.active);
+  const { issues: linearIssues, refresh: refreshLinearIssues } = useWorktreeLinearIssues(project?.path ?? "", linear.active);
   const sidePanels = useSidePanels();
   const changes = useChanges({
     cwd: selectedWorktree?.path,
@@ -704,6 +704,10 @@ function App() {
           path: worktree?.path,
           diff: worktree?.diff,
           linearIssue: worktree ? linearIssues[worktree.path] : undefined,
+          // The stored link (Worktree.linearIssue) and whether "Link Linear issue…" applies: the chat's own Worktree,
+          // not the main checkout, and not one another chat shares.
+          linearKey: linear.active ? worktree?.linearIssue : undefined,
+          linkable: linear.active && !!worktree && worktree.path !== project?.path && !worktreeShared(state, session.id),
           pullRequests: worktree
             ? chatPullRequests(
                 session.summary ? (summary.pullRequests ?? NO_REFS) : readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
@@ -732,12 +736,13 @@ function App() {
     pullRequests,
     chatPrs,
     linearIssues,
+    linear.active,
     agentPorts,
     project,
     archivingChats,
   ]);
-  const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
-  latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
+  const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat, linkChatIssue, unlinkChatIssue });
+  latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat, linkChatIssue, unlinkChatIssue };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -1342,6 +1347,32 @@ function App() {
     void executeSend(issueFirstMessage(issue, draftStore.get()), permissionMode, imageDraft.images, imageDraft.files, false, undefined, issue.key);
   }
 
+  // The chat's Worktree gets the issue (its branch is renamed when the branch is still a milagre/ one with no open PR).
+  async function linkChatIssue(sessionId: number, key: string) {
+    const path = project?.path;
+    const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
+    if (!path || worktreeId === undefined) return;
+    const linked = async () => {
+      const result = await window.milagre.linkWorktreeIssue({ projectPath: path, worktreeId, key });
+      receiveState(path, result.project.state);
+      refreshLinearIssues();
+      setNotice(result.mode === "renamed" ? `Branch renamed to ${result.branch}` : LINK_PR_HINT(key));
+    };
+    await reportChatAction(linked(), "Could not link issue", setNotice);
+  }
+
+  async function unlinkChatIssue(sessionId: number) {
+    const path = project?.path;
+    const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
+    if (!path || worktreeId === undefined) return;
+    const unlinked = async () => {
+      const result = await window.milagre.unlinkWorktreeIssue({ projectPath: path, worktreeId });
+      receiveState(path, result.project.state);
+      refreshLinearIssues();
+    };
+    await reportChatAction(unlinked(), "Could not unlink issue", setNotice);
+  }
+
   async function sendMessage() {
     const body = draftStore.get().trim();
     if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
@@ -1500,6 +1531,8 @@ function App() {
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
       // The row shows the progress until this settles.
       onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
+      onLinkIssue: (id, key) => void latest.current.linkChatIssue(Number(id), key),
+      onUnlinkIssue: (id) => void latest.current.unlinkChatIssue(Number(id)),
     }),
     [],
   );

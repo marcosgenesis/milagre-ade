@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { LinearIssue } from "@milagre/shared/linear";
 import { pollWhileActive } from "./useWorktreePullRequests";
 
 const NO_ISSUES: Record<string, LinearIssue> = {};
 
-/** Linear issues the Worktrees under a Project were started from or name, keyed by Worktree path. Polls like the PRs do. */
-export function useWorktreeLinearIssues(projectPath: string, active: boolean): Record<string, LinearIssue> {
+/**
+ * Linear issues the Worktrees under a Project were started from or name, keyed by Worktree path. Polls like the PRs do.
+ * `refresh` reads them again at once, e.g. after a link or unlink.
+ */
+export function useWorktreeLinearIssues(projectPath: string, active: boolean): { issues: Record<string, LinearIssue>; refresh: () => void } {
   const [snapshot, setSnapshot] = useState<{ projectPath: string; issues: Record<string, LinearIssue> }>({ projectPath: "", issues: NO_ISSUES });
+  const refreshRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!projectPath || !active) return;
     let disposed = false;
@@ -16,6 +20,7 @@ export function useWorktreeLinearIssues(projectPath: string, active: boolean): R
       const issues = await readIssues(projectPath);
       if (!disposed) setSnapshot((current) => keepIfSame(current, projectPath, issues));
     };
+    refreshRef.current = () => void refresh();
     void refresh();
     const stopPolling = pollWhileActive(
       () => void refresh(),
@@ -23,10 +28,12 @@ export function useWorktreeLinearIssues(projectPath: string, active: boolean): R
     );
     return () => {
       disposed = true;
+      refreshRef.current = () => {};
       stopPolling();
     };
   }, [projectPath, active]);
-  return active && snapshot.projectPath === projectPath ? snapshot.issues : NO_ISSUES;
+  const refresh = useCallback(() => refreshRef.current(), []);
+  return { issues: active && snapshot.projectPath === projectPath ? snapshot.issues : NO_ISSUES, refresh };
 }
 
 // Never throws: a failed read shows no chips.

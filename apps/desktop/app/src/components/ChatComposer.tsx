@@ -36,6 +36,7 @@ import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
+import { LinearIssuePicker } from "./LinearIssuePicker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
@@ -516,8 +517,6 @@ type NewChatHeaderProps = Pick<
   | "onStartFromIssue"
 >;
 
-type IssueList = { issues: LinearIssue[]; error?: string };
-
 function NewChatHeader({
   worktrees,
   selectedWorktreeId,
@@ -533,7 +532,6 @@ function NewChatHeader({
   const [menu, setMenu] = useState<"isolation" | "branch" | "issue" | null>(null);
   const [query, setQuery] = useState("");
   const [popover, setPopover] = useState({ left: 0, maxHeight: 480 });
-  const [issues, setIssues] = useState<IssueList | null>(null);
   const selected = worktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? worktrees[0];
   const isolationOption = ISOLATIONS.find((option) => option.id === isolation) ?? ISOLATIONS[0];
   const search = query.trim().toLowerCase();
@@ -552,28 +550,6 @@ function NewChatHeader({
       : branches
           .filter((branch) => branch.toLowerCase().includes(search))
           .map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
-
-  // Issues come from the workspace search; a typed query waits 250 ms, and a stale answer is dropped.
-  useEffect(() => {
-    if (menu !== "issue") return;
-    let live = true;
-    const timer = window.setTimeout(() => {
-      Promise.resolve()
-        .then(() => window.milagre.listLinearIssues(query.trim() || undefined))
-        .then(
-          (result) => {
-            if (live) setIssues("error" in result ? { issues: [], error: result.error } : { issues: result.issues });
-          },
-          (error: unknown) => {
-            if (live) setIssues({ issues: [], error: error instanceof Error ? error.message : String(error) });
-          },
-        );
-    }, 250);
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-    };
-  }, [menu, query]);
 
   const lastTrigger = useRef<HTMLElement | null>(null);
   function place(trigger: HTMLElement) {
@@ -595,7 +571,6 @@ function NewChatHeader({
   function toggle(next: "isolation" | "branch" | "issue", trigger: HTMLElement) {
     place(trigger);
     setQuery("");
-    setIssues(null);
     setMenu((current) => (current === next ? null : next));
   }
 
@@ -603,8 +578,6 @@ function NewChatHeader({
     setMenu(null);
     setQuery("");
   }
-
-  const issueRows = issues?.issues ?? [];
 
   const popoverStyle = { left: popover.left, maxHeight: popover.maxHeight, transformOrigin: "top left" };
 
@@ -649,39 +622,14 @@ function NewChatHeader({
             </PickerPanel>
           )}
           {menu === "issue" && (
-            <PickerPanel
-              title="Start from a Linear issue"
-              query={query}
-              onQueryChange={setQuery}
-              placeholder="Search issues"
-              searchPlacement="bottom"
-              emptyLabel={issues ? (issues.error ?? "No issues found.") : "Loading issues…"}
-              isEmpty={issueRows.length === 0}
-              className="absolute top-[calc(100%+0.375rem)] w-[420px] max-w-[calc(100vw-2rem)]"
+            <LinearIssuePicker
               style={popoverStyle}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  close();
-                }
+              onPick={(issue) => {
+                onStartFromIssue?.(issue);
+                close();
               }}
-            >
-              {issueRows.map((issue) => (
-                <div key={issue.key} data-linear-issue-row>
-                  <PickerRow
-                    icon={<LinearLogo size={13} />}
-                    label={`${issue.key} ${issue.title}`}
-                    description={issue.state.name}
-                    selected={false}
-                    wrapLabel
-                    onClick={() => {
-                      onStartFromIssue?.(issue);
-                      close();
-                    }}
-                  />
-                </div>
-              ))}
-            </PickerPanel>
+              onClose={close}
+            />
           )}
           {menu === "branch" && (
             <PickerPanel

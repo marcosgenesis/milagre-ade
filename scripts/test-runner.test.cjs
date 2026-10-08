@@ -79,3 +79,39 @@ test("an Electron check is retried once, only on Linux CI", () => {
   assert.equal(shouldRetry({ platform: "linux", ci: undefined, attempt: 1 }), false);
   assert.equal(shouldRetry({ platform: "darwin", ci: "true", attempt: 1 }), false);
 });
+
+test("--shard partitions the unit files and the runnable Electron checks, balancing the Electron time", () => {
+  const unit = discoverUnitTests(root);
+  const electron = discoverElectronChecks(root);
+  const select = (args) => selectTests({ unit, electron, filters: { ...parseArgs(args), platform: "linux", commandExists: () => true } });
+  const all = select([]);
+  const seconds = (file) => MANIFEST[path.basename(file)]?.seconds ?? 8;
+  for (const count of [1, 2, 3, 8]) {
+    const shards = Array.from({ length: count }, (_, i) => select(["--shard", `${i + 1}/${count}`]));
+    // Every runnable test runs on exactly one shard, so nothing is dropped or run twice.
+    assert.deepEqual(shards.flatMap((shard) => shard.unit).toSorted(), all.unit.toSorted(), `${count} shards`);
+    assert.deepEqual(shards.flatMap((shard) => shard.electron).toSorted(), all.electron.toSorted(), `${count} shards`);
+    for (const shard of shards) assert.deepEqual(shard.skipped, all.skipped);
+    const files = shards.map((shard) => shard.unit.length);
+    assert.ok(Math.max(...files) - Math.min(...files) <= 1, `${count} shards: ${files} unit files`);
+    // No shard runs longer than the average plus one check, so the slowest runner sets the pace only as much as it must.
+    const loads = shards.map((shard) => shard.electron.reduce((sum, file) => sum + seconds(file), 0));
+    const average = loads.reduce((sum, load) => sum + load, 0) / count;
+    assert.ok(Math.max(...loads) <= Math.max(average + 8, ...all.electron.map(seconds)), `${count} shards: ${loads} seconds`);
+  }
+});
+
+test("a malformed --shard is rejected", () => {
+  for (const value of ["0/2", "3/2", "2", "a/b", "1/0", "1.5/2"]) assert.throws(() => parseArgs(["--shard", value]), /--shard needs <index>\/<count>/, value);
+  assert.throws(() => parseArgs(["--shard"]), /--shard needs a value/);
+});
+
+test("every Electron check that loads the built renderer asks for the build", () => {
+  // Shards run on separate runners, so a check cannot rely on another check having built dist first.
+  const fs = require("node:fs");
+  for (const file of discoverElectronChecks(root)) {
+    const name = path.basename(file);
+    if (fs.readFileSync(path.join(root, file), "utf8").includes("apps/desktop/dist/index.html"))
+      assert.equal(MANIFEST[name]?.needsBuild, true, `${name} loads apps/desktop/dist but is missing needsBuild in MANIFEST`);
+  }
+});

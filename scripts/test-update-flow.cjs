@@ -132,7 +132,7 @@ async function browserChecks() {
       const pill = ${button("Update available")}.getBoundingClientRect();
       const chip = [...document.querySelectorAll('button')].find(n => n.textContent.includes('Subagents')).getBoundingClientRect();
       const column = document.querySelector('textarea[aria-label="Prompt"]').closest('.max-w-3xl').getBoundingClientRect();
-      return { pillCenter: (pill.left + pill.right) / 2, columnCenter: (column.left + column.right) / 2, pillBottom: pill.bottom, chipBottom: chip.bottom, fixed: getComputedStyle(${button("Update available")}.parentElement).position };
+      return { pillCenter: (pill.left + pill.right) / 2, columnCenter: (column.left + column.right) / 2, pillBottom: pill.bottom, chipBottom: chip.bottom, fixed: getComputedStyle(${button("Update available")}.closest("[data-update-notice]")).position };
     })()`);
     assert.ok(Math.abs(placement.pillCenter - placement.columnCenter) < 1, `pill is centred: ${JSON.stringify(placement)}`);
     assert.ok(Math.abs(placement.pillBottom - placement.chipBottom) < 1, `pill shares the chip row's line: ${JSON.stringify(placement)}`);
@@ -140,13 +140,24 @@ async function browserChecks() {
     await screenshot("update-pill-chat");
     await evaluate(`${button("Update available")}.click()`);
     await waitFor("!!document.querySelector('[role=dialog]')");
+    // The pill morphs into the card in its own spot instead of opening a card above it.
+    await waitFor(`getComputedStyle(${button("Update available")}).visibility === "hidden" && ${button("Update available")}.inert`);
+    await delay(600);
+    const card = await evaluate(`(() => {
+      const card = document.querySelector('[data-update-notice] > div').getBoundingClientRect();
+      return { center: (card.left + card.right) / 2, bottom: card.bottom, width: card.width };
+    })()`);
+    assert.ok(Math.abs(card.center - placement.columnCenter) < 1, `card is centred: ${JSON.stringify(card)}`);
+    assert.ok(Math.abs(card.bottom - placement.pillBottom) < 1, `card grows from the pill's line: ${JSON.stringify(card)}`);
+    assert.ok(Math.abs(card.width - 360) < 1, `card reaches full width: ${JSON.stringify(card)}`);
     await screenshot("update-pill-chat-open");
     await evaluate("document.querySelector('[aria-label=\"Dismiss update\"]').click()");
     await waitFor("!document.querySelector('[role=dialog]')");
+    assert.equal(await evaluate("document.activeElement.textContent.trim()"), "Update available");
     // Leaving the Chat returns the pill to the window's bottom left.
     await evaluate("window.__chat(false)");
-    await waitFor(`getComputedStyle(${button("Update available")}.parentElement).position === 'fixed'`);
-    console.log("PASS: update pill above the chat composer, falling back to the bottom left without a Chat");
+    await waitFor(`getComputedStyle(${button("Update available")}.closest("[data-update-notice]")).position === 'fixed'`);
+    console.log("PASS: update pill above the chat composer morphs into the card in place, falling back to the bottom left without a Chat");
     console.log("PASS: update progress, ready card, dismissal, settings warning, installation, retries and keyboard access");
     app.exit(0);
   } catch (error) {

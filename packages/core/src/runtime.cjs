@@ -6,6 +6,7 @@ const { createChatScopes } = require("./chat-scopes.cjs");
 const { registerLinkRuntime } = require("./link-runtime.cjs");
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
+const { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } = require("@milagre/shared/pr-action");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
 const { syncMainBranch } = require("./main-sync.cjs");
@@ -894,8 +895,15 @@ function createRuntime(options) {
 
   commands.handle("chat:send", (_event, request) => {
     if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
-    // Only Milagre marks a message as coming from another Chat.
-    return chats.send({ ...request, context: undefined }).then(({ sessionId }) => ({ sessionId }));
+    // Only Milagre marks a message as coming from another Chat. A PR-blocker pill is the one context a renderer can ask
+    // for, and Milagre checks it and writes its message and skill prompt itself.
+    const { prAction, ...rest } = request;
+    const action = prAction === undefined ? null : pullRequestActionContext(prAction);
+    if (prAction !== undefined && !action) throw new Error("That pull request action isn't valid.");
+    const message = action
+      ? { ...rest, body: pullRequestActionBody(action), prompt: pullRequestActionPrompt(action), images: [], files: [], context: action }
+      : { ...rest, context: undefined };
+    return chats.send(message).then(({ sessionId }) => ({ sessionId }));
   });
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");

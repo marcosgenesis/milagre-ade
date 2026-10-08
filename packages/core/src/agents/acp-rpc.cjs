@@ -134,8 +134,9 @@ class AcpRpc extends EventEmitter {
     this.write({ id, error: { code, message } });
   }
 
-  close() {
-    return killTree(this.child);
+  // `descendants` also stops the commands the agent started in process groups of their own (see killTree).
+  close({ descendants = false } = {}) {
+    return killTree(this.child, { descendants });
   }
 }
 

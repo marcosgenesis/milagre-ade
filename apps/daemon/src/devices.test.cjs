@@ -193,3 +193,15 @@ test("list during an in-flight load still returns the previous devices", async (
     ["phoneB"],
   );
 });
+
+test("kindOf says what a device paired as, and null for a key that isn't paired", async () => {
+  const dir = await tmp("devices-kind");
+  const devices = createDevices(dir, { now: () => 1 });
+  await devices.add("phoneA");
+  await devices.add("macB", { kind: "computer", name: "studio" });
+  assert.equal(devices.kindOf("phoneA"), "phone");
+  assert.equal(devices.kindOf("macB"), "computer");
+  assert.equal(devices.kindOf("nobody"), null);
+  await devices.remove("macB");
+  assert.equal(devices.kindOf("macB"), null);
+});

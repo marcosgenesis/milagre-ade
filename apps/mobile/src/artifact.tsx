@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { DomWebView } from "@expo/dom-webview";
 import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, CheckmarkCircle02Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
 import {
@@ -292,7 +293,13 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
   };
   const ref = (design: Artifact): ArtifactRef => ({ id: design.id, version: design.version, title: design.title });
   return (
-    <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: colors.page }}>
+    // The bar under the design rises with the keyboard, so a comment being written stays in view.
+    // The keyboard covers the home indicator, so the bar's bottom inset gives way to its 12pt gap while it is up.
+    <KeyboardAvoidingView
+      behavior="padding"
+      keyboardVerticalOffset={-Math.max(insets.bottom - 12, 0)}
+      style={{ flex: 1, paddingTop: insets.top, backgroundColor: colors.page }}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 8 }}>
         <CircleButton label="Previous design" icon={ArrowLeft01Icon} onPress={index > 0 ? () => step(-1) : undefined} />
         <View style={{ flex: 1, alignItems: "center" }}>
@@ -328,6 +335,8 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
         <View
           style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: Math.max(insets.bottom, 12), gap: 10, borderTopWidth: 1, borderColor: colors.line }}
         >
+          {/* Its own row, the width of the bar: beside the version and choice controls it would not fit a phone. */}
+          {editing !== key && feedback > 0 && <PillButton title={`Send ${feedback}`} onPress={send} />}
           {editing !== key ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <CircleButton
@@ -355,15 +364,17 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
               ) : (
                 <PillButton title={pendingHere ? "Chosen ✓" : "Choose"} secondary onPress={() => setChoice(pendingHere ? null : ref(artifact))} />
               )}
-              {feedback > 0 && <PillButton title={`Send ${feedback}`} onPress={send} />}
             </View>
           ) : (
             <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
               <TextInput
+                // Uncontrolled: the bar moves with the keyboard as it types, and a controlled value written back
+                // during those renders drops keystrokes.
+                key={key}
                 accessibilityLabel={`Comment on ${artifact.title}`}
                 autoFocus
                 multiline
-                value={notes[key]?.text ?? ""}
+                defaultValue={notes[key]?.text ?? ""}
                 onChangeText={(text) => setNotes((current) => ({ ...current, [key]: { design: ref(artifact), text } }))}
                 placeholder="What should change?"
                 placeholderTextColor={colors.ink3}
@@ -383,7 +394,7 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
           )}
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -576,3 +576,29 @@ test("an image queued behind four others rides the route that is current when it
   held.slice(1).forEach((release) => release());
   await Promise.all(loads);
 });
+
+test("a host that numbers snapshots sends the next one as a patch on the one the app holds", async () => {
+  const { diffState } = await import("@milagre/shared/state-patch");
+  const sent: (string | undefined)[] = [];
+  const v1 = { project: { path: "/p", state: { sessions: { 1: { id: 1, title: "One" } }, messages: [{ id: 1, body: "hi" }] } }, runs: { runs: {} } };
+  const v2 = { ...v1, project: { ...v1.project, state: { ...v1.project.state, sessions: { 1: { id: 1, title: "Renamed" } } } } };
+  const answers = [
+    { epoch: "e", version: 1, snapshot: v1 },
+    { epoch: "e", version: 2, base: 1, patch: diffState(v1, v2, 6) },
+    // A patch on a snapshot the app doesn't hold: it asks again for the whole one.
+    { epoch: "e", version: 9, base: 7, patch: {} },
+    { epoch: "e", version: 10, snapshot: v2 },
+  ];
+  const client = createClient({ address: "http://127.0.0.1:8787", token: "token" }, async (_url, init) => {
+    // oxlint-disable-next-line no-unsafe-optional-chaining -- test stub; init is always passed by the code under test
+    sent.push((init?.headers as Record<string, string>)["X-Milagre-Snapshot-Since"]);
+    return new Response(JSON.stringify({ v: 1, result: answers.shift() }));
+  });
+  const first = await client.snapshot("/p");
+  assert.deepEqual(first, v1);
+  const second = await client.snapshot("/p");
+  assert.deepEqual(second, v2);
+  assert.equal(second.project.state.messages, first.project.state.messages, "what the patch leaves alone is the same object");
+  assert.deepEqual(await client.snapshot("/p"), v2);
+  assert.deepEqual(sent, ["none", "e:1", "e:2", "none"]);
+});

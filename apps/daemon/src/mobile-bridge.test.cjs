@@ -1152,3 +1152,48 @@ test("account assignment changes notify live phones independently of Project sta
   await until(() => phone.messages.includes("accounts") && phone.messages.includes("project"));
   assert.equal(phone.messages.filter((type) => type === "accounts").length, 1);
 });
+
+test("an app that says what snapshot it holds gets the next one as a patch, kept current from the host's patches", async (t) => {
+  const { applyStatePatch } = require("@milagre/shared/state-patch");
+  const { project, request, rpc } = await fixture(t);
+  assert.equal((await rpc("project:open", [project])).status, 200);
+  const snapshot = async (since) =>
+    (await (await request("/snapshot?projectPath=" + encodeURIComponent(project), { headers: { "x-milagre-snapshot-since": since } })).json()).result;
+  const first = await snapshot("none");
+  assert.equal(typeof first.epoch, "string");
+  const session = Object.values(first.snapshot.project.state.sessions)[0];
+  assert.equal(first.snapshot.project.path, project);
+  assert.equal(first.snapshot.project.state.sessions[session.id].id, session.id);
+
+  assert.equal((await rpc("chat:patch", [project, session.id, { title: "From the phone" }])).status, 200);
+  const deadline = Date.now() + 2000;
+  let next;
+  // The bridge follows the change from the host's patch; the phone's snapshot shows it once that arrives.
+  do next = await snapshot(`${first.epoch}:${first.version}`);
+  while (
+    applyStatePatch(first.snapshot, next.patch).project.state.sessions[session.id].title !== "From the phone" &&
+    Date.now() < deadline &&
+    (await delay(20), true)
+  );
+  assert.equal(next.base, first.version);
+  assert.equal("snapshot" in next, false);
+  assert.ok(JSON.stringify(next).length < 2000, "a renamed chat is a small patch");
+  const patched = applyStatePatch(first.snapshot, next.patch);
+  assert.equal(patched.project.state.sessions[session.id].title, "From the phone");
+  assert.deepEqual(patched.project, (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result.project);
+
+  // A number this bridge never gave, or no header at all, gets a whole snapshot.
+  assert.ok("snapshot" in (await snapshot("another-bridge:3")));
+  assert.equal("epoch" in (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result, false);
+});
+
+test("the phone's copy of a state keeps what didn't change, so snapshots share it", () => {
+  const message = { id: 1, session_id: 1, body: "x", steps: [{ id: "s", kind: "shell", title: "Ran", status: "done", detail: "$ ls" }] };
+  const session = { id: 1, subagents: [{ id: "a", transcript: [{ id: "t", text: "hi" }] }] };
+  const state = { sessions: { 1: session }, messages: [message] };
+  const first = forPhone({ path: "/p", state });
+  const second = forPhone({ path: "/p", state: { ...state, messages: [...state.messages, { id: 2, session_id: 1, body: "y" }] } });
+  assert.equal(second.state.messages[0], first.state.messages[0]);
+  assert.equal(second.state.sessions[1], first.state.sessions[1]);
+  assert.equal(first.state.messages[0].steps[0].hasDetail, true, "tool output is still left out");
+});

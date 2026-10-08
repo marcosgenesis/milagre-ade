@@ -16,7 +16,7 @@ The screenshot shows the real desktop and mobile interfaces with demo data inspi
 - **Claude and Codex.** Choose a model, keep conversation history across restarts, and send a follow-up while the agent works. Read formatted replies and open a tool row for its command output or diff.
 - **Your input, when needed.** Answer questions and review approval cards in the Chat. Choose Ask approval, Auto or Full permissions for each agent.
 - **Context across Projects.** Link Projects and Worktrees on the canvas. Agents can read linked context, delegate changes to the other side's agent, and negotiate a shared contract.
-- **The same Chats on your phone.** Pair your iPhone from desktop Settings > Phone. Follow running agents, reply, answer questions and approvals, attach files, and inspect changes. Your Mac runs the agents and keeps their state.
+- **The same Chats on your phone.** Pair your iPhone from desktop Settings > Devices. Follow running agents, reply, answer questions and approvals, attach files, and inspect changes. Your Mac runs the agents and keeps their state.
 
 ## Get started
 

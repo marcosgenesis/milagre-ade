@@ -3,6 +3,7 @@ import * as Network from "expo-network";
 import { b64url } from "@milagre/shared/relay-crypto";
 import { createRelayTransport } from "./relay-transport";
 import { phoneIdentity, phoneRandom } from "./phone-identity";
+import { phoneName } from "./phone-name-native";
 import { createRouteSupervisor, PROBE_TIMEOUT, type RouteSupervisor } from "./routes";
 import { lanRouteFromAnswer, type LanRoute } from "./lan-route";
 import { savedHosts } from "./hosts-native";
@@ -47,6 +48,7 @@ function entry(id: string, token: string): Entry {
         token: created.token,
         identity,
         random: phoneRandom,
+        name: phoneName,
         onLost,
       });
       try {

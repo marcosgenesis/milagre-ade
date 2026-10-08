@@ -54,6 +54,16 @@ A summary of what the receiving agent did for a **Delegation**, posted to the re
 A back-and-forth of **Delegations** between two **Chats** across a **Link**, where each **Delegation report** starts a turn on the other side, until one agent concludes it with a summary of the agreement. The requesting agent decides on its own that a request needs a **Negotiation**, and only it can; the user never has to ask for one, and the receiving side can't turn a **Delegation** into one. It stops after at most 10 rounds, when the user stops it, and pauses while either side waits on the user.
 _Avoid_: consensus mode, auto-chat
 
+### Computers and devices
+
+**Computer**:
+A Mac running Milagre, whose daemon owns its **Projects**. "This Mac" is the **Computer** a window runs on; other **Computers** can be paired to it.
+_Avoid_: host, machine, server (code says host; the UI says computer or Mac)
+
+**Device**:
+A phone or **Computer** paired to a Mac. That Mac's Settings › Devices lists each one, says whether it is connected now or when it was last seen, and removes it.
+_Avoid_: client (any connection to the daemon, this Mac's own window included)
+
 ## Relationships
 
 - A **Project** has one or more **Worktrees**; an ordinary **Worktree** has one or more **Chats**. A named Link's shared **Chat** owns one **Worktree** per member **Project**.
@@ -61,6 +71,7 @@ _Avoid_: consensus mode, auto-chat
 - A **Link** joins exactly two endpoints; each endpoint is a **Project** or a **Worktree**.
 - A **Delegation** travels along exactly one **Link**, from one **Chat** to one **Chat**.
 - A **Negotiation** involves exactly two **Chats** and is made of **Delegations** along one **Link**.
+- A **Project** lives on exactly one **Computer**, whose daemon is its only writer (ADR-0003).
 
 ## Example dialogue
 

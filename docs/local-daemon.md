@@ -1,6 +1,6 @@
 # Local daemon
 
-Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. The mobile bridge attaches to the same profile and owner. Desktop Settings > Phone manages phone access through the public encrypted relay or a configured Cloudflare tunnel; see [mobile setup](mobile-local.md).
+Desktop starts or connects to a persistent `@milagre/core` daemon through a private Unix socket on macOS or Linux. It uses the same Electron userData directory and existing Project files, so Chat history and provider IDs do not move. Closing desktop leaves agents running. The mobile bridge attaches to the same profile and owner. Desktop Settings > Devices manages phone access through the public encrypted relay or a configured Cloudflare tunnel; see [mobile setup](mobile-local.md).
 
 For the first upgrade from an embedded-runtime desktop, close that older app before launching the new build. Never open the same Projects through an older desktop while the new host owns them. The running app is not automatically replaced by development checks.
 
@@ -29,7 +29,7 @@ Updates install only through the explicit restart action. It saves and stops the
 
 Reconnect retains at most 1,024 events or 16 MiB while obtaining its snapshot. If that limit is exceeded, it disconnects and retries the snapshot without replaying commands. A deleted Project is skipped so another Project can still be opened. Other Project errors remain visible as a failed reconnect rather than being silently ignored.
 
-Desktop startup does not install a login service. An older embedded-runtime desktop must be closed before a current desktop can take ownership of its profile. Phone access is managed separately by the daemon through Settings > Phone.
+Desktop startup does not install a login service. An older embedded-runtime desktop must be closed before a current desktop can take ownership of its profile. Phone access is managed separately by the daemon through Settings > Devices.
 
 ## Ownership and recovery
 

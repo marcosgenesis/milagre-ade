@@ -5,22 +5,26 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
-const { readIdentity, createPhones } = require("./relay-identity.cjs");
+const { readIdentity } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
 const { startLanHost } = require("./lan-host.cjs");
 const { random, startFakeBridge, connectPhone, until } = require("./relay-test-kit.cjs");
 
+/** What devices.json holds now, or "" before it exists. */
+const onDisk = (dir) => fs.readFile(path.join(dir, "devices.json"), "utf8").catch(() => "");
+
 async function lanMac(t, { knownPhone = true, ...hostOptions } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const key = boxKeyPair(random);
   if (knownPhone) await phones.add(b64url(key.publicKey));
   const bridge = await startFakeBridge(t);
   const host = await startLanHost({ port: 0, hostname: "127.0.0.1", identity, phones, token: "a".repeat(64), bridgeUrl: bridge.url, ...hostOptions });
   t.after(() => host.close());
-  return { identity, key, bridge, host, url: `ws://127.0.0.1:${host.port}` };
+  return { identity, key, bridge, host, phones, dir, url: `ws://127.0.0.1:${host.port}` };
 }
 
 test("/v1/hello names this Mac and nothing else", async (t) => {
@@ -160,9 +164,9 @@ test("closing the host with a request in flight resolves and leaves nothing runn
 
 test("a port that is taken rejects without leaving a liveness timer behind", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const taken = net.createServer();
   await new Promise((resolve) => taken.listen(0, "127.0.0.1", resolve));
@@ -266,4 +270,19 @@ test("no more than 64 sockets are held at once", async (t) => {
   extra.on("error", () => {});
   t.after(() => extra.destroy());
   assert.equal(await endsWithin(extra, 3000), true);
+});
+
+test("a known phone on the LAN shows as connected, is seen with its name, and drop closes it", async (t) => {
+  const { identity, key, host, phones, dir, url } = await lanMac(t);
+  const id = b64url(key.publicKey);
+  const phone = connectPhone({ relayUrl: url, identity, key, name: "Victor's iPhone" });
+  t.after(() => phone.close());
+  assert.ok((await phone.hello()).channel);
+  assert.deepEqual(host.connectedKeys(), [id]);
+  await until(() => phones.list()[0].name === "Victor's iPhone", "the name from the hello");
+  // The hello does not wait for the write, so wait for the file before the test's cleanup removes the directory.
+  await until(async () => (await onDisk(dir)).includes("Victor's iPhone"), "the name written to devices.json");
+  host.drop(id);
+  await phone.closed;
+  await until(() => host.connectedKeys().length === 0, "dropped");
 });

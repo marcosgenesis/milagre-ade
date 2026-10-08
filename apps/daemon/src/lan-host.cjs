@@ -156,6 +156,8 @@ function startLanHost({
       pinger.unref();
       resolve({
         port: server.address().port,
+        connectedKeys: () => channels.keysOf(session),
+        drop: (key) => channels.dropKey(session, key),
         async close() {
           clearInterval(pinger);
           for (const conn of session.conns.keys()) channels.dropConn(session, conn, false);

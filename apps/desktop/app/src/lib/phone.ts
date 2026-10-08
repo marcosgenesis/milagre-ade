@@ -1,6 +1,6 @@
 import type { PhoneStatus } from "../electron";
 
-/** The one line under "Allow your phone to connect". */
+/** The one line under "Allow devices to connect". */
 export function phoneStatusLine(status: PhoneStatus | null): string {
   if (!status) return "Checking…";
   switch (status.state) {
@@ -31,18 +31,19 @@ export function phoneLanLine(status: PhoneStatus | null): string | null {
   return `Reachable at ${status.lan.addresses.join(", ")}`;
 }
 
+/**
+ * Under the Phones list. Remove drops a phone's local and relay routes, but a phone on the Cloudflare tunnel
+ * authenticates with the shared token, so it keeps access until the token changes.
+ */
+export function cloudflarePhonesNote(status: PhoneStatus | null): string | null {
+  return status?.remote === "cloudflare" ? "Phones on your Cloudflare tunnel keep access until Reset access." : null;
+}
+
 /** Whether new phones may still pair, and for how many whole minutes (rounded up). Only a relay phone has a window. */
 export function pairingWindow(status: PhoneStatus | null, now: number): { open: boolean; minutes: number } | null {
   if (!status || status.remote !== "relay" || status.pairingUntil === undefined) return null;
   const left = status.pairingUntil - now;
   return left > 0 ? { open: true, minutes: Math.ceil(left / 60_000) } : { open: false, minutes: 0 };
-}
-
-/** How many phones paired since the last reset. Only a relay phone keeps count. */
-export function pairedPhonesLine(status: PhoneStatus | null): string | null {
-  if (!status || status.remote !== "relay" || status.pairedPhones === undefined) return null;
-  const count = status.pairedPhones;
-  return count === 0 ? "No phones yet" : count === 1 ? "1 phone" : `${count} phones`;
 }
 
 /** The host's QR code is an SVG string; an <img> shows it without letting it run anything. */

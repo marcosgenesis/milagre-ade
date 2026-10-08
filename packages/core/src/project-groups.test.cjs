@@ -85,3 +85,29 @@ test("concurrent duplicate creation persists only one named Link", async (t) => 
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal((await registry.listProjectGroups()).length, 1);
 });
+
+test("editing a named Link renames it and changes members, keeping an unavailable one only if it was already there", async (t) => {
+  const { root, file, registry, projects } = await fixture(t);
+  const folder = path.join(root, "admin");
+  await fs.mkdir(folder);
+  execFileSync("git", ["-C", folder, "init", "-q", "-b", "main"], { stdio: "ignore" });
+  execFileSync("git", ["-C", folder, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Initial"], {
+    stdio: "ignore",
+  });
+  const admin = await resolveProject(folder);
+  await registry.add(admin);
+  const group = await registry.createProjectGroup({ name: "RDFood", projectIds: projects.map((p) => p.id) });
+  const other = await registry.createProjectGroup({ name: "Admin", projectIds: [projects[0].id, admin.id] });
+  await fs.rm(projects[1].path, { recursive: true });
+  await registry.list();
+  const kept = await registry.updateProjectGroup({ id: group.id, name: "RDFood", projectIds: [...group.projectIds, admin.id] });
+  assert.deepEqual(kept.projectIds, [...group.projectIds, admin.id]);
+  await assert.rejects(registry.updateProjectGroup({ id: other.id, name: "Admin", projectIds: [admin.id, projects[1].id] }), /Open each member/);
+  await assert.rejects(registry.updateProjectGroup({ id: group.id, name: "RDFood", projectIds: [admin.id, projects[0].id] }), /already/);
+  await assert.rejects(
+    registry.updateProjectGroup({ id: "00000000-0000-4000-8000-000000000000", name: "X", projectIds: other.projectIds }),
+    /no longer exists/,
+  );
+  const renamed = await registry.updateProjectGroup({ id: group.id, name: "Food", projectIds: [projects[0].id, admin.id].reverse().concat(projects[1].id) });
+  assert.deepEqual(await createProjectRegistry(file, { roots: [] }).listProjectGroups(), [{ ...group, name: "Food", projectIds: renamed.projectIds }, other]);
+});

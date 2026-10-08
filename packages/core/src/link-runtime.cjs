@@ -56,6 +56,19 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
   });
   commands.handle("link:list", () => registry().listProjectGroups());
   commands.handle("link:create", (_event, request) => registry().createProjectGroup(request));
+  // Waits for a send in progress, so a new Chat prepares against one membership.
+  commands.handle("link:update", (_event, request) => {
+    const id = request?.id;
+    if (!validLinkId(id)) throw new Error("Invalid Link ID");
+    const run = (queues.get(id) ?? Promise.resolve()).catch(() => {}).then(() => registry().updateProjectGroup(request));
+    queues.set(id, run);
+    run
+      .finally(() => {
+        if (queues.get(id) === run) queues.delete(id);
+      })
+      .catch(() => {});
+    return run;
+  });
   commands.handle("link:open", (_event, id) => open(id));
   commands.handle("link:snapshot", async (_event, id) => ({ link: await definition(id), state: await store.get(id) }));
   commands.handle("link:send", (_event, request) => {

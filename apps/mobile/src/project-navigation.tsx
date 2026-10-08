@@ -346,6 +346,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     if (isLinkScopeKey(projectPath)) {
       if (action === "copy") await Clipboard.setStringAsync(name);
+      if (action === "edit") onNavigate({ pathname: "/link-projects", params: { linkId: projectPath.slice("milagre-link:".length) } }, true);
       return;
     }
     if (action === "copy") {
@@ -552,6 +553,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 items: [
                   { id: "new", title: "New Chat", systemImage: "square.and.pencil" },
                   { id: "copy", title: linked ? "Copy Link name" : "Copy path", systemImage: "doc.on.doc" },
+                  ...(linked ? [{ id: "edit", title: "Edit Link", systemImage: "pencil" }] : []),
                 ],
               },
               ...(!linked ? [{ items: [{ id: "remove", title: "Remove from list", systemImage: "minus.circle", destructive: true }] }] : []),

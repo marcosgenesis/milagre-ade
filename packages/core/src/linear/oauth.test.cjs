@@ -125,3 +125,48 @@ test("an invalid_grant refresh is revoked, a network error is offline", async ()
     { code: "offline", message: "Couldn't reach Linear: ENOTFOUND" },
   );
 });
+
+test("a failed code exchange is failed, never revoked, even on invalid_grant", async () => {
+  await assert.rejects(
+    exchangeCode({
+      fetchImpl: async () => json(400, { error: "invalid_grant" }),
+      apiBase: "https://api.test",
+      clientId: "cid",
+      code: "abc",
+      redirectUri: "http://127.0.0.1:1/linear/callback",
+      verifier: "v",
+      now: 0,
+    }),
+    { code: "failed", message: "Linear sign-in failed: invalid_grant" },
+  );
+});
+
+test("a refresh rejected for rate limiting says to try again later", async () => {
+  await assert.rejects(
+    refreshTokens({ fetchImpl: async () => json(429, { error: "rate_limited" }), apiBase: "https://api.test", clientId: "cid", refreshToken: "r", now: 0 }),
+    { code: "rate-limited", message: "Linear is limiting requests. Try again in a minute." },
+  );
+});
+
+test("a refresh met by a Linear server error is offline, not revoked", async () => {
+  await assert.rejects(refreshTokens({ fetchImpl: async () => json(503, {}), apiBase: "https://api.test", clientId: "cid", refreshToken: "r", now: 0 }), {
+    code: "offline",
+    message: "Linear is having trouble. Try again in a minute.",
+  });
+});
+
+test("a refresh posts the refresh token and returns the new one Linear sends back", async () => {
+  let sent;
+  const fetchImpl = async (url, init) => {
+    sent = { url, init };
+    return json(200, { access_token: "a2", refresh_token: "r2", expires_in: 86400 });
+  };
+  const tokens = await refreshTokens({ fetchImpl, apiBase: "https://api.test", clientId: "cid", refreshToken: "r1", now: 1000 });
+  assert.deepEqual(tokens, { accessToken: "a2", refreshToken: "r2", expiresAt: 1000 + 86_400_000 });
+  assert.equal(sent.url, "https://api.test/oauth/token");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent.init.body)), {
+    grant_type: "refresh_token",
+    refresh_token: "r1",
+    client_id: "cid",
+  });
+});

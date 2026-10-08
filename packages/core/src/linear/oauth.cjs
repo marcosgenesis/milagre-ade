@@ -93,9 +93,13 @@ async function tokenRequest({ fetchImpl, apiBase, params, now }) {
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok || typeof body.access_token !== "string") {
+    if (response.status === 429) throw new LinearError("Linear is limiting requests. Try again in a minute.", "rate-limited");
+    if (response.status >= 500) throw new LinearError("Linear is having trouble. Try again in a minute.", "offline");
     const message = body.error_description || body.error || `Linear answered ${response.status}.`;
-    // invalid_grant: the refresh token was revoked or already used. Only signing in again helps.
-    const revoked = body.error === "invalid_grant" || response.status === 401;
+    // Only a refresh that Linear refuses means the grant is gone and only signing in again helps.
+    // A failed code exchange is a failed sign-in, whatever the error says.
+    const refused = body.error === "invalid_grant" || response.status === 401;
+    const revoked = params.grant_type === "refresh_token" && refused;
     throw new LinearError(`Linear sign-in failed: ${message}`, revoked ? "revoked" : "failed");
   }
   // A refresh answer without a new refresh token leaves the old one in place.

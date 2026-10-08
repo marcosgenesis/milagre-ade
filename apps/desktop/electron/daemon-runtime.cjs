@@ -45,10 +45,14 @@ async function connectDesktopRuntime(options) {
   // The start every launch and restartHost use; tests stand in for it.
   /** @type {typeof ensureDaemon} */
   const startHost = options.startHost ?? ensureDaemon;
+  // A paired computer's host (computers.cjs) is only reached, through `connect`: this Mac never starts, flushes, stops
+  // or restarts it. Without `connect` the runtime drives this Mac's own host.
+  const remote = typeof options.connect === "function";
+  const first = remote ? await options.connect() : await startHost(options);
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
-  let client = await startHost(options);
-  const status = client.status ?? (await client.call("daemon:status"));
-  await takeStatePatches(client, status);
+  let client = first;
+  const status = first.status ?? (await first.call("daemon:status"));
+  await takeStatePatches(first, status);
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
@@ -197,7 +201,8 @@ async function connectDesktopRuntime(options) {
     let connection;
     let started = false;
     try {
-      if (mayStart()) {
+      if (remote) connection = await options.connect();
+      else if (mayStart()) {
         try {
           connection = await compatibleClient(dataDir);
         } catch (error) {
@@ -331,6 +336,7 @@ async function connectDesktopRuntime(options) {
     },
     /** Replaces a running host with this desktop's own (an older one can't load large Projects). The window reconnects to it. */
     async restartHost() {
+      if (remote) throw new Error("Only this Mac's own host restarts from here.");
       if (closed || restarting) return;
       if (!client || recovering) throw new Error("Reconnect to the host before restarting it.");
       const connection = client;
@@ -354,6 +360,7 @@ async function connectDesktopRuntime(options) {
     },
     async close({ stopHost: stop = false } = {}) {
       if (closed) return;
+      if (stop && remote) throw new Error("Only this Mac's own host stops from here.");
       if (stop) {
         if (!client || recovering) throw new Error("Reconnect to the host before installing an update.");
         const connection = client;
@@ -366,7 +373,7 @@ async function connectDesktopRuntime(options) {
           if (client === connection) hostStopped = false;
           throw error;
         }
-      } else if (client && !recovering) await client.call("daemon:flush");
+      } else if (client && !recovering && !remote) await client.call("daemon:flush");
       closed = true;
       clearTimeout(timer);
       client?.close();

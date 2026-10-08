@@ -687,3 +687,57 @@ test("a real host killed outright is started again over its locks and socket, wi
   assert.equal((await desktop.invoke("project:current")).path, project);
   assert.equal(JSON.parse(await fs.readFile(path.join(project, ".milagre/runtime.lock/owner.json"), "utf8")).pid, restarted, "the Project lock was taken over");
 });
+
+test("a runtime given `connect` reconnects through it alone, and never starts, flushes, stops or restarts that host", async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-remote-runtime-")));
+  const project = path.join(root, "project");
+  await fs.mkdir(project);
+  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
+  const dataDir = path.join(root, "profile");
+  const daemon = await startDaemon({ dataDir, version: "test", runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {} } });
+  let remote;
+  t.after(async () => {
+    await remote?.close().catch(() => {});
+    await daemon.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const connections = [];
+  const calls = [];
+  const connectToHost = async () => {
+    const client = await compatibleClient(dataDir);
+    const call = client.call.bind(client);
+    client.call = (method, args) => {
+      calls.push(method);
+      return call(method, args);
+    };
+    connections.push(client);
+    return client;
+  };
+  const events = [];
+  remote = await connectDesktopRuntime({
+    dataDir: path.join(root, "not-this-macs-host"),
+    connect: connectToHost,
+    reconnectMs: 20,
+    startHost: async () => {
+      throw new Error("must not start a host");
+    },
+    emit: (channel, payload) => events.push({ channel, payload }),
+  });
+  assert.equal(connections.length, 1);
+  assert.ok(remote.methods.includes("chat:send"));
+  connections[0].close();
+  await waitFor(() => events.some((event) => event.channel === "runtime:connection" && event.payload.connected));
+  assert.equal(connections.length, 2, "reconnected through connect");
+  assert.ok(
+    events.some((event) => event.channel === "runtime:snapshot"),
+    "and read the state again",
+  );
+  await assert.rejects(remote.restartHost(), /Only this Mac's own host/);
+  await assert.rejects(remote.close({ stopHost: true }), /Only this Mac's own host/);
+  await remote.close();
+  assert.equal(calls.includes("daemon:flush"), false);
+  assert.equal(calls.includes("daemon:stop"), false);
+  const check = await compatibleClient(dataDir);
+  check.close();
+  assert.ok(check.status.capabilities.includes("desktop-v1"), "the host still runs");
+});

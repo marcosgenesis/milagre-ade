@@ -10,6 +10,7 @@ import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
 import { ErrorNotice, ListRow, PageScroll, Toggle, styles } from "../ui";
 import { useAttentionButton } from "../attention";
+import { useMuriloMode } from "../murilo-mode";
 
 type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills";
 
@@ -28,6 +29,7 @@ export default function SettingsScreen() {
 export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void }) {
   const push = usePush();
   const [attentionButton, setAttentionButton] = useAttentionButton();
+  const [muriloMode, setMuriloMode] = useMuriloMode();
   const updates = useAppUpdates();
   const session = useSession();
   const projects = session.recent.filter((project) => !project.link);
@@ -124,6 +126,13 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
           </View>
         </>
       )}
+      <Text style={[styles.label, { marginTop: 16 }]}>Experimental</Text>
+      <View style={[styles.card, { gap: 4 }]}>
+        <Toggle title="Murilo mode" selected={muriloMode} onPress={() => setMuriloMode(!muriloMode)} />
+        <Text style={styles.caption}>
+          Shows every tool call in the Chat, one row each, with the agent&apos;s notes between them. Replies no longer fold their activity into one line.
+        </Text>
+      </View>
       {/* The connected computer's Projects; each opens its own settings. */}
       {session.client && projects.length > 0 && (
         <>

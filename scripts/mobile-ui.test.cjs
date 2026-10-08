@@ -4311,6 +4311,7 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
     "../icons": { Icon: "Icon" },
     "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
   assert.deepEqual(opened, ["project-accounts"]);
@@ -4753,6 +4754,7 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./tool-row": { ToolRow: "ToolRow" },
     "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
     "./answer-card": { AnswerCard: "AnswerCard" },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
     "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
     "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
@@ -4812,6 +4814,61 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   assert.deepEqual(
     markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
     ["Checking. Done."],
+  );
+});
+
+test("mobile Murilo mode shows each tool call and the notes between them in the Chat, with no activity fold", () => {
+  const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
+  const reply = (murilo) =>
+    load("chat-reply.tsx", {
+      "@milagre/shared/advisor-result": require("@milagre/shared/advisor-result"),
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+      "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
+      "react-native-svg": { default: "Svg", Path: "Path" },
+      "expo-router": { router: {} },
+      "@hugeicons/core-free-icons": new Proxy({}, { get: (_, key) => key }),
+      "@milagre/shared/reply-parts": require("@milagre/shared/reply-parts"),
+      "./file-chip": { FileChip: "FileChip" },
+      "./markdown": { Markdown: "Markdown" },
+      "./icons": { Icon: "Icon" },
+      "./activity-item": { ActivityTitle: "ActivityTitle" },
+      "./tool-row": { ToolRow: "ToolRow" },
+      "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+      "./answer-card": { AnswerCard: "AnswerCard" },
+      "./murilo-mode": { useMuriloMode: () => [murilo, () => {}] },
+      "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+      "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./theme": { hex: () => "#000" },
+      "./viewer-store": { showImages() {} },
+      "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
+    }).ChatReply;
+  const body = "Running the tests.Tests pass, reading the config.Done.";
+  const steps = [
+    { id: "a", kind: "shell", title: "Ran `npm test`", status: "done", offset: 18 },
+    { id: "b", kind: "read", title: "Read `package.json`", status: "done", offset: 49 },
+    { id: "c", kind: "search", title: "Searched for `muriloMode`", status: "done", offset: 49 },
+  ];
+  const props = { media: () => null, onActivity() {}, message: { id: 1, session_id: 1, role: "assistant", body, steps } };
+  const shown = (tree) => {
+    const rows = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.type === "ToolRow") rows.push(node.props.step.id);
+      else if (node.type === "Markdown") rows.push(node.props.text);
+      else if (typeof node.type === "function" && node.type.name === "ActivityRow") rows.push("fold");
+      walk(node.props?.children);
+    };
+    walk(tree);
+    return rows;
+  };
+  assert.deepEqual(shown(reply(false)(props)), ["fold", "Done."], "off: the activity folds into one row");
+  assert.deepEqual(
+    shown(reply(true)(props)),
+    ["Running the tests.", "a", "Tests pass, reading the config.", "b", "c", "Done."],
+    "on: every step and note, in order",
   );
 });
 
@@ -4890,6 +4947,7 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
     "../icons": { Icon: "Icon" },
     "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
   });
   const render = () => {
     react.begin();

@@ -200,6 +200,12 @@ function ExperimentalSettings() {
           onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
         />
       </Row>
+      <Row
+        label="Murilo mode"
+        description="Shows every tool call in the chat, one row each, with the agent's notes between them. Replies no longer fold their activity into one line."
+      >
+        <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
+      </Row>
     </Group>
   );
 }

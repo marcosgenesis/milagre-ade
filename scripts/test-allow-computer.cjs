@@ -102,6 +102,11 @@ async function browserChecks() {
     await waitFor(`!!(${button}) && !(${button}).disabled`);
     await evaluate(`(${button}).click()`);
   }
+  /** A click as it lands, enabled or not (a disabled button takes none). */
+  const clickNow = (text) =>
+    evaluate(
+      `(() => { const button = [...${prompt}.querySelectorAll('button')].find((el) => el.textContent.trim() === ${JSON.stringify(text)}); button?.click(); return !!button && !button.disabled; })()`,
+    );
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
     if (!screenshotDir) return;
@@ -162,6 +167,24 @@ async function browserChecks() {
     await waitFor(`!${prompt}?.open`);
     assert.deepEqual(await host.call("devices:pending"), []);
     console.log("PASS: two computers at once are asked one after the other, oldest first");
+
+    // The second click of a double-click lands as the next request replaces the first: it must not allow what was never read.
+    const gamma = ask("c".repeat(43), "gamma");
+    const delta = ask("d".repeat(43), "delta");
+    await waitFor(asking("gamma"));
+    await press("Allow");
+    assert.equal(await gamma.verdict, "allowed");
+    await waitFor(asking("delta"));
+    const landed = await clickNow("Allow");
+    assert.equal(landed, false, "the next request's Allow is not armed the moment it appears");
+    await clickNow("Deny");
+    const early = await Promise.race([delta.verdict, delay(300).then(() => "waiting")]);
+    assert.equal(early, "waiting", "a click right after the request changed answers nothing");
+    assert.equal((await host.call("devices:pending")).length, 1);
+    await press("Allow");
+    assert.equal(await delta.verdict, "allowed");
+    await waitFor(`!${prompt}?.open`);
+    console.log("PASS: the click that follows a request change is ignored, and Allow works once it is armed");
 
     host.close();
     await daemon.close();

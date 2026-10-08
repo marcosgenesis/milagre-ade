@@ -236,9 +236,14 @@ async function electronChecks() {
       await delay(16);
     }
     await evaluate(`window.dispatchEvent(new PointerEvent("pointerup", { clientX: milagreDrag.x, clientY: milagreDrag.y - 96 }))`);
+    await waitFor('document.querySelector("[data-terminal-panel]").getBoundingClientRect().height > 300', "the panel taller after the drag");
+    const grown = async () => (await terminals.list({ chatId: CHAT })).terminals[0].rows > rows;
+    for (let attempt = 0; attempt < 200 && !(await grown()); attempt++) await delay(25);
+    // Long enough for any resize still on its way to arrive and be counted.
     await delay(300);
     const dropped = (await terminals.list({ chatId: CHAT })).terminals[0];
-    assert.ok(dropped.rows > rows, `The drag didn't grow the PTY: ${rows} -> ${dropped.rows}`);
+    const panelHeight = await evaluate('document.querySelector("[data-terminal-panel]").getBoundingClientRect().height');
+    assert.ok(dropped.rows > rows, `The drag didn't grow the PTY: ${rows} -> ${dropped.rows} rows, panel ${panelHeight}px, sent ${resizes}`);
     assert.deepEqual(resizes, [`${dropped.cols}x${dropped.rows}`], "The PTY was resized once, at the drop");
     assert.equal((await evaluate('localStorage.getItem("milagre.terminal.height")')) !== null, true, "The dropped height is kept");
 

@@ -25,6 +25,26 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("browser:input", request),
     close: (request) => ipcRenderer.invoke("browser:close", request),
   },
+  terminals: {
+    list: (request) => ipcRenderer.invoke("terminal:list", request),
+    open: (request) => ipcRenderer.invoke("terminal:open", request),
+    read: (request) => ipcRenderer.invoke("terminal:read", request),
+    input: (request) => ipcRenderer.invoke("terminal:input", request),
+    resize: (request) => ipcRenderer.invoke("terminal:resize", request),
+    close: (request) => ipcRenderer.invoke("terminal:close", request),
+  },
+  onTerminalsChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("terminal:changed", listener);
+    return () => ipcRenderer.removeListener("terminal:changed", listener);
+  },
+  // ⌘W closes the focused Terminal instead of the window; the main process needs to know where focus is to decide.
+  setTerminalFocused: (focused) => ipcRenderer.send("app:terminal-focused", focused === true),
+  onCloseFocusedTerminal: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("app:close-focused-terminal", listener);
+    return () => ipcRenderer.removeListener("app:close-focused-terminal", listener);
+  },
   artifacts: {
     get: (request) => ipcRenderer.invoke("artifact:get", request),
     list: (request) => ipcRenderer.invoke("artifact:list", request),

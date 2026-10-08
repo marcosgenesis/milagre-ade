@@ -31,6 +31,7 @@ import { PullRequestAction, SubagentChip, usePullRequest } from "../status-indic
 import { SimulatorChip } from "../simulator";
 import { BrowserChip } from "../browser";
 import { PortsChip } from "../ports";
+import { TerminalChip, terminalPlaces } from "../terminal";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
 import { designMessageSent, peekDesignMessage } from "../design-outbox";
@@ -821,6 +822,9 @@ export default function ChatScreen() {
                 )}
                 <View style={{ flex: 1 }} />
                 <BrowserChip chatId={params.id ? chatId : undefined} />
+                {params.id && Number(params.id) > 0 && chat && !chat.archived && (
+                  <TerminalChip key={`terminal-${chatId}`} chatId={chatId} places={terminalPlaces(chat)} />
+                )}
                 {params.id && Number(params.id) > 0 && <PortsChip key={`ports-${chatId}`} chatId={chatId} />}
                 {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
                 {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction("agents")} />}

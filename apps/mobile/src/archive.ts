@@ -1,4 +1,5 @@
 import type { AgentSession, CoordinatorState } from "@milagre/shared/model";
+import type { TerminalList } from "@milagre/shared/terminal";
 import {
   archiveChat,
   archiveChoices,
@@ -32,10 +33,27 @@ const fromOldDaemon = (error: unknown) => OLD_DAEMON.test((error as Error)?.mess
 
 /**
  * What the confirm step offers for one Chat, as desktop's menu works it out: whether Milagre made its worktree, whether
- * another Chat uses it, and what removing it would lose. `null` when the Mac's daemon has no such check yet, so the
- * phone archives as it did before: hide only.
+ * another Chat uses it, what removing it would lose, and what its Terminals run that archiving would end. `null` when the
+ * Mac's daemon has no such check yet, so the phone archives as it did before: hide only.
  */
-export async function checkArchive(client: ArchiveClient, state: CoordinatorState, sessionId: number): Promise<ArchivePlan | null> {
+export async function checkArchive(client: ArchiveClient, state: CoordinatorState, sessionId: number, chatId?: string): Promise<ArchivePlan | null> {
+  const plan = await worktreePlan(client, state, sessionId);
+  if (!plan || !chatId) return plan;
+  const terminals = await busyTerminals(client, chatId);
+  return terminals.length ? { ...plan, terminals } : plan;
+}
+
+/** What the Chat's Terminals run, when it isn't the shell's prompt; none from a Mac without Terminals. */
+async function busyTerminals(client: ArchiveClient, chatId: string): Promise<string[]> {
+  try {
+    const { terminals } = await client.call<TerminalList>("terminal:list", [{ chatId }]);
+    return terminals.filter((terminal) => terminal.busy).map((terminal) => terminal.title);
+  } catch {
+    return [];
+  }
+}
+
+async function worktreePlan(client: ArchiveClient, state: CoordinatorState, sessionId: number): Promise<ArchivePlan | null> {
   const worktree = state.worktrees[state.sessions[sessionId]?.worktree_id ?? -1];
   let roots: unknown;
   try {
@@ -147,7 +165,7 @@ export async function archiveFromPhone(request: ArchiveRequest): Promise<"busy" 
   archiving.add(chatId);
   let done = () => {};
   try {
-    const plan = await checkArchive(client, request.state, chat.id);
+    const plan = await checkArchive(client, request.state, chat.id, chatId);
     const mode = await confirmArchive(request.alert, archiveDialog(plan, request.running));
     if (!mode) return "cancelled";
     done = startArchiving(chatId);

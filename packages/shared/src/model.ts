@@ -167,6 +167,8 @@ export interface WorktreeBinding {
   worktreePath: string;
   branch: string;
   base: string;
+  /** The folder name the shared Chat's workspace links this Worktree under. */
+  alias?: string;
 }
 export interface LinkChatSession extends Omit<AgentSession, "worktree_id"> {
   workspacePath: string;

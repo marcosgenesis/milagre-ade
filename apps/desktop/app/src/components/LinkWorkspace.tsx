@@ -38,6 +38,9 @@ import { gitChatContext } from "../lib/git-dialog";
 import { Select } from "./primitives/Select";
 import { lazyView } from "../lib/lazy-view";
 import type { LinkedWork } from "@milagre/shared/model";
+import { TerminalPanel } from "./terminal/TerminalPanel";
+import { CORNER_PITCH, PanelToggles } from "./agents/PanelToggles";
+import { busyTerminals, newTerminal, useTerminalSync, type TerminalPlace } from "../lib/terminal-actions";
 const CanvasView = lazyView(() => import("./CanvasView").then((module) => module.CanvasView));
 const CANVAS_STATES = {};
 
@@ -114,6 +117,11 @@ export function LinkWorkspace({
   );
   const session = sessionId == null ? undefined : state.sessions[sessionId];
   const chatId = session ? chatKeyForScope(scope, session.id) : null;
+  // A shared Chat's Terminals start in one of its Worktrees, chosen when it has several.
+  const terminalPlaces: TerminalPlace[] | undefined = session?.worktrees.map((member) => ({
+    path: member.worktreePath,
+    label: member.alias ?? member.projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? member.worktreePath,
+  }));
   const run = chatId ? agents.runs[chatId] : undefined;
   // Every project's chats that wait on the user; the Link's own are marked in its sidebar.
   const attentionKey = chatsNeedingAttention(agents.runs).join("\n");
@@ -137,6 +145,8 @@ export function LinkWorkspace({
   const memberDialog = useRef<HTMLDialogElement>(null);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const terminalChatId = canvasOpen || session?.archived ? null : chatId;
+  useTerminalSync(terminalChatId);
   const chosen = session?.worktrees.find((member) => member.projectId === memberId);
   const changes = useChanges({ cwd: chosen?.worktreePath, base: chosen?.base, chatId, available: Boolean(session) });
   const groupChanges = useLinkDiffLists({ members: session?.worktrees ?? [], chatId, mode: changes.mode, active: changes.open });
@@ -221,6 +231,10 @@ export function LinkWorkspace({
         event.preventDefault();
         setCommandsOpen(true);
       }
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "t" && terminalChatId) {
+        event.preventDefault();
+        newTerminal(terminalChatId, terminalPlaces, setError);
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         setFindSeed(undefined);
@@ -243,7 +257,7 @@ export function LinkWorkspace({
     }
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [chatId, run, findOpen, session, changes.toggle, canvasOpen]);
+  }, [chatId, run, findOpen, session, changes.toggle, canvasOpen, terminalChatId]);
   function pick(id: number | null) {
     latest.current.selection++;
     drafts.newSelection(scope);
@@ -417,6 +431,13 @@ export function LinkWorkspace({
                 setGitChoice(Number(id));
                 setGitMemberId("");
               },
+              // A shared Chat keeps its Worktrees when archived; only its Terminals would end.
+              onArchiveCheck: async (id) => ({
+                milagreOwned: false,
+                shared: false,
+                status: null,
+                terminals: await busyTerminals(chatKeyForScope(scope, Number(id))),
+              }),
               onArchive: (id) => {
                 const key = chatKeyForScope(scope, Number(id));
                 return agents
@@ -462,7 +483,7 @@ export function LinkWorkspace({
                 trailing={<DiffToolbar changes={{ ...changes, refresh: refreshChanges }} prefs={diffPrefs} />}
               />
               {changes.diffOpen && <DiffView key={`${chatId}:${memberId}:${changes.mode}`} changes={changes} prefs={diffPrefs} comments={comments} />}
-              <div className={`min-h-0 flex-1 overflow-hidden ${changes.diffOpen ? "hidden" : ""}`}>
+              <div className={`min-h-0 flex-1 flex-col overflow-hidden ${changes.diffOpen ? "hidden" : "flex"}`}>
                 <EditorLinks root={root}>
                   <DraftChatComposer
                     {...preferences}
@@ -542,6 +563,7 @@ export function LinkWorkspace({
                     }
                   />
                 </EditorLinks>
+                <TerminalPanel chatId={terminalChatId} places={terminalPlaces} notify={setError} />
               </div>
             </>
           )}
@@ -572,6 +594,7 @@ export function LinkWorkspace({
         </ChangesPanelSlot>
       </div>
       {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+      <PanelToggles right={!canvasOpen && session ? 12 + CORNER_PITCH : 12} />
       {showAttentionButton && attentionChats[0] && (
         <AttentionButton
           label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}

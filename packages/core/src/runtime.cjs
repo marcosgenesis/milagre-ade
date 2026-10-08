@@ -167,6 +167,34 @@ function createRuntime(options) {
       return browsers[method === "close" ? "closeViewer" : method](request, context.clientId);
     });
   }
+  // A Chat's Terminals start in its Worktree, or in one of a shared Chat's Worktrees. The host resolves them from the
+  // saved Chat: a client never names a folder it could not otherwise reach.
+  async function chatWorktrees(chatId) {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope)) throw new Error("Open this Chat before opening a Terminal.");
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (!session) throw new Error("Open an existing Chat before opening a Terminal.");
+    if (session.archived) throw new Error("This Chat is archived.");
+    if (isLinkScopeKey(scope)) return (session.worktrees ?? []).map((member) => ({ path: member.worktreePath, label: member.alias }));
+    const worktree = state.worktrees?.[session.worktree_id];
+    return worktree?.path ? [{ path: worktree.path, label: path.basename(worktree.path) }] : [];
+  }
+  const terminals =
+    options.terminals ??
+    require("./terminals.cjs").createTerminals({
+      resolveChat: chatWorktrees,
+      onChange: (chatId) => emit("terminal:changed", { chatId }),
+      onShellsChanged: () => ports.wake(),
+    });
+  commands.handle("terminal:list", (_context, request) => terminals.list(request));
+  for (const method of ["open", "read", "input", "resize", "close"]) {
+    commands.handle(`terminal:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Terminal access requires an authenticated connection");
+      return terminals[method](request);
+    });
+  }
   const searchFiles = createFileSearch();
   const environmentReady =
     options.environmentReady ??
@@ -489,6 +517,7 @@ function createRuntime(options) {
       force,
       closeSession: async () => {
         for (const gone of goneChats) {
+          terminals.closeChat(gone);
           await advisorDelivery.stop(gone);
           await advisors.stopChat(gone);
         }
@@ -631,8 +660,13 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
-    isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
-    roots: () => agents.processes(),
+    isRunning: () => terminals.size > 0 || [...agents.sessions.values()].some((entry) => entry.session.turnActive),
+    roots: () => {
+      // A Terminal's shell is a root too: what its commands listen on is the Chat's, like the agent's commands.
+      const roots = agents.processes();
+      for (const [chatId, shells] of terminals.shells()) roots.set(chatId, { ...roots.get(chatId), shells });
+      return roots;
+    },
     publish: (next) => {
       emit("agent:ports", next);
     },
@@ -816,6 +850,7 @@ function createRuntime(options) {
   commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
     if (!scopeStates.has(projectPath)) return;
     if (patch?.archived) {
+      terminals.closeChat(`${projectPath}#${sessionId}`);
       await advisorDelivery.stop(`${projectPath}#${sessionId}`);
       await advisors.stopChat(`${projectPath}#${sessionId}`);
     }
@@ -1270,7 +1305,8 @@ function createRuntime(options) {
       await advisors.close();
       await advisorMcp.close();
       await advisorStore.close();
-      await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
+      // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
+      await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

@@ -371,17 +371,62 @@ test("Stop kills an agent that doesn't honour the cancel", async (t) => {
   await assert.rejects(session.startTurn(TURN), (error) => error.sessionClosed === true);
 });
 
+test("Stop that has to kill the agent also stops the commands it started in groups of their own", { skip: process.platform === "win32" }, async (t) => {
+  const { session, events } = antigravity(t, { scenario: "stubborn-command", interruptGraceMs: 100 });
+  await session.startTurn(TURN);
+  await waitUntil(() => replyText(events) === "Working");
+  const { commandPid } = await fake(session);
+  const alive = () => {
+    try {
+      process.kill(commandPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  t.after(() => alive() && process.kill(commandPid, "SIGKILL"));
+  assert.ok(alive());
+  await session.interrupt();
+  await ended(events);
+  await waitUntil(() => !alive());
+});
+
 test("a message sent while a turn runs starts the next turn", async (t) => {
   const { session, events } = antigravity(t, { scenario: "slow" });
   await session.startTurn(TURN);
   await waitUntil(() => replyText(events) === "Working");
   const queued = session.startTurn({ ...TURN, prompt: "Next" });
-  await session.interrupt();
+  await session.rpc.request("fake/finish");
   const result = await queued;
   assert.equal(result.steered, false);
   await waitUntil(() => of(events, "turn-started").length === 2);
   const prompts = await sent(session, "session/prompt");
   assert.deepEqual(prompts.at(-1).prompt, [{ type: "text", text: "Next" }]);
+});
+
+test("Stop drops a message that was waiting for the turn, and a message sent after Stop starts the next turn", async (t) => {
+  const { session, events } = antigravity(t, { scenario: "slow" });
+  await session.startTurn(TURN);
+  await waitUntil(() => replyText(events) === "Working");
+  const queued = session.startTurn({ ...TURN, prompt: "Dropped" });
+  await session.interrupt();
+  const after = session.startTurn({ ...TURN, prompt: "After Stop" });
+  assert.deepEqual(await queued, { turnId: null, steered: false, cancelled: true });
+  assert.ok((await after).turnId);
+  assert.equal(of(events, "turn-started").length, 2);
+  const prompts = (await sent(session, "session/prompt")).map((params) => params.prompt.at(-1).text);
+  assert.equal(prompts.includes("Dropped"), false);
+  assert.equal(prompts.at(-1), "After Stop");
+});
+
+test("Stop drops a waiting message when it has to kill the agent", async (t) => {
+  const { session, events } = antigravity(t, { scenario: "stubborn", interruptGraceMs: 100 });
+  await session.startTurn(TURN);
+  await waitUntil(() => replyText(events) === "Working");
+  const queued = session.startTurn({ ...TURN, prompt: "Dropped" });
+  await session.interrupt();
+  assert.deepEqual(await queued, { turnId: null, steered: false, cancelled: true });
+  assert.deepEqual(events.filter(isTerminal), [{ type: "turn-cancelled" }]);
 });
 
 test("a crash fails the turn with the agent's error line", async (t) => {

@@ -5,6 +5,9 @@ const { powershell, powershellEnvironment } = require("../private-files.cjs");
 // signalling the whole process group keeps them from outliving the session, even when the
 // leader itself already exited (an idle CLI exits as soon as its stdin ends). Children
 // spawned with `detached: true` lead their own group; others fall back to a plain kill.
+// `descendants` also stops every process below the child that left its group (Antigravity's
+// harness starts each command in a group of its own), found by parent pid before anything is
+// signalled, since an orphan's parent becomes launchd or init.
 const POLL_MS = 50;
 
 function groupAlive(pid) {
@@ -16,7 +19,38 @@ function groupAlive(pid) {
   }
 }
 
-async function killTree(child, { graceMs = 2000, platform = process.platform, execFileImpl = execFile } = {}) {
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The processes below `pid` from one `ps` snapshot: [{ pid, pgid }]. Empty when ps fails.
+async function descendantsOf(pid, execFileImpl = execFile) {
+  const stdout = await new Promise((resolve) => execFileImpl("ps", ["-A", "-o", "pid=,ppid=,pgid="], (error, out) => resolve(error ? "" : String(out))));
+  const children = new Map();
+  for (const line of stdout.split("\n")) {
+    const [child, parent, pgid] = line.trim().split(/\s+/).map(Number);
+    if (!Number.isInteger(child) || !Number.isInteger(parent) || !Number.isInteger(pgid)) continue;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push({ pid: child, pgid });
+  }
+  const found = [];
+  const queue = [pid];
+  while (queue.length) {
+    for (const entry of children.get(queue.shift()) ?? []) {
+      if (entry.pid === pid || found.some((other) => other.pid === entry.pid)) continue;
+      found.push(entry);
+      queue.push(entry.pid);
+    }
+  }
+  return found;
+}
+
+async function killTree(child, { graceMs = 2000, platform = process.platform, execFileImpl = execFile, descendants = false } = {}) {
   if (platform === "win32" && (await closeWindowsJob(child))) return;
   const pid = child?.pid;
   if (!pid) return;
@@ -26,8 +60,22 @@ async function killTree(child, { graceMs = 2000, platform = process.platform, ex
     return killWindowsTree(pid, execFileImpl, { isRootCurrent: current });
   }
   const exited = () => child.exitCode !== null || child.signalCode != null;
-  const alive = () => groupAlive(pid) || !exited();
+  // Only groups led by a process of this tree are signalled whole; another process is signalled alone.
+  const others = descendants ? (await descendantsOf(pid, execFileImpl)).filter((entry) => entry.pgid !== pid) : [];
+  const leaders = new Set(others.filter((entry) => entry.pgid === entry.pid).map((entry) => entry.pid));
+  const othersAlive = () => others.some((entry) => (leaders.has(entry.pgid) ? groupAlive(entry.pgid) : isAlive(entry.pid)));
+  const alive = () => groupAlive(pid) || !exited() || othersAlive();
+  const signalOthers = (name) => {
+    for (const entry of others) {
+      try {
+        process.kill(leaders.has(entry.pgid) ? -entry.pgid : entry.pid, name);
+      } catch {
+        // Already gone.
+      }
+    }
+  };
   const signal = (name) => {
+    signalOthers(name);
     try {
       process.kill(-pid, name);
       return;

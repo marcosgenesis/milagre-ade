@@ -63,6 +63,15 @@ const bridge = {
   saveFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:save", projectPath, patterns),
   readWorktreeSetup: (projectPath) => ipcRenderer.invoke("worktree-setup:read", projectPath),
   saveWorktreeSetup: (projectPath, command) => ipcRenderer.invoke("worktree-setup:save", projectPath, command),
+  readMainSync: (projectPath) => ipcRenderer.invoke("main-sync:read", projectPath),
+  saveMainSync: (projectPath, override) => ipcRenderer.invoke("main-sync:save", projectPath, override),
+  readMainSyncDefault: () => ipcRenderer.invoke("main-sync:default:read"),
+  saveMainSyncDefault: (value) => ipcRenderer.invoke("main-sync:default:save", value),
+  onMainSyncStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("main-sync:status", listener);
+    return () => ipcRenderer.removeListener("main-sync:status", listener);
+  },
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);

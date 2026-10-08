@@ -1,3 +1,4 @@
+import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
 import type {
   ProjectAccountScope,
   ProjectAccountsSnapshot,
@@ -157,6 +158,14 @@ declare global {
       readWorktreeSetup: (projectPath: string) => Promise<WorktreeSetupSettings>;
       /** Saves the project's setup command; an empty one removes it. `.milagre/worktree.json` still wins. */
       saveWorktreeSetup: (projectPath: string, command: string) => Promise<WorktreeSetupSettings>;
+      /** Whether new Worktrees sync the main branch first, and the last sync's result. */
+      readMainSync: (projectPath: string) => Promise<MainSyncSettings>;
+      /** null brings the global default back. */
+      saveMainSync: (projectPath: string, override: boolean | null) => Promise<MainSyncSettings>;
+      readMainSyncDefault: () => Promise<{ syncMain: boolean }>;
+      saveMainSyncDefault: (value: boolean) => Promise<{ syncMain: boolean }>;
+      /** A main branch sync finished, before a new Worktree. */
+      onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */

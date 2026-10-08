@@ -38,6 +38,8 @@ import { WorkspaceIcon } from "./WorkspaceIcon";
 import { RECENT_PROJECTS_CHANGED, projectInitial, projectRows } from "../lib/project-list";
 import type { RecentProject } from "../lib/project-list";
 import { setProjectImage, useProjectImages } from "../lib/project-images";
+import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE, choiceOf, mainSyncChoices, mainSyncProjectTitle, mainSyncStatusLine, overrideOf } from "@milagre/shared/main-sync";
+import type { MainSyncChoice, MainSyncSettings } from "@milagre/shared/main-sync";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -309,6 +311,9 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
             />
           )}
         </Row>
+      </Group>
+      <Group title="Worktrees">
+        <MainSyncDefaultSetting />
       </Group>
       <Group title="System">
         <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
@@ -1029,6 +1034,84 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   );
 }
 
+// The global default for main branch sync; each Project can override it. Kept by the daemon, which runs the sync.
+export function MainSyncDefaultSetting() {
+  const [syncMain, setSyncMain] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    window.milagre.readMainSyncDefault().then(
+      (value) => setSyncMain(value.syncMain),
+      () => setSyncMain(false),
+    );
+  }, []);
+  async function change(next: boolean) {
+    setError(null);
+    setSyncMain(next);
+    try {
+      setSyncMain((await window.milagre.saveMainSyncDefault(next)).syncMain);
+    } catch (failure) {
+      setSyncMain(!next);
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  return (
+    <div data-main-sync-default>
+      <Row label={MAIN_SYNC_TITLE} description={MAIN_SYNC_HINT}>
+        <Switch label={MAIN_SYNC_TITLE} checked={syncMain === true} onChange={(next) => void change(next)} />
+      </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
+export function MainSyncSetting({ projectPath }: { projectPath: string }) {
+  const [sync, setSync] = useState<MainSyncSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    window.milagre.readMainSync(projectPath).then(
+      (value) => live && setSync(value),
+      (failure) => live && setError(ipcErrorMessage(failure)),
+    );
+    const stop = window.milagre.onMainSyncStatus((status) => {
+      if (status.projectPath !== projectPath) return;
+      setNow(Date.now());
+      setSync((current) => (current ? { ...current, last: status.last } : current));
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [projectPath]);
+  async function change(choice: MainSyncChoice) {
+    setError(null);
+    try {
+      setSync(await window.milagre.saveMainSync(projectPath, overrideOf(choice)));
+    } catch (failure) {
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  const title = mainSyncProjectTitle(sync?.branch ?? "main");
+  return (
+    <div data-main-sync>
+      <Row label={title} description={sync ? mainSyncStatusLine(sync.last, now) : undefined}>
+        <Select<MainSyncChoice>
+          label={title}
+          value={choiceOf(sync?.override ?? null)}
+          onChange={(choice) => void change(choice)}
+          options={mainSyncChoices(sync?.defaultValue ?? false).map((choice) => ({ value: choice.value, label: choice.title }))}
+        />
+      </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
 function ProjectSettings({ project, onManageAccounts }: { project: SettingsProject; onManageAccounts: () => void }) {
   return (
     <>
@@ -1039,6 +1122,9 @@ function ProjectSettings({ project, onManageAccounts }: { project: SettingsProje
         <ShowInSidebarSetting project={project} />
       </Group>
       <ProjectAccountsGroup projectPath={project.path} onManageAccounts={onManageAccounts} />
+      <Group title="Main branch">
+        <MainSyncSetting projectPath={project.path} />
+      </Group>
       <Group title="New worktrees">
         <FilesToCopy projectPath={project.path} />
         <SetupCommand projectPath={project.path} />

@@ -30,7 +30,7 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
     await chats.resumeInterrupted(key, state).catch(() => {});
     state = await store.get(id);
     titles.resume(key, state);
-    void chats.recoverHandovers(key, state).catch(() => {});
+    void chats.recoverHandoffs(key, state).catch(() => {});
     const projects = await registry().list();
     return {
       link,

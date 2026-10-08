@@ -4,7 +4,7 @@ import type { ChatMessage, LinkedContext } from "../model";
 
 /** The message's Link context when another Chat (or Milagre, for a Link) wrote it rather than the user or the agent. */
 export function linkedContext({ context }: Pick<ChatMessage, "context">): LinkedContext | null {
-  return typeof context === "object" && context !== null && context.kind !== "git-action" ? context : null;
+  return typeof context === "object" && context !== null && context.kind !== "git-action" && context.kind !== "handoff" ? context : null;
 }
 
 const ENDED = { cancelled: "stopped", failed: "failed" } as const;

@@ -81,7 +81,7 @@ test("the brief comes from the source provider, treats the transcript as data an
   assert.match(calls[0].prompt, /<transcript>\nT\n<\/transcript>/);
   assert.equal(
     brief,
-    "You're taking over a chat that ran on Codex.\n\n## Goal\nShip it\n\nFull transcript of the previous chat: /x/3.md. Read it if you need details the brief leaves out.",
+    "You're taking over a chat that ran on Codex.\n\n## Goal\nShip it\n\nFull transcript of this chat: /x/3.md. Read it if you need details the brief leaves out.",
   );
 });
 
@@ -127,7 +127,85 @@ for (const [name, model] of [
     );
     assert.equal(
       brief,
-      "You're taking over a chat that ran on Claude. Its summary couldn't be written, so here is the minimum.\n\nLast request:\nfix the login redirect\n\nChanged files:\n- src/auth.ts\n- src/auth.test.ts\n\nFull transcript of the previous chat: /x/3.md. Read it if you need details the brief leaves out.",
+      "You're taking over a chat that ran on Claude. Its summary couldn't be written, so here is the minimum.\n\nLast request:\nfix the login redirect\n\nChanged files:\n- src/auth.ts\n- src/auth.test.ts\n\nFull transcript of this chat: /x/3.md. Read it if you need details the brief leaves out.",
     );
   });
 }
+
+const divided = {
+  ...state,
+  messages: [
+    ...state.messages.filter((message) => message.session_id === 3),
+    {
+      id: 7,
+      session_id: 3,
+      role: "assistant",
+      body: "",
+      context: { kind: "handoff", from: { provider: "claude" }, to: { provider: "codex" }, status: "done", brief: "B" },
+    },
+    { id: 8, session_id: 3, role: "user", body: "now add tests", context: null },
+  ],
+};
+
+test("a divider renders as a handoff heading, not as a reply", () => {
+  const text = renderTranscript(divided, 3);
+  assert.match(text, /## Handoff: Claude → Codex\n/);
+  assert.doesNotMatch(text, /## Assistant\n\n\n/);
+});
+
+test("a range renders only the messages after the given id, under a note", () => {
+  const text = renderTranscript(divided, 3, { after: 7 });
+  assert.match(text, /Earlier messages are left out: you already know them\./);
+  assert.match(text, /## User\n\nnow add tests/);
+  assert.doesNotMatch(text, /fix the login redirect|Handoff:/);
+});
+
+test("a catch-up brief opens by saying the reader is back, and asks only for what changed", async () => {
+  const calls = [];
+  const brief = await generateBrief(
+    { transcript: "T", transcriptPath: "/x/3.md", provider: "codex", lastUserMessage: "", changedFiles: async () => [], catchUp: true },
+    { models: { codex: async (input) => (calls.push(input), '{"brief":"B"}') } },
+  );
+  assert.match(brief, /^You're back on this chat\. Here is what happened on Codex since you last worked on it\.\n\nB\n\n/);
+  assert.match(calls[0].system, /already knows the work before this transcript/);
+});
+
+test("a Link chat's state has no worktrees: the header uses the session's workspace path", () => {
+  const link = {
+    sessions: { 3: { id: 3, provider: "claude", workspacePath: "/link/ws", worktrees: [{ alias: "api", worktreePath: "/a" }] } },
+    messages: [{ id: 4, session_id: 3, role: "user", body: "hi", context: null }],
+  };
+  assert.match(renderTranscript(link, 3), /Worktree: \/link\/ws/);
+  assert.match(renderTranscript({ ...link, sessions: { 3: { id: 3, provider: "claude" } } }, 3), /Worktree: unknown/);
+});
+
+test("a failed divider renders as a failed handoff", () => {
+  const failed = {
+    ...divided,
+    messages: divided.messages.map((message) => (message.id === 7 ? { ...message, context: { ...message.context, status: "failed" } } : message)),
+  };
+  assert.match(renderTranscript(failed, 3), /## Handoff \(failed\): Claude → Codex\n/);
+});
+
+test("an outer abort signal aborts the model call", async () => {
+  const outer = new AbortController();
+  let seen;
+  const pending = generateBrief(
+    { transcript: "T", transcriptPath: "/x/3.md", provider: "claude", lastUserMessage: "", changedFiles: async () => [], signal: outer.signal },
+    {
+      models: {
+        claude: ({ signal }) =>
+          new Promise((resolve) => {
+            seen = signal;
+            signal.addEventListener("abort", () => resolve(null));
+          }),
+      },
+      timeoutMs: 5000,
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  outer.abort();
+  const settled = await Promise.race([pending.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
+  assert.equal(settled, true);
+  assert.equal(seen.aborted, true);
+});

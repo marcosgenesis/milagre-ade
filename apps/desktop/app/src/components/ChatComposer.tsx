@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { UpdatePillSlot } from "./UpdateNotice";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
@@ -869,7 +870,9 @@ export function ChatComposer({
             />
           </div>
 
-          <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
+          <div className={`relative mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "z-20 -mt-1.5"}`}>
+            {/* The update pill floats centred on the chip row's line, outside its flow. */}
+            {!canvasOpened && <UpdatePillSlot className="bottom-full mb-2" />}
             {isNewChat && scopeKind !== "link" && (
               <NewChatHeader
                 worktrees={worktrees}

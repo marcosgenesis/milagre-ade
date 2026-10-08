@@ -1,14 +1,22 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { UpdateState } from "../electron";
 import { useDismiss } from "../lib/use-dismiss";
 
 const Updates = createContext<UpdateState | null>(null);
+const SlotRegistry = createContext<((slot: HTMLElement) => () => void) | null>(null);
 export const useAppUpdates = () => useContext(Updates);
 export const showUpdateNotice = () => window.dispatchEvent(new Event("milagre:show-update"));
 
 /** Lives above every screen so updates remain reachable without an open Project. */
 export function UpdateShell({ children }: { children: ReactNode }) {
   const [state, setState] = useState<UpdateState | null>(null);
+  // The open Chat offers a spot above its composer; the latest one mounted holds the pill.
+  const [slots, setSlots] = useState<HTMLElement[]>([]);
+  const [register] = useState(() => (slot: HTMLElement) => {
+    setSlots((previous) => [...previous, slot]);
+    return () => setSlots((previous) => previous.filter((item) => item !== slot));
+  });
   useEffect(() => {
     let changed = false;
     const off = window.milagre.onUpdateState((next) => {
@@ -31,18 +39,27 @@ export function UpdateShell({ children }: { children: ReactNode }) {
   }, []);
   return (
     <Updates.Provider value={state}>
-      {children}
-      <UpdateNotice state={state} />
+      <SlotRegistry.Provider value={register}>
+        {children}
+        <UpdateNotice state={state} slot={slots.at(-1) ?? null} />
+      </SlotRegistry.Provider>
     </Updates.Provider>
   );
 }
 
-function Gift() {
+/** Centres the pill above the composer, out of the chip row's flow. Without one, the pill sits at the window's bottom left. */
+export function UpdatePillSlot({ className = "" }: { className?: string }) {
+  const register = useContext(SlotRegistry);
+  const ref = useCallback((slot: HTMLDivElement | null) => (slot && register ? register(slot) : undefined), [register]);
+  return <div ref={ref} className={`pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 ${className}`} />;
+}
+
+function Gift({ size = 20 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -56,7 +73,7 @@ function Gift() {
   );
 }
 
-function UpdateNotice({ state }: { state: UpdateState | null }) {
+function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLElement | null }) {
   const [presentation, setPresentation] = useState({ version: "", open: false });
   const [requestError, setRequestError] = useState("");
   const [pending, setPending] = useState(false);
@@ -113,10 +130,12 @@ function UpdateNotice({ state }: { state: UpdateState | null }) {
       setPending(false);
     }
   }
-  return (
+  const notice = (
     <div
       ref={root}
-      className="fixed bottom-4 left-4 z-50 max-w-[calc(100vw-2rem)] text-ink [-webkit-app-region:no-drag]"
+      className={`text-ink [-webkit-app-region:no-drag] ${
+        slot ? "pointer-events-auto flex flex-col items-center" : "fixed bottom-4 left-4 z-50 max-w-[calc(100vw-2rem)]"
+      }`}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open && !installing && !pending) {
           event.stopPropagation();
@@ -224,12 +243,15 @@ function UpdateNotice({ state }: { state: UpdateState | null }) {
           else showUpdateNotice();
         }}
         disabled={installing || pending}
-        className="flex items-center gap-2 rounded-full border border-line-strong bg-surface px-3 py-2 text-[12px] font-medium shadow-sm transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+        className={`flex items-center rounded-full border border-line-strong bg-surface font-medium transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${
+          slot ? "h-6 gap-1.5 px-2.5 text-[12px] whitespace-nowrap" : "gap-2 px-3 py-2 text-[12px] shadow-sm"
+        }`}
       >
-        <Gift />
+        <Gift size={slot ? 14 : 20} />
         <span>{downloading ? `Downloading update · ${percent}%` : title}</span>
         {ready && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink" />}
       </button>
     </div>
   );
+  return slot ? createPortal(notice, slot) : notice;
 }

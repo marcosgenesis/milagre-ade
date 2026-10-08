@@ -73,7 +73,6 @@ import SidebarNav from "./components/SidebarNav";
 import { runKeys } from "./lib/sidebar-scopes";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
 import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat, type PendingChat } from "@milagre/shared/chats";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
@@ -234,12 +233,12 @@ function App() {
   // its provider's recommended model (see nextSelection).
   const pickedModel = useRef(false);
   const appliedDefault = useRef(false);
-  const lockedProviderRef = useRef<ModelProvider | undefined>(undefined);
+  const preferredProviderRef = useRef<ModelProvider | undefined>(undefined);
   useEffect(() => {
     const applyDefault = reported !== null && !appliedDefault.current && !pickedModel.current;
     if (reported !== null) appliedDefault.current = true;
     setSelectedModel((current) =>
-      nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }),
+      nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, preferredProvider: preferredProviderRef.current }),
     );
   }, [models]);
   const chooseModel = (model: ModelOption) => {
@@ -441,9 +440,7 @@ function App() {
     // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages],
   );
-  // A handed-over chat's brief, attached to its first message until it is sent.
-  const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
-  lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
+  preferredProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const owner = projectOfKey(chatId);
@@ -1083,16 +1080,14 @@ function App() {
     files: string[] = imageDraft.files,
     preserveComposer = false,
   ): Promise<boolean> {
-    // The brief is sent with the main process's copy of the draft, so the message may be empty.
-    const briefAttached = handoverDraft !== undefined;
-    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading)
-      return false;
+    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     sendInFlight.current = true;
     const view = chatView.current;
     const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
     setPreparingView(view);
     setNewChatError(null);
-    const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
+    // The picker decides the provider: a chat on another one hands off to it.
+    const model = selectedModel;
     const firstMessage = messages.length === 0;
     const submittedDraft = draftStore.get();
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
@@ -1114,7 +1109,6 @@ function App() {
       projectPath: project.path,
       originSessionId: selectedSession?.id ?? null,
       originWorktreeId: selectedWorktree.id,
-      message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
     });
     if (!preserveComposer) {
       setDraft("");
@@ -1149,8 +1143,7 @@ function App() {
         body,
         images,
         files,
-        // With the brief there is no fallback text for an empty message: the brief is the prompt.
-        prompt: briefAttached && !body ? (files.length ? `Attached files:\n${files.join("\n")}` : "") : attachmentPrompt(body, files),
+        prompt: attachmentPrompt(body, files),
         ...options,
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
@@ -1187,7 +1180,6 @@ function App() {
               draft: submittedDraft || body,
               error: message,
               target: target ? { ...target, view, projectPath: project.path } : null,
-              message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
             },
           ]);
         setNotice(message);
@@ -1213,43 +1205,8 @@ function App() {
 
   async function sendMessage() {
     const body = draftStore.get().trim();
-    if (
-      (!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) ||
-      !state ||
-      !selectedWorktree ||
-      !project ||
-      preparing ||
-      imageDraft.loading
-    )
-      return;
+    if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
-  }
-
-  async function handover(provider: ModelProvider) {
-    if (!project || selectedSessionId === null) return;
-    const target = handoverModel(selectedModel, provider, openState()?.messages ?? [], models);
-    if (!target) return;
-    const capability = capabilityFor(target, capabilities);
-    try {
-      const { sessionId } = await window.milagre.handover({
-        projectPath: project.path,
-        sessionId: selectedSessionId,
-        provider,
-        model: target.id,
-        permissionMode,
-        effort: effortFor(capability, effort),
-        ultracode: capability.ultracode && ultracode,
-        fastMode: capability.fastMode && fastMode,
-        replies: getSettings().claudeReplies,
-        tldrEnabled: getSettings().tldrEnabled,
-      });
-      if (projectRef.current?.path !== project.path) return;
-      advanceChatView();
-      setSelectedSessionId(sessionId);
-      setSelectedModel(target);
-    } catch (error) {
-      setNotice(`Could not hand over: ${ipcErrorMessage(error)}`);
-    }
   }
 
   // Keep finished message cards out of the typing render path. Recommendations still use
@@ -1873,7 +1830,7 @@ function App() {
                       : undefined
                   }
                   isSending={isSending}
-                  sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
+                  sendBlocked={preparing}
                   runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
                   streamingText={run?.text}
                   streamingSteps={run?.steps}
@@ -1887,19 +1844,8 @@ function App() {
                   onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}
+                  sessionProvider={selectedSession?.provider}
                   runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
-                  lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
-                  onHandover={(provider) => void handover(provider)}
-                  canHandover={messages.length > 0}
-                  handoverBrief={
-                    project && selectedSession && handoverDraft !== undefined
-                      ? {
-                          chatId: chatKey(project.path, selectedSession.id),
-                          brief: handoverDraft,
-                          onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
-                        }
-                      : undefined
-                  }
                   resume={
                     project && selectedSession?.resumeTurn
                       ? {
@@ -1911,7 +1857,6 @@ function App() {
                       : undefined
                   }
                   onOpenLinkedChat={openLinkedChat}
-                  handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
                   models={models}
                   cliStatus={cliStatus}
                   onModelPickerOpen={refreshCliStatus}

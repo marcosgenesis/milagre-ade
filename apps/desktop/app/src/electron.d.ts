@@ -21,7 +21,6 @@ import type {
   AgentPorts,
   EditorInfo,
   AgentEvent,
-  ChatHandoverRequest,
   ChatSendRequest,
   CoordinatorState,
   LinkedWork,
@@ -221,10 +220,6 @@ declare global {
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
       /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
       resumeChat: (projectPath: string, sessionId: number) => Promise<boolean>;
-      /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
-      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
-      /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */
-      setHandoverDraft: (projectPath: string, sessionId: number, text: string) => Promise<void>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;

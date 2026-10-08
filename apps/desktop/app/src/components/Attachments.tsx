@@ -9,7 +9,7 @@ import { MediaLightbox } from "./motion/LazyMediaLightbox";
 
 const AttachmentPreview = lazyView(() => import("./AttachmentPreview").then((module) => module.AttachmentPreview));
 
-/** `leading` goes first in the row, such as the handover brief, which isn't a file the user attached. */
+/** `leading` goes first in the row, which isn't a file the user attached. */
 export function Attachments({
   images = [],
   files = [],

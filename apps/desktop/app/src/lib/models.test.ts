@@ -88,16 +88,24 @@ const catalog: ModelOption[] = [
 ];
 const pick = (id: string) => catalog.find((model) => model.id === id)!;
 
-test("a locked Claude chat stays on its model when the default is a Codex model", () => {
+test("a Claude chat stays on its model when the default is a Codex model", () => {
   const current = pick("claude-haiku-4-5");
-  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: true, lockedProvider: "claude" }), current);
-  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: false, lockedProvider: "claude" }), current);
+  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: true, preferredProvider: "claude" }), current);
+  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: false, preferredProvider: "claude" }), current);
 });
 
-test("the Settings default replaces the starting model once, when nothing locks the chat", () => {
+test("a pick on the other provider survives a refetch of the lists", () => {
+  const picked = pick("gpt-6-sol");
+  assert.equal(nextSelection(catalog, picked, { defaultId: "claude-haiku-4-5", applyDefault: false, preferredProvider: "claude" }), picked);
+});
+
+test("the Settings default replaces the starting model once, when no chat prefers a provider", () => {
   assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true }).id, "claude-haiku-4-5");
   assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: false }).id, "gpt-6-astra");
-  assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true, lockedProvider: "codex" }).id, "gpt-6-astra");
+  assert.equal(
+    nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true, preferredProvider: "codex" }).id,
+    "gpt-6-astra",
+  );
 });
 
 test("a refetch with identical lists changes nothing", () => {

@@ -756,6 +756,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
+    "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
+    "../handoff-divider": { HandoffDivider: "HandoffDivider" },
+    "../handoff-brief-store": { showBrief() {} },
+    "@milagre/shared/handoff": require("@milagre/shared/handoff"),
     "../archive": require("../apps/mobile/src/archive.ts"),
     "../confirm-store": { confirmSheet: (...args) => alert(...args) },
   });

@@ -15,6 +15,8 @@ import { ArtifactCards, DesignFeedbackCard } from "./artifact";
 import { advisorResultLabel } from "@milagre/shared/advisor-result";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { AnswerCard } from "./answer-card";
+import { PullRequestActionCard } from "./pr-action-card";
+import { isPullRequestAction } from "@milagre/shared/pr-action";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
 import { colors, styles } from "./ui";
@@ -212,6 +214,8 @@ export const ChatReply = memo(function ChatReply({
   const waiting = !!(run?.approvals.length || run?.questions.length);
   // Feedback sent from the design sheet or canvas shows as a card, not as the text the agent reads.
   const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
+  // So does a PR-blocker pill's action, instead of the skill prompt the agent read.
+  const prAction = message?.role === "user" && isPullRequestAction(message.context) ? message.context : null;
   // What the agent concluded only in thinking, once the turn ends or stops on a question.
   const thought = !run || run.questions.length ? unspokenThought(text, steps) : "";
   const advisor = typeof message?.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
@@ -231,7 +235,9 @@ export const ChatReply = memo(function ChatReply({
           .map((file) => (
             <FileChip key={file} path={file} />
           ))}
-        {feedback ? (
+        {prAction ? (
+          <PullRequestActionCard action={prAction} />
+        ) : feedback ? (
           <DesignFeedbackCard feedback={feedback} chatId={chatId} moved={designsMoved} />
         ) : message.answered?.length ? (
           <AnswerCard answered={message.answered} />

@@ -784,6 +784,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
     "@hugeicons/core-free-icons": icons,
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
@@ -805,7 +806,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "../attachment-picker": { pickAttachments },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
-    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
+    // A test can show the Chat's open PR with globalThis.chatPullRequest.
+    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => globalThis.chatPullRequest ?? null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
     "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
@@ -2070,6 +2072,42 @@ test("text typed during the first send follows the created Chat into its compose
   assert.equal(screen.params.id, "42");
   assert.equal(screen.field().value, "next message typed during send");
   assert.equal(screen.session.drafts["/p#new:1"], undefined);
+});
+
+test("the PR pill sends a PR action whose preview is already a card", async () => {
+  const url = "https://github.com/o/r/pull/77";
+  globalThis.chatPullRequest = { number: 77, url, state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    find(screen.render(), (node) => node.type === "PullRequestAction").props.onRun();
+    await settle();
+    const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+    assert.equal(sent.body, "Fix CI on pull request #77");
+    // An older Mac ignores prAction: the prompt still carries the URL and the skill token.
+    assert.equal(sent.prompt, `Fix CI on pull request #77 (${url}). /milagre-fix-ci`);
+    assert.equal(JSON.stringify(sent.prAction), JSON.stringify({ action: "checks-failed", pr: 77, url }));
+    const [pending] = Object.values(screen.session.pendingChats);
+    assert.equal(JSON.stringify(pending.preview.message.context), JSON.stringify({ kind: "pr-action", action: "checks-failed", pr: 77, url }));
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
+});
+
+test("a PR without a number yet shows no PR pill", () => {
+  globalThis.chatPullRequest = { url: "https://github.com/o/r/pull/77", state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    assert.equal(
+      find(screen.render(), (node) => node.type === "PullRequestAction"),
+      undefined,
+    );
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
 });
 
 test("a successful first send clears the sent draft", async () => {
@@ -4715,6 +4753,8 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./tool-row": { ToolRow: "ToolRow" },
     "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
     "./answer-card": { AnswerCard: "AnswerCard" },
+    "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
@@ -4730,6 +4770,20 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   const findType = (node, type) =>
     Array.isArray(node) ? node.some((child) => findType(child, type)) : !!node?.props && (node.type === type || findType(node.props.children, type));
   assert.ok(findType(answerTree, "AnswerCard"));
+  // So does a PR-blocker pill's action, instead of its body text.
+  const prTree = ChatReply({
+    message: {
+      id: 2,
+      session_id: 1,
+      body: "Fix CI on pull request #77",
+      context: { kind: "pr-action", action: "checks-failed", pr: 77, url: "https://github.com/o/r/pull/77" },
+      role: "user",
+    },
+    onActivity() {},
+    media: (path) => path,
+  });
+  assert.ok(findType(prTree, "PullRequestActionCard"));
+  assert.ok(!findType(prTree, "Text"), "no bubble with the body text");
   const conclusion = "T3 Code tries every route in parallel.";
   const steps = [
     { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },

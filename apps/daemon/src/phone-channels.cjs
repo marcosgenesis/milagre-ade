@@ -109,15 +109,24 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     record.state = "open";
     clearTimeout(record.helloTimer);
     sendFrame(current, DATA, conn, accepted.reply);
-    if (kind === "computer")
-      record.peer = openPeerChannel({
-        openPeer,
-        channel: record.channel,
-        deliver: (sealed) => sendFrame(current, DATA, conn, sealed),
-        queued: () => current.queued?.(conn) ?? 0,
-        isOpen: () => current.conns.get(conn) === record,
-        drop: () => dropConn(current, conn, true),
-      });
+    record.kind = kind;
+    if (kind === "computer") {
+      try {
+        record.peer = openPeerChannel({
+          openPeer,
+          channel: record.channel,
+          deliver: (sealed) => sendFrame(current, DATA, conn, sealed),
+          queued: () => current.queued?.(conn) ?? 0,
+          isOpen: () => current.conns.get(conn) === record,
+          drop: () => dropConn(current, conn, true),
+        });
+      } catch {
+        // A desktop with no daemon connection has nothing to talk to, and must never fall through to the bridge.
+        return dropConn(current, conn, true);
+      }
+      // The connection ended while it was being built: dropConn found no peer to close.
+      if (current.conns.get(conn) !== record) record.peer.close();
+    }
   }
 
   /** Keys of the devices whose channel on this carrier finished its hello. */
@@ -247,7 +256,10 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
   function handleMessage(current, conn, record, message) {
     if (!message || typeof message !== "object") throw new Error("Not a message");
     // A desktop's channel speaks peer messages only (peer-channel.cjs), never HTTP-over-channel.
-    if (record.peer) return record.peer.receive(message);
+    if (record.kind === "computer") {
+      if (!record.peer) throw new Error("No peer");
+      return record.peer.receive(message);
+    }
     switch (message.t) {
       case "req":
         requestPart(current, conn, record, message);
@@ -293,6 +305,7 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
         assembler: createAssembler(),
         helloTimer: null,
         key: null,
+        kind: null,
         peer: null,
       };
       current.conns.set(conn, record);

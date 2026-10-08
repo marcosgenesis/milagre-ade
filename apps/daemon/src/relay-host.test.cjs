@@ -581,3 +581,41 @@ test("a bad part gets its error reply before the channel closes", async (t) => {
   assert.equal(daemon.connections[0].closed, true);
   assert.equal(desktop.error, null);
 });
+
+test("a desktop whose daemon connection can't open is dropped, and never reaches the bridge", async (t) => {
+  const openPeer = () => {
+    throw new Error("no daemon");
+  };
+  const { relay, bridge, mac } = await paired(t, { mac: { openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  // Sent at once, like a desktop that doesn't wait: if the channel stayed open this would reach the bridge.
+  try {
+    desktop.sendMessage({ t: "req", id: 1, method: "POST", path: "/rpc", headers: {}, chunk: "", more: false });
+  } catch {
+    /* already closed */
+  }
+  await desktop.closed;
+  await sleep(50);
+  assert.equal(bridge.seen.requests.length, 0, "nothing reached the bridge");
+  assert.deepEqual(mac.host.connectedKeys(), []);
+  assert.equal(mac.host.status(), "online", "the host carries on");
+});
+
+test("a daemon connection that ends while it is being opened is closed, not leaked", async (t) => {
+  const connections = [];
+  const openPeer = (carrier) => {
+    const connection = { closed: false };
+    connections.push(connection);
+    carrier.end();
+    return { receive() {}, invalid() {}, close: () => (connection.closed = true) };
+  };
+  const { relay, mac } = await paired(t, { mac: { openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  await desktop.closed;
+  await until(() => connections[0]?.closed, "the connection closed");
+  assert.deepEqual(mac.host.connectedKeys(), []);
+});

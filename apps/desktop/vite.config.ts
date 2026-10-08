@@ -13,7 +13,7 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 const CSP = [
   "default-src 'self'",
   // The simulator and browser iframes embed these exact bundled receivers, with data kept outside their executable scripts.
-  `script-src 'self' ${[SIMULATOR_RECEIVER_SCRIPT, BROWSER_RECEIVER_SCRIPT].map(script => `'sha256-${createHash("sha256").update(script).digest("base64")}'`).join(" ")}`,
+  `script-src 'self' ${[SIMULATOR_RECEIVER_SCRIPT, BROWSER_RECEIVER_SCRIPT].map((script) => `'sha256-${createHash("sha256").update(script).digest("base64")}'`).join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: milagre-media: https:",
   "media-src 'self' blob: milagre-media:",
@@ -37,7 +37,7 @@ export default defineConfig({
   plugins: [react(), contentSecurityPolicy],
   // Canvas is lazy-loaded. Prebundle it before first paint so its React runtime
   // stays shared with the renderer when the user first opens it in development.
-  optimizeDeps: { include: ['@xyflow/react'] },
+  optimizeDeps: { include: ["@xyflow/react"] },
   resolve: {
     alias: {
       "@": resolve(projectRoot, "app/src"),

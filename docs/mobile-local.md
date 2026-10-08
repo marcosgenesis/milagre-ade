@@ -207,7 +207,6 @@ node scripts/check-mobile-providers.cjs --run
 
 This uses the installed Codex and Claude accounts for one short no-tool prompt each in an isolated temporary Project. It checks the full mobile HTTP/socket/core path, restarts the host and verifies the token, saved Chats, provider session IDs and replies. It is excluded from normal tests and CI because it consumes provider quota. The saved temporary Project path is printed for inspection.
 
-
 ### Android capture packaging
 
 `npm run build` prepares the pinned scrcpy 4.0 server used by Expo Device Hub 0.15.1. It verifies SHA-256 `84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a` before packaging. The helper package and server remain outside ASAR so the installed app does not download into its signed bundle. A clean desktop build needs GitHub access once; later builds reuse the verified artifact. Run `node scripts/prepare-simulator-helper.cjs` before invoking electron-builder directly.

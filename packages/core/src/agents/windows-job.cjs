@@ -1,8 +1,8 @@
-const { spawn } = require('node:child_process');
-const { EventEmitter } = require('node:events');
-const { PassThrough } = require('node:stream');
-const { randomBytes } = require('node:crypto');
-const { powershell, powershellEnvironment } = require('../private-files.cjs');
+const { spawn } = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+const { randomBytes } = require("node:crypto");
+const { powershell, powershellEnvironment } = require("../private-files.cjs");
 
 const jobs = new WeakMap();
 // Windows CommandLineToArgvW quoting. Backslashes before quotes or the closing
@@ -10,7 +10,7 @@ const jobs = new WeakMap();
 function quoteWindowsArgument(value) {
   value = String(value);
   if (value && !/[\s"]/u.test(value)) return value;
-  return '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"';
+  return '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1") + '"';
 }
 
 const NATIVE = String.raw`
@@ -96,43 +96,77 @@ public static class MilagreJob {
 `;
 
 function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
-  const marker = `__MILAGRE_JOB_${randomBytes(16).toString('hex')}__`;
-  const commandLine = [quoteWindowsArgument(file), ...args.map(options.windowsVerbatimArguments ? String : quoteWindowsArgument)].join(' ');
+  const marker = `__MILAGRE_JOB_${randomBytes(16).toString("hex")}__`;
+  const commandLine = [quoteWindowsArgument(file), ...args.map(options.windowsVerbatimArguments ? String : quoteWindowsArgument)].join(" ");
   const targetEnvironment = options.env || process.env;
-  const modulePathName = Object.keys(targetEnvironment).find(name => name.toLowerCase() === 'psmodulepath');
+  const modulePathName = Object.keys(targetEnvironment).find((name) => name.toLowerCase() === "psmodulepath");
   const targetPSModulePath = modulePathName === undefined ? null : targetEnvironment[modulePathName];
-  const payload = Buffer.from(JSON.stringify({ file, commandLine, cwd: options.cwd || process.cwd(), marker, parent: process.pid, targetPSModulePath }), 'utf8').toString('base64');
-  const source = Buffer.from(NATIVE, 'utf8').toString('base64');
+  const payload = Buffer.from(
+    JSON.stringify({ file, commandLine, cwd: options.cwd || process.cwd(), marker, parent: process.pid, targetPSModulePath }),
+    "utf8",
+  ).toString("base64");
+  const source = Buffer.from(NATIVE, "utf8").toString("base64");
   // Compile and decode with OS modules, then restore the application's module
   // path. CreateProcess inherits its requested environment, not helper policy.
   const script = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; try { Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${source}'))); $p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('MILAGRE_WINDOWS_JOB_SPEC'))) | ConvertFrom-Json); [Environment]::SetEnvironmentVariable('MILAGRE_WINDOWS_JOB_SPEC',$null); [Environment]::SetEnvironmentVariable('PSModulePath',$p.targetPSModulePath); $result=[MilagreJob]::Run($p.file,$p.commandLine,$p.cwd,$p.marker,[uint32]$p.parent); exit $result } catch { [Console]::Error.WriteLine('Milagre Windows process containment failed: '+$_.Exception.Message); exit 1 }`;
-  if (payload.length > 32000) throw new Error('The Windows agent command exceeds the process environment limit');
+  if (payload.length > 32000) throw new Error("The Windows agent command exceeds the process environment limit");
   const { windowsVerbatimArguments: _verbatim, ...keeperOptions } = options;
   // WinPS can exit before evaluating its command when launched DETACHED_PROCESS.
   // The native job contains the application; the keeper stays with its owner.
-  const keeper = spawnImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { ...keeperOptions, detached: false, env: { ...powershellEnvironment(targetEnvironment), MILAGRE_WINDOWS_JOB_SPEC: payload }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const keeper = spawnImpl(
+    powershell(),
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    {
+      ...keeperOptions,
+      detached: false,
+      env: { ...powershellEnvironment(targetEnvironment), MILAGRE_WINDOWS_JOB_SPEC: payload },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
   const child = new EventEmitter();
-  Object.assign(child, { pid: undefined, exitCode: null, signalCode: null, killed: false, stdin: keeper.stdin, stdout: new PassThrough(), stderr: new PassThrough(), spawnfile: file, spawnargs: [file, ...args] });
-  const stdio = options.stdio || ['pipe', 'pipe', 'pipe'];
-  const ignored = index => stdio === 'ignore' || stdio[index] === 'ignore';
-  if (ignored(0)) { keeper.stdin.end(); child.stdin = null; }
+  Object.assign(child, {
+    pid: undefined,
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    stdin: keeper.stdin,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    spawnfile: file,
+    spawnargs: [file, ...args],
+  });
+  const stdio = options.stdio || ["pipe", "pipe", "pipe"];
+  const ignored = (index) => stdio === "ignore" || stdio[index] === "ignore";
+  if (ignored(0)) {
+    keeper.stdin.end();
+    child.stdin = null;
+  }
   let rootExited = false;
   let closed = false;
   let drained = false;
   const close = (code, signal) => {
-    if (closed) return; closed = true;
-    child.stdout.end(); child.stderr.end(); child.emit('close', code, signal);
+    if (closed) return;
+    closed = true;
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("close", code, signal);
   };
   const exit = (code, signal) => {
-    if (rootExited) return; rootExited = true;
-    child.exitCode = code; child.signalCode = signal; child.emit('exit', code, signal);
+    if (rootExited) return;
+    rootExited = true;
+    child.exitCode = code;
+    child.signalCode = signal;
+    child.emit("exit", code, signal);
     if (drained) close(code, signal);
   };
-  let control = '';
+  let control = "";
   let output = Buffer.alloc(0);
-  const barrier = Buffer.from(marker + 'DRAIN:');
+  const barrier = Buffer.from(marker + "DRAIN:");
   const earlyOutput = [];
-  const writeOutput = bytes => { if (bytes.length && !closed && !ignored(1)) child.stdout.write(bytes); };
+  const writeOutput = (bytes) => {
+    if (bytes.length && !closed && !ignored(1)) child.stdout.write(bytes);
+  };
   function readOutput(chunk) {
     output = Buffer.concat([output, chunk]);
     const at = output.indexOf(barrier);
@@ -141,7 +175,8 @@ function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
       output = output.subarray(at);
       const end = output.indexOf(10);
       if (end < 0) return;
-      output = output.subarray(end + 1); drained = true;
+      output = output.subarray(end + 1);
+      drained = true;
       if (rootExited) close(child.exitCode, child.signalCode);
       return;
     }
@@ -150,40 +185,73 @@ function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
     writeOutput(output.subarray(0, output.length - keep));
     output = output.subarray(output.length - keep);
   }
-  keeper.stdout.on('data', chunk => { if (child.pid) readOutput(chunk); else earlyOutput.push(chunk); });
-  keeper.stderr.setEncoding('utf8');
-  keeper.stderr.on('data', chunk => {
+  keeper.stdout.on("data", (chunk) => {
+    if (child.pid) readOutput(chunk);
+    else earlyOutput.push(chunk);
+  });
+  keeper.stderr.setEncoding("utf8");
+  keeper.stderr.on("data", (chunk) => {
     control += chunk;
     while (true) {
       const at = control.indexOf(marker);
       if (at < 0) {
         const keep = Math.min(marker.length - 1, control.length);
         if (!closed && !ignored(2) && control.length > keep) child.stderr.write(control.slice(0, -keep));
-        control = control.slice(-keep); return;
+        control = control.slice(-keep);
+        return;
       }
       if (at && !closed && !ignored(2)) child.stderr.write(control.slice(0, at));
       control = control.slice(at);
-      const end = control.indexOf('\n');
+      const end = control.indexOf("\n");
       if (end < 0) return;
-      const frame = control.slice(marker.length, end).trim(); control = control.slice(end + 1);
-      if (/^PID:\d+$/.test(frame)) { child.pid = Number(frame.slice(4)); child.emit('spawn'); for (const chunk of earlyOutput.splice(0)) readOutput(chunk); }
-      else if (/^EXIT:\d+$/.test(frame)) exit(Number(frame.slice(5)), null);
-      else if (frame === 'ERROR:ENOENT') child.emit('error', Object.assign(new Error(`spawn ${file} ENOENT`), { code: 'ENOENT', syscall: 'spawn', path: file, spawnargs: args }));
-      else if (!closed && !ignored(2)) child.stderr.write(marker + frame + '\n');
+      const frame = control.slice(marker.length, end).trim();
+      control = control.slice(end + 1);
+      if (/^PID:\d+$/.test(frame)) {
+        child.pid = Number(frame.slice(4));
+        child.emit("spawn");
+        for (const chunk of earlyOutput.splice(0)) readOutput(chunk);
+      } else if (/^EXIT:\d+$/.test(frame)) exit(Number(frame.slice(5)), null);
+      else if (frame === "ERROR:ENOENT")
+        child.emit("error", Object.assign(new Error(`spawn ${file} ENOENT`), { code: "ENOENT", syscall: "spawn", path: file, spawnargs: args }));
+      else if (!closed && !ignored(2)) child.stderr.write(marker + frame + "\n");
     }
   });
-  keeper.on('error', error => { child.emit('error', error); exit(null, null); });
-  keeper.on('exit', (code, signal) => exit(code, signal));
-  keeper.on('close', (code, signal) => { jobs.delete(child); if (!drained) { for (const chunk of earlyOutput.splice(0)) writeOutput(chunk); writeOutput(output); } if (control && !closed && !ignored(2)) child.stderr.write(control); close(child.exitCode ?? code, child.signalCode ?? signal); });
-  child.kill = (signal = 'SIGTERM') => {
+  keeper.on("error", (error) => {
+    child.emit("error", error);
+    exit(null, null);
+  });
+  keeper.on("exit", (code, signal) => exit(code, signal));
+  keeper.on("close", (code, signal) => {
+    jobs.delete(child);
+    if (!drained) {
+      for (const chunk of earlyOutput.splice(0)) writeOutput(chunk);
+      writeOutput(output);
+    }
+    if (control && !closed && !ignored(2)) child.stderr.write(control);
+    close(child.exitCode ?? code, child.signalCode ?? signal);
+  });
+  child.kill = (signal = "SIGTERM") => {
     if (rootExited) return false;
     child.killed = true;
     // The keeper holds the original process handle, so its PID cannot be reused.
-    if (child.pid) { try { process.kill(child.pid, signal); return true; } catch { return false; } }
+    if (child.pid) {
+      try {
+        process.kill(child.pid, signal);
+        return true;
+      } catch {
+        return false;
+      }
+    }
     return keeper.kill(signal);
   };
-  child.unref = () => { keeper.unref(); return child; };
-  child.ref = () => { keeper.ref(); return child; };
+  child.unref = () => {
+    keeper.unref();
+    return child;
+  };
+  child.ref = () => {
+    keeper.ref();
+    return child;
+  };
   child.connected = false;
   child.isWindowsJob = true;
   jobs.set(child, keeper);
@@ -192,14 +260,24 @@ function spawnWindowsJob(file, args, options = {}, spawnImpl = spawn) {
 async function closeWindowsJob(child) {
   const keeper = jobs.get(child);
   if (!keeper) return false;
-  if (keeper.exitCode != null || keeper.signalCode != null) { jobs.delete(child); return true; }
+  if (keeper.exitCode != null || keeper.signalCode != null) {
+    jobs.delete(child);
+    return true;
+  }
   await new Promise((resolve, reject) => {
-    keeper.once('close', resolve);
-    keeper.once('error', reject);
-    try { keeper.kill('SIGKILL'); } catch (error) { reject(error); }
+    keeper.once("close", resolve);
+    keeper.once("error", reject);
+    try {
+      keeper.kill("SIGKILL");
+    } catch (error) {
+      reject(error);
+    }
   });
   jobs.delete(child);
   return true;
 }
-function isWindowsJobActive(child) { const keeper = jobs.get(child); return Boolean(keeper && keeper.exitCode == null && keeper.signalCode == null); }
+function isWindowsJobActive(child) {
+  const keeper = jobs.get(child);
+  return Boolean(keeper && keeper.exitCode == null && keeper.signalCode == null);
+}
 module.exports = { spawnWindowsJob, closeWindowsJob, isWindowsJobActive, quoteWindowsArgument };

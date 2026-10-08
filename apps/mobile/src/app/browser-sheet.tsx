@@ -1,5 +1,5 @@
-import { useLocalSearchParams } from 'expo-router';
-import { BrowserSheet } from '../browser';
+import { useLocalSearchParams } from "expo-router";
+import { BrowserSheet } from "../browser";
 
 export default function BrowserScreen() {
   const { hostId, chatId } = useLocalSearchParams<{ hostId?: string; chatId?: string }>();

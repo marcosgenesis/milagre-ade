@@ -1,6 +1,6 @@
-const { closeWindowsJob } = require('./windows-job.cjs');
-const { execFile } = require('node:child_process');
-const { powershell, powershellEnvironment } = require('../private-files.cjs');
+const { closeWindowsJob } = require("./windows-job.cjs");
+const { execFile } = require("node:child_process");
+const { powershell, powershellEnvironment } = require("../private-files.cjs");
 // Stops a child process and everything it started. Agents start shells and MCP servers;
 // signalling the whole process group keeps them from outliving the session, even when the
 // leader itself already exited (an idle CLI exits as soon as its stdin ends). Children
@@ -17,7 +17,7 @@ function groupAlive(pid) {
 }
 
 async function killTree(child, { graceMs = 2000, platform = process.platform, execFileImpl = execFile } = {}) {
-  if (platform === "win32" && await closeWindowsJob(child)) return;
+  if (platform === "win32" && (await closeWindowsJob(child))) return;
   const pid = child?.pid;
   if (!pid) return;
   if (platform === "win32") {
@@ -65,8 +65,8 @@ function waitForExit(alive, ms) {
 // .Handle makes .Kill() use the same cached handle instead of reopening a PID.
 // The caller rechecks its ChildProcess after handles are pinned, before approval.
 function killWindowsTree(pid, execFileImpl = execFile, { expectedStartTime, isRootCurrent = () => true } = {}) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return Promise.reject(new Error('Invalid process ID'));
-  if (expectedStartTime !== undefined && !/^\d+$/.test(String(expectedStartTime))) return Promise.reject(new Error('Invalid process creation time'));
+  if (!Number.isSafeInteger(pid) || pid <= 0) return Promise.reject(new Error("Invalid process ID"));
+  if (expectedStartTime !== undefined && !/^\d+$/.test(String(expectedStartTime))) return Promise.reject(new Error("Invalid process creation time"));
   const script = `$ErrorActionPreference = 'Stop'
 $rows = @(Get-CimInstance Win32_Process)
 $seen = [Collections.Generic.HashSet[int]]::new()
@@ -83,7 +83,7 @@ function Capture([int]$id, [long]$minimumStart) {
   [void]$p.Handle
    $current = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id)
   if ($p.HasExited -or -not $current -or $current.CreationDate.ToUniversalTime().Ticks -ne $created) { $p.Dispose(); return }
-  ${expectedStartTime === undefined ? '' : `if ($id -eq ${pid} -and $created -ne [long]'${expectedStartTime}') { $p.Dispose(); return }`}
+  ${expectedStartTime === undefined ? "" : `if ($id -eq ${pid} -and $created -ne [long]'${expectedStartTime}') { $p.Dispose(); return }`}
  } catch { $p.Dispose(); return }
  [void]$held.Add($p)
  foreach ($rowChild in $rows) { if ([int]$rowChild.ParentProcessId -eq $id) { Capture ([int]$rowChild.ProcessId) $created } }
@@ -99,17 +99,22 @@ try {
  }
 } finally { foreach ($p in $held) { $p.Dispose() } }`;
   return new Promise((resolve, reject) => {
-    let output = '';
+    let output = "";
     let approved = false;
     let allowed = false;
-    const controller = execFileImpl(powershell(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnvironment(), timeout: 15000, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(allowed && String(stdout).includes('PINNED')));
-    controller?.stdin?.on('error', () => {});
-    controller?.stdout?.on('data', chunk => {
+    const controller = execFileImpl(
+      powershell(),
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+      { env: powershellEnvironment(), timeout: 15000, windowsHide: true },
+      (error, stdout) => (error ? reject(error) : resolve(allowed && String(stdout).includes("PINNED"))),
+    );
+    controller?.stdin?.on("error", () => {});
+    controller?.stdout?.on("data", (chunk) => {
       output += String(chunk);
-      if (!approved && output.includes('PINNED')) {
+      if (!approved && output.includes("PINNED")) {
         approved = true;
         allowed = isRootCurrent();
-        controller.stdin.end(allowed ? 'STOP\n' : 'ABORT\n');
+        controller.stdin.end(allowed ? "STOP\n" : "ABORT\n");
       }
     });
   });

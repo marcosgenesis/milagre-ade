@@ -10,7 +10,14 @@ type Media = HTMLImageElement | HTMLVideoElement;
 type Zoom = View & { smooth?: boolean };
 // A slide's figure and the motion values the morph drives, so a close mid-open starts from where it is.
 // `corner` is the media's corner radius as seen on screen, so it can follow the thumbnail's rounding through the morph.
-type Figure = { el: HTMLDivElement; x: MotionValue<number>; y: MotionValue<number>; scale: MotionValue<number>; opacity: MotionValue<number>; corner: MotionValue<number> };
+type Figure = {
+  el: HTMLDivElement;
+  x: MotionValue<number>;
+  y: MotionValue<number>;
+  scale: MotionValue<number>;
+  opacity: MotionValue<number>;
+  corner: MotionValue<number>;
+};
 type Pose = Partial<Record<"x" | "y" | "scale" | "opacity" | "corner", number>>;
 // Each slide's elements by item id, so an exiting slide never stands in for the current one.
 type Elements = { figures: Map<string, Figure>; media: Map<string, Media> };
@@ -19,7 +26,8 @@ const FIT: Zoom = { scale: 1, x: 0, y: 0 };
 // The full-size media's corner radius, in screen pixels.
 const CORNER = 8;
 const SWIPE = 60;
-const natural = (media: Media): [number, number] => media instanceof HTMLImageElement ? [media.naturalWidth, media.naturalHeight] : [media.videoWidth, media.videoHeight];
+const natural = (media: Media): [number, number] =>
+  media instanceof HTMLImageElement ? [media.naturalWidth, media.naturalHeight] : [media.videoWidth, media.videoHeight];
 
 // Where a thumbnail's media is drawn, if it is still on screen to morph into.
 function thumbRect(thumb: HTMLElement | null | undefined): Rect | null {
@@ -43,18 +51,32 @@ function thumbCorner(thumb: HTMLElement | null | undefined): number {
 }
 // The transform that puts the figure's untransformed box exactly over `to`, with a centre origin.
 function flip(figure: Figure, to: Rect) {
-  const box = figure.el.getBoundingClientRect(), scale = figure.scale.get();
-  const left = box.left + box.width / 2 - figure.x.get(), top = box.top + box.height / 2 - figure.y.get(), width = box.width / scale;
+  const box = figure.el.getBoundingClientRect(),
+    scale = figure.scale.get();
+  const left = box.left + box.width / 2 - figure.x.get(),
+    top = box.top + box.height / 2 - figure.y.get(),
+    width = box.width / scale;
   return { x: to.left + to.width / 2 - left, y: to.top + to.height / 2 - top, scale: to.width / width };
 }
 function pose(figure: Figure, to: Pose, transition: Transition) {
-  return Promise.all((Object.keys(to) as (keyof Pose)[]).map(key => animate(figure[key], to[key]!, transition)));
+  return Promise.all((Object.keys(to) as (keyof Pose)[]).map((key) => animate(figure[key], to[key]!, transition)));
 }
 
-const Icon = ({ d }: { d: string }) => <svg aria-hidden viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
-const control = "flex size-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition-colors hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-accent-ink";
+const Icon = ({ d }: { d: string }) => (
+  <svg aria-hidden viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d={d} />
+  </svg>
+);
+const control =
+  "flex size-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition-colors hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-accent-ink";
 
-export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: {
+export function MediaLightbox({
+  items,
+  start,
+  thumbFor,
+  onIndexChange,
+  close,
+}: {
   items: LightboxItem[];
   start: number;
   // The thumbnail button an item opens from, closes back into, and returns focus to.
@@ -110,14 +132,18 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
     const figure = elements.figures.get(current().id);
     if (!figure) return close();
     // Morph back into the thumbnail when it is on screen; otherwise just fade out.
-    const thumb = thumbFor(current().id), target = thumbRect(thumb);
-    const run = !reduce && target
-      ? pose(figure, { ...flip(figure, target), corner: thumbCorner(thumb) }, SPRING_LAYOUT)
-      : pose(figure, { opacity: 0, scale: reduce ? 1 : 0.96 }, { duration: 0.18, ease: EASE_OUT });
+    const thumb = thumbFor(current().id),
+      target = thumbRect(thumb);
+    const run =
+      !reduce && target
+        ? pose(figure, { ...flip(figure, target), corner: thumbCorner(thumb) }, SPRING_LAYOUT)
+        : pose(figure, { opacity: 0, scale: reduce ? 1 : 0.96 }, { duration: 0.18, ease: EASE_OUT });
     run.then(close);
   };
 
-  const openDialog = (el: HTMLDialogElement | null) => { if (el && !el.open) el.showModal(); };
+  const openDialog = (el: HTMLDialogElement | null) => {
+    if (el && !el.open) el.showModal();
+  };
   // The first media to load morphs out of its thumbnail.
   const ready = (figure: Figure) => {
     if (opened.current) return;
@@ -128,7 +154,8 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
     // Decoding a large image at its full size takes a few frames; done first, the morph doesn't stall on it.
     const media = elements.media.get(items[start].id);
     void (media instanceof HTMLImageElement ? media.decode().catch(() => {}) : Promise.resolve()).then(() => {
-      const thumb = thumbFor(items[start].id), source = thumbRect(thumb);
+      const thumb = thumbFor(items[start].id),
+        source = thumbRect(thumb);
       if (reduce || !source) {
         figure.scale.jump(reduce ? 1 : 0.96);
         pose(figure, { opacity: 1, scale: 1 }, { duration: 0.2, ease: EASE_OUT });
@@ -155,22 +182,31 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "Escape") return requestClose();
-      const zoom = latest.current.zoom, bounds = frame();
+      const zoom = latest.current.zoom,
+        bounds = frame();
       if (zoom.scale > 1 && bounds) setZoom({ ...panBy(zoom, nudge[0], nudge[1], bounds), smooth: true });
       else if (event.key === "ArrowLeft" || event.key === "ArrowRight") go(event.key === "ArrowLeft" ? -1 : 1);
     };
     // Pinch or ⌘-scroll zooms, scrolling pans a zoomed image, a sideways swipe changes item.
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      const zoom = latest.current.zoom, bounds = frame();
+      const zoom = latest.current.zoom,
+        bounds = frame();
       if ((event.ctrlKey || event.metaKey) && bounds && current().kind === "image") {
         setZoom(zoomAt(zoom, zoom.scale * Math.exp(-event.deltaY * 0.01), fromCentre(event.clientX, event.clientY), bounds));
         return;
       }
-      if (zoom.scale > 1 && bounds) { setZoom(panBy(zoom, -event.deltaX, -event.deltaY, bounds)); return; }
-      const now = performance.now(), s = swipe.current;
+      if (zoom.scale > 1 && bounds) {
+        setZoom(panBy(zoom, -event.deltaX, -event.deltaY, bounds));
+        return;
+      }
+      const now = performance.now(),
+        s = swipe.current;
       // Momentum keeps sending events after a swipe; wait for it to stop before the next one.
-      if (now < s.lockedUntil) { s.lockedUntil = now + 200; return; }
+      if (now < s.lockedUntil) {
+        s.lockedUntil = now + 200;
+        return;
+      }
       if (now - s.last > 200) s.total = 0;
       s.last = now;
       if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
@@ -197,7 +233,8 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
     drag.current = { x: event.clientX, y: event.clientY, moved: false };
   };
   const pointerMove = (event: ReactPointerEvent) => {
-    const start = drag.current, bounds = frame();
+    const start = drag.current,
+      bounds = frame();
     if (!start || !bounds || zoom.scale <= 1) return;
     if (!start.moved && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) return;
     // Capture only once a pan starts: captured clicks land on the stage, never on the image or the empty area.
@@ -211,12 +248,19 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
     const start = drag.current;
     drag.current = null;
     if (!start || start.moved || zoom.scale > 1) return;
-    const dx = event.clientX - start.x, dy = event.clientY - start.y;
-    if (Math.abs(dx) > SWIPE && Math.abs(dx) > Math.abs(dy)) { dragged.current = true; go(dx < 0 ? 1 : -1); }
+    const dx = event.clientX - start.x,
+      dy = event.clientY - start.y;
+    if (Math.abs(dx) > SWIPE && Math.abs(dx) > Math.abs(dy)) {
+      dragged.current = true;
+      go(dx < 0 ? 1 : -1);
+    }
   };
   // A click on an image zooms in at that point or back out; a click on the empty area around it closes.
   const click = (event: ReactMouseEvent) => {
-    if (dragged.current) { dragged.current = false; return; }
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
     const target = event.target as Element;
     if (target instanceof HTMLVideoElement) return;
     if (!(target instanceof HTMLImageElement)) return requestClose();
@@ -226,28 +270,82 @@ export function MediaLightbox({ items, start, thumbFor, onIndexChange, close }: 
   };
 
   const chrome = { initial: { opacity: 0 }, animate: { opacity: closing ? 0 : 1 }, transition: { duration: closing ? 0.18 : 0.24, ease: EASE_OUT } };
-  return createPortal(<dialog ref={dialog} aria-label={`Preview ${item.name}`} onCancel={event => { event.preventDefault(); requestClose(); }} className="m-0 h-dvh max-h-none w-dvw max-w-none overflow-hidden bg-transparent p-0 text-white backdrop:bg-transparent">
-    <motion.div {...chrome} className="absolute inset-0 bg-black/70 backdrop-blur-overlay" onClick={requestClose} />
-    <motion.header {...chrome} className="absolute inset-x-0 top-0 flex h-14 items-center justify-between px-4">
-      <span aria-live="polite" className="text-xs tabular-nums text-white/70">{items.length > 1 ? `${index + 1} / ${items.length}` : ""}</span>
-      <button autoFocus type="button" aria-label="Close preview" onClick={requestClose} className={control}><Icon d="M6 6l12 12M18 6L6 18" /></button>
-    </motion.header>
-    <div ref={stage} className="absolute inset-x-0 top-14 bottom-18 overflow-hidden" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }} onClick={click}>
-      <AnimatePresence initial={false} custom={direction}>
-        <motion.div key={item.id} custom={direction} variants={{ enter: (by: number) => ({ opacity: 0, x: reduce ? 0 : by * 48 }), center: { opacity: 1, x: 0 }, exit: (by: number) => ({ opacity: 0, x: reduce ? 0 : by * -48 }) }} initial="enter" animate="center" exit="exit" transition={{ duration: 0.22, ease: EASE_OUT }} className="absolute inset-0 flex items-center justify-center p-4">
-          <Slide item={item} intro={!opened.current} zoom={zoom} elements={elements} onReady={ready} />
-        </motion.div>
-      </AnimatePresence>
-    </div>
-    <motion.footer {...chrome} className="absolute inset-x-0 bottom-0 flex h-18 items-center justify-center gap-4 px-4">
-      {items.length > 1 && <button type="button" aria-label="Previous" disabled={index === 0} onClick={() => go(-1)} className={control}><Icon d="M15 6l-6 6 6 6" /></button>}
-      <span className="min-w-0 max-w-[60vw] truncate text-sm text-white/80" title={item.name}>{item.name}</span>
-      {items.length > 1 && <button type="button" aria-label="Next" disabled={index === items.length - 1} onClick={() => go(1)} className={control}><Icon d="M9 6l6 6-6 6" /></button>}
-    </motion.footer>
-  </dialog>, document.body);
+  return createPortal(
+    <dialog
+      ref={dialog}
+      aria-label={`Preview ${item.name}`}
+      onCancel={(event) => {
+        event.preventDefault();
+        requestClose();
+      }}
+      className="m-0 h-dvh max-h-none w-dvw max-w-none overflow-hidden bg-transparent p-0 text-white backdrop:bg-transparent"
+    >
+      <motion.div {...chrome} className="absolute inset-0 bg-black/70 backdrop-blur-overlay" onClick={requestClose} />
+      <motion.header {...chrome} className="absolute inset-x-0 top-0 flex h-14 items-center justify-between px-4">
+        <span aria-live="polite" className="text-xs tabular-nums text-white/70">
+          {items.length > 1 ? `${index + 1} / ${items.length}` : ""}
+        </span>
+        <button autoFocus type="button" aria-label="Close preview" onClick={requestClose} className={control}>
+          <Icon d="M6 6l12 12M18 6L6 18" />
+        </button>
+      </motion.header>
+      <div
+        ref={stage}
+        className="absolute inset-x-0 top-14 bottom-18 overflow-hidden"
+        onPointerDown={pointerDown}
+        onPointerMove={pointerMove}
+        onPointerUp={pointerUp}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+        onClick={click}
+      >
+        <AnimatePresence initial={false} custom={direction}>
+          <motion.div
+            key={item.id}
+            custom={direction}
+            variants={{
+              enter: (by: number) => ({ opacity: 0, x: reduce ? 0 : by * 48 }),
+              center: { opacity: 1, x: 0 },
+              exit: (by: number) => ({ opacity: 0, x: reduce ? 0 : by * -48 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.22, ease: EASE_OUT }}
+            className="absolute inset-0 flex items-center justify-center p-4"
+          >
+            <Slide item={item} intro={!opened.current} zoom={zoom} elements={elements} onReady={ready} />
+          </motion.div>
+        </AnimatePresence>
+      </div>
+      <motion.footer {...chrome} className="absolute inset-x-0 bottom-0 flex h-18 items-center justify-center gap-4 px-4">
+        {items.length > 1 && (
+          <button type="button" aria-label="Previous" disabled={index === 0} onClick={() => go(-1)} className={control}>
+            <Icon d="M15 6l-6 6 6 6" />
+          </button>
+        )}
+        <span className="min-w-0 max-w-[60vw] truncate text-sm text-white/80" title={item.name}>
+          {item.name}
+        </span>
+        {items.length > 1 && (
+          <button type="button" aria-label="Next" disabled={index === items.length - 1} onClick={() => go(1)} className={control}>
+            <Icon d="M9 6l6 6-6 6" />
+          </button>
+        )}
+      </motion.footer>
+    </dialog>,
+    document.body,
+  );
 }
 
-function Slide({ item, intro, zoom, elements, onReady }: {
+function Slide({
+  item,
+  intro,
+  zoom,
+  elements,
+  onReady,
+}: {
   item: LightboxItem;
   intro: boolean;
   zoom: Zoom;
@@ -255,26 +353,63 @@ function Slide({ item, intro, zoom, elements, onReady }: {
   onReady: (figure: Figure) => void;
 }) {
   const figure = useRef<Figure>(null);
-  const x = useMotionValue(0), y = useMotionValue(0), scale = useMotionValue(1), opacity = useMotionValue(intro ? 0 : 1), corner = useMotionValue(CORNER);
+  const x = useMotionValue(0),
+    y = useMotionValue(0),
+    scale = useMotionValue(1),
+    opacity = useMotionValue(intro ? 0 : 1),
+    corner = useMotionValue(CORNER);
   // The figure's scale shrinks the radius with everything else, so divide it back out.
   const borderRadius = useTransform(() => corner.get() / scale.get());
-  const loaded = () => { if (figure.current) onReady(figure.current); };
-  const keep = (el: Media | null) => { if (el) elements.media.set(item.id, el); };
+  const loaded = () => {
+    if (figure.current) onReady(figure.current);
+  };
+  const keep = (el: Media | null) => {
+    if (el) elements.media.set(item.id, el);
+  };
   // A cached image can finish loading before React attaches onLoad.
   useLayoutEffect(() => {
     const media = elements.media.get(item.id);
     if (media instanceof HTMLImageElement && media.complete && media.naturalWidth) loaded();
   }, []);
   const fit = "block max-h-[calc(100dvh-10rem)] max-w-[calc(100vw-2rem)] object-contain";
-  return <motion.div ref={el => { if (!el) return; figure.current = { el, x, y, scale, opacity, corner }; elements.figures.set(item.id, figure.current); }} style={{ x, y, scale, opacity }} className="flex">
-    {item.kind === "video"
-      // No rounding on video: clipping a playing video's corners repaints it on every frame of the morph.
-      ? <video ref={keep} src={item.src} controls autoPlay onLoadedMetadata={loaded} onError={loaded} className={fit} />
-      : <motion.img ref={keep} style={{ borderRadius }} src={item.src} alt={item.name} draggable={false} onLoad={loaded} onError={loaded}
-        // Stopped here, since React bubbles it through the portal to whatever opened the viewer.
-        onContextMenu={item.file ? event => { event.preventDefault(); event.stopPropagation(); void window.milagre.showImageMenu(item.file!, item.name); } : undefined}
-        data-zoom={zoom.scale.toFixed(2)}
-        animate={{ scale: zoom.scale, x: zoom.x, y: zoom.y }} transition={zoom.smooth ? SPRING_LAYOUT : { duration: 0 }}
-        className={`${fit} select-none ${zoom.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />}
-  </motion.div>;
+  return (
+    <motion.div
+      ref={(el) => {
+        if (!el) return;
+        figure.current = { el, x, y, scale, opacity, corner };
+        elements.figures.set(item.id, figure.current);
+      }}
+      style={{ x, y, scale, opacity }}
+      className="flex"
+    >
+      {item.kind === "video" ? (
+        // No rounding on video: clipping a playing video's corners repaints it on every frame of the morph.
+        <video ref={keep} src={item.src} controls autoPlay onLoadedMetadata={loaded} onError={loaded} className={fit} />
+      ) : (
+        <motion.img
+          ref={keep}
+          style={{ borderRadius }}
+          src={item.src}
+          alt={item.name}
+          draggable={false}
+          onLoad={loaded}
+          onError={loaded}
+          // Stopped here, since React bubbles it through the portal to whatever opened the viewer.
+          onContextMenu={
+            item.file
+              ? (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void window.milagre.showImageMenu(item.file!, item.name);
+                }
+              : undefined
+          }
+          data-zoom={zoom.scale.toFixed(2)}
+          animate={{ scale: zoom.scale, x: zoom.x, y: zoom.y }}
+          transition={zoom.smooth ? SPRING_LAYOUT : { duration: 0 }}
+          className={`${fit} select-none ${zoom.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`}
+        />
+      )}
+    </motion.div>
+  );
 }

@@ -80,7 +80,10 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 1200, height: 460, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source).catch(() => { throw new Error(`evaluate failed: ${source}`); });
+  const evaluate = (source) =>
+    window.webContents.executeJavaScript(source).catch(() => {
+      throw new Error(`evaluate failed: ${source}`);
+    });
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -88,8 +91,8 @@ async function browserChecks() {
     }
     throw new Error(`Timed out: ${source}`);
   }
-  const shot = async name => fs.writeFileSync(`/tmp/diff-view-${name}.png`, (await window.webContents.capturePage()).toPNG());
-  const file = p => `[data-diff-file="${p}"]`;
+  const shot = async (name) => fs.writeFileSync(`/tmp/diff-view-${name}.png`, (await window.webContents.capturePage()).toPNG());
+  const file = (p) => `[data-diff-file="${p}"]`;
   const CAL = "packages/app/src/components/Calendar/CalendarEmptyState.tsx";
   try {
     await window.loadURL(process.argv[2]);
@@ -104,10 +107,13 @@ async function browserChecks() {
     // Tree: merged single-child folders and summed counts.
     const folders = await evaluate('[...document.querySelectorAll("[data-diff-tree-folder]")].map(node => node.dataset.diffTreeFolder)');
     assert.deepEqual(folders, ["assets", "assets/data", "packages/app/src", "packages/app/src/components/Calendar"], "Single-child folders merge into one row");
-    assert.equal(await evaluate('document.querySelector("[data-diff-tree-folder=\'packages/app/src/components/Calendar\']").textContent'), "components/Calendar+3−2");
-    assert.equal(await evaluate('document.querySelector("[data-diff-tree-folder=\'packages/app/src\']").textContent'), "packages/app/src+5−2");
+    assert.equal(
+      await evaluate("document.querySelector(\"[data-diff-tree-folder='packages/app/src/components/Calendar']\").textContent"),
+      "components/Calendar+3−2",
+    );
+    assert.equal(await evaluate("document.querySelector(\"[data-diff-tree-folder='packages/app/src']\").textContent"), "packages/app/src+5−2");
     assert.equal(await evaluate('document.querySelector("[data-diff-counts=total]").textContent'), "+3507−3");
-    assert.equal(await evaluate('document.querySelector("[data-diff-tree-file=\'packages/app/src/index.ts\'] [data-status]").dataset.status'), "A");
+    assert.equal(await evaluate("document.querySelector(\"[data-diff-tree-file='packages/app/src/index.ts'] [data-status]\").dataset.status"), "A");
     assert.equal(await evaluate('document.querySelectorAll("[data-diff-view]").length'), 0, "Diff view waits for a file click");
     await delay(200);
     await shot("panel");
@@ -121,10 +127,17 @@ async function browserChecks() {
     assert.ok(await evaluate('document.querySelector("[data-diff-back]").getBoundingClientRect().left >= 128'), "Back clears the window controls");
     // Electron routes a click in the drag strip to whatever paints on top; every bar button must beat the strip.
     await delay(400);
-    assert.equal(await evaluate(`[...document.querySelectorAll("[data-diff-bar] button")].filter(button => { const r = button.getBoundingClientRect(); return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }).length`), 0, "Diff bar buttons sit above the drag strip");
+    assert.equal(
+      await evaluate(
+        `[...document.querySelectorAll("[data-diff-bar] button")].filter(button => { const r = button.getBoundingClientRect(); return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }).length`,
+      ),
+      0,
+      "Diff bar buttons sit above the drag strip",
+    );
     // Chromium builds the window's drag region from every element with an app-region, in tree order: drag adds its box,
     // no-drag subtracts it. Only the bar's buttons opt out; the empty stretch between Back and the toolbar still drags the window.
-    const draggableAt = (x, y) => evaluate(`(() => {
+    const draggableAt = (x, y) =>
+      evaluate(`(() => {
       let draggable = false;
       for (const node of document.querySelectorAll("*")) {
         const style = getComputedStyle(node);
@@ -135,26 +148,50 @@ async function browserChecks() {
       }
       return draggable;
     })()`);
-    const barGap = await evaluate('(() => { const back = document.querySelector("[data-diff-back]").getBoundingClientRect(); const tools = document.querySelector("[data-diff-toolbar]").getBoundingClientRect(); return { x: (back.right + tools.left) / 2, y: (back.top + back.bottom) / 2 }; })()');
+    const barGap = await evaluate(
+      '(() => { const back = document.querySelector("[data-diff-back]").getBoundingClientRect(); const tools = document.querySelector("[data-diff-toolbar]").getBoundingClientRect(); return { x: (back.right + tools.left) / 2, y: (back.top + back.bottom) / 2 }; })()',
+    );
     assert.ok(barGap.x > 300, "The gap between Back and the toolbar is wide enough to grab");
     assert.equal(await draggableAt(barGap.x, barGap.y), true, "The empty middle of the diff bar drags the window");
     assert.equal(await draggableAt(barGap.x, 6), true, "Above the bar still drags the window");
-    const backCentre = await evaluate('(() => { const r = document.querySelector("[data-diff-back]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+    const backCentre = await evaluate(
+      '(() => { const r = document.querySelector("[data-diff-back]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()',
+    );
     assert.equal(await draggableAt(backCentre.x, backCentre.y), false, "Back is a button, not a drag handle");
-    const toolCentre = await evaluate('(() => { const r = document.querySelector("[data-diff-layout=split]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+    const toolCentre = await evaluate(
+      '(() => { const r = document.querySelector("[data-diff-layout=split]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()',
+    );
     assert.equal(await draggableAt(toolCentre.x, toolCentre.y), false, "Toolbar buttons are not drag handles");
     assert.equal(await evaluate('document.querySelector("[data-chat-stub]").classList.contains("hidden")'), true);
     await waitFor(`!!document.querySelector('${file("README.md")} [data-diff-row]')`);
     await delay(150);
-    assert.ok(await evaluate(`Math.abs(document.querySelector('${file("README.md")}').getBoundingClientRect().top - document.querySelector("[data-diff-view]").getBoundingClientRect().top) < 60`), "The clicked file scrolls to the top");
+    assert.ok(
+      await evaluate(
+        `Math.abs(document.querySelector('${file("README.md")}').getBoundingClientRect().top - document.querySelector("[data-diff-view]").getBoundingClientRect().top) < 60`,
+      ),
+      "The clicked file scrolls to the top",
+    );
     await evaluate(`document.querySelector('[data-diff-view]').scrollTo(0, 0)`);
 
     // Unified: two gutters, hunk header, tints, syntax and word highlight.
     await waitFor(`!!document.querySelector('${file(CAL)} [data-diff-row]')`);
     assert.equal(await evaluate(`document.querySelector('${file(CAL)} [data-diff-hunk]').textContent`), "@@ -1,7 +1,7 @@");
-    assert.deepEqual(await evaluate(`[...document.querySelectorAll('${file(CAL)} [data-diff-row]')].map(row => [row.dataset.diffRow, row.children[0].textContent, row.children[1].textContent])`), [
-      ["context", "1", "1"], ["remove", "2", ""], ["add", "", "2"], ["context", "3", "3"], ["context", "4", "4"],
-      ["remove", "5", ""], ["add", "", "5"], ["context", "6", "6"], ["context", "7", "7"]]);
+    assert.deepEqual(
+      await evaluate(
+        `[...document.querySelectorAll('${file(CAL)} [data-diff-row]')].map(row => [row.dataset.diffRow, row.children[0].textContent, row.children[1].textContent])`,
+      ),
+      [
+        ["context", "1", "1"],
+        ["remove", "2", ""],
+        ["add", "", "2"],
+        ["context", "3", "3"],
+        ["context", "4", "4"],
+        ["remove", "5", ""],
+        ["add", "", "5"],
+        ["context", "6", "6"],
+        ["context", "7", "7"],
+      ],
+    );
     await waitFor(`!!document.querySelector('${file(CAL)} .code-token')`);
     assert.ok(await evaluate(`!!document.querySelector('${file(CAL)} [data-diff-row=add] [class*="diff-add-word"]')`), "Changed words get a darker tint");
     assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('${file(CAL)} [data-diff-row=add]')).backgroundColor`), "rgba(0, 0, 0, 0)");
@@ -170,7 +207,11 @@ async function browserChecks() {
     // Split pairs rows and pads the shorter side.
     await evaluate('document.querySelector("[data-diff-layout=split]").click()');
     await waitFor(`document.querySelectorAll('${file("README.md")} [data-diff-cell]').length > 0`);
-    assert.equal(await evaluate(`document.querySelectorAll('${file("README.md")} [data-diff-filler]').length`), 1, "One removal against two additions leaves one filler");
+    assert.equal(
+      await evaluate(`document.querySelectorAll('${file("README.md")} [data-diff-filler]').length`),
+      1,
+      "One removal against two additions leaves one filler",
+    );
     assert.equal(await evaluate(`document.querySelectorAll('${file(CAL)} [data-diff-cell=left]').length`), 7);
     assert.equal(await evaluate(`document.querySelectorAll('${file(CAL)} [data-diff-cell=right]').length`), 7);
     assert.equal(await evaluate('localStorage.getItem("milagre:diff-layout")'), "split");
@@ -178,7 +219,11 @@ async function browserChecks() {
     await delay(150);
     await shot("split");
     // Split never scrolls sideways: both halves stay on screen however long a line is.
-    assert.equal(await evaluate(`[...document.querySelectorAll("[data-diff-body]")].filter(body => body.scrollWidth > body.clientWidth + 1).length`), 0, "Split fits its card");
+    assert.equal(
+      await evaluate(`[...document.querySelectorAll("[data-diff-body]")].filter(body => body.scrollWidth > body.clientWidth + 1).length`),
+      0,
+      "Split fits its card",
+    );
     assert.equal(await evaluate('document.querySelector("[data-diff-wrap]").disabled'), true, "Wrap is fixed on in split");
     // Scrolled: the bottom fades and the file header stays pinned.
     await evaluate('document.querySelector("[data-diff-view]").scrollTo(0, 120)');
@@ -207,7 +252,7 @@ async function browserChecks() {
     await waitFor(`window.listCalls.length === ${before + 1}`);
 
     // Mode switch refetches and shows the base.
-    await evaluate('document.querySelector("[aria-label=\'Changes mode\']").click()');
+    await evaluate("document.querySelector(\"[aria-label='Changes mode']\").click()");
     await waitFor('!!document.querySelector("[role=option]")');
     await evaluate('[...document.querySelectorAll("[role=option]")].find(node => node.textContent.includes("Committed")).click()');
     await waitFor('window.listCalls.at(-1) === "committed"');
@@ -228,7 +273,9 @@ async function browserChecks() {
     await evaluate('document.querySelector("[data-changes-toggle]").click()');
     await waitFor('!document.querySelector("[data-changes-panel]") && !document.querySelector("[data-diff-view]")');
     assert.equal(await evaluate('document.querySelector("[data-chat-stub]").classList.contains("hidden")'), false);
-    console.log("PASS: panel tree with merged folders and counts, file click opens the diff, Back slides it out, unified gutters and word tint, split pairing, large and binary files, mode switch, turn-end refresh");
+    console.log(
+      "PASS: panel tree with merged folders and counts, file click opens the diff, Back slides it out, unified gutters and word tint, split pairing, large and binary files, mode switch, turn-end refresh",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -241,19 +288,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "diff-view-fixture",
-      resolveId(id) { if (id === "/__diff_view_fixture.tsx") return id; },
-      load(id) { if (id === "/__diff_view_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__diff_view__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__diff_view_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "diff-view-fixture",
+        resolveId(id) {
+          if (id === "/__diff_view_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__diff_view_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__diff_view__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__diff_view_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -262,13 +318,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__diff_view__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

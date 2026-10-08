@@ -71,7 +71,10 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 1200, height: 560, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source).catch(() => { throw new Error(`evaluate failed: ${source}`); });
+  const evaluate = (source) =>
+    window.webContents.executeJavaScript(source).catch(() => {
+      throw new Error(`evaluate failed: ${source}`);
+    });
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -81,17 +84,29 @@ async function browserChecks() {
   }
   const shotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   if (shotDir) fs.mkdirSync(shotDir, { recursive: true });
-  const shot = async name => { if (shotDir) fs.writeFileSync(path.join(shotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG()); };
-  const A = 'src/a.ts';
-  const file = p => `[data-diff-file="${p}"]`;
-  const rows = p => `${file(p)} [data-diff-row]`;
-  const bodies = () => evaluate('[...document.querySelectorAll("[data-diff-comment]")].map(node => [node.querySelector("[data-diff-comment-label]").textContent, node.querySelector("[data-diff-comment-body]").textContent])');
+  const shot = async (name) => {
+    if (shotDir) fs.writeFileSync(path.join(shotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());
+  };
+  const A = "src/a.ts";
+  const file = (p) => `[data-diff-file="${p}"]`;
+  const rows = (p) => `${file(p)} [data-diff-row]`;
+  const bodies = () =>
+    evaluate(
+      '[...document.querySelectorAll("[data-diff-comment]")].map(node => [node.querySelector("[data-diff-comment-label]").textContent, node.querySelector("[data-diff-comment-body]").textContent])',
+    );
   // Mouse-down on a row's "+", as a click or the start of a drag; the page-level mouse-up ends it.
-  const press = (p, row, shift = false) => evaluate(`document.querySelectorAll('${rows(p)}')[${row}].querySelector("[data-diff-add]").dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, shiftKey: ${shift} }))`);
+  const press = (p, row, shift = false) =>
+    evaluate(
+      `document.querySelectorAll('${rows(p)}')[${row}].querySelector("[data-diff-add]").dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, shiftKey: ${shift} }))`,
+    );
   const hover = (p, row) => evaluate(`document.querySelectorAll('${rows(p)}')[${row}].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }))`);
   const release = () => evaluate('window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))');
-  const type = text => evaluate(`(() => { const field = document.querySelector("[data-diff-comment-input]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(field, ${JSON.stringify(text)}); field.dispatchEvent(new Event("input", { bubbles: true })); })()`);
-  const key = (name, extra = "") => evaluate(`document.querySelector("[data-diff-comment-input]").dispatchEvent(new KeyboardEvent("keydown", { key: "${name}", bubbles: true, ${extra} }))`);
+  const type = (text) =>
+    evaluate(
+      `(() => { const field = document.querySelector("[data-diff-comment-input]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(field, ${JSON.stringify(text)}); field.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+  const key = (name, extra = "") =>
+    evaluate(`document.querySelector("[data-diff-comment-input]").dispatchEvent(new KeyboardEvent("keydown", { key: "${name}", bubbles: true, ${extra} }))`);
   const save = () => evaluate('document.querySelector("[data-diff-comment-save]").click()');
   const stored = () => evaluate('JSON.parse(localStorage.getItem("milagre:diff-comments:chat-1") ?? "[]")');
   const openDiff = async () => {
@@ -117,7 +132,11 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[data-diff-comment-editor]")');
     assert.equal(await evaluate('document.activeElement === document.querySelector("[data-diff-comment-input]")'), true, "The editor takes focus");
     assert.equal(await evaluate('document.querySelector("[data-diff-comment-input]").rows'), 3);
-    assert.equal(await evaluate(`document.querySelectorAll('${rows(A)}')[3].nextElementSibling.contains(document.querySelector("[data-diff-comment-editor]"))`), true, "The editor sits under its row");
+    assert.equal(
+      await evaluate(`document.querySelectorAll('${rows(A)}')[3].nextElementSibling.contains(document.querySelector("[data-diff-comment-editor]"))`),
+      true,
+      "The editor sits under its row",
+    );
     assert.equal(await evaluate('document.querySelector("[data-diff-comment-save]").disabled'), true, "Comment is disabled while blank");
     await type("   ");
     assert.equal(await evaluate('document.querySelector("[data-diff-comment-save]").disabled'), true, "Whitespace is still blank");
@@ -146,13 +165,20 @@ async function browserChecks() {
     assert.equal(await evaluate('!!document.querySelector("[data-diff-comment-editor]")'), false, "The editor waits for the mouse to be released");
     await release();
     await waitFor('!!document.querySelector("[data-diff-comment-editor]")');
-    assert.equal(await evaluate(`document.querySelectorAll('${rows(A)}')[2].nextElementSibling.contains(document.querySelector("[data-diff-comment-editor]"))`), true, "The editor sits under the last selected row");
+    assert.equal(
+      await evaluate(`document.querySelectorAll('${rows(A)}')[2].nextElementSibling.contains(document.querySelector("[data-diff-comment-editor]"))`),
+      true,
+      "The editor sits under the last selected row",
+    );
     await type("Range note");
     await delay(300);
     await shot("diff-comments-editor");
     await key("Enter", "metaKey: true");
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 2');
-    assert.deepEqual(await bodies(), [["L1–2", "Range note"], ["L3", "Single line note"]]);
+    assert.deepEqual(await bodies(), [
+      ["L1–2", "Range note"],
+      ["L3", "Single line note"],
+    ]);
 
     // Shift-click extends the selection and the editor, keeping what was typed.
     await press(A, 4);
@@ -165,7 +191,10 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-diff-comment-input]").value'), "Third", "Extending keeps the text");
     await save();
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 3');
-    assert.deepEqual((await bodies()).map(item => item[0]), ["L1–2", "L3", "L4–6"]);
+    assert.deepEqual(
+      (await bodies()).map((item) => item[0]),
+      ["L1–2", "L3", "L4–6"],
+    );
 
     // Edit swaps the card for a prefilled editor; delete removes.
     await evaluate(`document.querySelectorAll("[data-diff-comment-edit]")[1].click()`);
@@ -182,21 +211,27 @@ async function browserChecks() {
     await type("To delete");
     await save();
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 4');
-    await evaluate(`[...document.querySelectorAll("[data-diff-comment]")].find(node => node.textContent.includes("To delete")).querySelector("[data-diff-comment-delete]").click()`);
+    await evaluate(
+      `[...document.querySelectorAll("[data-diff-comment]")].find(node => node.textContent.includes("To delete")).querySelector("[data-diff-comment-delete]").click()`,
+    );
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 3');
 
     // Split: the + sits in each half and a comment keeps its side.
     await evaluate('document.querySelector("[data-diff-layout=split]").click()');
     await waitFor(`document.querySelectorAll('${file("README.md")} [data-diff-cell]').length > 0`);
     assert.equal(await evaluate('document.querySelectorAll("[data-diff-comment]").length'), 3, "Comments follow into split");
-    await evaluate(`document.querySelector('${file("README.md")} [data-diff-cell=left] [data-diff-add]').dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))`);
+    await evaluate(
+      `document.querySelector('${file("README.md")} [data-diff-cell=left] [data-diff-add]').dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))`,
+    );
     await release();
     await waitFor('!!document.querySelector("[data-diff-comment-editor]")');
     await type("Split note");
     await save();
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 4');
-    assert.deepEqual((await stored()).map(item => item.side).slice(-1), ["old"], "A left-half comment is on the old side");
-    await evaluate(`[...document.querySelectorAll("[data-diff-comment]")].find(node => node.textContent.includes("Split note")).querySelector("[data-diff-comment-delete]").click()`);
+    assert.deepEqual((await stored()).map((item) => item.side).slice(-1), ["old"], "A left-half comment is on the old side");
+    await evaluate(
+      `[...document.querySelectorAll("[data-diff-comment]")].find(node => node.textContent.includes("Split note")).querySelector("[data-diff-comment-delete]").click()`,
+    );
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 3');
     await evaluate('document.querySelector("[data-diff-layout=unified]").click()');
     await waitFor(`document.querySelectorAll('${rows(A)}').length === 7`);
@@ -206,7 +241,13 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-diff-send]").textContent'), "Send 3 comments");
     await waitFor('!document.querySelector("[data-diff-comment-editor]")');
     await delay(300);
-    assert.equal(await evaluate(`[...document.querySelectorAll("[data-diff-bar] button")].filter(button => { const r = button.getBoundingClientRect(); return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }).length`), 0, "Diff bar buttons, Send included, sit above the drag strip");
+    assert.equal(
+      await evaluate(
+        `[...document.querySelectorAll("[data-diff-bar] button")].filter(button => { const r = button.getBoundingClientRect(); return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }).length`,
+      ),
+      0,
+      "Diff bar buttons, Send included, sit above the drag strip",
+    );
     await evaluate('document.querySelector("[data-diff-view]").scrollTo(0, 0)');
     await shot("diff-comments-saved");
 
@@ -221,7 +262,11 @@ async function browserChecks() {
     await evaluate("window.editA(); window.endTurn()");
     await waitFor('document.querySelectorAll("[data-diff-comment-outdated]").length === 1');
     assert.equal(await evaluate('document.querySelector("[data-diff-comment][data-outdated] [data-diff-comment-label]").textContent'), "L1–2");
-    assert.equal(await evaluate('document.querySelector("[data-diff-comment][data-outdated] [data-diff-comment-edit]")'), null, "An outdated comment can't be edited");
+    assert.equal(
+      await evaluate('document.querySelector("[data-diff-comment][data-outdated] [data-diff-comment-edit]")'),
+      null,
+      "An outdated comment can't be edited",
+    );
     await waitFor('document.querySelector("[data-diff-send]")?.textContent === "Send 2 comments"');
     await evaluate('document.querySelector("[data-diff-view]").scrollTo(0, 0)');
     await shot("diff-comments-outdated");
@@ -229,13 +274,32 @@ async function browserChecks() {
     // Send goes out as one message, takes the sent comments with it and returns to the chat.
     await evaluate('document.querySelector("[data-diff-send]").click()');
     await waitFor("window.sent.length === 1");
-    assert.equal(await evaluate("window.sent[0]"), [
-      "Review comments on the diff (uncommitted changes):", "",
-      "1. src/a.ts, line 3 (new):", "```typescript", " const b = 3;", "```", "Edited note", "",
-      "2. src/a.ts, lines 4–6 (new):", "```typescript", " const c = 4;", " const d = 5;", " export {};", "```", "Third",
-    ].join("\n"));
+    assert.equal(
+      await evaluate("window.sent[0]"),
+      [
+        "Review comments on the diff (uncommitted changes):",
+        "",
+        "1. src/a.ts, line 3 (new):",
+        "```typescript",
+        " const b = 3;",
+        "```",
+        "Edited note",
+        "",
+        "2. src/a.ts, lines 4–6 (new):",
+        "```typescript",
+        " const c = 4;",
+        " const d = 5;",
+        " export {};",
+        "```",
+        "Third",
+      ].join("\n"),
+    );
     await waitFor('!document.querySelector("[data-diff-view]") && !document.querySelector("[data-chat-stub]").classList.contains("hidden")');
-    assert.deepEqual((await stored()).map(item => item.snippet.length), [3], "Only the outdated comment stays");
+    assert.deepEqual(
+      (await stored()).map((item) => item.snippet.length),
+      [3],
+      "Only the outdated comment stays",
+    );
 
     // It is still there, deletable, and nothing is left to send.
     await evaluate(`document.querySelector('[data-diff-tree-file="${A}"]').click()`);
@@ -244,7 +308,9 @@ async function browserChecks() {
     await evaluate('document.querySelector("[data-diff-comment-delete]").click()');
     await waitFor('document.querySelectorAll("[data-diff-comment]").length === 0');
     assert.equal(await evaluate('localStorage.getItem("milagre:diff-comments:chat-1")'), null);
-    console.log("PASS: single-line, drag and shift-click comments, Esc and blank handling, edit and delete, split side, tree counts, Send above the drag strip, message text, outdated, persistence across a remount");
+    console.log(
+      "PASS: single-line, drag and shift-click comments, Esc and blank handling, edit and delete, split side, tree counts, Send above the drag strip, message text, outdated, persistence across a remount",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -257,19 +323,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "diff-comments-fixture",
-      resolveId(id) { if (id === "/__diff_comments_fixture.tsx") return id; },
-      load(id) { if (id === "/__diff_comments_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__diff_comments__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__diff_comments_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "diff-comments-fixture",
+        resolveId(id) {
+          if (id === "/__diff_comments_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__diff_comments_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__diff_comments__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__diff_comments_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -278,13 +353,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__diff_comments__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

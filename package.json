@@ -1,8 +1,11 @@
 {
   "name": "milagre-monorepo",
-  "productName": "Milagre",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "type": "module",
   "main": "apps/desktop/electron/main.cjs",
   "scripts": {
@@ -32,6 +35,8 @@
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
     "package:repositories": "node scripts/generate-linux-repository.cjs",
     "lint": "oxlint",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\"",
     "knip": "knip"
   },
@@ -44,10 +49,14 @@
     "knip": "6.39.0",
     "lefthook": "2.1.17",
     "lockfile-lint": "5.0.1",
+    "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "qrcode-terminal": "^0.12.0",
     "semantic-release": "^25.0.9",
     "yaml": "^2.9.1"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "build": {
     "appId": "com.milagre.app",
@@ -123,11 +132,5 @@
       "releaseType": "release"
     }
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "engines": {
-    "node": ">=24"
-  }
+  "productName": "Milagre"
 }

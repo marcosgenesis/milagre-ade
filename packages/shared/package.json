@@ -2,6 +2,24 @@
   "name": "@milagre/shared",
   "version": "0.1.0",
   "private": true,
+  "files": [
+    "src/*.mjs",
+    "src/*.d.mts",
+    "src/model.ts",
+    "src/git-diff.ts",
+    "src/model-options.ts",
+    "src/model-copy.ts",
+    "src/reply-parts.ts",
+    "src/streaming-markdown.ts",
+    "src/pr-blockers.ts",
+    "src/diff-parse.ts",
+    "src/diff-tree.ts",
+    "src/diff-layout.ts",
+    "src/usage.ts",
+    "src/simulator.ts",
+    "src/browser.ts",
+    "src/message-navigation.ts"
+  ],
   "type": "module",
   "exports": {
     "./prompt-skills": {
@@ -87,33 +105,15 @@
       "default": "./src/file-syntax.mjs"
     }
   },
-  "files": [
-    "src/*.mjs",
-    "src/*.d.mts",
-    "src/model.ts",
-    "src/git-diff.ts",
-    "src/model-options.ts",
-    "src/model-copy.ts",
-    "src/reply-parts.ts",
-    "src/streaming-markdown.ts",
-    "src/pr-blockers.ts",
-    "src/diff-parse.ts",
-    "src/diff-tree.ts",
-    "src/diff-layout.ts",
-    "src/usage.ts",
-    "src/simulator.ts",
-    "src/browser.ts",
-    "src/message-navigation.ts"
-  ],
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": {
-    "typescript": "~6.0.3"
-  },
   "dependencies": {
     "refractor": "^5.0.0",
     "tweetnacl": "1.0.3"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
   }
 }

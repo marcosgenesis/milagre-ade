@@ -1,92 +1,249 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { HugeiconsIcon } from '@hugeicons/react';
-import { ArrowDown01Icon, ArrowRight01Icon, MoreVerticalIcon, GitBranchIcon, GitPullRequestIcon, SourceCodeIcon, FolderOpenIcon } from '@hugeicons/core-free-icons';
-import type { WorktreeBinding } from '@milagre/shared/model';
-import type { DiffMode } from '../../electron';
-import { ChangeList, ChangesHeader, Counts } from './ChangesPanel';
-import type { DiffList } from './useDiffFiles';
-import { ProjectAvatarStack } from '../ProjectAvatarStack';
-import { ScrollArea } from '../primitives/ScrollArea';
-import { PickerPanel, PickerRow } from '../primitives/Picker';
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  MoreVerticalIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+  SourceCodeIcon,
+  FolderOpenIcon,
+} from "@hugeicons/core-free-icons";
+import type { WorktreeBinding } from "@milagre/shared/model";
+import type { DiffMode } from "../../electron";
+import { ChangeList, ChangesHeader, Counts } from "./ChangesPanel";
+import type { DiffList } from "./useDiffFiles";
+import { ProjectAvatarStack } from "../ProjectAvatarStack";
+import { ScrollArea } from "../primitives/ScrollArea";
+import { PickerPanel, PickerRow } from "../primitives/Picker";
 
-export function LinkChangesPanel({ members, projects, lists, loading, mode, onModeChange, onRefresh, onSelectFile, selectedProjectId, activePath, commentCounts, onCommit, onOpenEditor, onReveal }: {
-  members: WorktreeBinding[]; projects: Array<{ id: string; path: string; name: string }>; lists: Record<string, DiffList>;
-  loading: boolean; mode: DiffMode; onModeChange: (mode: DiffMode) => void; onRefresh: () => void;
-  onSelectFile: (member: WorktreeBinding, path: string) => void; selectedProjectId?: string; activePath?: string;
-  commentCounts?: Record<string, number>; onCommit: (member: WorktreeBinding) => void;
-  onOpenEditor: (member: WorktreeBinding) => void; onReveal: (member: WorktreeBinding) => void;
+export function LinkChangesPanel({
+  members,
+  projects,
+  lists,
+  loading,
+  mode,
+  onModeChange,
+  onRefresh,
+  onSelectFile,
+  selectedProjectId,
+  activePath,
+  commentCounts,
+  onCommit,
+  onOpenEditor,
+  onReveal,
+}: {
+  members: WorktreeBinding[];
+  projects: Array<{ id: string; path: string; name: string }>;
+  lists: Record<string, DiffList>;
+  loading: boolean;
+  mode: DiffMode;
+  onModeChange: (mode: DiffMode) => void;
+  onRefresh: () => void;
+  onSelectFile: (member: WorktreeBinding, path: string) => void;
+  selectedProjectId?: string;
+  activePath?: string;
+  commentCounts?: Record<string, number>;
+  onCommit: (member: WorktreeBinding) => void;
+  onOpenEditor: (member: WorktreeBinding) => void;
+  onReveal: (member: WorktreeBinding) => void;
 }) {
-  const totals = members.reduce((sum, member) => {
-    const list = lists[member.projectId];
-    if (list?.state === 'ready' && list.isRepo) for (const file of list.files) { sum.added += file.added; sum.removed += file.removed; }
-    return sum;
-  }, { added: 0, removed: 0 });
-  return <aside data-changes-panel aria-label="Changes" className="flex min-h-0 w-[320px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
-    <ChangesHeader mode={mode} onModeChange={onModeChange} onRefresh={onRefresh} loading={loading} totals={totals} />
-    <ScrollArea className="flex-1 py-1.5">
-      {members.map(member => <ProjectChanges key={member.projectId} member={member} name={projects.find(project => project.id === member.projectId)?.name ?? member.projectId}
-        list={lists[member.projectId] ?? { state: 'loading' }} mode={mode} onSelectFile={path => onSelectFile(member, path)}
-        activePath={selectedProjectId === member.projectId ? activePath : undefined} commentCounts={selectedProjectId === member.projectId ? commentCounts : undefined}
-        onCommit={() => onCommit(member)} onOpenEditor={() => onOpenEditor(member)} onReveal={() => onReveal(member)} />)}
-    </ScrollArea>
-  </aside>;
+  const totals = members.reduce(
+    (sum, member) => {
+      const list = lists[member.projectId];
+      if (list?.state === "ready" && list.isRepo)
+        for (const file of list.files) {
+          sum.added += file.added;
+          sum.removed += file.removed;
+        }
+      return sum;
+    },
+    { added: 0, removed: 0 },
+  );
+  return (
+    <aside data-changes-panel aria-label="Changes" className="flex min-h-0 w-[320px] shrink-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
+      <ChangesHeader mode={mode} onModeChange={onModeChange} onRefresh={onRefresh} loading={loading} totals={totals} />
+      <ScrollArea className="flex-1 py-1.5">
+        {members.map((member) => (
+          <ProjectChanges
+            key={member.projectId}
+            member={member}
+            name={projects.find((project) => project.id === member.projectId)?.name ?? member.projectId}
+            list={lists[member.projectId] ?? { state: "loading" }}
+            mode={mode}
+            onSelectFile={(path) => onSelectFile(member, path)}
+            activePath={selectedProjectId === member.projectId ? activePath : undefined}
+            commentCounts={selectedProjectId === member.projectId ? commentCounts : undefined}
+            onCommit={() => onCommit(member)}
+            onOpenEditor={() => onOpenEditor(member)}
+            onReveal={() => onReveal(member)}
+          />
+        ))}
+      </ScrollArea>
+    </aside>
+  );
 }
 
-function ProjectChanges({ member, name, list, mode, onSelectFile, activePath, commentCounts, onCommit, onOpenEditor, onReveal }: {
-  member: WorktreeBinding; name: string; list: DiffList; mode: DiffMode; onSelectFile: (path: string) => void;
-  activePath?: string; commentCounts?: Record<string, number>; onCommit: () => void; onOpenEditor: () => void; onReveal: () => void;
+function ProjectChanges({
+  member,
+  name,
+  list,
+  mode,
+  onSelectFile,
+  activePath,
+  commentCounts,
+  onCommit,
+  onOpenEditor,
+  onReveal,
+}: {
+  member: WorktreeBinding;
+  name: string;
+  list: DiffList;
+  mode: DiffMode;
+  onSelectFile: (path: string) => void;
+  activePath?: string;
+  commentCounts?: Record<string, number>;
+  onCommit: () => void;
+  onOpenEditor: () => void;
+  onReveal: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
-  const files = list.state === 'ready' && list.isRepo ? list.files : [];
-  return <section data-link-changes-project={member.projectId} aria-label={name} className="pb-2">
-    <div data-project-header className={`group/project relative mx-2 mt-1 rounded-chip hover:bg-hover ${actionsOpen ? 'bg-hover' : ''}`}>
-      <button type="button" data-project-collapse aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name} changes`} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)} className={`flex w-full min-w-0 items-center gap-1.5 rounded-chip py-1 pl-1 text-left transition-[padding] duration-150 group-hover/project:pr-8 group-focus-within/project:pr-8 ${actionsOpen ? 'pr-8' : 'pr-1'}`}>
-        <HugeiconsIcon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} size={12} color="currentColor" />
-        <ProjectAvatarStack projects={[{ path: member.projectPath, name }]} />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[12px] font-medium" title={name}>{name}</span>
-          <span className="flex min-w-0 items-center gap-1 text-[10px] text-ink-3"><HugeiconsIcon icon={GitBranchIcon} size={11} className="shrink-0" /><span className="truncate" title={member.branch}>{member.branch}</span></span>
-        </span>
-        <Counts className="self-start pt-0.5" added={files.reduce((sum, file) => sum + file.added, 0)} removed={files.reduce((sum, file) => sum + file.removed, 0)} />
-      </button>
-      <ProjectActions name={name} onOpenChange={setActionsOpen} onCommit={onCommit} onOpenEditor={onOpenEditor} onReveal={onReveal} />
-    </div>
-    {!collapsed && <>
-      {mode === 'committed' && list.state === 'ready' && list.isRepo && list.base && <p data-diff-base className="truncate px-8 pb-1 text-[10px] text-ink-3">since <span className="font-mono">{list.base}</span></p>}
-      <div className="pl-5"><ChangeList list={list} mode={mode} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} /></div>
-    </>}
-  </section>;
+  const files = list.state === "ready" && list.isRepo ? list.files : [];
+  return (
+    <section data-link-changes-project={member.projectId} aria-label={name} className="pb-2">
+      <div data-project-header className={`group/project relative mx-2 mt-1 rounded-chip hover:bg-hover ${actionsOpen ? "bg-hover" : ""}`}>
+        <button
+          type="button"
+          data-project-collapse
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${name} changes`}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+          className={`flex w-full min-w-0 items-center gap-1.5 rounded-chip py-1 pl-1 text-left transition-[padding] duration-150 group-hover/project:pr-8 group-focus-within/project:pr-8 ${actionsOpen ? "pr-8" : "pr-1"}`}
+        >
+          <HugeiconsIcon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} size={12} color="currentColor" />
+          <ProjectAvatarStack projects={[{ path: member.projectPath, name }]} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-[12px] font-medium" title={name}>
+              {name}
+            </span>
+            <span className="flex min-w-0 items-center gap-1 text-[10px] text-ink-3">
+              <HugeiconsIcon icon={GitBranchIcon} size={11} className="shrink-0" />
+              <span className="truncate" title={member.branch}>
+                {member.branch}
+              </span>
+            </span>
+          </span>
+          <Counts
+            className="self-start pt-0.5"
+            added={files.reduce((sum, file) => sum + file.added, 0)}
+            removed={files.reduce((sum, file) => sum + file.removed, 0)}
+          />
+        </button>
+        <ProjectActions name={name} onOpenChange={setActionsOpen} onCommit={onCommit} onOpenEditor={onOpenEditor} onReveal={onReveal} />
+      </div>
+      {!collapsed && (
+        <>
+          {mode === "committed" && list.state === "ready" && list.isRepo && list.base && (
+            <p data-diff-base className="truncate px-8 pb-1 text-[10px] text-ink-3">
+              since <span className="font-mono">{list.base}</span>
+            </p>
+          )}
+          <div className="pl-5">
+            <ChangeList list={list} mode={mode} onSelectFile={onSelectFile} activePath={activePath} commentCounts={commentCounts} />
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
-function ProjectActions({ name, onOpenChange, onCommit, onOpenEditor, onReveal }: { name: string; onOpenChange: (open: boolean) => void; onCommit: () => void; onOpenEditor: () => void; onReveal: () => void }) {
+function ProjectActions({
+  name,
+  onOpenChange,
+  onCommit,
+  onOpenEditor,
+  onReveal,
+}: {
+  name: string;
+  onOpenChange: (open: boolean) => void;
+  onCommit: () => void;
+  onOpenEditor: () => void;
+  onReveal: () => void;
+}) {
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
-  function close(refocus = true) { setPosition(null); onOpenChange(false); if (refocus) trigger.current?.focus(); }
-  useLayoutEffect(() => { if (position) panel.current?.querySelector<HTMLButtonElement>('[data-picker-row]')?.focus(); }, [position]);
+  const trigger = useRef<HTMLButtonElement>(null),
+    panel = useRef<HTMLDivElement>(null);
+  function close(refocus = true) {
+    setPosition(null);
+    onOpenChange(false);
+    if (refocus) trigger.current?.focus();
+  }
+  useLayoutEffect(() => {
+    if (position) panel.current?.querySelector<HTMLButtonElement>("[data-picker-row]")?.focus();
+  }, [position]);
   useEffect(() => {
     if (!position) return;
-    const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) close(false); };
+    const outside = (event: Event) => {
+      if (!panel.current?.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) close(false);
+    };
     const dismiss = () => close(false);
-    document.addEventListener('pointerdown', outside); document.addEventListener('scroll', outside, true);
-    window.addEventListener('resize', dismiss); window.addEventListener('blur', dismiss);
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('scroll', outside, true); window.removeEventListener('resize', dismiss); window.removeEventListener('blur', dismiss); };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("scroll", outside, true);
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("blur", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("scroll", outside, true);
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("blur", dismiss);
+    };
   }, [position]);
   function open() {
     const rect = trigger.current!.getBoundingClientRect();
-    setPosition({ left: Math.max(12, rect.right - 230), ...(window.innerHeight - rect.bottom > 150 ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }) });
+    setPosition({
+      left: Math.max(12, rect.right - 230),
+      ...(window.innerHeight - rect.bottom > 150 ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }),
+    });
     onOpenChange(true);
   }
-  const choose = (action: () => void) => () => { close(); action(); };
-  return <>
-    <button ref={trigger} type="button" data-project-actions aria-label={`${name} actions`} aria-expanded={Boolean(position)} onClick={() => position ? close() : open()} className={`absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-chip text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/project:opacity-100 ${position ? 'bg-hover text-ink opacity-100' : 'opacity-0'}`}><HugeiconsIcon icon={MoreVerticalIcon} size={14} /></button>
-    {position && createPortal(<div ref={panel} data-link-project-menu aria-label={`${name} actions`} className="fixed z-[70] w-[230px]" style={position}>
-      <PickerPanel onKeyDown={event => { if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); event.stopPropagation(); close(); } }}>
-        <PickerRow label="Commit and open PR…" icon={<HugeiconsIcon icon={GitPullRequestIcon} size={15} />} selected={false} onClick={choose(onCommit)} />
-        <PickerRow label="Open in editor" icon={<HugeiconsIcon icon={SourceCodeIcon} size={15} />} selected={false} onClick={choose(onOpenEditor)} />
-        <PickerRow label="Reveal Worktree" icon={<HugeiconsIcon icon={FolderOpenIcon} size={15} />} selected={false} onClick={choose(onReveal)} />
-      </PickerPanel>
-    </div>, document.body)}
-  </>;
+  const choose = (action: () => void) => () => {
+    close();
+    action();
+  };
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        data-project-actions
+        aria-label={`${name} actions`}
+        aria-expanded={Boolean(position)}
+        onClick={() => (position ? close() : open())}
+        className={`absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-chip text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/project:opacity-100 ${position ? "bg-hover text-ink opacity-100" : "opacity-0"}`}
+      >
+        <HugeiconsIcon icon={MoreVerticalIcon} size={14} />
+      </button>
+      {position &&
+        createPortal(
+          <div ref={panel} data-link-project-menu aria-label={`${name} actions`} className="fixed z-[70] w-[230px]" style={position}>
+            <PickerPanel
+              onKeyDown={(event) => {
+                if (event.key === "Escape" || event.key === "Tab") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  close();
+                }
+              }}
+            >
+              <PickerRow label="Commit and open PR…" icon={<HugeiconsIcon icon={GitPullRequestIcon} size={15} />} selected={false} onClick={choose(onCommit)} />
+              <PickerRow label="Open in editor" icon={<HugeiconsIcon icon={SourceCodeIcon} size={15} />} selected={false} onClick={choose(onOpenEditor)} />
+              <PickerRow label="Reveal Worktree" icon={<HugeiconsIcon icon={FolderOpenIcon} size={15} />} selected={false} onClick={choose(onReveal)} />
+            </PickerPanel>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }

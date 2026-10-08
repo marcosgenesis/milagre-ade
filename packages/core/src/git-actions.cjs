@@ -28,7 +28,8 @@ const GH_TIMEOUT = 60_000;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const HOOKS = ["pre-commit", "prepare-commit-msg", "commit-msg"];
 // Git's own reasons a commit can fail; anything else with a commit hook installed is the hook's.
-const GIT_COMMIT_ERRORS = /Please tell me who you are|Author identity unknown|nothing to commit|empty commit message|unable to auto-detect email|could not lock|index\.lock/i;
+const GIT_COMMIT_ERRORS =
+  /Please tell me who you are|Author identity unknown|nothing to commit|empty commit message|unable to auto-detect email|could not lock|index\.lock/i;
 // A signing key that can't sign (gpg, ssh) is not something the agent can fix.
 // Narrow on purpose: hook output saying "assigning" or "designing" is still the hook's.
 const SIGNING_ERRORS = /gpg failed|failed to sign|signing (failed|key)/i;
@@ -130,7 +131,10 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   }
 
   async function remotes(cwd) {
-    return ((await gitOut(cwd, ["remote"])) ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+    return ((await gitOut(cwd, ["remote"])) ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   }
 
   async function hasOrigin(cwd) {
@@ -173,7 +177,11 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   async function changedFiles(cwd) {
     const status = await git(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", ...PATHSPEC]);
     if (!status.ok) return [];
-    const entries = status.stdout.split("\0").filter(Boolean).slice(0, FILE_LIMIT).map((entry) => ({ code: entry.slice(0, 2), path: entry.slice(3) }));
+    const entries = status.stdout
+      .split("\0")
+      .filter(Boolean)
+      .slice(0, FILE_LIMIT)
+      .map((entry) => ({ code: entry.slice(0, 2), path: entry.slice(3) }));
     const head = (await refExists(cwd, "HEAD")) ? "HEAD" : EMPTY_TREE;
     const counts = new Map();
     for (const record of await gitList(cwd, ["diff", "--numstat", "-z", "--no-renames", head, ...PATHSPEC])) {
@@ -184,7 +192,7 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     for (const { code, path: file } of entries) {
       const untracked = code === "??";
       const status = untracked || code.includes("A") ? "added" : code.includes("D") ? "deleted" : "modified";
-      const lines = untracked ? { added: await fileLineCount(path.join(cwd, file)), removed: 0 } : counts.get(file) ?? { added: 0, removed: 0 };
+      const lines = untracked ? { added: await fileLineCount(path.join(cwd, file)), removed: 0 } : (counts.get(file) ?? { added: 0, removed: 0 });
       files.push({ path: file, status, ...lines, untracked });
     }
     return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -225,7 +233,14 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   async function readChanges({ cwd, base }) {
     const top = await checkTop(cwd);
     if (!top.ok) return { isRepo: false, message: top.message };
-    const [branch, files, remoteNames, unpushed, resolved, blocked] = await Promise.all([currentBranch(cwd), changedFiles(cwd), remotes(cwd), unpushedCount(cwd), resolveBase(cwd, base), operationInProgress(cwd)]);
+    const [branch, files, remoteNames, unpushed, resolved, blocked] = await Promise.all([
+      currentBranch(cwd),
+      changedFiles(cwd),
+      remotes(cwd),
+      unpushedCount(cwd),
+      resolveBase(cwd, base),
+      operationInProgress(cwd),
+    ]);
     const origin = remoteNames.includes("origin");
     const onBase = branch === resolved.name;
     const ahead = resolved.ref ? await countCommits(cwd, [`${resolved.ref}..HEAD`]) : 0;
@@ -291,7 +306,11 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
         await write(cwd, ["read-tree", before]);
         await write(cwd, ["update-index", "-q", "--refresh"]);
       }
-      return { ok: false, kind: "secrets", message: `These look like secrets and would be committed: ${secrets.join(", ")}. Add them to .gitignore, or commit them yourself if you mean to.` };
+      return {
+        ok: false,
+        kind: "secrets",
+        message: `These look like secrets and would be committed: ${secrets.join(", ")}. Add them to .gitignore, or commit them yourself if you mean to.`,
+      };
     }
     if ((await git(cwd, ["diff", "--cached", "--quiet"])).ok) return { ok: false, kind: "nothing", message: "There's nothing to commit." };
     const committed = await write(cwd, ["commit", "-F", "-"], { input: `${text}\n`, profile: "COMMIT" });
@@ -319,7 +338,8 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     const result = await write(cwd, ["push", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { profile: "PUSH" });
     if (result.ok) return { ok: true, branch, remote: "origin" };
     const output = capOutput(result.stderr || result.stdout);
-    if (/\[rejected\]|non-fast-forward|fetch first|\(stale info\)/i.test(output)) return { ok: false, kind: "rejected", message: output, hint: PUSH_REJECTED_HINT };
+    if (/\[rejected\]|non-fast-forward|fetch first|\(stale info\)/i.test(output))
+      return { ok: false, kind: "rejected", message: output, hint: PUSH_REJECTED_HINT };
     return { ok: false, kind: "error", message: result.timedOut ? "The push took too long and was stopped." : output || "The push failed." };
   }
 
@@ -334,7 +354,11 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     if (branch === resolved.name) return { ok: false, kind: "on-base", message: `You're on ${resolved.name}. Open a PR from a worktree branch.` };
     const prTitle = String(title ?? "").trim();
     if (!prTitle) return { ok: false, kind: "error", message: "Add a PR title first." };
-    const result = await run(gh, ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], { cwd, input: String(body ?? ""), timeout: GH_TIMEOUT });
+    const result = await run(gh, ["pr", "create", `--base=${resolved.name}`, `--title=${prTitle}`, "--body-file", "-"], {
+      cwd,
+      input: String(body ?? ""),
+      timeout: GH_TIMEOUT,
+    });
     if (result.missing) return { ok: false, kind: "gh-missing", message: GH_MISSING, code: GIT_CODES.GH_MISSING };
     if (!result.ok && isAuthFailure(result)) return { ok: false, kind: "gh-auth", message: GH_LOGIN };
     if (!result.ok) return { ok: false, kind: "error", message: capOutput(result.stderr || result.stdout) || "gh couldn't open the PR." };
@@ -380,7 +404,9 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
     const hasHead = await refExists(cwd, "HEAD");
     const range = hasChanges ? [hasHead ? "HEAD" : EMPTY_TREE] : resolved.ref ? [`${resolved.ref}...HEAD`] : null;
     const paths = hasChanges ? files.map((file) => file.path) : range ? await gitList(cwd, ["diff", "--name-only", "-z", ...range, ...PATHSPEC]) : [];
-    const omitted = paths.filter((file) => looksSecret(file) || isLockfile(file)).map((file) => ({ path: file, reason: looksSecret(file) ? "secret" : "lockfile" }));
+    const omitted = paths
+      .filter((file) => looksSecret(file) || isLockfile(file))
+      .map((file) => ({ path: file, reason: looksSecret(file) ? "secret" : "lockfile" }));
     const hidden = new Set(omitted.map((item) => item.path));
     let diff = "";
     let stat = "";
@@ -399,7 +425,11 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
         diff += (await newFileDiff(cwd, file.path, Math.floor(remaining / 4))) ?? "";
       }
     }
-    const lines = async (args) => ((await gitOut(cwd, args)) ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const lines = async (args) =>
+      ((await gitOut(cwd, args)) ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
     const [recentSubjects, branchCommits] = await Promise.all([
       hasHead ? lines(["log", "-n", "15", "--format=%s"]) : [],
       hasHead && resolved.ref && branch !== resolved.name ? lines(["log", "-n", "20", "--format=%s", `${resolved.ref}..HEAD`]) : [],
@@ -410,4 +440,17 @@ function createGitActions({ execFile = childProcess.execFile, env = process.env,
   return { readChanges, commit, push, openPr, readTextContext, checkTop };
 }
 
-module.exports = { CONFLICTS, DETACHED, DETACHED_COMMIT, GH_LOGIN, GH_MISSING, NOT_REPO, NOT_TOP, NO_ORIGIN, PUSH_REJECTED_HINT, createGitActions, isLockfile, looksSecret };
+module.exports = {
+  CONFLICTS,
+  DETACHED,
+  DETACHED_COMMIT,
+  GH_LOGIN,
+  GH_MISSING,
+  NOT_REPO,
+  NOT_TOP,
+  NO_ORIGIN,
+  PUSH_REJECTED_HINT,
+  createGitActions,
+  isLockfile,
+  looksSecret,
+};

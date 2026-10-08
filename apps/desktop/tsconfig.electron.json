@@ -3,10 +3,7 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": [
-      "ES2023",
-      "DOM"
-    ],
+    "lib": ["ES2023", "DOM"],
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
@@ -20,8 +17,5 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx"
   },
-  "include": [
-    "electron/main.cjs",
-    "electron/preload.cjs"
-  ]
+  "include": ["electron/main.cjs", "electron/preload.cjs"]
 }

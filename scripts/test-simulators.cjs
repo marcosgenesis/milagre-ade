@@ -1,8 +1,8 @@
 // Real Electron rendering of the composer and simulator entry point. No simulator required.
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const fs = require('node:fs');
-const {setTimeout:delay} = require('node:timers/promises');
+const assert = require("node:assert/strict");
+const path = require("node:path");
+const fs = require("node:fs");
+const { setTimeout: delay } = require("node:timers/promises");
 const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -73,84 +73,157 @@ document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 async function browserChecks() {
- const {app,BrowserWindow} = require('electron');
- app.setPath('userData',fs.mkdtempSync(path.join(require('node:os').tmpdir(),'milagre-simulator-ui-')));
- await app.whenReady();
- console.log('Electron ready');
- const watchdog=setTimeout(()=>{console.error('Electron UI check timed out');app.exit(1);},60000);
- const window = new BrowserWindow({width:1000,height:800,show:false,webPreferences:{backgroundThrottling:false}});
- window.webContents.on('console-message',details=>{if(details.level==='error')console.error(details.message);});
- window.webContents.on('did-fail-load',(_e,code,message)=>console.error('Page load failed',code,message));
- window.webContents.on('render-process-gone',(_e,details)=>console.error('Renderer gone',details));
- const evaluate = source => window.webContents.executeJavaScript(source);
- const waitFor = async source => {for(let i=0;i<200;i++){if(await evaluate(source))return;await delay(50);}throw Error('Timed out: '+source);};
- const click = selector => evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
- const screenshot = async name => {if(!process.env.MILAGRE_SCREENSHOT_DIR)return;fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR,{recursive:true});await delay(150);fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR,name+'.png'),(await window.webContents.capturePage()).toPNG());};
- try {
-  console.log('Loading fixture');
-  await window.loadURL(process.argv[2]);
-  console.log('Fixture loaded');
-  await waitFor('document.querySelector("[data-slot=simulator-track]")?.textContent.includes("2")');
-  assert.equal(await evaluate('window.simulatorCalls.length'),0,'closed pill must not start capture');
-  assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-track] svg")'),'phone icon');
-  assert.ok(await evaluate('document.querySelector("[data-slot=simulator-track]").parentElement === document.querySelector("[data-slot=subagent-track]").parentElement'),'same composer pill row');
-  await evaluate('window.setMessageCount(0)');
-  await waitFor('!document.querySelector("[data-slot=simulator-track]")');
-  await screenshot('new-chat');
-  await evaluate('window.setMessageCount(2)');
-  await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
-  await screenshot('composer-dark');
-  await click('[data-slot=simulator-track] button');
-  await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
-  assert.equal(await evaluate('window.simulatorCalls.length'),0,'chooser must not capture every device');
-  assert.ok(await evaluate('document.querySelector("[data-simulator-device=device-1]").textContent.includes("Android 16")'),'Android device label');
-  await screenshot('chooser-dark');
-  await click('[data-simulator-device="device-0"]');
-  await waitFor('window.simulatorCalls.length===1');
-  await waitFor('document.querySelector("[data-slot=simulator-frame]")');
-  await click('[aria-label="Expand simulator"]');
-  await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.expanded==="true"');
-  await screenshot('expanded-dark');
-  const footerMatches = '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
-  await waitFor(footerMatches);
-  await evaluate('window.setDark(false)'); await waitFor(footerMatches);
-  assert.equal(await evaluate('window.simulatorCalls.length'),1,'theme changes must preserve the viewer session');
-  await screenshot('expanded-light');
-  await evaluate('window.setDark(true)'); await waitFor(footerMatches);
-  await click('[aria-label="Collapse simulator"]');
-  window.setContentSize(390,500);await delay(200);
-  assert.ok(await evaluate('(()=>{const r=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()'),'viewer fits short/narrow window');
-  await screenshot('viewer-narrow');
-  await click('[aria-label="Close simulator"]');
-  await waitFor('!document.querySelector("[data-slot=simulator-popover]") && window.simulatorClosed.length>0');
-  window.setContentSize(1000,800);await evaluate('window.setDark(false)');
-  await screenshot('composer-light');
-  await click('[data-slot=simulator-track] button');
-  await waitFor('!!document.querySelector("[data-slot=simulator-popover]")');
-  assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-2]")'),false,'other Chat device is excluded');
-  await screenshot('chooser-light');
-  await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Attach simulator").click()');
-  await waitFor('!!document.querySelector("[data-simulator-device=device-2]")');
-  assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-0]")'),false);
-  await screenshot('attach-light');
-  await click('[data-simulator-device=device-2]');
-  await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
-  assert.equal(await evaluate('window.simulatorCalls.at(-1).chatId'),'/fixture#1');
-  await click('[aria-label="Back to devices"]');
-  await click('[aria-label="Detach Other Chat device from Chat"]');
-  await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
-  window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
-  await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
-  console.log('PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots');
-  app.exit(0);
- } catch(error){console.error(error);app.exit(1);}
+  const { app, BrowserWindow } = require("electron");
+  app.setPath("userData", fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-simulator-ui-")));
+  await app.whenReady();
+  console.log("Electron ready");
+  const watchdog = setTimeout(() => {
+    console.error("Electron UI check timed out");
+    app.exit(1);
+  }, 60000);
+  const window = new BrowserWindow({ width: 1000, height: 800, show: false, webPreferences: { backgroundThrottling: false } });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
+  window.webContents.on("did-fail-load", (_e, code, message) => console.error("Page load failed", code, message));
+  window.webContents.on("render-process-gone", (_e, details) => console.error("Renderer gone", details));
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  const waitFor = async (source) => {
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(source)) return;
+      await delay(50);
+    }
+    throw Error("Timed out: " + source);
+  };
+  const click = (selector) => evaluate("document.querySelector(" + JSON.stringify(selector) + ").click()");
+  const screenshot = async (name) => {
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    await delay(150);
+    fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name + ".png"), (await window.webContents.capturePage()).toPNG());
+  };
+  try {
+    console.log("Loading fixture");
+    await window.loadURL(process.argv[2]);
+    console.log("Fixture loaded");
+    await waitFor('document.querySelector("[data-slot=simulator-track]")?.textContent.includes("2")');
+    assert.equal(await evaluate("window.simulatorCalls.length"), 0, "closed pill must not start capture");
+    assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-track] svg")'), "phone icon");
+    assert.ok(
+      await evaluate(
+        'document.querySelector("[data-slot=simulator-track]").parentElement === document.querySelector("[data-slot=subagent-track]").parentElement',
+      ),
+      "same composer pill row",
+    );
+    await evaluate("window.setMessageCount(0)");
+    await waitFor('!document.querySelector("[data-slot=simulator-track]")');
+    await screenshot("new-chat");
+    await evaluate("window.setMessageCount(2)");
+    await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
+    await screenshot("composer-dark");
+    await click("[data-slot=simulator-track] button");
+    await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
+    assert.equal(await evaluate("window.simulatorCalls.length"), 0, "chooser must not capture every device");
+    assert.ok(await evaluate('document.querySelector("[data-simulator-device=device-1]").textContent.includes("Android 16")'), "Android device label");
+    await screenshot("chooser-dark");
+    await click('[data-simulator-device="device-0"]');
+    await waitFor("window.simulatorCalls.length===1");
+    await waitFor('document.querySelector("[data-slot=simulator-frame]")');
+    await click('[aria-label="Expand simulator"]');
+    await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.expanded==="true"');
+    await screenshot("expanded-dark");
+    const footerMatches =
+      '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
+    await waitFor(footerMatches);
+    await evaluate("window.setDark(false)");
+    await waitFor(footerMatches);
+    assert.equal(await evaluate("window.simulatorCalls.length"), 1, "theme changes must preserve the viewer session");
+    await screenshot("expanded-light");
+    await evaluate("window.setDark(true)");
+    await waitFor(footerMatches);
+    await click('[aria-label="Collapse simulator"]');
+    window.setContentSize(390, 500);
+    await delay(200);
+    assert.ok(
+      await evaluate(
+        '(()=>{const r=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()',
+      ),
+      "viewer fits short/narrow window",
+    );
+    await screenshot("viewer-narrow");
+    await click('[aria-label="Close simulator"]');
+    await waitFor('!document.querySelector("[data-slot=simulator-popover]") && window.simulatorClosed.length>0');
+    window.setContentSize(1000, 800);
+    await evaluate("window.setDark(false)");
+    await screenshot("composer-light");
+    await click("[data-slot=simulator-track] button");
+    await waitFor('!!document.querySelector("[data-slot=simulator-popover]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-2]")'), false, "other Chat device is excluded");
+    await screenshot("chooser-light");
+    await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Attach simulator").click()');
+    await waitFor('!!document.querySelector("[data-simulator-device=device-2]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-simulator-device=device-0]")'), false);
+    await screenshot("attach-light");
+    await click("[data-simulator-device=device-2]");
+    await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
+    assert.equal(await evaluate("window.simulatorCalls.at(-1).chatId"), "/fixture#1");
+    await click('[aria-label="Back to devices"]');
+    await click('[aria-label="Detach Other Chat device from Chat"]');
+    await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
+    console.log(
+      "PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots",
+    );
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
 }
-async function main(){
- const {createServer}=await import('vite'); const {spawn}=require('node:child_process');
- const server=await createServer({server:{host:'127.0.0.1',port:0},plugins:[{
-  name:'simulator-fixture', resolveId(id){if(id==='/__simulators_fixture.tsx')return id;},load(id){if(id==='/__simulators_fixture.tsx')return fixture;},
-  configureServer(server){server.middlewares.use(async(req,res,next)=>{if(req.url!=='/__simulators__')return next();res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/__simulators_fixture.tsx"></script></body></html>'));});}
- }]});
- try {await server.listen();const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn(require('electron'),[__filename,server.resolvedUrls.local[0]+'__simulators__'],{env,stdio:'inherit'});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>resolve(code??1));});}finally{await server.close();}
+async function main() {
+  const { createServer } = await import("vite");
+  const { spawn } = require("node:child_process");
+  const server = await createServer({
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [
+      {
+        name: "simulator-fixture",
+        resolveId(id) {
+          if (id === "/__simulators_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__simulators_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (req, res, next) => {
+            if (req.url !== "/__simulators__") return next();
+            res.setHeader("Content-Type", "text/html");
+            res.end(
+              await server.transformIndexHtml(
+                req.url,
+                '<html><body><div id="root"></div><script type="module" src="/__simulators_fixture.tsx"></script></body></html>',
+              ),
+            );
+          });
+        },
+      },
+    ],
+  });
+  try {
+    await server.listen();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(require("electron"), [__filename, server.resolvedUrls.local[0] + "__simulators__"], { env, stdio: "inherit" });
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
 }
-(process.versions.electron?browserChecks():main()).catch(error=>{console.error(error);process.exitCode=1;});
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -9,7 +9,7 @@ on:
         type: string
         required: false
   schedule:
-    - cron: '0 9 * * 1-5'
+    - cron: "0 9 * * 1-5"
 permissions:
   contents: write
 concurrency:

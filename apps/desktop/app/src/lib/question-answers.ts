@@ -47,9 +47,8 @@ export function draftAnswers(questions: AgentQuestion[], drafts: QuestionDrafts)
  * one per line under their tab labels. A typed answer to a secret question is masked.
  */
 export function answerSummary(questions: AgentQuestion[], answers: QuestionAnswers): string {
-  const shown = (question: AgentQuestion) => (answers[question.id] ?? [])
-    .map((value) => (question.secret && !question.options.some((option) => option.label === value) ? "••••••" : value))
-    .join(", ");
+  const shown = (question: AgentQuestion) =>
+    (answers[question.id] ?? []).map((value) => (question.secret && !question.options.some((option) => option.label === value) ? "••••••" : value)).join(", ");
   if (questions.length === 1) return shown(questions[0]);
   return questions.map((question, index) => `${tabLabel(question, index)}: ${shown(question)}`).join("\n");
 }

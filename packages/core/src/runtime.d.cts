@@ -1,8 +1,8 @@
-import type { AgentEvent, OpenProject } from '@milagre/shared/model';
-import type { AttentionNotice } from '@milagre/shared/attention';
-import type { KeepAwake } from './keep-awake.cjs';
-import type { Simulators } from './simulators.cjs';
-import type { Browsers } from './browsers.cjs';
+import type { AgentEvent, OpenProject } from "@milagre/shared/model";
+import type { AttentionNotice } from "@milagre/shared/attention";
+import type { KeepAwake } from "./keep-awake.cjs";
+import type { Simulators } from "./simulators.cjs";
+import type { Browsers } from "./browsers.cjs";
 /** Host-facing runtime boundary. Provider adapters remain internal to core. */
 export interface RuntimeOptions {
   dataDir: string;

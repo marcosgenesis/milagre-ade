@@ -10,11 +10,11 @@ Chromium-family browsers (Chrome, Chromium, Edge, headless Chrome) whose browser
 
 ## Capture path
 
-| Option | Result |
-| --- | --- |
-| CDP `Page.startScreencast` (chosen) | Chromium encodes JPEG frames only when the page changes. Pure Node in the daemon, no helper binary to pin, sign or download. Works for headless browsers. |
-| WebRTC, as for simulators | Needs an encoder on the host: a native addon or a hidden Chromium window per stream, plus TURN for remote phones. Browser pages are mostly still, so its continuous video buys little. |
-| Opening the URL in a phone WebView | Rejected by the issue: a separate copy has neither the session nor the page state. |
+| Option                              | Result                                                                                                                                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CDP `Page.startScreencast` (chosen) | Chromium encodes JPEG frames only when the page changes. Pure Node in the daemon, no helper binary to pin, sign or download. Works for headless browsers.                              |
+| WebRTC, as for simulators           | Needs an encoder on the host: a native addon or a hidden Chromium window per stream, plus TURN for remote phones. Browser pages are mostly still, so its continuous video buys little. |
+| Opening the URL in a phone WebView  | Rejected by the issue: a separate copy has neither the session nor the page state.                                                                                                     |
 
 Frames are pulled. A viewer asks for a frame newer than the last it showed; the host keeps only the newest frame and holds the request up to 2.5 seconds. A slow link skips intermediate frames instead of queuing them, so latency stays bounded. Frames are capped at 1280 pixels on the longer side, JPEG quality 60, and frames over 1.5 MiB are dropped.
 

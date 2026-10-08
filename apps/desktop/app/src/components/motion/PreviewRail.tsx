@@ -91,7 +91,7 @@ export function PreviewRail({
       const centeredTop = rowRect.top - rootRect.top + (rowRect.height - height) / 2;
       const top = Math.max(6, Math.min(centeredTop, rootRect.height - height - 6));
       const offset = top - centeredTop;
-      setPreviewBounds(current => current.offset === offset && current.maxHeight === maxHeight ? current : { offset, maxHeight });
+      setPreviewBounds((current) => (current.offset === offset && current.maxHeight === maxHeight ? current : { offset, maxHeight }));
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -100,92 +100,121 @@ export function PreviewRail({
     return () => observer.disconnect();
   }, [displayedId, items, itemSize, showPreview]);
 
-  const selectItem = useCallback((item: PreviewRailItem) => {
-    if (activeId === undefined) setInternalActiveId(item.id);
-    onActiveChange?.(item.id);
-    onItemSelect?.(item);
-  }, [activeId, onActiveChange, onItemSelect]);
+  const selectItem = useCallback(
+    (item: PreviewRailItem) => {
+      if (activeId === undefined) setInternalActiveId(item.id);
+      onActiveChange?.(item.id);
+      onItemSelect?.(item);
+    },
+    [activeId, onActiveChange, onItemSelect],
+  );
 
   // The scrolled content changes independently; reuse its navigation until a rail input changes.
-  const navigation = useMemo(() => <>
-      <nav
-        aria-label={label}
-        onPointerLeave={() => setHoveredId(null)}
-        style={{ gridTemplateRows: rowTemplate }}
-        className={`absolute inset-y-0 left-0 z-10 grid w-6 content-center ${railClassName}`}
-      >
-        {items.map((item, index) => {
-          const selected = item.id === selectedId;
-          const highlighted = item.id === highlightedId;
-          const distance = displayedIndex < 0 ? Number.POSITIVE_INFINITY : Math.abs(index - displayedIndex);
-          const scale = highlighted ? 1 : distance === 1 ? 0.68 : distance === 2 ? 0.44 : 0.25;
-
-          return (
-            <button
-              key={item.id}
-              data-slot="preview-rail-item"
-              type="button"
-              aria-label={item.ariaLabel ?? item.label}
-              aria-current={selected ? "location" : undefined}
-              onPointerEnter={(event) => {
-                if (event.pointerType === "mouse") setHoveredId(item.id);
-              }}
-              onPointerDown={(event) => {
-                if (event.pointerType !== "mouse") setPinnedId(item.id);
-              }}
-              onFocus={(event) => {
-                if (event.currentTarget.matches(":focus-visible")) setFocusedId(item.id);
-              }}
-              onBlur={(event) => {
-                if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocusedId(null);
-              }}
-              onClick={() => selectItem(item)}
-              style={{ height: "100%" }}
-              className="relative flex h-6 w-6 items-center justify-end text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <motion.span
-                data-slot="preview-rail-tick"
-                aria-hidden="true"
-                animate={{ scaleX: scale }}
-                transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
-                className={`block h-px w-4 origin-right bg-current ${highlighted ? "text-ink" : "text-line-strong"}`}
-              />
-            </button>
-          );
-        })}
-      </nav>
-
-      {showPreview ? (
-        <div
-          aria-hidden="true"
+  const navigation = useMemo(
+    () => (
+      <>
+        <nav
+          aria-label={label}
+          onPointerLeave={() => setHoveredId(null)}
           style={{ gridTemplateRows: rowTemplate }}
-          className={`pointer-events-none absolute inset-y-0 right-16 left-4 z-50 grid content-center ${previewSide === "after" ? "right-4 left-16" : ""} ${previewContainerClassName}`}
+          className={`absolute inset-y-0 left-0 z-10 grid w-6 content-center ${railClassName}`}
         >
-          {items.map((item) => (
-            <div key={item.id} ref={item.id === displayedId ? previewRowRef : undefined} className="relative flex min-h-0 items-center">
-              {item.id === displayedId ? (
-                <div ref={previewRef} style={{ transform: `translateY(${previewBounds.offset}px)`, maxHeight: previewBounds.maxHeight }} className={`w-full max-w-sm overflow-hidden ${previewSide === "before" ? "ml-auto" : ""} ${previewClassName}`}>
-                  <motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
-                    <AnimatePresence mode="wait" initial={false}>
-                      <motion.div
-                        key={item.id}
-                        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }}
-                        animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-                        exit={reduce ? { opacity: 0 } : { opacity: 0, y: -2, filter: "blur(4px)", transition: { duration: 0.12, ease: EASE_OUT } }}
-                        transition={{ duration: reduce ? 0 : 0.18, ease: EASE_OUT }}
-                      >
-                        {renderPreview ? renderPreview(item) : <DefaultPreview item={item} />}
-                      </motion.div>
-                    </AnimatePresence>
-                  </motion.div>
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-  </>, [items, label, selectedId, highlightedId, displayedIndex, railClassName, rowTemplate, reduce, selectItem,
-    showPreview, previewSide, previewContainerClassName, displayedId, previewBounds, previewClassName, uid, renderPreview]);
+          {items.map((item, index) => {
+            const selected = item.id === selectedId;
+            const highlighted = item.id === highlightedId;
+            const distance = displayedIndex < 0 ? Number.POSITIVE_INFINITY : Math.abs(index - displayedIndex);
+            const scale = highlighted ? 1 : distance === 1 ? 0.68 : distance === 2 ? 0.44 : 0.25;
+
+            return (
+              <button
+                key={item.id}
+                data-slot="preview-rail-item"
+                type="button"
+                aria-label={item.ariaLabel ?? item.label}
+                aria-current={selected ? "location" : undefined}
+                onPointerEnter={(event) => {
+                  if (event.pointerType === "mouse") setHoveredId(item.id);
+                }}
+                onPointerDown={(event) => {
+                  if (event.pointerType !== "mouse") setPinnedId(item.id);
+                }}
+                onFocus={(event) => {
+                  if (event.currentTarget.matches(":focus-visible")) setFocusedId(item.id);
+                }}
+                onBlur={(event) => {
+                  if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocusedId(null);
+                }}
+                onClick={() => selectItem(item)}
+                style={{ height: "100%" }}
+                className="relative flex h-6 w-6 items-center justify-end text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <motion.span
+                  data-slot="preview-rail-tick"
+                  aria-hidden="true"
+                  animate={{ scaleX: scale }}
+                  transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
+                  className={`block h-px w-4 origin-right bg-current ${highlighted ? "text-ink" : "text-line-strong"}`}
+                />
+              </button>
+            );
+          })}
+        </nav>
+
+        {showPreview ? (
+          <div
+            aria-hidden="true"
+            style={{ gridTemplateRows: rowTemplate }}
+            className={`pointer-events-none absolute inset-y-0 right-16 left-4 z-50 grid content-center ${previewSide === "after" ? "right-4 left-16" : ""} ${previewContainerClassName}`}
+          >
+            {items.map((item) => (
+              <div key={item.id} ref={item.id === displayedId ? previewRowRef : undefined} className="relative flex min-h-0 items-center">
+                {item.id === displayedId ? (
+                  <div
+                    ref={previewRef}
+                    style={{ transform: `translateY(${previewBounds.offset}px)`, maxHeight: previewBounds.maxHeight }}
+                    className={`w-full max-w-sm overflow-hidden ${previewSide === "before" ? "ml-auto" : ""} ${previewClassName}`}
+                  >
+                    <motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={item.id}
+                          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }}
+                          animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
+                          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -2, filter: "blur(4px)", transition: { duration: 0.12, ease: EASE_OUT } }}
+                          transition={{ duration: reduce ? 0 : 0.18, ease: EASE_OUT }}
+                        >
+                          {renderPreview ? renderPreview(item) : <DefaultPreview item={item} />}
+                        </motion.div>
+                      </AnimatePresence>
+                    </motion.div>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </>
+    ),
+    [
+      items,
+      label,
+      selectedId,
+      highlightedId,
+      displayedIndex,
+      railClassName,
+      rowTemplate,
+      reduce,
+      selectItem,
+      showPreview,
+      previewSide,
+      previewContainerClassName,
+      displayedId,
+      previewBounds,
+      previewClassName,
+      uid,
+      renderPreview,
+    ],
+  );
 
   return (
     <motion.div ref={rootRef} layoutRoot className={`isolate relative flex w-full ${className}`}>

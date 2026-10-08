@@ -41,12 +41,22 @@ test("the question is the last sentence of its line", () => {
 
 test("without a marker nothing is recommended", () => {
   const result = parseRecommendation("Which one?\n1. A\n2. B");
-  assert.deepEqual(result?.options.map((option) => option.recommended), [false, false]);
+  assert.deepEqual(
+    result?.options.map((option) => option.recommended),
+    [false, false],
+  );
 });
 
 test("marker forms are recognised and only the first counts", () => {
   const result = parseRecommendation("Which?\n1. Alpha - Recommended\n2. Recommended: Beta\n3. Gamma, recommended");
-  assert.deepEqual(result?.options.map((option) => [option.label, option.recommended]), [["Alpha", true], ["Beta", false], ["Gamma", false]]);
+  assert.deepEqual(
+    result?.options.map((option) => [option.label, option.recommended]),
+    [
+      ["Alpha", true],
+      ["Beta", false],
+      ["Gamma", false],
+    ],
+  );
 });
 
 test("text after the list is not a card", () => {
@@ -82,5 +92,8 @@ test("a list inside a code fence is not a card", () => {
 
 test("1) numbering works", () => {
   const result = parseRecommendation("Which?\n1) A\n2) B");
-  assert.deepEqual(result?.options.map((option) => option.label), ["A", "B"]);
+  assert.deepEqual(
+    result?.options.map((option) => option.label),
+    ["A", "B"],
+  );
 });

@@ -59,7 +59,11 @@ function Content({ line, decoration }: { line: DiffLine; decoration?: Decorated 
       if (from === to) continue;
       const changed = words.some(([a, b]) => from >= a && to <= b);
       pieces.push(
-        <span key={`${start}-${from}`} className={`${decoration?.tokens ? "code-token" : ""} ${changed ? wordClass : ""}`} style={token.htmlStyle as CSSProperties | undefined}>
+        <span
+          key={`${start}-${from}`}
+          className={`${decoration?.tokens ? "code-token" : ""} ${changed ? wordClass : ""}`}
+          style={token.htmlStyle as CSSProperties | undefined}
+        >
           {token.content.slice(from - start, to - start)}
         </span>,
       );
@@ -77,11 +81,19 @@ function Gutter({ value }: { value?: number }) {
 }
 
 function HunkHeader({ hunk }: { hunk: DiffHunk }) {
-  return <div data-diff-hunk className="h-6 select-none truncate bg-inset px-3 text-[11px] leading-6 text-ink-3">{hunk.header}</div>;
+  return (
+    <div data-diff-hunk className="h-6 select-none truncate bg-inset px-3 text-[11px] leading-6 text-ink-3">
+      {hunk.header}
+    </div>
+  );
 }
 
 function Text({ line, decoration, wrap }: { line: DiffLine; decoration?: Decorated; wrap: boolean }) {
-  return <span className={`min-w-0 flex-1 pr-3 ${wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"}`}><Content line={line} decoration={decoration} /></span>;
+  return (
+    <span className={`min-w-0 flex-1 pr-3 ${wrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"}`}>
+      <Content line={line} decoration={decoration} />
+    </span>
+  );
 }
 
 /** What the rows need to take part in commenting: which are selected, what goes under them, and the handlers. */
@@ -96,10 +108,20 @@ function AddButton({ commenting, hunk, line, side }: { commenting: Commenting; h
   const target = { path: commenting.path, hunk, line, side };
   return (
     // Mouse-down starts the range so the drag can follow; a keyboard activation (detail 0) is a plain one-line pick.
-    <button type="button" aria-label="Comment on this line" data-diff-add
-      onMouseDown={(event) => { if (event.button !== 0) return; event.preventDefault(); commenting.actions.start(target, event.shiftKey, true); }}
-      onClick={(event) => { if (event.detail === 0) commenting.actions.start(target, event.shiftKey, false); }}
-      className="absolute top-0.5 left-1 flex size-4 items-center justify-center rounded-chip bg-ink text-surface opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100">
+    <button
+      type="button"
+      aria-label="Comment on this line"
+      data-diff-add
+      onMouseDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        commenting.actions.start(target, event.shiftKey, true);
+      }}
+      onClick={(event) => {
+        if (event.detail === 0) commenting.actions.start(target, event.shiftKey, false);
+      }}
+      className="absolute top-0.5 left-1 flex size-4 items-center justify-center rounded-chip bg-ink text-surface opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
+    >
       <HugeiconsIcon icon={Add01Icon} size={11} strokeWidth={2.4} color="currentColor" />
     </button>
   );
@@ -114,7 +136,17 @@ const Selected = () => (
   </>
 );
 
-function Unified({ hunks, decorations, wrap, commenting }: { hunks: DiffHunk[]; decorations: Map<DiffLine, Decorated>; wrap: boolean; commenting: Commenting }) {
+function Unified({
+  hunks,
+  decorations,
+  wrap,
+  commenting,
+}: {
+  hunks: DiffHunk[];
+  decorations: Map<DiffLine, Decorated>;
+  wrap: boolean;
+  commenting: Commenting;
+}) {
   return (
     <div className="w-max min-w-full">
       {hunks.map((hunk, index) => (
@@ -124,8 +156,12 @@ function Unified({ hunks, decorations, wrap, commenting }: { hunks: DiffHunk[]; 
             const selected = commenting.selected(index, lineIndex);
             return (
               <Fragment key={lineIndex}>
-                <div data-diff-row={line.kind} data-selected={selected ? "" : undefined} onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk: index, line: lineIndex })}
-                  className={`group/row relative isolate flex min-h-5 ${TINT[line.kind]}`}>
+                <div
+                  data-diff-row={line.kind}
+                  data-selected={selected ? "" : undefined}
+                  onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk: index, line: lineIndex })}
+                  className={`group/row relative isolate flex min-h-5 ${TINT[line.kind]}`}
+                >
                   <Gutter value={line.oldNumber} />
                   <Gutter value={line.newNumber} />
                   <span className={`w-4 shrink-0 select-none text-center ${MARKER_COLOR[line.kind]}`}>{MARKER[line.kind]}</span>
@@ -143,14 +179,32 @@ function Unified({ hunks, decorations, wrap, commenting }: { hunks: DiffHunk[]; 
   );
 }
 
-function Half({ line, side, decoration, commenting, hunk, index }: { line?: DiffLine; side: "left" | "right"; decoration?: Decorated; commenting: Commenting; hunk: number; index: number }) {
+function Half({
+  line,
+  side,
+  decoration,
+  commenting,
+  hunk,
+  index,
+}: {
+  line?: DiffLine;
+  side: "left" | "right";
+  decoration?: Decorated;
+  commenting: Commenting;
+  hunk: number;
+  index: number;
+}) {
   const border = side === "left" ? "border-r border-line" : "";
   if (!line) return <div data-diff-filler className={`min-h-5 bg-inset ${border}`} />;
   const column = side === "left" ? "old" : "new";
   const selected = commenting.selected(hunk, index, column);
   return (
-    <div data-diff-cell={side} data-selected={selected ? "" : undefined} onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk, line: index, side: column })}
-      className={`group/row relative isolate flex min-h-5 min-w-0 ${TINT[line.kind]} ${border}`}>
+    <div
+      data-diff-cell={side}
+      data-selected={selected ? "" : undefined}
+      onMouseOver={() => commenting.actions.over({ path: commenting.path, hunk, line: index, side: column })}
+      className={`group/row relative isolate flex min-h-5 min-w-0 ${TINT[line.kind]} ${border}`}
+    >
       <Gutter value={side === "left" ? line.oldNumber : line.newNumber} />
       <span className={`w-4 shrink-0 select-none text-center ${MARKER_COLOR[line.kind]}`}>{MARKER[line.kind]}</span>
       <Text line={line} decoration={decoration} wrap />
@@ -168,7 +222,9 @@ function Split({ hunks, decorations, commenting }: { hunks: DiffHunk[]; decorati
         const indexes = new Map(hunk.lines.map((line, lineIndex) => [line, lineIndex]));
         return (
           <Fragment key={index}>
-            <div className="col-span-2"><HunkHeader hunk={hunk} /></div>
+            <div className="col-span-2">
+              <HunkHeader hunk={hunk} />
+            </div>
             {splitRows(hunk).map((row, rowIndex) => {
               const left = row.left && indexes.get(row.left);
               const right = row.right && indexes.get(row.right);
@@ -176,9 +232,23 @@ function Split({ hunks, decorations, commenting }: { hunks: DiffHunk[]; decorati
               return (
                 <Fragment key={rowIndex}>
                   <Half line={row.left} side="left" decoration={row.left && decorations.get(row.left)} commenting={commenting} hunk={index} index={left ?? 0} />
-                  <Half line={row.right} side="right" decoration={row.right && decorations.get(row.right)} commenting={commenting} hunk={index} index={right ?? 0} />
+                  <Half
+                    line={row.right}
+                    side="right"
+                    decoration={row.right && decorations.get(row.right)}
+                    commenting={commenting}
+                    hunk={index}
+                    index={right ?? 0}
+                  />
                   {/* A context row is one line in both halves; its slot comes once. */}
-                  {slots.map((slot, at) => slot && <div key={at} className="col-span-2">{slot}</div>)}
+                  {slots.map(
+                    (slot, at) =>
+                      slot && (
+                        <div key={at} className="col-span-2">
+                          {slot}
+                        </div>
+                      ),
+                  )}
                 </Fragment>
               );
             })}
@@ -190,10 +260,28 @@ function Split({ hunks, decorations, commenting }: { hunks: DiffHunk[]; decorati
 }
 
 function Message({ children, action }: { children: ReactNode; action?: ReactNode }) {
-  return <div className="flex items-center justify-center gap-3 px-4 py-6 font-sans text-[12px] text-ink-3">{children}{action}</div>;
+  return (
+    <div className="flex items-center justify-center gap-3 px-4 py-6 font-sans text-[12px] text-ink-3">
+      {children}
+      {action}
+    </div>
+  );
 }
 
-export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comments, draft, draftText, actions, collapsed, onToggle, onVisible, onShowLarge }: {
+export const DiffFile = memo(function DiffFile({
+  file,
+  patch,
+  layout,
+  wrap,
+  comments,
+  draft,
+  draftText,
+  actions,
+  collapsed,
+  onToggle,
+  onVisible,
+  onShowLarge,
+}: {
   file: DiffFileEntry;
   patch: PatchState | undefined;
   layout: DiffLayout;
@@ -234,8 +322,15 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
   useEffect(() => {
     if (!language || languageReady || hunks.length === 0) return;
     let live = true;
-    loadLanguage(language).then(() => { if (live) setLoadedCount((count) => count + 1); }, () => {});
-    return () => { live = false; };
+    loadLanguage(language).then(
+      () => {
+        if (live) setLoadedCount((count) => count + 1);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
   }, [language, languageReady, hunks.length]);
 
   const decorations = useMemo(() => decorate(hunks, file.path, languageReady), [hunks, file.path, languageReady]);
@@ -249,7 +344,10 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
     const stale: CommentView[] = [];
     for (const comment of comments) {
       const found = comment.outdated ? undefined : locateComment(comment, hunks);
-      if (!found) { stale.push(comment); continue; }
+      if (!found) {
+        stale.push(comment);
+        continue;
+      }
       const key = `${found.hunk}:${found.lines[found.lines.length - 1]}`;
       placed.set(key, [...(placed.get(key) ?? []), comment]);
     }
@@ -263,7 +361,10 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
   let editorAt: string | undefined;
   if (draft && hunk && !draft.dragging) {
     for (let index = hi; index >= lo; index--) {
-      if (!draft.side || onSide(hunk.lines[index], draft.side)) { editorAt = `${draft.hunk}:${index}`; break; }
+      if (!draft.side || onSide(hunk.lines[index], draft.side)) {
+        editorAt = `${draft.hunk}:${index}`;
+        break;
+      }
     }
   }
   const commenting: Commenting = {
@@ -278,12 +379,26 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
       if (!cards.length && !editing) return null;
       return (
         <CommentSlot>
-          {cards.map((comment) => <CommentCard key={comment.id} comment={comment} onDelete={() => actions.remove(comment.id)} onEdit={() => {
-            const found = locateComment(comment, hunks);
-            if (found) actions.edit(comment, found.hunk, found.lines, layout === "split" ? comment.side : undefined);
-          }} />)}
-          {editing && <CommentEditor text={draftText} onCancel={actions.cancel}
-            onSave={(text) => actions.save(selectionFromRows(hunks[editing.hunk], editing.anchor, editing.head, editing.side), file.path, text, editing.editing)} />}
+          {cards.map((comment) => (
+            <CommentCard
+              key={comment.id}
+              comment={comment}
+              onDelete={() => actions.remove(comment.id)}
+              onEdit={() => {
+                const found = locateComment(comment, hunks);
+                if (found) actions.edit(comment, found.hunk, found.lines, layout === "split" ? comment.side : undefined);
+              }}
+            />
+          ))}
+          {editing && (
+            <CommentEditor
+              text={draftText}
+              onCancel={actions.cancel}
+              onSave={(text) =>
+                actions.save(selectionFromRows(hunks[editing.hunk], editing.anchor, editing.head, editing.side), file.path, text, editing.editing)
+              }
+            />
+          )}
         </CommentSlot>
       );
     },
@@ -291,18 +406,45 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
 
   let body: ReactNode;
   if (file.binary) body = <Message>Binary file</Message>;
-  else if (!patch && isLarge(file)) body = <Message action={<button type="button" data-diff-show onClick={() => onShowLarge(file)} className="rounded-control border border-line px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-hover">Show diff</button>}>This diff is large</Message>;
+  else if (!patch && isLarge(file))
+    body = (
+      <Message
+        action={
+          <button
+            type="button"
+            data-diff-show
+            onClick={() => onShowLarge(file)}
+            className="rounded-control border border-line px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-hover"
+          >
+            Show diff
+          </button>
+        }
+      >
+        This diff is large
+      </Message>
+    );
   else if (!patch || patch.status === "loading") body = <Message>Loading…</Message>;
   else if (patch.status === "error") body = <Message>{patch.message}</Message>;
   else if (patch.binary) body = <Message>Binary file</Message>;
   else if (patch.tooLarge) body = <Message>This file's diff is too large to show</Message>;
   else if (hunks.length === 0) body = <Message>{file.status === "renamed" ? `Renamed from ${file.oldPath}` : "No content changes"}</Message>;
-  else body = (
-    <>
-      {layout === "split" ? <Split hunks={hunks} decorations={decorations} commenting={commenting} /> : <Unified hunks={hunks} decorations={decorations} wrap={wrap} commenting={commenting} />}
-      {stale.length > 0 && <CommentSlot>{stale.map((comment) => <CommentCard key={comment.id} comment={comment} onDelete={() => actions.remove(comment.id)} />)}</CommentSlot>}
-    </>
-  );
+  else
+    body = (
+      <>
+        {layout === "split" ? (
+          <Split hunks={hunks} decorations={decorations} commenting={commenting} />
+        ) : (
+          <Unified hunks={hunks} decorations={decorations} wrap={wrap} commenting={commenting} />
+        )}
+        {stale.length > 0 && (
+          <CommentSlot>
+            {stale.map((comment) => (
+              <CommentCard key={comment.id} comment={comment} onDelete={() => actions.remove(comment.id)} />
+            ))}
+          </CommentSlot>
+        )}
+      </>
+    );
 
   return (
     <section ref={ref} data-diff-file={file.path} className="rounded-card border border-line bg-surface">
@@ -311,18 +453,35 @@ export const DiffFile = memo(function DiffFile({ file, patch, layout, wrap, comm
           wrapper, under the header; inside the header it would paint over the header's own background and border. */}
       <div className={`sticky top-0 z-10 -mx-px -mt-px ${collapsed ? "-mb-px" : ""}`}>
         <span aria-hidden className="absolute inset-x-0 top-0 h-[var(--radius-card)] bg-page" />
-        <header className={`relative flex h-9 items-center gap-2 border border-line bg-surface px-3 text-[12.5px] ${collapsed ? "rounded-card" : "rounded-t-card"}`}>
-          <button type="button" aria-label={collapsed ? "Expand file" : "Collapse file"} aria-expanded={!collapsed} data-diff-collapse onClick={() => onToggle(file.path)} className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-chip text-ink-3 hover:bg-hover hover:text-ink">
+        <header
+          className={`relative flex h-9 items-center gap-2 border border-line bg-surface px-3 text-[12.5px] ${collapsed ? "rounded-card" : "rounded-t-card"}`}
+        >
+          <button
+            type="button"
+            aria-label={collapsed ? "Expand file" : "Collapse file"}
+            aria-expanded={!collapsed}
+            data-diff-collapse
+            onClick={() => onToggle(file.path)}
+            className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-chip text-ink-3 hover:bg-hover hover:text-ink"
+          >
             <HugeiconsIcon icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" />
           </button>
           <span className="shrink-0 font-medium text-ink">{name}</span>
-          {folder && <span className="min-w-0 flex-1 truncate text-ink-3" dir="rtl"><bdi>{folder}</bdi></span>}
+          {folder && (
+            <span className="min-w-0 flex-1 truncate text-ink-3" dir="rtl">
+              <bdi>{folder}</bdi>
+            </span>
+          )}
           {!folder && <span className="flex-1" />}
           {!file.binary && <Counts added={file.added} removed={file.removed} />}
           <StatusBox status={file.status} />
         </header>
       </div>
-      {!collapsed && <div className="overflow-x-auto rounded-b-card font-mono text-[12px] leading-5 [container-type:inline-size]" data-diff-body>{body}</div>}
+      {!collapsed && (
+        <div className="overflow-x-auto rounded-b-card font-mono text-[12px] leading-5 [container-type:inline-size]" data-diff-body>
+          {body}
+        </div>
+      )}
     </section>
   );
 });

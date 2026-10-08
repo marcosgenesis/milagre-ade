@@ -1,36 +1,54 @@
-const { randomBytes } = require('node:crypto');
+const { randomBytes } = require("node:crypto");
 
 // A browser belongs to a Chat on evidence only: its browser process descends from that Chat's agent
 // process (lineage), or the user attached it to the Chat. Names, titles and URLs never decide it.
 const TARGET = /^([A-Za-z0-9-]{8,64}):([A-Fa-f0-9]{32})$/;
 const BROWSER = /^[A-Za-z0-9-]{8,64}$/;
-const BUTTONS = new Set(['left', 'middle', 'right', 'none']);
-const COMMANDS = new Set(['selectAll', 'copy', 'cut', 'paste', 'undo', 'redo']);
-const NAVIGATION = new Set(['back', 'forward', 'reload']);
+const BUTTONS = new Set(["left", "middle", "right", "none"]);
+const COMMANDS = new Set(["selectAll", "copy", "cut", "paste", "undo", "redo"]);
+const NAVIGATION = new Set(["back", "forward", "reload"]);
 const MAX_ATTACHED = 16;
 
-function identifier() { return randomBytes(24).toString('base64url'); }
-const unit = value => Number.isFinite(value) && value >= 0 && value <= 1;
-const modifiers = value => value === undefined || (Number.isInteger(value) && value >= 0 && value <= 15);
+function identifier() {
+  return randomBytes(24).toString("base64url");
+}
+const unit = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+const modifiers = (value) => value === undefined || (Number.isInteger(value) && value >= 0 && value <= 15);
 function validEvent(event) {
-  if (!event || typeof event !== 'object' || Array.isArray(event)) return false;
+  if (!event || typeof event !== "object" || Array.isArray(event)) return false;
   switch (event.kind) {
-    case 'mouse': {
-      if (!['down', 'move', 'up'].includes(event.phase) || !unit(event.x) || !unit(event.y) || !modifiers(event.modifiers)) return false;
-      const button = event.button ?? 'none';
-      if (!BUTTONS.has(button) || (event.phase !== 'move' && button === 'none')) return false;
+    case "mouse": {
+      if (!["down", "move", "up"].includes(event.phase) || !unit(event.x) || !unit(event.y) || !modifiers(event.modifiers)) return false;
+      const button = event.button ?? "none";
+      if (!BUTTONS.has(button) || (event.phase !== "move" && button === "none")) return false;
       return event.clickCount === undefined || (Number.isInteger(event.clickCount) && event.clickCount >= 0 && event.clickCount <= 3);
     }
-    case 'wheel':
-      return unit(event.x) && unit(event.y) && modifiers(event.modifiers) && [event.deltaX, event.deltaY].every(delta => Number.isFinite(delta) && Math.abs(delta) <= 10000);
-    case 'key':
-      return ['down', 'up'].includes(event.phase) && typeof event.key === 'string' && event.key.length >= 1 && event.key.length <= 32 &&
-        typeof event.code === 'string' && /^[A-Za-z0-9]{0,32}$/.test(event.code) && Number.isInteger(event.keyCode) && event.keyCode >= 0 && event.keyCode <= 255 &&
-        (event.text === undefined || (typeof event.text === 'string' && event.text.length >= 1 && event.text.length <= 8)) && modifiers(event.modifiers) &&
-        (event.commands === undefined || (Array.isArray(event.commands) && event.commands.length <= 4 && event.commands.every(command => COMMANDS.has(command))));
-    case 'text':
-      return typeof event.text === 'string' && event.text.length >= 1 && event.text.length <= 1024;
-    case 'navigate':
+    case "wheel":
+      return (
+        unit(event.x) &&
+        unit(event.y) &&
+        modifiers(event.modifiers) &&
+        [event.deltaX, event.deltaY].every((delta) => Number.isFinite(delta) && Math.abs(delta) <= 10000)
+      );
+    case "key":
+      return (
+        ["down", "up"].includes(event.phase) &&
+        typeof event.key === "string" &&
+        event.key.length >= 1 &&
+        event.key.length <= 32 &&
+        typeof event.code === "string" &&
+        /^[A-Za-z0-9]{0,32}$/.test(event.code) &&
+        Number.isInteger(event.keyCode) &&
+        event.keyCode >= 0 &&
+        event.keyCode <= 255 &&
+        (event.text === undefined || (typeof event.text === "string" && event.text.length >= 1 && event.text.length <= 8)) &&
+        modifiers(event.modifiers) &&
+        (event.commands === undefined ||
+          (Array.isArray(event.commands) && event.commands.length <= 4 && event.commands.every((command) => COMMANDS.has(command))))
+      );
+    case "text":
+      return typeof event.text === "string" && event.text.length >= 1 && event.text.length <= 1024;
+    case "navigate":
       return NAVIGATION.has(event.action);
     default:
       return false;
@@ -40,52 +58,87 @@ function validEvent(event) {
 function cleanEvent(event) {
   const extra = event.modifiers ? { modifiers: event.modifiers } : {};
   switch (event.kind) {
-    case 'mouse': return { kind: 'mouse', phase: event.phase, x: event.x, y: event.y, button: event.button ?? 'none', clickCount: event.clickCount ?? (event.phase === 'move' ? 0 : 1), ...extra };
-    case 'wheel': return { kind: 'wheel', x: event.x, y: event.y, deltaX: event.deltaX, deltaY: event.deltaY, ...extra };
-    case 'key': return { kind: 'key', phase: event.phase, key: event.key, code: event.code, keyCode: event.keyCode, ...(event.phase === 'down' && event.text !== undefined ? { text: event.text } : {}), ...extra, ...(event.phase === 'down' && event.commands?.length ? { commands: [...event.commands] } : {}) };
-    case 'text': return { kind: 'text', text: event.text };
-    default: return { kind: 'navigate', action: event.action };
+    case "mouse":
+      return {
+        kind: "mouse",
+        phase: event.phase,
+        x: event.x,
+        y: event.y,
+        button: event.button ?? "none",
+        clickCount: event.clickCount ?? (event.phase === "move" ? 0 : 1),
+        ...extra,
+      };
+    case "wheel":
+      return { kind: "wheel", x: event.x, y: event.y, deltaX: event.deltaX, deltaY: event.deltaY, ...extra };
+    case "key":
+      return {
+        kind: "key",
+        phase: event.phase,
+        key: event.key,
+        code: event.code,
+        keyCode: event.keyCode,
+        ...(event.phase === "down" && event.text !== undefined ? { text: event.text } : {}),
+        ...extra,
+        ...(event.phase === "down" && event.commands?.length ? { commands: [...event.commands] } : {}),
+      };
+    case "text":
+      return { kind: "text", text: event.text };
+    default:
+      return { kind: "navigate", action: event.action };
   }
 }
 function requireChat(request) {
   const chatId = request?.chatId;
-  if (typeof chatId !== 'string' || !chatId || chatId.length > 1024) throw new Error('A Chat is required to list its browsers.');
+  if (typeof chatId !== "string" || !chatId || chatId.length > 1024) throw new Error("A Chat is required to list its browsers.");
   return chatId;
 }
 
 /** One host owns browser captures; viewer capabilities belong to a trusted transport connection. */
 function createBrowsers(options = {}) {
-  const supported = options.supported ?? (process.platform === 'darwin' || process.platform === 'linux');
-  const adapter = options.adapter ?? require('./browsers-cdp.cjs').createBrowserAdapter(options);
+  const supported = options.supported ?? (process.platform === "darwin" || process.platform === "linux");
+  const adapter = options.adapter ?? require("./browsers-cdp.cjs").createBrowserAdapter(options);
   const roots = options.roots ?? (() => new Map());
 
   const now = options.now ?? Date.now;
   const ttl = options.viewerTtlMs ?? 30000;
   const maxViewers = options.maxViewers ?? 8;
   const frameWaitMs = options.frameWaitMs ?? 2500;
-  const owners = new Map(), viewers = new Map(), captures = new Map();
+  const owners = new Map(),
+    viewers = new Map(),
+    captures = new Map();
   // browserId -> { chatId, pid }: the Chat whose agent started it, kept until that browser exits.
   const lineage = new Map();
   const attachments = new Map();
-  let closed = false, queue = Promise.resolve(), pending = 0, cache = null, discovering = null;
+  let closed = false,
+    queue = Promise.resolve(),
+    pending = 0,
+    cache = null,
+    discovering = null;
 
   function serial(fn, allowClosed = false) {
-    if (closed && !allowClosed) return Promise.reject(new Error('Browser service is closed.'));
-    if (pending >= 128 && !allowClosed) return Promise.reject(new Error('Browser is busy. Retry after pending commands finish.'));
+    if (closed && !allowClosed) return Promise.reject(new Error("Browser service is closed."));
+    if (pending >= 128 && !allowClosed) return Promise.reject(new Error("Browser is busy. Retry after pending commands finish."));
     pending++;
     const result = queue.then(fn);
-    queue = result.catch(() => {}).finally(() => { pending--; });
+    queue = result
+      .catch(() => {})
+      .finally(() => {
+        pending--;
+      });
     return result;
   }
   function ownerState(owner) {
-    if (typeof owner !== 'string' || !owner || owner.length > 1024) throw new Error('A trusted browser owner is required.');
+    if (typeof owner !== "string" || !owner || owner.length > 1024) throw new Error("A trusted browser owner is required.");
     let state = owners.get(owner);
-    if (!state) { state = { dead: false, count: 0 }; owners.set(owner, state); }
+    if (!state) {
+      state = { dead: false, count: 0 };
+      owners.set(owner, state);
+    }
     return state;
   }
   function requireViewer(request, owner) {
     const v = viewers.get(request?.viewerId);
-    if (!v || v.owner !== owner || v.ownerState.dead) throw new Error('Unknown browser viewer or owner. Reopen the viewer.');
+    if (!v || v.owner !== owner || v.ownerState.dead) throw new Error("Unknown browser viewer or owner. Reopen the viewer.");
     return v;
   }
 
@@ -95,9 +148,9 @@ function createBrowsers(options = {}) {
     discovering ??= (async () => {
       try {
         const world = await adapter.discover();
-        const parents = new Map(world.processes.map(row => [row.pid, row.ppid]));
+        const parents = new Map(world.processes.map((row) => [row.pid, row.ppid]));
         const agents = new Map([...roots()].map(([chatId, root]) => [root.pid, chatId]));
-        const present = new Map(world.browsers.map(browser => [browser.id, browser]));
+        const present = new Map(world.browsers.map((browser) => [browser.id, browser]));
         for (const [id, known] of lineage) if (present.get(id)?.pid !== known.pid) lineage.delete(id);
         for (const [chatId, set] of attachments) {
           for (const id of set) if (!present.has(id)) set.delete(id);
@@ -115,17 +168,28 @@ function createBrowsers(options = {}) {
         }
         cache = { at: now(), world };
         return world;
-      } finally { discovering = null; }
+      } finally {
+        discovering = null;
+      }
     })();
     return discovering;
   }
   function view(world, chatId) {
-    const targets = [], others = [];
+    const targets = [],
+      others = [];
     for (const browser of world.browsers) {
       const owner = lineage.get(browser.id)?.chatId;
       if (owner === chatId || attachments.get(chatId)?.has(browser.id)) {
-        for (const page of browser.pages) targets.push({ id: `${browser.id}:${page.id}`, title: String(page.title ?? '').slice(0, 300), url: String(page.url ?? '').slice(0, 2048), browser: browser.product, source: owner === chatId ? 'agent' : 'attached' });
-      } else if (!owner) others.push({ id: browser.id, browser: browser.product, pages: browser.pages.length, title: String(browser.pages[0]?.title ?? '').slice(0, 300) });
+        for (const page of browser.pages)
+          targets.push({
+            id: `${browser.id}:${page.id}`,
+            title: String(page.title ?? "").slice(0, 300),
+            url: String(page.url ?? "").slice(0, 2048),
+            browser: browser.product,
+            source: owner === chatId ? "agent" : "attached",
+          });
+      } else if (!owner)
+        others.push({ id: browser.id, browser: browser.product, pages: browser.pages.length, title: String(browser.pages[0]?.title ?? "").slice(0, 300) });
     }
     return { supported: true, targets, others };
   }
@@ -133,8 +197,16 @@ function createBrowsers(options = {}) {
   function releaseHeld(capture) {
     const mouse = capture.mouse;
     capture.mouse = null;
-    if (mouse) { try { capture.channel.send({ kind: 'mouse', phase: 'up', ...mouse }); } catch {} }
-    for (const key of capture.keys.values()) { try { capture.channel.send({ kind: 'key', phase: 'up', ...key }); } catch {} }
+    if (mouse) {
+      try {
+        capture.channel.send({ kind: "mouse", phase: "up", ...mouse });
+      } catch {}
+    }
+    for (const key of capture.keys.values()) {
+      try {
+        capture.channel.send({ kind: "key", phase: "up", ...key });
+      } catch {}
+    }
     capture.keys.clear();
   }
   function revoke(capture) {
@@ -145,17 +217,29 @@ function createBrowsers(options = {}) {
   function metadata(capture) {
     const state = capture.channel.status();
     // Input normalized to an old viewport must not land in a resized one.
-    const signature = `${state.width}:${state.height}:${!!state.ready}:${state.error ?? ''}`;
+    const signature = `${state.width}:${state.height}:${!!state.ready}:${state.error ?? ""}`;
     if (capture.signature !== signature) {
-      if (capture.signature !== undefined) { releaseHeld(capture); capture.generation++; }
+      if (capture.signature !== undefined) {
+        releaseHeld(capture);
+        capture.generation++;
+      }
       capture.signature = signature;
     }
     return state;
   }
   function statusOf(v) {
-    const capture = v.capture, state = metadata(capture);
+    const capture = v.capture,
+      state = metadata(capture);
     if (state.error) throw new Error(state.error);
-    return { generation: capture.generation, controlling: capture.controller === v.id, ready: !!state.ready, title: state.title ?? '', url: state.url ?? '', canGoBack: !!state.canGoBack, canGoForward: !!state.canGoForward };
+    return {
+      generation: capture.generation,
+      controlling: capture.controller === v.id,
+      ready: !!state.ready,
+      title: state.title ?? "",
+      url: state.url ?? "",
+      canGoBack: !!state.canGoBack,
+      canGoForward: !!state.canGoForward,
+    };
   }
   async function remove(v) {
     if (!viewers.delete(v.id)) return;
@@ -175,31 +259,45 @@ function createBrowsers(options = {}) {
   async function expire() {
     for (const v of viewers.values()) if (now() - v.heartbeat >= ttl || v.ownerState.dead) await remove(v);
   }
-  async function active(request, owner) { await expire(); return requireViewer(request, owner); }
-  const expiryTimer = setInterval(() => { if (!closed) void serial(expire).catch(() => {}); }, Math.min(5000, ttl));
+  async function active(request, owner) {
+    await expire();
+    return requireViewer(request, owner);
+  }
+  const expiryTimer = setInterval(
+    () => {
+      if (!closed) void serial(expire).catch(() => {});
+    },
+    Math.min(5000, ttl),
+  );
   expiryTimer.unref();
   // Lineage must be seen while the agent's process tree still holds the browser, not only when someone opens the list.
-  const lineageTimer = setInterval(() => { if (!closed && supported && roots().size) void snapshot().catch(() => {}); }, options.lineagePollMs ?? 5000);
+  const lineageTimer = setInterval(() => {
+    if (!closed && supported && roots().size) void snapshot().catch(() => {});
+  }, options.lineagePollMs ?? 5000);
   lineageTimer.unref();
 
   return {
     async list(request) {
-      if (closed) throw new Error('Browser service is closed.');
+      if (closed) throw new Error("Browser service is closed.");
       const chatId = requireChat(request);
       if (!supported) return { supported: false, targets: [], others: [] };
-      try { return view(await snapshot(), chatId); }
-      catch { return { supported: true, targets: [], others: [], error: 'Could not list browsers on this computer.' }; }
+      try {
+        return view(await snapshot(), chatId);
+      } catch {
+        return { supported: true, targets: [], others: [], error: "Could not list browsers on this computer." };
+      }
     },
     async attach(request) {
-      if (closed) throw new Error('Browser service is closed.');
+      if (closed) throw new Error("Browser service is closed.");
       const chatId = requireChat(request);
-      if (!supported) throw new Error('Browser viewing is not supported on this computer.');
+      if (!supported) throw new Error("Browser viewing is not supported on this computer.");
       const world = await snapshot();
-      const browser = typeof request.browserId === 'string' && BROWSER.test(request.browserId) ? world.browsers.find(item => item.id === request.browserId) : null;
-      if (!browser || lineage.has(browser.id)) throw new Error('This browser is not available to attach. Refresh the list.');
+      const browser =
+        typeof request.browserId === "string" && BROWSER.test(request.browserId) ? world.browsers.find((item) => item.id === request.browserId) : null;
+      if (!browser || lineage.has(browser.id)) throw new Error("This browser is not available to attach. Refresh the list.");
       const set = attachments.get(chatId) ?? new Set();
-      if (!set.has(browser.id) && set.size >= MAX_ATTACHED) throw new Error('Too many browsers are attached to this Chat.');
-      if (!attachments.has(chatId) && attachments.size >= 512) throw new Error('Too many Chats have attached browsers.');
+      if (!set.has(browser.id) && set.size >= MAX_ATTACHED) throw new Error("Too many browsers are attached to this Chat.");
+      if (!attachments.has(chatId) && attachments.size >= 512) throw new Error("Too many Chats have attached browsers.");
       set.add(browser.id);
       attachments.set(chatId, set);
       return view(world, chatId);
@@ -209,15 +307,15 @@ function createBrowsers(options = {}) {
       return serial(async () => {
         await expire();
         const chatId = requireChat(request);
-        if (!supported) throw new Error('Browser viewing is not supported on this computer.');
-        if (ownership.dead || closed) throw new Error('Browser owner disconnected.');
-        if (viewers.size >= maxViewers) throw new Error('Too many browser viewers. Close a viewer first.');
-        const match = typeof request.targetId === 'string' ? TARGET.exec(request.targetId) : null;
-        if (!match) throw new Error('Unknown browser page. Choose another page.');
+        if (!supported) throw new Error("Browser viewing is not supported on this computer.");
+        if (ownership.dead || closed) throw new Error("Browser owner disconnected.");
+        if (viewers.size >= maxViewers) throw new Error("Too many browser viewers. Close a viewer first.");
+        const match = typeof request.targetId === "string" ? TARGET.exec(request.targetId) : null;
+        if (!match) throw new Error("Unknown browser page. Choose another page.");
         const world = await snapshot();
-        const target = view(world, chatId).targets.find(item => item.id === request.targetId);
-        const browser = world.browsers.find(item => item.id === match[1]);
-        if (!target || !browser) throw new Error('This page is not available in this Chat. Choose another page.');
+        const target = view(world, chatId).targets.find((item) => item.id === request.targetId);
+        const browser = world.browsers.find((item) => item.id === match[1]);
+        if (!target || !browser) throw new Error("This page is not available in this Chat. Choose another page.");
         let capture = captures.get(target.id);
         if (capture && metadata(capture).error) {
           for (const id of [...capture.viewers]) await remove(viewers.get(id));
@@ -225,7 +323,10 @@ function createBrowsers(options = {}) {
         }
         if (!capture) {
           const channel = await adapter.connect(browser, match[2]);
-          if (ownership.dead || closed) { await channel.close().catch(() => {}); throw new Error('Browser owner disconnected.'); }
+          if (ownership.dead || closed) {
+            await channel.close().catch(() => {});
+            throw new Error("Browser owner disconnected.");
+          }
           capture = { key: target.id, channel, viewers: new Set(), controller: null, generation: 1, mouse: null, keys: new Map() };
           captures.set(target.id, capture);
         }
@@ -241,21 +342,31 @@ function createBrowsers(options = {}) {
     async frame(request, owner) {
       const v = await serial(async () => {
         const v = await active(request, owner);
-        if (!Number.isSafeInteger(request.after) || request.after < 0) throw new Error('Invalid browser frame request.');
-        if (v.waiting) throw new Error('A frame request is already pending for this viewer.');
+        if (!Number.isSafeInteger(request.after) || request.after < 0) throw new Error("Invalid browser frame request.");
+        if (v.waiting) throw new Error("A frame request is already pending for this viewer.");
         statusOf(v);
         v.heartbeat = now();
         v.waiting = true;
         return v;
       });
       try {
-        const newer = () => { const frame = v.capture.channel.frame(); return frame && frame.sequence > request.after ? frame : null; };
+        const newer = () => {
+          const frame = v.capture.channel.frame();
+          return frame && frame.sequence > request.after ? frame : null;
+        };
         if (!newer() && !v.removed) {
-          await new Promise(resolve => {
+          await new Promise((resolve) => {
             const timer = setTimeout(done, frameWaitMs);
-            const unsubscribe = v.capture.channel.onFrame(() => { if (newer() || v.capture.channel.status().error) done(); });
+            const unsubscribe = v.capture.channel.onFrame(() => {
+              if (newer() || v.capture.channel.status().error) done();
+            });
             v.wake = done;
-            function done() { clearTimeout(timer); unsubscribe(); v.wake = null; resolve(); }
+            function done() {
+              clearTimeout(timer);
+              unsubscribe();
+              v.wake = null;
+              resolve();
+            }
           });
         }
         // Closing a viewer ends its pending wait quietly; the receiver has already moved on.
@@ -265,49 +376,83 @@ function createBrowsers(options = {}) {
         const frame = newer();
         v.heartbeat = now();
         return frame ? { sequence: frame.sequence, data: frame.data, viewport: { ...frame.viewport }, generation: v.capture.generation } : null;
-      } finally { v.waiting = false; }
+      } finally {
+        v.waiting = false;
+      }
     },
     status(request, owner) {
-      return serial(async () => { const v = await active(request, owner); v.heartbeat = now(); return statusOf(v); });
+      return serial(async () => {
+        const v = await active(request, owner);
+        v.heartbeat = now();
+        return statusOf(v);
+      });
     },
     control(request, owner) {
       return serial(async () => {
-        const v = await active(request, owner), capture = v.capture;
-        if (typeof request.takeOver !== 'boolean') throw new Error('Invalid browser control request.');
-        if (capture.controller !== v.id && (!capture.controller || request.takeOver)) { revoke(capture); capture.controller = v.id; }
+        const v = await active(request, owner),
+          capture = v.capture;
+        if (typeof request.takeOver !== "boolean") throw new Error("Invalid browser control request.");
+        if (capture.controller !== v.id && (!capture.controller || request.takeOver)) {
+          revoke(capture);
+          capture.controller = v.id;
+        }
         v.heartbeat = now();
         return statusOf(v);
       });
     },
     input(request, owner) {
       return serial(async () => {
-        const v = await active(request, owner), capture = v.capture;
-        if (!Number.isSafeInteger(request.sequence) || request.sequence < 0 || !Number.isSafeInteger(request.generation) || !validEvent(request.event)) throw new Error('Invalid browser input event.');
+        const v = await active(request, owner),
+          capture = v.capture;
+        if (!Number.isSafeInteger(request.sequence) || request.sequence < 0 || !Number.isSafeInteger(request.generation) || !validEvent(request.event))
+          throw new Error("Invalid browser input event.");
         const state = metadata(capture);
-        if (capture.controller !== v.id || !state.ready || state.error || request.generation !== capture.generation || request.sequence <= v.sequence) return { accepted: false };
+        if (capture.controller !== v.id || !state.ready || state.error || request.generation !== capture.generation || request.sequence <= v.sequence)
+          return { accepted: false };
         v.sequence = request.sequence;
         v.inputTokens = Math.min(240, v.inputTokens + Math.max(0, now() - v.rateAt) * 0.24);
         v.rateAt = now();
-        if (v.inputTokens < 1) { releaseHeld(capture); return { accepted: false }; }
+        if (v.inputTokens < 1) {
+          releaseHeld(capture);
+          return { accepted: false };
+        }
         v.inputTokens--;
         const event = cleanEvent(request.event);
-        if (event.kind === 'mouse' && (event.phase === 'down' ? !!capture.mouse : event.phase === 'up' && !capture.mouse)) return { accepted: false };
-        try { capture.channel.send(event); } catch { revoke(capture); return { accepted: false }; }
-        if (event.kind === 'mouse') {
-          if (event.phase === 'down') capture.mouse = { x: event.x, y: event.y, button: event.button, clickCount: event.clickCount };
-          else if (event.phase === 'up') capture.mouse = null;
+        if (event.kind === "mouse" && (event.phase === "down" ? !!capture.mouse : event.phase === "up" && !capture.mouse)) return { accepted: false };
+        try {
+          capture.channel.send(event);
+        } catch {
+          revoke(capture);
+          return { accepted: false };
+        }
+        if (event.kind === "mouse") {
+          if (event.phase === "down") capture.mouse = { x: event.x, y: event.y, button: event.button, clickCount: event.clickCount };
+          else if (event.phase === "up") capture.mouse = null;
           else if (capture.mouse) capture.mouse = { ...capture.mouse, x: event.x, y: event.y };
         }
-        if (event.kind === 'key') event.phase === 'down' ? capture.keys.set(event.code || event.key, { key: event.key, code: event.code, keyCode: event.keyCode }) : capture.keys.delete(event.code || event.key);
+        if (event.kind === "key")
+          event.phase === "down"
+            ? capture.keys.set(event.code || event.key, { key: event.key, code: event.code, keyCode: event.keyCode })
+            : capture.keys.delete(event.code || event.key);
         v.heartbeat = now();
         return { accepted: true };
       });
     },
-    closeViewer(request, owner) { return serial(async () => { await remove(await active(request, owner)); return null; }); },
+    closeViewer(request, owner) {
+      return serial(async () => {
+        await remove(await active(request, owner));
+        return null;
+      });
+    },
     disconnect(owner) {
       const state = owners.get(owner);
-      if (state) { state.dead = true; owners.delete(owner); }
-      return serial(async () => { for (const v of viewers.values()) if (v.owner === owner) await remove(v); }, true);
+      if (state) {
+        state.dead = true;
+        owners.delete(owner);
+      }
+      return serial(async () => {
+        for (const v of viewers.values()) if (v.owner === owner) await remove(v);
+      }, true);
     },
     close() {
       if (closed) return queue;

@@ -16,11 +16,17 @@ function sources(dir: string): string[] {
 
 function offenders(pattern: RegExp) {
   return sources(SRC).flatMap((path) =>
-    readFileSync(path, "utf8").split("\n").flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
+    readFileSync(path, "utf8")
+      .split("\n")
+      .flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
   );
 }
 
 test("backdrop blur uses a blur token", () => {
   assert.deepEqual(offenders(/backdrop-blur(?!-(overlay|chip|edge)\b)/), [], "Use backdrop-blur-overlay, -chip or -edge");
-  assert.deepEqual(offenders(/backdrop-filter:\s*blur\((?!var\(--blur-(overlay|chip|edge)\))/), [], "Use blur(var(--blur-overlay)), (--blur-chip) or (--blur-edge)");
+  assert.deepEqual(
+    offenders(/backdrop-filter:\s*blur\((?!var\(--blur-(overlay|chip|edge)\))/),
+    [],
+    "Use blur(var(--blur-overlay)), (--blur-chip) or (--blur-edge)",
+  );
 });

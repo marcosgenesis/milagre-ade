@@ -123,7 +123,9 @@ export function SidebarUsage({ usage }: { usage: UsageState }) {
             onClick={() => show(item.provider)}
             className={`sidebar-usage-row relative flex h-8 w-full min-w-0 items-center gap-2 rounded-[8px] px-2 text-[12px] tabular-nums text-ink-2 transition-[background-color,color,opacity] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""} ${item.status === "error" ? "opacity-60" : ""}`}
           >
-            <span className="flex shrink-0 items-center justify-center"><ProviderMark provider={item.provider} size={13} /></span>
+            <span className="flex shrink-0 items-center justify-center">
+              <ProviderMark provider={item.provider} size={13} />
+            </span>
             <span className="sidebar-copy min-w-0 truncate text-ink-2">{PROVIDER_NAMES[item.provider]}</span>
             {item.windows.length === 0 ? (
               <span className="sidebar-copy ml-auto text-ink-3">—</span>

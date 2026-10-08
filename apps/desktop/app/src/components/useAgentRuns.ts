@@ -29,20 +29,28 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
     let taken = 0;
     let recovered = false;
     const unsubscribe = window.milagre.onAgentEvent(({ chatId, event, state, seq }) => {
-      if (seq === undefined || seq > taken) setAll(applyRunEvent(runsRef.current, chatId, event, event.type === "turn-started" ? modelForRef.current(chatId) : ""));
+      if (seq === undefined || seq > taken)
+        setAll(applyRunEvent(runsRef.current, chatId, event, event.type === "turn-started" ? modelForRef.current(chatId) : ""));
       if (state) onStateRef.current(projectOfKey(chatId), state);
     });
-    const recover = window.milagre.onRuntimeSnapshot?.(snapshot => {
+    const recover = window.milagre.onRuntimeSnapshot?.((snapshot) => {
       recovered = true;
       taken = snapshot.runs.seq;
       setAll(snapshot.runs.runs);
     });
-    void window.milagre.getRuns().then((snapshot) => {
-      if (recovered) return;
-      taken = snapshot.seq;
-      setAll(snapshot.runs);
-    }).catch(() => {});
-    return () => { recovered = true; unsubscribe(); recover?.(); };
+    void window.milagre
+      .getRuns()
+      .then((snapshot) => {
+        if (recovered) return;
+        taken = snapshot.seq;
+        setAll(snapshot.runs);
+      })
+      .catch(() => {});
+    return () => {
+      recovered = true;
+      unsubscribe();
+      recover?.();
+    };
   }, [setAll]);
 
   /** Saves the message and starts or steers its chat's turn; resolves with the chat's session id. */
@@ -51,29 +59,39 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
   const interrupt = useCallback((chatId: string) => window.milagre.interruptAgent(chatId), []);
 
   /** Sends the user's answer. The card shows it as sent until the agent takes it, and goes back to pending if it doesn't arrive. */
-  const answer = useCallback(async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
-    setAll(markAnswered(runsRef.current, chatId, requestId, sent));
-    try {
-      const accepted = await deliver();
-      if (!accepted) setAll(clearAnswered(runsRef.current, chatId, requestId));
-      return accepted;
-    } catch (error) {
-      setAll(clearAnswered(runsRef.current, chatId, requestId));
-      throw error;
-    }
-  }, [setAll]);
+  const answer = useCallback(
+    async (chatId: string, requestId: string, sent: SentAnswer, deliver: () => Promise<boolean>) => {
+      setAll(markAnswered(runsRef.current, chatId, requestId, sent));
+      try {
+        const accepted = await deliver();
+        if (!accepted) setAll(clearAnswered(runsRef.current, chatId, requestId));
+        return accepted;
+      } catch (error) {
+        setAll(clearAnswered(runsRef.current, chatId, requestId));
+        throw error;
+      }
+    },
+    [setAll],
+  );
 
-  const respond = useCallback((chatId: string, requestId: string, decision: PermissionDecision) => answer(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)), [answer]);
+  const respond = useCallback(
+    (chatId: string, requestId: string, decision: PermissionDecision) =>
+      answer(chatId, requestId, decision, () => window.milagre.respondToPermission(chatId, requestId, decision)),
+    [answer],
+  );
 
   /**
    * Sends the answers to a question, or dismisses it (null). The main process shows the answers in the chat
    * as the user's message, so whatever the agent streams next lands below them, and takes them back if they don't arrive.
    */
-  const answerQuestion = useCallback((chatId: string, requestId: string, answers: QuestionAnswers | null) => {
-    const request = runsRef.current[chatId]?.questions.find((item) => item.requestId === requestId);
-    const summary = answers && request ? answerSummary(request.questions, answers) : "";
-    return answer(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers, summary));
-  }, [answer]);
+  const answerQuestion = useCallback(
+    (chatId: string, requestId: string, answers: QuestionAnswers | null) => {
+      const request = runsRef.current[chatId]?.questions.find((item) => item.requestId === requestId);
+      const summary = answers && request ? answerSummary(request.questions, answers) : "";
+      return answer(chatId, requestId, answers ? "answered" : "dismissed", () => window.milagre.answerQuestion(chatId, requestId, answers, summary));
+    },
+    [answer],
+  );
 
   return { runs, send, interrupt, respond, answerQuestion };
 }

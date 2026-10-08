@@ -4,7 +4,7 @@ name: Mobile fingerprint
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths: ['apps/mobile/**', 'package-lock.json', 'packages/shared/**']
+    paths: ["apps/mobile/**", "package-lock.json", "packages/shared/**"]
 permissions:
   contents: read
 jobs:

@@ -1,12 +1,11 @@
 {
   "name": "milagre",
-  "productName": "Milagre",
-  "description": "A local-first desktop ADE for coordinating coding agents",
-  "homepage": "https://github.com/the-ptf/milagre-ade",
-  "author": "Milagre contributors",
-  "license": "MIT",
   "version": "0.1.0",
   "private": true,
+  "description": "A local-first desktop ADE for coordinating coding agents",
+  "homepage": "https://github.com/the-ptf/milagre-ade",
+  "license": "MIT",
+  "author": "Milagre contributors",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -47,5 +46,6 @@
     "vite": "^7.1.7",
     "wait-on": "^8.0.4"
   },
-  "desktopName": "milagre.desktop"
+  "desktopName": "milagre.desktop",
+  "productName": "Milagre"
 }

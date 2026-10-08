@@ -40,7 +40,16 @@ test("saveImage copies the image where the user picks, starting in Downloads", a
   await fs.writeFile(image, "png bytes");
   const target = path.join(base, "saved.png");
   let options;
-  assert.equal(await saveImage(image, { downloads: "/Users/me/Downloads", showSaveDialog: async (value) => { options = value; return { canceled: false, filePath: target }; } }), target);
+  assert.equal(
+    await saveImage(image, {
+      downloads: "/Users/me/Downloads",
+      showSaveDialog: async (value) => {
+        options = value;
+        return { canceled: false, filePath: target };
+      },
+    }),
+    target,
+  );
   assert.equal(options.defaultPath, "/Users/me/Downloads/ig.png");
   assert.deepEqual(options.filters, [{ name: "Image", extensions: ["png"] }]);
   assert.equal(await fs.readFile(target, "utf8"), "png bytes");
@@ -51,26 +60,58 @@ test("a pasted image's data URL copies and saves without a file", async (t) => {
   const base = await scratch(t);
   const url = `data:image/png;base64,${Buffer.from("png bytes").toString("base64")}`;
   const written = [];
-  await copyImage(url, { createFromPath: () => assert.fail("no path to read"), createFromBuffer: (bytes) => ({ bytes, isEmpty: () => false }), writeImage: (value) => written.push(String(value.bytes)) });
+  await copyImage(url, {
+    createFromPath: () => assert.fail("no path to read"),
+    createFromBuffer: (bytes) => ({ bytes, isEmpty: () => false }),
+    writeImage: (value) => written.push(String(value.bytes)),
+  });
   assert.deepEqual(written, ["png bytes"]);
   const target = path.join(base, "saved.png");
   let options;
-  assert.equal(await saveImage(url, { downloads: "/Users/me/Downloads", showSaveDialog: async (value) => { options = value; return { canceled: false, filePath: target }; } }, "Screenshot 2026.png"), target);
+  assert.equal(
+    await saveImage(
+      url,
+      {
+        downloads: "/Users/me/Downloads",
+        showSaveDialog: async (value) => {
+          options = value;
+          return { canceled: false, filePath: target };
+        },
+      },
+      "Screenshot 2026.png",
+    ),
+    target,
+  );
   assert.equal(options.defaultPath, "/Users/me/Downloads/Screenshot 2026.png");
   assert.equal(await fs.readFile(target, "utf8"), "png bytes");
   assert.equal(imageData("data:text/html;base64,PGI+"), null);
   await assert.rejects(copyImage("data:text/html;base64,PGI+", { createFromPath: () => ({ isEmpty: () => false }), writeImage: () => {} }), /Not an image/);
 });
 
-test('copyImage waits for the asynchronous clipboard write and reports rejection', async () => {
+test("copyImage waits for the asynchronous clipboard write and reports rejection", async () => {
   let finish;
-  const pending = new Promise(resolve => { finish = resolve; });
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
   const image = { isEmpty: () => false };
-  const input = 'data:image/png;base64,cG5n';
+  const input = "data:image/png;base64,cG5n";
   let done = false;
-  const copying = copyImage(input, { createFromBuffer: () => image, writeImage: () => pending }).then(() => { done = true; });
-  await Promise.resolve(); await Promise.resolve();
+  const copying = copyImage(input, { createFromBuffer: () => image, writeImage: () => pending }).then(() => {
+    done = true;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
   assert.equal(done, false);
-  finish(); await copying; assert.equal(done, true);
-  await assert.rejects(copyImage(input, { createFromBuffer: () => image, writeImage: async () => { throw new Error('Clipboard blocked'); } }), /Clipboard blocked/);
+  finish();
+  await copying;
+  assert.equal(done, true);
+  await assert.rejects(
+    copyImage(input, {
+      createFromBuffer: () => image,
+      writeImage: async () => {
+        throw new Error("Clipboard blocked");
+      },
+    }),
+    /Clipboard blocked/,
+  );
 });

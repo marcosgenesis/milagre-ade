@@ -28,10 +28,13 @@ export function saveChatPreferences(storage: Storage, projectPath: string, patch
   const { isolation, ...choice } = patch;
   const { isolation: previousIsolation, ...previousChoice } = loadChatPreferences(storage, projectPath);
   try {
-    storage.setItem(KEY, JSON.stringify({
-      isolation: isolation ?? previousIsolation,
-      projects: { ...saved.projects, [projectPath]: { ...previousChoice, ...choice } },
-    }));
+    storage.setItem(
+      KEY,
+      JSON.stringify({
+        isolation: isolation ?? previousIsolation,
+        projects: { ...saved.projects, [projectPath]: { ...previousChoice, ...choice } },
+      }),
+    );
   } catch {
     // The current selection still works when storage is unavailable.
   }

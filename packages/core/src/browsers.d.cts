@@ -1,10 +1,21 @@
-import type { BrowserFrame, BrowserInput, BrowserList, BrowserOpen, BrowserStatus } from '@milagre/shared/browser';
-export interface BrowserPage { id: string; title: string; url: string }
+import type { BrowserFrame, BrowserInput, BrowserList, BrowserOpen, BrowserStatus } from "@milagre/shared/browser";
+export interface BrowserPage {
+  id: string;
+  title: string;
+  url: string;
+}
 /** Internal discovery record. `host` and `port` stay inside the host and are never returned to clients. */
-export interface DiscoveredBrowser { id: string; pid: number; host: string; port: number; product: string; pages: BrowserPage[] }
+export interface DiscoveredBrowser {
+  id: string;
+  pid: number;
+  host: string;
+  port: number;
+  product: string;
+  pages: BrowserPage[];
+}
 export interface BrowserChannel {
-  status(): Omit<BrowserStatus, 'generation' | 'controlling'> & { width: number; height: number; error?: string };
-  frame(): Omit<BrowserFrame, 'generation'> | null;
+  status(): Omit<BrowserStatus, "generation" | "controlling"> & { width: number; height: number; error?: string };
+  frame(): Omit<BrowserFrame, "generation"> | null;
   onFrame(listener: () => void): () => void;
   send(event: BrowserInput): void;
   close(): Promise<void>;

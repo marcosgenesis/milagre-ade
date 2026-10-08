@@ -12,6 +12,7 @@ const { startDaemon } = require("./server.cjs");
 const { connect } = require("./client.cjs");
 const { MAX_FRAME_BYTES } = require("./protocol.cjs");
 const { applyStatePatch } = require("@milagre/shared/state-patch");
+const { mergeTranscript } = require("@milagre/shared/subagent-transcript");
 
 const gitConfig = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 
@@ -83,7 +84,8 @@ async function waitFor(read) {
   }
   throw new Error("Timed out waiting for daemon state");
 }
-async function fixture(t, options = {}) {
+async function fixture(t, { createSession, ...options } = {}) {
+  const fixtureOptions = { createSession };
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-daemon-")));
   const dataDir = path.join(directory, "profile");
   const project = path.join(directory, "project");
@@ -100,6 +102,7 @@ async function fixture(t, options = {}) {
       titleModels: {},
       agentCli: Object.assign(async () => ({ command: "/fake/codex" }), { invalidate() {} }),
       createSession(provider, options) {
+        if (fixtureOptions.createSession) return fixtureOptions.createSession(provider, options);
         const session = {
           closed: false,
           turnActive: false,
@@ -895,6 +898,82 @@ test("a state the client can't patch from, or a patch over the event limit, says
   const again = await desktop.call("state:read", [project]);
   assert.equal(again.version, large.payload.version);
   assert.equal(again.state.messages.at(-1).body.length, 5000);
+});
+
+test("a client that reads transcripts on demand gets each subagent with the end of its transcript", async (t) => {
+  const entry = (n) => ({ id: `e${n}`, kind: "message", text: `Entry ${n}` });
+  const { project, client } = await fixture(t, {
+    createSession(_provider, options) {
+      return {
+        closed: false,
+        async startTurn() {
+          // A provider sends its child as it knows it: here only the entry it just added.
+          options.emit({ type: "turn-started", turnId: "turn-1" });
+          options.emit({
+            type: "subagent-update",
+            agent: { id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: Date.now(), transcript: [entry(21)] },
+          });
+          return { turnId: "turn-1" };
+        },
+        async close() {
+          this.closed = true;
+        },
+      };
+    },
+  });
+  await fs.mkdir(path.join(project, ".milagre"));
+  const transcript = Array.from({ length: 20 }, (_, index) => entry(index + 1));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 3,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: {
+        2: {
+          id: 2,
+          worktree_id: 1,
+          agent_name: "main",
+          status: "Created",
+          subagents: [{ id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: 2, transcript }],
+        },
+      },
+      messages: [],
+      tasks: {},
+    }),
+  );
+  const desktop = await client();
+  const whole = await client();
+  const events = [];
+  const wholeEvents = [];
+  desktop.on("event", (event) => events.push(event));
+  whole.on("event", (event) => wholeEvents.push(event));
+  assert.ok((await desktop.call("daemon:status")).capabilities.includes("subagent-tails-v1"));
+  await desktop.call("daemon:state-patches", [{ messages: false, transcripts: false }]);
+  await whole.call("daemon:state-patches");
+  const opened = await desktop.call("project:open", [project]);
+  const tail = opened.state.sessions[2].subagents[0];
+  assert.deepEqual(
+    tail.transcript.map((item) => item.id),
+    ["e17", "e18", "e19", "e20"],
+  );
+  assert.equal(tail.transcriptLength, 20);
+  assert.equal((await desktop.call("state:read", [project])).state.sessions[2].subagents[0].transcriptLength, 20);
+  assert.equal((await whole.call("project:open", [project])).state.sessions[2].subagents[0].transcript.length, 20);
+  const read = await desktop.call("chat:subagent", [project, 2, "child"]);
+  assert.deepEqual(read.transcript, transcript);
+  await assert.rejects(desktop.call("chat:subagent", [project, 2, "gone"]), /no longer in this Chat/);
+
+  // A running child's update carries only the end of its transcript to this client, and all of it to the other.
+  await desktop.call("chat:send", [{ projectPath: project, sessionId: 2, body: "Go", provider: "codex", model: "test", permissionMode: "ask" }]);
+  const isUpdate = (event) => event.channel === "agent:event" && event.payload.event.type === "subagent-update";
+  const update = (await waitFor(() => events.find(isUpdate))).payload.event.agent;
+  assert.equal(update.transcript.length, 4);
+  assert.equal(update.transcriptLength, 21);
+  assert.equal(update.transcript.at(-1).id, "e21");
+  assert.equal((await waitFor(() => wholeEvents.find(isUpdate))).payload.event.agent.transcript.length, 21);
+  // The whole transcript read before, with that tail on top, is the host's.
+  assert.deepEqual(mergeTranscript(read.transcript, update), (await desktop.call("chat:subagent", [project, 2, "child"])).transcript);
 });
 
 test("a client that reads messages by Chat gets states without them, and each change's messages beside its patch", async (t) => {

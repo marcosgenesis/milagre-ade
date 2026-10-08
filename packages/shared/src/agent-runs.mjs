@@ -2,6 +2,8 @@
 // process, which saves every chat's turns (see agents/chat-host.cjs), and the renderer, which shows
 // them as they stream. Types: agent-runs.d.mts.
 
+import { hasTranscriptTail } from "./subagent-transcript.mjs";
+
 export const MAX_OUTPUT = 20_000;
 
 /** Command output keeps its end, where results and errors are. */
@@ -221,6 +223,9 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
         if (!communications.has(entry.id)) communications.set(entry.id, entry);
       }
       // A resumed provider can rediscover a child before it has replayed the earlier output.
+      // A client that holds transcript tails (subagent-transcript.mjs) gets the host's merged transcript, or its tail,
+      // and keeps it as it comes.
+      const tail = hasTranscriptTail(event.agent) || hasTranscriptTail(previous);
       const agent = previous
         ? {
             ...previous,
@@ -232,11 +237,13 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
             startedAt: Math.min(previous.startedAt, event.agent.startedAt),
             communications: [...communications.values()].sort((a, b) => a.at - b.at).slice(-20),
             transcript:
-              event.agent.source === "milagre-advisor"
+              event.agent.source === "milagre-advisor" || tail
                 ? event.agent.transcript
                 : [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
+            transcriptLength: event.agent.transcriptLength,
           }
         : event.agent;
+      if (agent.transcriptLength === undefined) delete agent.transcriptLength;
       const subagents = previous ? children.map((child) => (child.id === agent.id ? agent : child)) : [...children, agent];
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
     }

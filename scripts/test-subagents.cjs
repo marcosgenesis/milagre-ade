@@ -235,20 +235,11 @@ async function browserChecks() {
         'document.querySelector("[data-canvas-agent=review]").title.includes("Review authentication") && document.querySelector("[data-canvas-agent=review]").title.includes("Reading auth.ts")',
       ),
     );
-    assert.equal(await evaluate('document.querySelectorAll(".subagent-thinking-bubble").length'), 2, "Only working bots show activity clouds");
-    assert.equal(await evaluate('document.querySelectorAll(".subagent-thinking-bubble > span > i").length'), 6, "Each activity cloud has an ellipsis");
-    const dotFrames = await evaluate(
-      'document.querySelector(".subagent-thinking-bubble i").getAnimations().flatMap(animation => animation.effect.getKeyframes()).map(frame => ({opacity:frame.opacity,transform:frame.transform}))',
+    assert.equal(await evaluate('document.querySelectorAll(".subagent-thinking-bubble").length'), 0, "Activity clouds are removed");
+    assert.equal(
+      await evaluate('document.querySelector("[data-canvas-agent=review]").parentElement.querySelector(".subagent-bot-status").textContent.trim()'),
+      "Reading files",
     );
-    assert.ok(new Set(dotFrames.map((frame) => frame.opacity)).size > 1, "Thinking dots change opacity");
-    assert.ok(
-      dotFrames.every((frame) => frame.transform === undefined || frame.transform === "none"),
-      "Thinking dots do not bounce",
-    );
-    const cloudFrames = await evaluate(
-      'document.querySelector(".subagent-thinking-bubble").getAnimations().flatMap(animation => animation.effect.getKeyframes()).map(frame => frame.transform)',
-    );
-    assert.ok(new Set(cloudFrames.filter(Boolean)).size > 1, "The activity cloud gently drifts");
     assert.equal(await evaluate('document.querySelectorAll("[data-status=failed] .subagent-outcome").length'), 1, "Failed bots show an alert");
 
     // Profile the canvas itself: hidden conversation work must not count as a scene commit.
@@ -463,6 +454,10 @@ async function browserChecks() {
     const arrangedView = await world();
     await evaluate('window.setChildren(items=>items.map(item=>item.id==="review" ? {...item,latestActivity:"Running auth tests"} : item))');
     await waitFor('document.querySelector("[data-canvas-agent=review]").title.includes("Running auth tests")');
+    assert.equal(
+      await evaluate('document.querySelector("[data-canvas-agent=review]").parentElement.querySelector(".subagent-bot-status").textContent.trim()'),
+      "Running tests",
+    );
     assert.deepEqual(await positions(), arranged, "Live activity updates preserve bot positions");
     assert.deepEqual(await world(), arrangedView, "Live activity updates preserve the viewport");
     await evaluate('document.querySelector("[data-diff-back]").click()');
@@ -925,12 +920,15 @@ async function main() {
         enforce: "pre",
         transform(source, id) {
           if (!id.endsWith("/components/agents/SubagentCanvas.tsx")) return;
-          assert.ok(source.includes("return <section ref={panel}"), "Canvas profiler must wrap the rendered scene");
+          assert.match(source, /return\s*\(\s*<section\s+ref=\{panel\}/, "Canvas profiler must wrap the rendered scene");
           return (
             'import { Profiler as FixtureCanvasProfiler } from "react";\n' +
             source
-              .replace("return <section ref={panel}", 'return <FixtureCanvasProfiler id="canvas" onRender={window.recordSubagentCommit}><section ref={panel}')
-              .replace("</section>;", "</section></FixtureCanvasProfiler>;")
+              .replace(
+                /return\s*\(\s*<section\s+ref=\{panel\}/,
+                'return (<FixtureCanvasProfiler id="canvas" onRender={window.recordSubagentCommit}><section ref={panel}',
+              )
+              .replace("</section>", "</section></FixtureCanvasProfiler>")
           );
         },
         resolveId(id) {

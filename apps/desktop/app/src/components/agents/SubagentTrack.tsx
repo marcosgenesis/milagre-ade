@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Archive02Icon, Cancel01Icon, ViewIcon } from "@hugeicons/core-free-icons";
+import { subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { ModelProvider, Subagent } from "../../model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
@@ -37,7 +38,7 @@ export const SubagentTranscript = memo(function SubagentTranscript({ agent }: { 
   return (
     <div className="space-y-4 p-3" data-slot="subagent-transcript">
       <div className="flex flex-wrap gap-3 text-[12px] text-ink-3">
-        <span>{labels[agent.status]}</span>
+        <span>{subagentActivityLabel(agent)}</span>
         <span>{elapsed(agent, now)}</span>
         <span>Read-only transcript</span>
       </div>

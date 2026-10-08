@@ -677,6 +677,7 @@ export function ChatComposer({
         agents={subagents}
         working={isSending}
         waiting={waitingForSubagents}
+        activity={streamingSteps?.filter((step) => step.status === "running").at(-1)?.title}
         onClose={closeCanvas}
       />
       <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>

@@ -18,7 +18,8 @@
     "src/usage.ts",
     "src/simulator.ts",
     "src/message-navigation.ts",
-    "src/message-search.ts"
+    "src/message-search.ts",
+    "src/agent-activity.ts"
   ],
   "type": "module",
   "exports": {
@@ -104,7 +105,8 @@
     "./file-syntax": {
       "types": "./src/file-syntax.d.mts",
       "default": "./src/file-syntax.mjs"
-    }
+    },
+    "./agent-activity": "./src/agent-activity.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

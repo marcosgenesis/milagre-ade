@@ -20,7 +20,8 @@ export type TerminalRead = { offset: number; data: string; reset: boolean; ended
 export interface TerminalApi {
   list(request: { chatId: string }): Promise<TerminalList>;
   open(request: { chatId: string; cwd?: string; cols?: number; rows?: number }): Promise<TerminalInfo>;
-  read(request: { terminalId: string; after: number }): Promise<TerminalRead>;
+  /** `limit` caps the characters returned; a host that predates it ignores it. */
+  read(request: { terminalId: string; after: number; limit?: number }): Promise<TerminalRead>;
   input(request: { terminalId: string; data: string }): Promise<{ accepted: boolean }>;
   resize(request: { terminalId: string; cols: number; rows: number }): Promise<null>;
   close(request: { terminalId: string }): Promise<null>;

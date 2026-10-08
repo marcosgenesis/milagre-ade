@@ -7,7 +7,7 @@ function host(reads: (TerminalRead | Error)[]) {
   const calls: { method: string; request: Record<string, unknown> }[] = [];
   let release: () => void = () => {};
   const api = {
-    async read(request: { terminalId: string; after: number }) {
+    async read(request: { terminalId: string; after: number; limit?: number }) {
       calls.push({ method: "read", request });
       const next = reads.shift();
       if (!next) return new Promise<TerminalRead>(() => {});
@@ -45,6 +45,46 @@ test("a viewer replays the kept output, then appends what follows from its offse
     [0, 5, 8],
   );
   assert.equal(ended, 1);
+});
+
+test("the next read waits until the viewer has drawn the last output", async () => {
+  const { api, calls } = host([
+    { offset: 5, data: "hello", reset: true, ended: false },
+    { offset: 8, data: " hi", reset: false, ended: false },
+  ]);
+  let drawn: () => void = () => {};
+  followTerminal({ terminalId: "t", api, write: () => {}, reset: () => new Promise<void>((resolve) => (drawn = resolve)), readLimit: 4096 });
+  for (let i = 0; i < 5; i++) await tick();
+  const reads = () => calls.filter((call) => call.method === "read").map((call) => call.request);
+  assert.deepEqual(reads(), [{ terminalId: "t", after: 0, limit: 4096 }]);
+  drawn();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.deepEqual(
+    reads().map((request) => request.after),
+    [0, 5, 8],
+  );
+});
+
+test("a viewer that drops a write keeps reading", async () => {
+  const { api, calls } = host([
+    { offset: 5, data: "hello", reset: true, ended: false },
+    { offset: 8, data: " hi", reset: false, ended: false },
+  ]);
+  const shown: string[] = [];
+  followTerminal({
+    terminalId: "t",
+    api,
+    reset: () => {
+      throw new Error("write data discarded, use flow control to avoid losing data");
+    },
+    write: (data) => shown.push(data),
+  });
+  for (let i = 0; i < 5; i++) await tick();
+  assert.deepEqual(shown, [" hi"]);
+  assert.deepEqual(
+    calls.filter((call) => call.method === "read").map((call) => call.request.after),
+    [0, 5, 8],
+  );
 });
 
 test("typing while a send is out is joined into the next send, in order", async () => {

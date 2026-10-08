@@ -20,7 +20,23 @@ import { TerminalPanel } from "/src/components/terminal/TerminalPanel";
 import { PanelToggles } from "/src/components/agents/PanelToggles";
 import { useTerminalSync } from "/src/lib/terminal-actions";
 import "/src/styles.css";
+import { Terminal } from "@xterm/xterm";
 window.notices = [];
+// The shown Terminal draws on a WebGL canvas, so its text is read from xterm's buffer, not the DOM.
+const opened = [];
+const open = Terminal.prototype.open;
+Terminal.prototype.open = function (element) {
+  opened.push(this);
+  return open.call(this, element);
+};
+window.terminalText = () => {
+  const term = opened.find((candidate) => candidate.element?.closest("[data-terminal-body]"));
+  if (!term) return "";
+  const lines = [];
+  for (let row = 0; row < term.buffer.active.length; row++) lines.push(term.buffer.active.getLine(row)?.translateToString(true) ?? "");
+  return lines.join("\\n");
+};
+window.terminalGpu = () => !!document.querySelector("[data-terminal-body] .xterm canvas");
 window.setDark = (dark) => document.documentElement.classList.toggle("dark", dark);
 const noop = () => {};
 const messages = [
@@ -94,8 +110,12 @@ async function electronChecks() {
     environment: () => terminalEnvironment({ PATH: "/usr/bin:/bin", HOME: scratch, PS1: "$ ", LANG: "en_US.UTF-8" }),
     onChange: (chatId) => !window.isDestroyed() && window.webContents.send("terminal:changed", { chatId }),
   });
+  let resizes = [];
   for (const method of ["list", "open", "read", "input", "resize", "close"])
-    ipcMain.handle(`terminal:${method}`, (_event, request) => terminals[method](request));
+    ipcMain.handle(`terminal:${method}`, (_event, request) => {
+      if (method === "resize") resizes.push(`${request.cols}x${request.rows}`);
+      return terminals[method](request);
+    });
   forwardAppShortcuts(window.webContents);
   window.webContents.on("console-message", (details) => {
     if (details.level === "error") console.error(details.message);
@@ -114,6 +134,12 @@ async function electronChecks() {
     fs.mkdirSync(screenshotDir, { recursive: true });
     fs.writeFileSync(path.join(screenshotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());
   }
+  // A frame as it is now, mid-animation, without the settling delay.
+  async function frame(name) {
+    if (!screenshotDir) return;
+    fs.mkdirSync(screenshotDir, { recursive: true });
+    fs.writeFileSync(path.join(screenshotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());
+  }
   async function waitFor(source, what = source) {
     for (let attempt = 0; attempt < 400; attempt++) {
       if (await evaluate(source)) return;
@@ -121,7 +147,7 @@ async function electronChecks() {
     }
     throw new Error(`Timed out: ${what}`);
   }
-  const shown = '(document.querySelector("[data-terminal-body] .xterm-rows")?.textContent ?? "")';
+  const shown = "window.terminalText()";
   const tabs = '[...document.querySelectorAll("[data-terminal-tab]")].map((tab) => tab.textContent)';
   function press(key, modifiers = []) {
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: key, modifiers });
@@ -149,11 +175,15 @@ async function electronChecks() {
     press("J", ["meta"]);
     await waitFor('!!document.querySelector("[data-terminal-panel] .xterm")', "the first Terminal");
     await waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")', "focus in the Terminal");
-    // The Chat makes room: its prompt sits above the panel, not under it.
+    // The panel rises as it opens; once it has, the Chat has made room: its prompt sits above the panel, not under it.
+    await waitFor('!!document.querySelector("[data-terminal-slot]:not([data-sliding])")', "the panel to finish opening");
     const layout = await evaluate(
       '(() => { const prompt = document.querySelector("textarea[aria-label=Prompt]").getBoundingClientRect(); const panel = document.querySelector("[data-terminal-panel]").getBoundingClientRect(); return { promptBottom: prompt.bottom, panelTop: panel.top, panelBottom: panel.bottom, height: innerHeight }; })()',
     );
     assert.ok(layout.promptBottom <= layout.panelTop && layout.panelBottom <= layout.height, `The prompt is under the Terminals: ${JSON.stringify(layout)}`);
+    // WebGL where the GPU offers WebGL2; where it doesn't (CI's Linux blocklists it), the DOM renderer draws instead.
+    const webgl2 = await evaluate('!!document.createElement("canvas").getContext("webgl2")');
+    assert.equal(await evaluate("window.terminalGpu()"), webgl2, webgl2 ? "The shown Terminal draws with WebGL" : "The Terminal fell back to the DOM renderer");
     await type("echo milagre-$((40+2)); pwd\r");
     await waitFor(`${shown}.includes("milagre-42") && ${shown}.includes(${JSON.stringify(worktree)})`, "the command's output and the Worktree folder");
     assert.equal(await evaluate('document.querySelector("[data-panel-toggle=terminal]").getAttribute("aria-pressed")'), "true");
@@ -164,16 +194,58 @@ async function electronChecks() {
     await screenshot("terminal-light");
     await evaluate("window.setDark(true)");
 
+    // A flood is read only as fast as xterm parses it, and the Terminal answers again once it is over.
+    await type("seq 1 300000; echo flood-$((1+1))\r");
+    await waitFor(`${shown}.includes("flood-2")`, "the end of a 2 MB flood");
+    await type("echo after-$((2+2))\r");
+    await waitFor(`${shown}.includes("after-4")`, "output after the flood");
+
     // The PTY takes the panel's size.
     const [{ cols, rows }] = (await terminals.list({ chatId: CHAT })).terminals;
     assert.ok(cols > 80 && rows >= 8, `The PTY was not fitted to the panel: ${cols}x${rows}`);
 
     // ⌘J hides the panel without ending the shell; ⌘J again brings it back with its output.
+    // It falls as it hides and rises as it shows, showing its output all the way: the card keeps its size while the slot
+    // moves, so the Terminal isn't refitted, nor the shell resized, on every frame.
+    resizes = [];
     press("J", ["meta"]);
+    await waitFor('!!document.querySelector("[data-terminal-slot][data-sliding]")', "the panel to start falling");
+    await delay(60);
+    await frame("terminal-closing");
     await waitFor('!document.querySelector("[data-terminal-panel]")', "the panel hidden");
     assert.equal((await terminals.list({ chatId: CHAT })).terminals.length, 1, "Hiding keeps the Terminal");
     press("J", ["meta"]);
-    await waitFor(`${shown}.includes("milagre-42")`, "the same output after showing it again");
+    await waitFor('!!document.querySelector("[data-terminal-slot][data-sliding]")', "the panel to start rising");
+    await delay(60);
+    await frame("terminal-opening");
+    assert.ok(await evaluate(`${shown}.includes("after-4")`), "The output shows while the panel rises");
+    await waitFor('!!document.querySelector("[data-terminal-slot]:not([data-sliding])")', "the panel to finish opening");
+    await waitFor(`${shown}.includes("after-4")`, "the same output after showing it again");
+    assert.deepEqual(new Set(resizes), new Set([`${cols}x${rows}`]), `The PTY took other sizes as the panel moved: ${resizes}`);
+
+    // Dragging the divider refits the Terminal as it goes, but the PTY learns only the size it was dropped at.
+    resizes = [];
+    await evaluate(`(() => {
+      const handle = document.querySelector("[aria-label='Resize Terminals']").getBoundingClientRect();
+      const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+      document.querySelector("[aria-label='Resize Terminals']").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+      window.milagreDrag = { x, y };
+    })()`);
+    for (let step = 1; step <= 12; step++) {
+      await evaluate(`window.dispatchEvent(new PointerEvent("pointermove", { clientX: milagreDrag.x, clientY: milagreDrag.y - ${step * 8} }))`);
+      await delay(16);
+    }
+    await evaluate(`window.dispatchEvent(new PointerEvent("pointerup", { clientX: milagreDrag.x, clientY: milagreDrag.y - 96 }))`);
+    await waitFor('document.querySelector("[data-terminal-panel]").getBoundingClientRect().height > 300', "the panel taller after the drag");
+    const grown = async () => (await terminals.list({ chatId: CHAT })).terminals[0].rows > rows;
+    for (let attempt = 0; attempt < 200 && !(await grown()); attempt++) await delay(25);
+    // Long enough for any resize still on its way to arrive and be counted.
+    await delay(300);
+    const dropped = (await terminals.list({ chatId: CHAT })).terminals[0];
+    const panelHeight = await evaluate('document.querySelector("[data-terminal-panel]").getBoundingClientRect().height');
+    assert.ok(dropped.rows > rows, `The drag didn't grow the PTY: ${rows} -> ${dropped.rows} rows, panel ${panelHeight}px, sent ${resizes}`);
+    assert.deepEqual(resizes, [`${dropped.cols}x${dropped.rows}`], "The PTY was resized once, at the drop");
+    assert.equal((await evaluate('localStorage.getItem("milagre.terminal.height")')) !== null, true, "The dropped height is kept");
 
     // + adds a second tab; a running command makes it busy, and ⌘W asks before ending it.
     await evaluate("document.querySelector(\"[aria-label='New Terminal']\").click()");

@@ -200,14 +200,15 @@ function ScopeHeader({
         onClick={onToggle}
         className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-[60px] text-left hover:bg-hover-2"
       >
-        <span className="relative flex size-5 shrink-0 items-center justify-center text-ink">
+        {/* A Link's stacked avatars are wider than a Project's icon, so the slot grows with them. */}
+        <span className="relative flex h-5 min-w-5 shrink-0 items-center justify-center text-ink">
           <span className="flex items-center justify-center transition-opacity duration-100 group-hover/scope:opacity-0 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-0">
             {icon}
           </span>
           <span
             aria-hidden
             data-scope-chevron
-            className={`absolute inset-0 flex items-center justify-center text-ink-3 opacity-0 transition-[opacity,transform] duration-150 group-hover/scope:opacity-100 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-100 ${open ? "" : "-rotate-90"}`}
+            className={`absolute inset-y-0 left-0 flex w-5 items-center justify-center text-ink-3 opacity-0 transition-[opacity,transform] duration-150 group-hover/scope:opacity-100 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-100 ${open ? "" : "-rotate-90"}`}
           >
             <IconChevronDownSmall size={14} />
           </span>

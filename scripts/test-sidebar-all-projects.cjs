@@ -124,6 +124,17 @@ async function browserChecks() {
       "A Link chat waiting on the user shows the mark",
     );
     assert.match((await chats("milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"))[0], /Shared checkout chat/);
+    assert.equal(
+      await evaluate(`(() => {
+        const header = document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-scope-toggle]');
+        const avatars = [...header.querySelectorAll('[aria-hidden] > span')].map((node) => node.getBoundingClientRect());
+        const project = document.querySelector('[data-sidebar-scope="/work/shop"] [data-scope-toggle] span span').getBoundingClientRect();
+        return avatars.length === 2 && Math.abs(Math.min(...avatars.map((rect) => rect.left)) - project.left) < 0.5 &&
+          Math.max(...avatars.map((rect) => rect.right)) <= header.querySelector('[data-scope-name]').getBoundingClientRect().left;
+      })()`),
+      true,
+      "A Link's stacked avatars start on the Projects' icon line and end before its name",
+    );
     await screenshot("all-projects");
 
     // One open scope; the others offer New chat in <name>; only a Project's ⋯ menu on a non-current scope has Remove.

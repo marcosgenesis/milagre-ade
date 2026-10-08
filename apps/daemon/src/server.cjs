@@ -241,15 +241,18 @@ async function startDaemon({
     }
     return frame({ ...rest, resync: true, version, epoch });
   }
-  /** A scope's state with its number, for a client that takes patches. A newer state than the one sent goes out first. */
+  /**
+   * A scope's state with its number, for a client that takes patches, beside the rest of its snapshot (a Project's path
+   * and name, a Link's definition). A newer state than the one sent goes out first.
+   */
   async function readState(owner) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
-    const { state } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
+    const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
     if (sentStates.get(owner)?.state !== state)
       broadcast(link ? "link:state" : "project:state", link ? { linkId: scopeFromKey(owner).linkId, state } : { path: owner, state });
     const sent = sentStates.get(owner);
-    return { state: sent.state, version: sent.version, epoch };
+    return { ...rest, state: sent.state, version: sent.version, epoch };
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
   // A first pairing is announced to the desktop, which tells the owner in case it was not them.

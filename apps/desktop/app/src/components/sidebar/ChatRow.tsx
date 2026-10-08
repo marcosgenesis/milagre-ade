@@ -263,18 +263,19 @@ export const ChatRow = memo(function ChatRow({
             data-row
             type="button"
             onClick={() => onPick(item)}
+            disabled={archiving}
             aria-busy={archiving || undefined}
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
             className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
               active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
-            }`}
+            } ${archiving ? "opacity-30" : ""}`}
           >
             <span className="sidebar-chat-initials relative size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">
               {recentInitials(item.label)}
-              {archiving || mark === "running" ? (
+              {mark === "running" ? (
                 <span aria-hidden className="absolute -right-1 -top-1 flex rounded-full bg-surface p-px">
-                  <SpinnerRing size={10} stroke={1.75} color={mark === "running" ? "var(--accent)" : undefined} />
+                  <SpinnerRing size={10} stroke={1.75} color="var(--accent)" />
                 </span>
               ) : (
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
@@ -286,21 +287,17 @@ export const ChatRow = memo(function ChatRow({
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
-              {archiving ? (
-                <span role="status" className="inline-flex items-center gap-2">
-                  <SpinnerRing size={12} />
-                  Archiving...
-                </span>
-              ) : (
-                <ChatTitle label={item.label} />
-              )}
+              <ChatTitle label={item.label} />
               {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
             </span>
           </button>
         )}
 
         {hasPullRequests && !renaming && (
-          <div data-chat-prs className="sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2">
+          <div
+            data-chat-prs
+            className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
+          >
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
             ))}
@@ -322,6 +319,15 @@ export const ChatRow = memo(function ChatRow({
             aria-hidden="true"
             className={`pointer-events-none absolute top-1.5 z-30 ${collapsed ? "right-1" : "right-3"}`}
           />
+        )}
+        {archiving && (
+          // Over the whole row, its pull requests included: the row stays in place, faded and untouchable, until the archive ends.
+          <div role="status" className="absolute inset-y-0 left-2 right-2 z-40 flex items-center justify-center">
+            <span className="flex h-6 items-center gap-1.5 rounded-full bg-surface px-2.5 text-[12px] font-medium text-ink shadow-card">
+              <SpinnerRing size={12} />
+              {!collapsed && "Archiving..."}
+            </span>
+          </div>
         )}
         {!item.pending && !collapsed && !renaming && !shortcutHint && (
           <button

@@ -48,13 +48,12 @@ import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "..
 import { Icon } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
-import { ArchiveProgress } from "../archive-progress";
 import { useOpenProject } from "../use-open-project";
 import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
 import { PromptField } from "../prompt-field";
 import { ContextRing } from "../context-ring";
 import { hex } from "../theme";
-import { archiveFromPhone } from "../archive";
+import { archiveFromPhone, showArchiveNotice } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
 import { runChatAction } from "../chat-actions";
@@ -134,9 +133,8 @@ export default function ChatScreen() {
       )
     : undefined;
   const pendingCanonicalId = pending && session.snapshot ? pendingChatSessionId(session.snapshot.project.state, pending.preview) : null;
-  const [archiving, setArchiving] = useState(false);
   const archiveRequest = useRef(false);
-  const busy = actionBusy || !!pending || archiving;
+  const busy = actionBusy || !!pending;
   const focused = useRef<object | null>(null);
   useFocusEffect(
     useCallback(() => {
@@ -548,19 +546,23 @@ export default function ChatScreen() {
     else if (id === "archive" && chat?.archived) void action(() => client.call("chat:patch", [project.path, chat.id, { archived: false }]));
     else if (id === "archive" && chat) void archive(chat);
   }
-  // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. The
-  // Chat is left once it is archived; one whose worktree stayed is brought back, and the notice shows here.
+  // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. Once
+  // confirmed the phone goes to the Chat list right away and the archive finishes there, on the Chat's row. Nothing
+  // navigates when it ends, so the phone stays wherever it went in the meantime; a notice shows on the list.
   async function archive(target: NonNullable<typeof chat>) {
     if (busy || archiveRequest.current) return;
     archiveRequest.current = true;
-    const onConfirm = () => {
-      setArchiving(true);
-      session.expectActivity();
+    let left = false;
+    const leave = () => {
+      left = true;
+      router.replace("/projects");
     };
+    // By the time the archive ends the phone may show another Project, so the list's copy of this one is read too.
+    const refresh = () => Promise.all([session.refresh(), session.previewProject(project.path)]);
     setError("");
     try {
-      if (project.link) {
-        const result = await runChatAction({
+      if (project.link)
+        await runChatAction({
           action: "archive",
           client,
           projectPath: project.path,
@@ -568,39 +570,37 @@ export default function ChatScreen() {
           link: project.link,
           chat: target,
           running: !!run,
-          onConfirm: () => setArchiving(true),
+          onConfirm: leave,
           expectActivity: session.expectActivity,
-          refresh: session.refresh,
-          notify: setError,
+          refresh,
+          notify: showArchiveNotice,
         });
-        if (result === "hidden") router.replace("/projects");
-        return;
-      }
-      const result = await archiveFromPhone({
-        client,
-        alert: confirmSheet,
-        projectPath: project.path,
-        state: project.state,
-        chat: target,
-        running: !!run,
-        onConfirm,
-        notify: setError,
-        refresh: session.refresh,
-      });
-      if (result === "hidden" || result === "removed") router.replace("/projects");
+      else
+        await archiveFromPhone({
+          client,
+          alert: confirmSheet,
+          projectPath: project.path,
+          state: project.state,
+          chat: target,
+          running: !!run,
+          onConfirm: () => {
+            session.expectActivity();
+            leave();
+          },
+          notify: showArchiveNotice,
+          refresh,
+        });
     } catch (e) {
-      setError((e as Error).message);
+      if (left) showArchiveNotice(`Could not archive Chat: ${(e as Error).message}`);
+      else setError((e as Error).message);
     } finally {
       archiveRequest.current = false;
-      setArchiving(false);
     }
   }
   const blockers = pullRequestBlockers(pr);
   const agents = (chat?.subagents || []).filter((agent) => !agent.archived);
   const diff = worktree?.diff;
-  const header = archiving ? (
-    <ArchiveProgress />
-  ) : (
+  const header = (
     <>
       <View style={{ alignItems: "center", maxWidth: 230 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>

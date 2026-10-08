@@ -23,7 +23,7 @@ test("chat marks follow the desktop sidebar precedence", async () => {
   assert.equal(chatMark({ unread: true } as AgentSession, run), "question");
   assert.equal(chatMark(undefined, { ...run, questions: [] }), "waiting");
   assert.equal(chatMark({ unread: true } as AgentSession, { questions: [], approvals: [] } as unknown as AgentRun), "running");
-  assert.equal(chatMark({ unread: true } as AgentSession, undefined, [{ outcome: "failed" }] as never), "unread");
-  assert.equal(chatMark({} as AgentSession, undefined, [{ outcome: "failed" }] as never), "failed");
+  assert.equal(chatMark({ unread: true } as AgentSession, undefined, [{ role: "assistant", outcome: "failed" }] as never), "unread");
+  assert.equal(chatMark({} as AgentSession, undefined, [{ role: "assistant", outcome: "failed" }] as never), "failed");
   assert.equal(chatMark({} as AgentSession), "idle");
 });

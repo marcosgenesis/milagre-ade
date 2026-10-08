@@ -5,7 +5,7 @@ export function chatMarkTone(
   mark: "question" | "waiting" | "delegated" | "interrupted" | "running" | "failed" | "unread" | "idle",
 ): "accent" | "orange" | "red" | "ink3";
 
-export function chatTitle(session: AgentSession | LinkChatSession, messages: ChatMessage[]): string;
+export function chatTitle(session: AgentSession | LinkChatSession, messages?: readonly ChatMessage[]): string;
 export function isHandoverChat(session: AgentSession | LinkChatSession | undefined): boolean;
 export function isListedChat(session: AgentSession | LinkChatSession | undefined, messageCount: number): boolean;
 

@@ -21,20 +21,27 @@ const snapshot = () => panels;
 /** Offers this panel's button while `panel` is set; null takes it away (the Chat has no designs, or no simulator). */
 export function useSidePanel(name: PanelName, panel: SidePanel | null) {
   const open = panel?.open;
-  // The button calls the newest toggle, so a toggle made anew each render doesn't publish the panel again: only
-  // opening and closing it does.
+  const offered = open !== undefined;
+  // The button calls the newest toggle, so a toggle made anew each render doesn't publish the panel again.
   const toggle = useRef(panel?.toggle);
   toggle.current = panel?.toggle;
-  useEffect(() => {
-    if (open === undefined) return;
-    panels = { ...panels, [name]: { open, toggle: () => toggle.current?.() } };
+  const press = useRef(() => toggle.current?.());
+  const publish = (next: SidePanel | undefined) => {
+    const { [name]: _gone, ...rest } = panels;
+    panels = next ? { ...rest, [name]: next } : rest;
     listeners.forEach((listener) => listener());
-    return () => {
-      const { [name]: _gone, ...rest } = panels;
-      panels = rest;
-      listeners.forEach((listener) => listener());
-    };
-  }, [name, open]);
+  };
+  // The button shows while the panel is offered, and goes with it.
+  useEffect(() => {
+    if (!offered) return;
+    return () => publish(undefined);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- publish only closes over name
+  }, [name, offered]);
+  // Its pressed state follows the panel's after every render, so it never lags behind the panel: a panel closed for
+  // another (the window's room, the designs expanding) shows its button released at once.
+  useEffect(() => {
+    if (open !== undefined && panels[name]?.open !== open) publish({ open, toggle: press.current });
+  });
 }
 
 /** The panels with a button now. */

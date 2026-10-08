@@ -29,7 +29,8 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
-import { PanelToggles } from "/src/components/agents/PanelToggles";
+import { PanelToggles, useSidePanel } from "/src/components/agents/PanelToggles";
+import { useSidePanelRoom } from "/src/components/agents/dock-area";
 import { ChangesToggle } from "/src/components/changes/ChangesChrome";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
@@ -65,6 +66,15 @@ function Fixture() {
   const [changes, setChanges] = useState(false);
   const [diff, setDiff] = useState(false);
   window.setChanges = setChanges;
+  // Stand-ins for the git changes panel and a docked simulator, counted against the window's room as the real ones are.
+  const [simulator, setSimulator] = useState(false);
+  // Offered once the check first opens it: until then the corner has no simulator button.
+  const [offered, setOffered] = useState(false);
+  window.setSimulator = (open) => { setOffered(true); setSimulator(open); };
+  window.simulatorOpen = simulator;
+  useSidePanel("simulator", offered ? { open: simulator, toggle: () => setSimulator((open) => !open) } : null);
+  useSidePanelRoom("simulator", simulator, 412, () => setSimulator(false));
+  useSidePanelRoom("changes", changes, 332, () => setChanges(false));
   window.setDiff = setDiff;
   window.revise = () => { window.latest = 3; setRevised(true); };
   const [said, setSaid] = useState([]);
@@ -396,6 +406,23 @@ async function browserChecks() {
     await waitFor(`!!${dock}`);
     await evaluate("window.setChanges(false)");
     await waitFor(`Math.round(window.innerWidth - ${dock}.getBoundingClientRect().right) === 12`);
+
+    // Too narrow for all three side panels beside a usable chat, the third to open closes the one opened first, and
+    // its button at the top lets go.
+    const pressed = (name) => evaluate(`document.querySelector("[data-panel-toggle=${name}]").getAttribute("aria-pressed")`);
+    await evaluate("window.setSimulator(true)");
+    await waitFor(`document.querySelector("[data-panel-toggle=simulator]")?.getAttribute("aria-pressed") === "true"`);
+    assert.equal(await pressed("designs"), "true");
+    await evaluate("window.setChanges(true)");
+    await waitFor(`!${dock}`);
+    assert.equal(await pressed("designs"), "false", "the designs, opened first, close");
+    assert.equal(await pressed("simulator"), "true");
+    await evaluate(`${toggle}.click()`);
+    await waitFor("!window.simulatorOpen");
+    assert.equal(await pressed("simulator"), "false", "then the simulator, opened before the changes panel");
+    assert.equal(await pressed("designs"), "true");
+    await evaluate("window.setChanges(false)");
+    await waitFor(`!!${dock} && Math.round(window.innerWidth - ${dock}.getBoundingClientRect().right) === 12`);
 
     // The design can fill the workspace beside the sidebar, covering the chat, and go back beside it.
     await evaluate('window.expandedEvents = 0; window.addEventListener("milagre:designs-expanded", () => window.expandedEvents++)');

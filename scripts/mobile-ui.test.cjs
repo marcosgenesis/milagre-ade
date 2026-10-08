@@ -4178,7 +4178,9 @@ test("mobile provider discovery uses the selected scope and ignores late respons
 test("mobile Project Accounts opens from Settings as a native stack screen", () => {
   const opened = [];
   const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useEffect() {} },
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View" },
     "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
     "@hugeicons/core-free-icons": {},

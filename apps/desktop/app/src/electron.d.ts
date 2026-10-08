@@ -6,6 +6,7 @@ import type {
   LinkState,
   LinkSendRequest,
   TranscriptState,
+  ChatMessage,
 } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
@@ -240,6 +241,8 @@ declare global {
       setOpenChat: (chatId: string | null) => Promise<void>;
       /** The turns streaming now, in every project, and the number of the last agent event they hold. */
       getRuns: () => Promise<{ runs: AgentRuns; seq: number }>;
+      /** One saved message of a Project or Link (scope key), with the long step details the state leaves out. */
+      getMessage: (scope: string, id: number) => Promise<ChatMessage>;
       respondToPermission: (chatId: string, requestId: string, decision: PermissionDecision) => Promise<boolean>;
       /** Sends the answers to a question card, or dismisses it (null). False when the question is gone. */
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;

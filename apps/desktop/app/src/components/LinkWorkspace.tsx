@@ -466,6 +466,7 @@ export function LinkWorkspace({
                     scopeKind="link"
                     store={draftStore}
                     projectPath={root}
+                    messageScope={owner}
                     messages={messages}
                     imageDraft={imageDraft}
                     onSend={() => void send()}

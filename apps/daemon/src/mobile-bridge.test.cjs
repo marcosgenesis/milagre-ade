@@ -952,7 +952,7 @@ test("a Project over 16 MB reaches the phone: its snapshot, tool output on deman
     }),
   );
   assert.equal((await rpc("project:open", [project])).status, 200);
-  // The daemon reads the whole state in pages; the phone gets it without tool output, and asks for one message's.
+  // The daemon moves the long tool output to sidecars; the phone gets the state without it, and asks for one message's.
   const snapshot = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
   assert.equal(snapshot.project.state.messages.length, 900);
   assert.equal(snapshot.project.state.messages[0].steps[0].hasDetail, true);

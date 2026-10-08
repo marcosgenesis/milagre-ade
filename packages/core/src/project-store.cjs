@@ -1,6 +1,15 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { migrateImages, compactSubagents, hydrateSubagents, referencedSidecars, sweepSubagentContent } = require("./project-content.cjs");
+const {
+  migrateImages,
+  compactSubagents,
+  hydrateSubagents,
+  referencedSidecars,
+  sweepSubagentContent,
+  compactDetails,
+  referencedDetails,
+  sweepDetailContent,
+} = require("./project-content.cjs");
 // ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
 const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 let counter = 0;
@@ -14,10 +23,13 @@ const SWEEP_MIN_AGE_MS = 60_000;
 const swept = new Set();
 
 // `durable` syncs the bytes and the rename to disk before returning. Only the migration of a linked worktree's old
-// chats asks for it, since it renames that file next; routine saves (up to ~20 MB, several a minute) only rename.
+// chats asks for it, since it renames that file next; routine saves only rename.
 async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_AGE_MS, durable = false } = {}) {
   const tracker = { known: settled.get(projectPath), next: new Map(), wrote: false };
-  const persisted = await compactSubagents(projectPath, await migrateImages(projectPath, state), tracker);
+  // The state in memory is compacted already (see compactProjectDetails); this catches one that wasn't.
+  const details = { wrote: false };
+  const compacted = await compactDetails(projectPath, await migrateImages(projectPath, state), { tracker: details });
+  const persisted = await compactSubagents(projectPath, compacted, tracker);
   const contents = JSON.stringify(persisted);
   const directory = path.dirname(stateFile(projectPath));
   await fs.mkdir(directory, { recursive: true });
@@ -45,13 +57,20 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   }
   settled.set(projectPath, tracker.next);
   // A new sidecar supersedes the one before it; the first save of a run also clears older leftovers.
-  if (tracker.wrote || !swept.has(projectPath)) {
+  if (tracker.wrote || details.wrote || !swept.has(projectPath)) {
     swept.add(projectPath);
     await sweepSubagentContent(projectPath, referencedSidecars(persisted), { minAgeMs: sweepMinAgeMs });
+    await sweepDetailContent(projectPath, referencedDetails(persisted), { minAgeMs: sweepMinAgeMs });
   }
 }
+/** The saved state, with subagent transcripts read back and long step details (from before sidecars) moved out. */
 async function readProjectState(projectPath) {
-  return hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")));
+  const state = await hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")));
+  return compactDetails(projectPath, state);
+}
+/** For ProjectStates: moves the long step details of the messages a change added into sidecars. */
+function compactProjectDetails(projectPath, next, previous) {
+  return next.messages === previous?.messages ? next : compactDetails(projectPath, next, { previous: previous?.messages });
 }
 /** Makes a rename in `directory` durable. Best effort: a file system that can't sync a folder still saves. */
 async function syncDirectory(directory) {
@@ -64,4 +83,4 @@ async function syncDirectory(directory) {
     await handle?.close().catch(() => {});
   }
 }
-module.exports = { saveProjectState, readProjectState, stateFile, syncDirectory };
+module.exports = { saveProjectState, readProjectState, compactProjectDetails, stateFile, syncDirectory };

@@ -216,10 +216,11 @@ test("a Project state over 16 MB opens in the desktop, and its changes reach the
     messages.push({
       id: 10 + index,
       session_id: 2,
-      body: `Reply ${index}`,
+      // Long replies make the size: long tool output moves to sidecars, out of the state.
+      body: `Reply ${index} `.padEnd(20_000, "reply line\n"),
       context: null,
       role: "assistant",
-      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `${index} `.padEnd(20_000, "output line\n") }],
+      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `$ npm test\n${index} passed` }],
     });
   }
   await fs.mkdir(path.join(project, ".milagre"));

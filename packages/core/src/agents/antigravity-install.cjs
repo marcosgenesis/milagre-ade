@@ -6,11 +6,11 @@ const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 
 // Milagre installs Google's Antigravity ACP agent itself (docs/adr/0006-antigravity-over-acp.md): a zip of two files,
-// the Python archive `agy_acp_server.par` and `localharness_external`, which the agent starts on its own.
-// Each release is pinned here with the size and SHA-256 of its archive, so a download is only ever kept when
-// it is byte for byte the one that was checked. The ACP registry lists every platform's URL but publishes no
-// hashes, so only a platform whose archive was downloaded and hashed by hand is listed. Others are
-// unsupported rather than guessed at.
+// the agent (`agy_acp_server.par`, `agy_acp_server.exe` on Windows) and `localharness_external` (`.exe` on
+// Windows), which the agent starts on its own. Each release is pinned here with the size and SHA-256 of its
+// archive, so a download is only ever kept when it is byte for byte the one that was checked. The ACP registry
+// lists every platform's URL but publishes no hashes, so only a platform whose archive was downloaded and
+// hashed by hand is listed (the same hashes T3 Code pins). Others are unsupported rather than guessed at.
 //
 //   <data dir>/tools/antigravity/<platform>-<arch>/versions/<sha256>/   the two files
 //   <data dir>/tools/antigravity/<platform>-<arch>/active.json          which version runs
@@ -21,15 +21,84 @@ const HARNESS = "localharness_external";
 const OVERRIDE_ENV = "MILAGRE_ANTIGRAVITY_PATH";
 const VALIDATE_TIMEOUT_MS = 90_000;
 
+// The agent's own names per platform: Windows archives hold `.exe` files, the others a Python archive and a binary.
+const WINDOWS_COMMAND = "agy_acp_server.exe";
+const WINDOWS_HARNESS = "localharness_external.exe";
+const memberNames = (platform = process.platform) =>
+  platform === "win32" ? { command: WINDOWS_COMMAND, harness: WINDOWS_HARNESS } : { command: COMMAND, harness: HARNESS };
+
+// Linux's agent needs `--uid=` (ADR-0006); the other platforms start it without arguments.
+const LINUX_ARGS = Object.freeze(["--uid="]);
+const argsFor = (platform = process.platform) => (platform === "linux" ? LINUX_ARGS : Object.freeze([]));
+
+const RELEASE_VERSION = "1.3.0";
+const BASE = "https://dl.google.com/agy-extensions/releases";
+const pin = ({ platform, os, file, bytes, sha256, command, harness }) =>
+  Object.freeze({
+    version: RELEASE_VERSION,
+    url: `${BASE}/${os}/agy-acp-server-${RELEASE_VERSION}-${file}.zip`,
+    bytes,
+    sha256,
+    args: argsFor(platform),
+    // Exactly these entries, with exactly these unpacked sizes.
+    files: Object.freeze({ [memberNames(platform).command]: command, [memberNames(platform).harness]: harness }),
+  });
+
+// Keys are Node's `${process.platform}-${process.arch}`; URLs are the registry's (its names are x86_64 and arm64).
 const RELEASES = Object.freeze({
-  "darwin-arm64": Object.freeze({
-    version: "1.3.0",
-    url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-arm64.zip",
+  "darwin-arm64": pin({
+    platform: "darwin",
+    os: "macos",
+    file: "darwin-arm64",
     bytes: 111_456_962,
     sha256: "7cd97045f7b4fe81175a107cdf16f9c51484e3c78a5162cae415338bb6aa5b88",
-    args: Object.freeze([]),
-    // Exactly these entries, with exactly these unpacked sizes.
-    files: Object.freeze({ [COMMAND]: 278_535_456, [HARNESS]: 118_611_392 }),
+    command: 278_535_456,
+    harness: 118_611_392,
+  }),
+  "darwin-x64": pin({
+    platform: "darwin",
+    os: "macos",
+    file: "darwin-x86_64",
+    bytes: 117_245_544,
+    sha256: "bb23956b89984bf5d354af2c3725e6c57f0cc1b7228e77a0e91c9c2bc1d47646",
+    command: 282_840_688,
+    harness: 124_175_392,
+  }),
+  "linux-x64": pin({
+    platform: "linux",
+    os: "linux",
+    file: "linux-x86_64",
+    bytes: 333_727_150,
+    sha256: "9fb60956af0a9d76220a4db91ca9ac88e2a2372ad68f985ab5fceace6b825b96",
+    command: 926_533_965,
+    harness: 130_388_040,
+  }),
+  "linux-arm64": pin({
+    platform: "linux",
+    os: "linux",
+    file: "linux-arm64",
+    bytes: 321_690_363,
+    sha256: "500b0bc0fb858e88f4df404d4cedf80bf9298c178291e39e383d6c50b111cbdf",
+    command: 930_848_992,
+    harness: 123_224_968,
+  }),
+  "win32-x64": pin({
+    platform: "win32",
+    os: "windows",
+    file: "windows-x86_64",
+    bytes: 124_509_787,
+    sha256: "65215e0688681fa3116e048a9eab27ef53af1bbd6f3da3f1c52bd4911d8b17f9",
+    command: 81_437_336,
+    harness: 145_548_952,
+  }),
+  "win32-arm64": pin({
+    platform: "win32",
+    os: "windows",
+    file: "windows-arm64",
+    bytes: 124_654_803,
+    sha256: "4a0f469720e9beb9438a979f543fdbfad5022ebe0992c052c590bd78b3144ca3",
+    command: 85_893_472,
+    harness: 135_640_216,
   }),
 });
 
@@ -202,11 +271,23 @@ const run = (file, args, options = {}, execFileImpl = execFile) =>
     });
   });
 
+// The tool that lists and unpacks a zip. macOS and most Linux systems have `unzip`; Windows has no unzip, but
+// since Windows 10 it ships bsdtar as System32\tar.exe, which reads zip archives.
+function archiveCommands(platform, archive, into, { env = process.env, exists = fs.existsSync } = {}) {
+  if (platform === "win32") {
+    const file = path.win32.join(env.SystemRoot || env.windir || "C:\\Windows", "System32", "tar.exe");
+    return { file, list: ["-tf", archive], extract: ["-xf", archive, "-C", into] };
+  }
+  const file = ["/usr/bin/unzip", "/bin/unzip", "/usr/local/bin/unzip"].find((candidate) => exists(candidate)) ?? "/usr/bin/unzip";
+  return { file, list: ["-Z1", archive], extract: ["-q", "-o", archive, "-d", into] };
+}
+
 // Unpacks the archive into `into`, which must start empty. The listing must be exactly the expected files
-// (so a name can never carry a path), they are unpacked by the system unzip, and their sizes are checked
+// (so a name can never carry a path), they are unpacked by the system's zip tool, and their sizes are checked
 // afterwards; anything that isn't a plain file of the expected size is refused.
-async function extract(release, archive, into, { execFileImpl } = {}) {
-  const names = (await run("/usr/bin/unzip", ["-Z1", archive], {}, execFileImpl))
+async function extract(release, archive, into, { execFileImpl, platform = process.platform, env = process.env } = {}) {
+  const tool = archiveCommands(platform, archive, into, { env });
+  const names = (await run(tool.file, tool.list, { windowsHide: true }, execFileImpl))
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
@@ -214,7 +295,7 @@ async function extract(release, archive, into, { execFileImpl } = {}) {
   const expected = Object.keys(release.files).toSorted();
   if (names.length !== expected.length || names.some((name, index) => name !== expected[index]))
     throw new Error("The Antigravity download has unexpected contents, so it was discarded.");
-  await run("/usr/bin/unzip", ["-q", "-o", archive, "-d", into], {}, execFileImpl);
+  await run(tool.file, tool.extract, { windowsHide: true }, execFileImpl);
   for (const [name, size] of Object.entries(release.files)) {
     const stat = fs.lstatSync(path.join(into, name));
     if (!stat.isFile() || stat.size !== size) throw new Error(`${name} in the Antigravity download has the wrong size, so it was discarded.`);
@@ -246,21 +327,22 @@ function createAntigravity({
   const root = path.join(dataDir, "tools", "antigravity", key);
   const activeFile = path.join(root, "active.json");
   const release = Object.hasOwn(releases, key) ? releases[key] : null;
+  const names = memberNames(platform);
 
   function fromFolder(folder, extra) {
-    const command = path.join(folder, COMMAND);
-    const harness = path.join(folder, HARNESS);
+    const command = path.join(folder, names.command);
+    const harness = path.join(folder, names.harness);
     if (!isExecutableFile(command) || !isExecutableFile(harness)) return null;
-    return { command, harness, args: release?.args ?? [], ...extra };
+    return { command, harness, args: release?.args ?? argsFor(platform), ...extra };
   }
 
   /** { command, harness, args, version, source } for the agent Milagre can run, or null. */
   function resolve() {
     const override = env[OVERRIDE_ENV];
     if (override) {
-      // The path of the .par; its harness sits beside it. A wrong path counts as not installed.
+      // The path of the agent (.par, .exe on Windows); its harness sits beside it. A wrong path counts as not installed.
       const found = fromFolder(path.dirname(path.resolve(override)), { version: null, source: "env" });
-      return found && path.basename(override) === COMMAND ? { ...found, command: path.resolve(override) } : null;
+      return found && path.basename(override) === names.command ? { ...found, command: path.resolve(override) } : null;
     }
     try {
       const active = JSON.parse(fs.readFileSync(activeFile, "utf8"));
@@ -297,13 +379,13 @@ function createAntigravity({
         onProgress?.({ phase: "extract" });
         const unpacked = path.join(staging, "files");
         fs.mkdirSync(unpacked, { mode: 0o700 });
-        await extract(release, archive, unpacked, { execFileImpl });
+        await extract(release, archive, unpacked, { execFileImpl, platform, env });
         await unlink(archive);
         onProgress?.({ phase: "validate" });
         signal?.throwIfAborted();
         await validate({
-          command: path.join(unpacked, COMMAND),
-          harness: path.join(unpacked, HARNESS),
+          command: path.join(unpacked, names.command),
+          harness: path.join(unpacked, names.harness),
           args: release.args,
           cwd: staging,
           version: release.version,
@@ -357,4 +439,19 @@ function createAntigravity({
 const tokenFile = (home) => path.join(home, AGENT_NAME, "acp_token.json");
 const hasToken = (home) => fs.existsSync(tokenFile(home));
 
-module.exports = { AGENT_NAME, AMBIENT_ENV, COMMAND, HARNESS, OVERRIDE_ENV, RELEASES, createAntigravity, hasToken, platformKey, tokenFile, validateAgent };
+module.exports = {
+  AGENT_NAME,
+  AMBIENT_ENV,
+  COMMAND,
+  HARNESS,
+  OVERRIDE_ENV,
+  RELEASES,
+  archiveCommands,
+  argsFor,
+  createAntigravity,
+  hasToken,
+  memberNames,
+  platformKey,
+  tokenFile,
+  validateAgent,
+};

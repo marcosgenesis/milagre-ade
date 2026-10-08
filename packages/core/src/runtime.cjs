@@ -12,7 +12,7 @@ const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
-const { migrateImages } = require("./project-content.cjs");
+const { migrateImages, withDetails } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -47,7 +47,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { createProjectFinder } = require("./project-finder.cjs");
-const { saveProjectState, readProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, compactProjectDetails, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -281,6 +281,7 @@ function createRuntime(options) {
       return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered, await linkStore.ownedWorktrees());
     },
     save: saveProjectState,
+    compact: compactProjectDetails,
   });
 
   const scopeStates = createChatScopes({
@@ -1066,6 +1067,14 @@ function createRuntime(options) {
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
+  });
+  // One saved message with the tool output its steps keep in a sidecar (see compactDetails), for a step opened on the
+  // desktop or the phone. A Project, open already, or a Link (read like link:snapshot does), by scope key.
+  commands.handle("chat:message", async (_event, scope, id) => {
+    if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
+    const message = (await scopeStates.get(scope)).messages.find((item) => item.id === id);
+    if (!message) throw new Error("That message is no longer in this Project.");
+    return withDetails(scopeStates.storageDirectory(scope), message);
   });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));

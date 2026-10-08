@@ -149,3 +149,71 @@ test("reading legacy state never writes coordination.json outside its owner", as
   await saveProjectState(p, { ...old, sessions: { 1: { title: "Acknowledged" } } });
   assert.equal(JSON.parse(await fs.readFile(stateFile(p), "utf8")).sessions[1].title, "Acknowledged");
 });
+
+const longOutput = (label) => `$ ${label}\n`.padEnd(5000, "output line\n");
+const reply = (id, steps) => ({ id, session_id: 1, role: "assistant", body: "Done", context: null, steps });
+test("long tool output moves to one sidecar per message and reads back whole", async (t) => {
+  const { compactDetails, withDetails, INLINE_DETAIL } = require("./project-content.cjs");
+  const p = await project(t);
+  const message = reply(1, [
+    { id: "short", kind: "read", title: "Read a file", status: "done", detail: "x".repeat(INLINE_DETAIL) },
+    { id: "long", kind: "shell", title: "Ran `npm test`", status: "done", detail: longOutput("npm test") },
+    { id: "plain", kind: "edit", title: "Edited a file", status: "done" },
+  ]);
+  const state = { messages: [message] };
+  const tracker = {};
+  const compacted = await compactDetails(p, state, { tracker });
+  assert.equal(tracker.wrote, true);
+  const [saved] = compacted.messages;
+  assert.match(saved.detailFile, /^[a-f0-9]{64}\.json$/);
+  assert.equal(saved.steps[0].detail.length, INLINE_DETAIL, "short output stays inline");
+  assert.equal(saved.steps[1].detail, undefined);
+  assert.equal(saved.steps[1].hasDetail, true);
+  assert.deepEqual(saved.steps[2], message.steps[2]);
+  assert.ok((await fs.stat(path.join(p, ".milagre", "details", saved.detailFile))).isFile());
+  assert.deepEqual(await withDetails(p, saved), message, "reading it back gives the message as it was");
+  assert.equal(await compactDetails(p, compacted), compacted, "a compacted state is returned as is");
+});
+
+test("output the app reads without opening a step stays inline", async (t) => {
+  const { compactDetails } = require("./project-content.cjs");
+  const p = await project(t);
+  const steps = [
+    { id: "think-1", kind: "thinking", title: "Thought", status: "done", detail: "early ".repeat(500) },
+    { id: "pr", kind: "shell", title: "Ran `gh pr create`", status: "done", detail: longOutput("gh pr create --fill") },
+    { id: "think-2", kind: "thinking", title: "Thought", status: "done", detail: "last ".repeat(500) },
+    { id: "live", kind: "shell", title: "Ran `sleep`", status: "running", detail: longOutput("sleep 100") },
+  ];
+  const [saved] = (await compactDetails(p, { messages: [reply(1, steps)] })).messages;
+  assert.equal(saved.steps[0].hasDetail, true, "an earlier thought moves");
+  assert.equal(saved.steps[1].detail, steps[1].detail, "a command that opened a PR stays for the chat's PR list");
+  assert.equal(saved.steps[2].detail, steps[2].detail, "the last thought stays, shown when a reply has no answer");
+  assert.equal(saved.steps[3].detail, steps[3].detail, "a running step is never moved");
+});
+
+test("an update looks only at the messages it added, and a missing sidecar leaves the step closed", async (t) => {
+  const { compactDetails, withDetails } = require("./project-content.cjs");
+  const p = await project(t);
+  const first = (await compactDetails(p, { messages: [reply(1, [{ id: "a", kind: "shell", title: "Ran", status: "done", detail: longOutput("a") }])] }))
+    .messages[0];
+  // An unchanged old message with long output inline is left alone when the caller names it as already compacted.
+  const legacy = reply(2, [{ id: "b", kind: "shell", title: "Ran", status: "done", detail: longOutput("b") }]);
+  const added = reply(3, [{ id: "c", kind: "shell", title: "Ran", status: "done", detail: longOutput("c") }]);
+  const next = await compactDetails(p, { messages: [first, legacy, added] }, { previous: [first, legacy] });
+  assert.equal(next.messages[0], first);
+  assert.equal(next.messages[1], legacy);
+  assert.equal(next.messages[2].steps[0].hasDetail, true);
+  await fs.rm(path.join(p, ".milagre", "details", first.detailFile));
+  assert.equal(await withDetails(p, first), first);
+});
+
+test("a sidecar that does not match its name is not read", async (t) => {
+  const { compactDetails, withDetails } = require("./project-content.cjs");
+  const p = await project(t);
+  const [saved] = (await compactDetails(p, { messages: [reply(1, [{ id: "a", kind: "shell", title: "Ran", status: "done", detail: longOutput("a") }])] }))
+    .messages;
+  await fs.writeFile(path.join(p, ".milagre", "details", saved.detailFile), JSON.stringify({ a: "tampered" }));
+  assert.equal(await withDetails(p, saved), saved);
+  const escaping = { ...saved, detailFile: "../coordination.json" };
+  assert.equal(await withDetails(p, escaping), escaping);
+});

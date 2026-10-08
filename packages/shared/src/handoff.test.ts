@@ -13,12 +13,12 @@ const reply = (id: number, outcome: ChatMessage["outcome"] = "completed"): ChatM
   role: "assistant",
   outcome,
 });
-const divider = (id: number, from: "claude" | "codex", to: "claude" | "codex"): ChatMessage => ({
+const divider = (id: number, from: "claude" | "codex", to: "claude" | "codex", status: "preparing" | "done" | "failed" = "done"): ChatMessage => ({
   id,
   session_id: 1,
   body: "",
   role: "assistant",
-  context: { kind: "handoff", from: { provider: from }, to: { provider: to }, status: "done" },
+  context: { kind: "handoff", from: { provider: from }, to: { provider: to }, status },
 });
 const state = (messages: ChatMessage[], extra: Partial<AgentSession> = {}) => ({ sessions: { 1: { ...session, ...extra } }, messages });
 
@@ -50,4 +50,14 @@ test("a send needs a switch when the provider changes, a restore when a replied 
   assert.equal(handoffKind(state([user(2), reply(3)], { native_session_id: undefined }), 1, "claude"), "restore");
   // A first turn that failed before its session started has nothing to restore.
   assert.equal(handoffKind(state([user(2), reply(3, "failed")], { native_session_id: undefined }), 1, "claude"), null);
+});
+
+test("a failed divider marks no switch: the last turn's provider and the catch-up ignore it", () => {
+  const messages = [user(2), reply(3), divider(4, "claude", "codex", "failed"), user(5)];
+  assert.equal(lastTurnProvider(state(messages), 1), "claude");
+  assert.equal(handoffKind(state(messages), 1, "codex"), "switch");
+  const switched = [user(2), reply(3), divider(4, "claude", "codex"), user(5), reply(6), divider(7, "codex", "claude", "failed")];
+  assert.equal(lastTurnProvider(state(switched, { provider: "codex" }), 1), "codex");
+  assert.equal(catchUpStart(state(switched, { provider: "codex", native_sessions: { claude: "c1" } }), 1, "claude"), 4);
+  assert.equal(catchUpStart(state([user(2), reply(3), divider(4, "claude", "codex", "failed")], { native_sessions: { claude: "c1" } }), 1, "claude"), null);
 });

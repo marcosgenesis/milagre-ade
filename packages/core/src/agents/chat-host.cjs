@@ -23,6 +23,31 @@ const RESUME_PROMPT =
 // A message the user sends replaces the brief waiting as a draft and any resume a quit left.
 const withoutDraft = ({ handoverDraft, resumeTurn, ...rest }) => rest;
 
+const withLead = (lead, prompt) => [lead, prompt].filter((part) => part?.trim()).join("\n\n");
+
+// A switch parks the native session of the provider left and resumes the one parked for the provider entered.
+// `revertSwitch` is its inverse, for a handoff that did not happen.
+function applySwitch(session, from, to) {
+  const parked = { ...session.native_sessions };
+  if (session.native_session_id) parked[from] = session.native_session_id;
+  const resumeId = parked[to];
+  delete parked[to];
+  return withNativeSessions({ ...session, provider: to }, resumeId, parked);
+}
+
+function revertSwitch(session, from, to) {
+  const parked = { ...session.native_sessions };
+  if (session.native_session_id) parked[to] = session.native_session_id;
+  const resumeId = parked[from];
+  delete parked[from];
+  return withNativeSessions({ ...session, provider: from }, resumeId, parked);
+}
+
+function withNativeSessions(session, current, parked) {
+  const { native_session_id: _current, native_sessions: _parked, ...rest } = session;
+  return { ...rest, ...(current ? { native_session_id: current } : {}), ...(Object.keys(parked).length ? { native_sessions: parked } : {}) };
+}
+
 // A new chat in a worktree takes its chat that has no messages yet, if there is one (not a handover still
 // waiting for its brief or holding it as a draft); otherwise one is made. Resolves the state with it.
 function starterChat(latest, worktree) {
@@ -59,7 +84,8 @@ class ChatHost {
     now = Date.now,
   }) {
     Object.assign(this, { states, startTurn, publish, broadcast, isFocused, isChatFocused, nameChat, readSubagents, handoverTools, now });
-    // Chats whose handoff brief is being written, by chat key; Stop aborts it (see cancelHandoff).
+    // Chats whose handoff is staged or its brief being written, by chat key: { controller, done, settle, ... }.
+    // Stop and quit abort it (see cancelHandoff); a send meanwhile waits on `done` (see send).
     this.preparing = new Map();
     this.subagentRecoveries = new Map();
     this.runs = {};
@@ -304,8 +330,12 @@ class ChatHost {
     let dividerId = null;
     let catchUp = null;
     let handoffFrom;
-    // The provider this turn runs on: a message that steers a running turn keeps the chat's, whatever was asked for.
+    // The provider and model this turn runs on: a message that steers a running turn keeps the chat's, whatever was asked for.
     let runProvider = provider;
+    let runModel = model;
+    let preparation = null;
+    // A handoff still preparing when this message was sent: it steers into that turn once it starts.
+    let waitFor = null;
     let pendingId;
     let originalSession;
     let stagedSession;
@@ -323,10 +353,14 @@ class ChatHost {
       brief = firstMessage ? session.handoverDraft : undefined;
       const chatId = chatKey(projectPath, session.id);
       const withSession = started.state;
-      // A message that steers a running turn never hands off.
-      const steering = Boolean(this.runs[chatId]);
+      // A message that steers a running turn, or one whose handoff is still preparing, never hands off.
+      waitFor = this.preparing.get(chatId) ?? null;
+      const steering = Boolean(this.runs[chatId]) || Boolean(waitFor);
       handoff = steering ? null : handoffKind(withSession, session.id, provider);
-      if (steering) runProvider = session.provider ?? provider;
+      if (steering) {
+        runProvider = session.provider ?? provider;
+        runModel = this.runs[chatId]?.model || lastUserModel(withSession, session.id) || model;
+      }
       // Persist the input before splitting or starting its run. Tokens keep flowing
       // while this save is pending; rejected input never changes a live run.
       const next = withSession;
@@ -343,34 +377,24 @@ class ChatHost {
         context: request.context ?? null,
         ...(request.operationId ? { operationId: request.operationId } : {}),
         role: "user",
-        model,
+        model: runModel,
       };
       pendingId = message.id;
       if (typeof request.clientMessageId === "string") message.clientMessageId = request.clientMessageId;
       // Switching providers parks the old native session and resumes the one parked for the new provider, if any.
-      let resumeId = session.native_session_id;
-      const parked = { ...session.native_sessions };
-      if (handoff === "switch") {
-        handoffFrom = lastTurnProvider(withSession, session.id);
-        catchUp = catchUpStart(withSession, session.id, provider);
-        if (session.native_session_id) parked[handoffFrom] = session.native_session_id;
-        resumeId = parked[provider];
-        delete parked[provider];
-      } else if (handoff) {
-        handoffFrom = provider;
-      }
       stagedSession = {
         ...withoutDraft(session),
         provider: runProvider,
         ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}),
       };
       if (handoff === "switch") {
-        if (resumeId) stagedSession.native_session_id = resumeId;
-        else delete stagedSession.native_session_id;
-        if (Object.keys(parked).length) stagedSession.native_sessions = parked;
-        else delete stagedSession.native_sessions;
+        handoffFrom = lastTurnProvider(withSession, session.id);
+        catchUp = catchUpStart(withSession, session.id, provider);
+        stagedSession = applySwitch(stagedSession, handoffFrom, provider);
+      } else if (handoff) {
+        handoffFrom = provider;
       }
-      target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId };
+      target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: stagedSession.native_session_id };
       const fromModel = lastUserModel(withSession, session.id);
       const divider = handoff && {
         id: dividerId,
@@ -379,6 +403,12 @@ class ChatHost {
         role: "assistant",
         context: { kind: "handoff", from: { provider: handoffFrom, ...(fromModel ? { model: fromModel } : {}) }, to: { provider, model }, status: "preparing" },
       };
+      if (handoff) {
+        let settle;
+        const done = new Promise((resolve) => (settle = resolve));
+        preparation = { controller: new AbortController(), done, settle, dividerId, catchUp, from: handoffFrom, to: provider, sessionId: session.id };
+        this.preparing.set(chatId, preparation);
+      }
       return {
         ...next,
         next_id: message.id + 1,
@@ -389,6 +419,10 @@ class ChatHost {
     try {
       await this.states.flush(projectPath);
     } catch (error) {
+      if (preparation) {
+        this.release(target.chatId, preparation);
+        preparation.settle(null);
+      }
       const { state } = await this.states.update(projectPath, (latest) => {
         const session = { ...latest.sessions[target.sessionId] };
         for (const field of ["provider", "titlePending", "handoverDraft", "resumeTurn", "native_session_id", "native_sessions"]) {
@@ -407,39 +441,50 @@ class ChatHost {
     }
     let seq;
     let added = [];
-    const { state } = await this.states.update(projectPath, (latest) => {
-      const message = latest.messages.find((item) => item.id === pendingId);
-      const divider = latest.messages.find((item) => item.id === dividerId);
-      const withoutPending = { ...latest, messages: latest.messages.filter((item) => item.id !== pendingId && item.id !== dividerId) };
-      const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: "message-sent", model });
-      added = sent.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
-      this.runs = sent.runs;
-      seq = ++this.seq;
-      return { ...sent.state, messages: [...sent.state.messages, ...(divider ? [divider] : []), message] };
-    });
-    this.publish(target.chatId, { type: "message-sent", model }, state, seq);
+    const { state } = await this.states
+      .update(projectPath, (latest) => {
+        const message = latest.messages.find((item) => item.id === pendingId);
+        const divider = latest.messages.find((item) => item.id === dividerId);
+        const withoutPending = { ...latest, messages: latest.messages.filter((item) => item.id !== pendingId && item.id !== dividerId) };
+        const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: "message-sent", model: runModel });
+        added = sent.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
+        this.runs = sent.runs;
+        seq = ++this.seq;
+        return { ...sent.state, messages: [...sent.state.messages, ...(divider ? [divider] : []), message] };
+      })
+      .catch((error) => {
+        // The handoff never prepares: nothing may wait on it.
+        if (preparation) {
+          this.release(target.chatId, preparation);
+          preparation.settle(null);
+        }
+        throw error;
+      });
+    this.publish(target.chatId, { type: "message-sent", model: runModel }, state, seq);
     if (state.sessions[target.sessionId].titlePending) void this.nameChat(projectPath, target.sessionId).catch(() => {});
     const turn = {
       provider: runProvider,
-      model,
+      model: runModel,
       permissionMode: request.permissionMode,
       effort: request.effort,
       ultracode: request.ultracode,
       fastMode: request.fastMode,
       replies: request.replies,
       tldrEnabled: request.tldrEnabled,
-      prompt:
-        brief !== undefined
-          ? [brief, request.prompt || body].filter((part) => part?.trim()).join("\n\n")
-          : request.prompt || body || "Describe the attached images.",
+      prompt: brief !== undefined ? withLead(brief, request.prompt || body) : request.prompt || body || "Describe the attached images.",
     };
     this.turns.set(target.chatId, turn);
-    const ready = handoff ? this.prepareHandoff(projectPath, target, state, { dividerId, catchUp, from: handoffFrom }) : Promise.resolve("");
+    // A message sent while a handoff prepares waits for its turn to start, then steers it with its own prompt.
+    const ready = handoff
+      ? this.prepareHandoff(projectPath, target, state, preparation)
+      : waitFor
+        ? waitFor.done.then((result) => (result === null ? null : ""))
+        : Promise.resolve("");
     const started = ready
       .then((handoffBrief) => {
-        // null: Stop cancelled the handoff (see cancelHandoff), so no agent starts.
+        // null: the handoff was cancelled or failed (see abandonHandoff), so no agent starts.
         if (handoffBrief === null) return null;
-        const prompt = handoffBrief ? [handoffBrief, turn.prompt].filter((part) => part?.trim()).join("\n\n") : turn.prompt;
+        const prompt = withLead(handoffBrief, turn.prompt);
         this.turns.set(target.chatId, { ...turn, prompt });
         return this.startTurn({ ...turn, prompt, ...execution, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId });
       })
@@ -447,17 +492,17 @@ class ChatHost {
         void this.receive(target.chatId, { type: "turn-failed", message: ipcErrorMessage(error) });
         return null;
       });
+    if (preparation) void started.then((result) => preparation.settle(result));
     await this.captureImages(projectPath, state, added);
     return { sessionId: target.sessionId, started };
   }
 
   /**
    * Writes the transcript and the brief for a handoff, then marks its divider done. Resolves with the brief, or
-   * null when Stop cancelled it (the divider is failed and the turn cancelled by then). A failure fails the divider too.
+   * null when Stop or a quit cancelled it (see abandonHandoff). A failure abandons the handoff too, then throws.
    */
-  async prepareHandoff(projectPath, target, state, { dividerId, catchUp, from }) {
-    const controller = new AbortController();
-    this.preparing.set(target.chatId, controller);
+  async prepareHandoff(projectPath, target, state, preparation) {
+    const { controller, dividerId, catchUp, from } = preparation;
     const aborted = new Promise((resolve) => controller.signal.addEventListener("abort", () => resolve(null), { once: true }));
     try {
       // The transcript is the chat up to the divider, on the provider it came from: the message sent with it travels as the prompt.
@@ -489,20 +534,44 @@ class ChatHost {
       ]);
       if (handoffBrief === null || controller.signal.aborted) return null;
       await this.updateDivider(projectPath, dividerId, { status: "done", brief: handoffBrief, transcriptPath });
-      return handoffBrief;
+      return controller.signal.aborted ? null : handoffBrief;
     } catch (error) {
-      if (!controller.signal.aborted) await this.updateDivider(projectPath, dividerId, { status: "failed" }).catch(() => {});
+      if (!controller.signal.aborted) await this.abandonHandoff(projectPath, preparation).catch(() => {});
       throw error;
     } finally {
-      this.preparing.delete(target.chatId);
+      this.release(target.chatId, preparation);
     }
+  }
+
+  /** Forgets a chat's preparation once it ended, unless a newer one took its place. */
+  release(chatId, preparation) {
+    if (this.preparing.get(chatId) === preparation) this.preparing.delete(chatId);
+  }
+
+  /**
+   * A handoff that did not happen (cancelled, failed or cut off by a quit): its divider fails and the chat goes back to
+   * the provider and native sessions it had, so the next send redoes the handoff.
+   */
+  async abandonHandoff(projectPath, { dividerId, sessionId, from, to }) {
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const divider = latest.messages.find((item) => item.id === dividerId);
+      if (!isHandoff(divider) || divider.context.status !== "preparing") return latest;
+      const session = latest.sessions[sessionId];
+      return {
+        ...latest,
+        sessions: session && from !== to && session.provider === to ? { ...latest.sessions, [sessionId]: revertSwitch(session, from, to) } : latest.sessions,
+        messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, status: "failed" } } : item)),
+      };
+    });
+    if (changed) this.broadcast(projectPath, state);
   }
 
   /** Merges `patch` into a handoff divider's context and tells the windows. */
   async updateDivider(projectPath, dividerId, patch) {
     const { state, changed } = await this.states.update(projectPath, (latest) => {
       const divider = latest.messages.find((item) => item.id === dividerId);
-      if (!isHandoff(divider)) return latest;
+      // Only a divider still preparing changes: a cancelled one stays failed.
+      if (!isHandoff(divider) || divider.context.status !== "preparing") return latest;
       return { ...latest, messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, ...patch } } : item)) };
     });
     if (changed) this.broadcast(projectPath, state);
@@ -510,13 +579,10 @@ class ChatHost {
 
   /** Stop while a handoff brief is written: no agent session runs yet, so the turn is cancelled here. Resolves true when there was one. */
   async cancelHandoff(chatId) {
-    const controller = this.preparing.get(chatId);
-    if (!controller) return false;
-    controller.abort();
-    const projectPath = projectOfKey(chatId);
-    const state = await this.states.get(projectPath);
-    const divider = state.messages.findLast((item) => item.session_id === sessionIdFromKey(chatId) && isHandoff(item));
-    if (divider) await this.updateDivider(projectPath, divider.id, { status: "failed" });
+    const preparation = this.preparing.get(chatId);
+    if (!preparation) return false;
+    preparation.controller.abort();
+    await this.abandonHandoff(projectOfKey(chatId), preparation);
     await this.receive(chatId, { type: "turn-cancelled" });
     return true;
   }
@@ -524,15 +590,26 @@ class ChatHost {
   /**
    * Before a quit stops the agents: every chat whose turn runs is saved with what it needs to start again
    * (`resumeTurn`), and the cancelled turns that follow say the quit stopped them. A chat whose agent never
-   * started keeps its prompt, since no session holds it yet.
+   * started keeps its prompt, since no session holds it yet. A handoff still preparing is abandoned instead: its
+   * agent never started, so the chat goes back to its old provider and the user's resend redoes the handoff.
    */
   async suspendRunning() {
     this.quitting = true;
     const stoppedAt = this.now();
+    const abandoned = new Set();
+    await Promise.all(
+      [...this.preparing].map(async ([chatId, preparation]) => {
+        abandoned.add(chatId);
+        preparation.controller.abort();
+        await this.abandonHandoff(projectOfKey(chatId), preparation).catch((error) =>
+          console.warn(`Milagre couldn't cancel the handoff of ${chatId}:`, error.message),
+        );
+      }),
+    );
     const byProject = new Map();
     for (const chatId of Object.keys(this.runs)) {
       const turn = this.turns.get(chatId);
-      if (!turn) continue;
+      if (!turn || abandoned.has(chatId)) continue;
       byProject.set(projectOfKey(chatId), [...(byProject.get(projectOfKey(chatId)) ?? []), [sessionIdFromKey(chatId), turn]]);
     }
     await Promise.all(

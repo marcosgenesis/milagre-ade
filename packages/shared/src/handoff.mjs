@@ -1,5 +1,5 @@
 // In-place provider handoff: a chat switches between Claude and Codex, and a divider message (context kind
-// "handoff") marks each switch. Dividers also record where each provider stopped reading. Types: handoff.d.mts.
+// "handoff") marks each switch (a failed one marks none). Dividers also record where each provider stopped reading. Types: handoff.d.mts.
 
 export function isHandoff(message) {
   return message?.context?.kind === "handoff";
@@ -7,11 +7,14 @@ export function isHandoff(message) {
 
 const chatMessages = (state, sessionId) => state.messages.filter((message) => message.session_id === sessionId);
 
+// A divider whose handoff failed or was cancelled did not happen: it marks no switch.
+const isEffective = (message) => isHandoff(message) && message.context.status !== "failed";
+
 /** The provider the chat's last turn ran on: the last divider's target, else the chat's provider once it has messages. */
 export function lastTurnProvider(state, sessionId) {
   const messages = chatMessages(state, sessionId);
   if (!messages.length) return undefined;
-  const divider = messages.findLast(isHandoff);
+  const divider = messages.findLast(isEffective);
   return divider ? divider.context.to.provider : state.sessions[sessionId]?.provider;
 }
 
@@ -21,7 +24,7 @@ export function lastTurnProvider(state, sessionId) {
  */
 export function catchUpStart(state, sessionId, provider) {
   if (!state.sessions[sessionId]?.native_sessions?.[provider]) return null;
-  return chatMessages(state, sessionId).findLast((message) => isHandoff(message) && message.context.from.provider === provider)?.id ?? null;
+  return chatMessages(state, sessionId).findLast((message) => isEffective(message) && message.context.from.provider === provider)?.id ?? null;
 }
 
 /**

@@ -4,6 +4,7 @@ const { ChatHost } = require("./chat-host.cjs");
 const { SessionManager } = require("./session-manager.cjs");
 const { ProjectStates } = require("../project-states.cjs");
 const { applyRunEvent } = require("@milagre/shared/agent-runs");
+const { lastTurnProvider } = require("@milagre/shared/handoff");
 const { waitUntil } = require("./test-helpers.cjs");
 
 class FakeSession {
@@ -453,6 +454,9 @@ test("a message that steers a running turn stays on its provider and adds no div
   await host.states.flush();
   assert.deepEqual(dividers(saved.get(ALPHA), sessionId), []);
   assert.equal(saved.get(ALPHA).sessions[sessionId].provider, "claude");
+  // The steering message runs on the model of the turn it joins, not the one asked for.
+  assert.equal(saved.get(ALPHA).messages.findLast((item) => item.role === "user").model, "claude-opus-5-5");
+  assert.equal(session(ALPHA).turns[2].model, "claude-opus-5-5");
 });
 
 test("a send after a failed resume restores context with a whole-chat brief", async (t) => {
@@ -508,6 +512,110 @@ test("stopping while the brief is written fails the divider, cancels the turn an
     false,
   );
   assert.equal(session(ALPHA).interrupts, 0);
+});
+
+test("a send during preparing waits, then steers after the briefed message; the old session gets no new turn", async (t) => {
+  let release;
+  const { host, manager, saved, session, created } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => (release = resolve)) },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => release);
+  const second = await host.send(message(ALPHA, "also this", { sessionId, provider: "codex", model: "gpt-6" }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    created.some((item) => item.provider === "codex"),
+    false,
+  );
+  assert.equal(session(ALPHA).turns.length, 1);
+  release("BRIEF");
+  await waitUntil(() => created.find((item) => item.provider === "codex")?.turns.length === 2);
+  assert.deepEqual(
+    created.find((item) => item.provider === "codex").turns.map((turn) => turn.prompt),
+    ["BRIEF\n\nswitch", "also this"],
+  );
+  assert.equal(session(ALPHA).turns.length, 1);
+  assert.notEqual(await second.started, null);
+  await host.states.flush();
+  assert.deepEqual(
+    dividers(saved.get(ALPHA), sessionId).map(({ status }) => status),
+    ["done"],
+  );
+});
+
+test("two quick sends on the other provider produce one divider", async (t) => {
+  const { host, manager, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  await Promise.all([
+    host.send(message(ALPHA, "one", { sessionId, provider: "codex", model: "gpt-6" })),
+    host.send(message(ALPHA, "two", { sessionId, provider: "codex", model: "gpt-6" })),
+  ]);
+  await host.states.flush();
+  assert.equal(dividers(saved.get(ALPHA), sessionId).length, 1);
+  assert.equal(saved.get(ALPHA).sessions[sessionId].provider, "codex");
+});
+
+test("a cancelled handoff did not happen: the chat is back on its provider and a resend redoes it", async (t) => {
+  let release;
+  let calls = 0;
+  const { host, manager, saved, session, created } = harness({
+    handoverTools: {
+      writeTranscript: async () => "/tmp/t.md",
+      brief: () => (calls++ ? Promise.resolve("AGAIN") : new Promise((resolve) => (release = resolve))),
+    },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => release);
+  await host.cancelHandoff(`${ALPHA}#${sessionId}`);
+  release("LATE");
+  await host.states.flush();
+  const reverted = saved.get(ALPHA).sessions[sessionId];
+  assert.deepEqual(
+    { provider: reverted.provider, current: reverted.native_session_id, parked: reverted.native_sessions },
+    { provider: "claude", current: "claude-1", parked: undefined },
+  );
+  assert.equal(lastTurnProvider(saved.get(ALPHA), sessionId), "claude");
+
+  await host.send(message(ALPHA, "switch again", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => created.find((item) => item.provider === "codex")?.turns.length);
+  await host.states.flush();
+  assert.deepEqual(
+    dividers(saved.get(ALPHA), sessionId).map(({ status }) => status),
+    ["failed", "done"],
+  );
+  assert.equal(created.find((item) => item.provider === "codex").turns[0].prompt, "AGAIN\n\nswitch again");
+  assert.deepEqual(saved.get(ALPHA).sessions[sessionId].native_sessions, { claude: "claude-1" });
+});
+
+test("a quit while a handoff prepares aborts it, reverts the chat, fails the divider and saves no resume", async (t) => {
+  let release;
+  const { host, manager, saved, session, created } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => (release = resolve)) },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => release);
+  await host.suspendRunning();
+  release("LATE");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await host.states.flush();
+  const chat = saved.get(ALPHA).sessions[sessionId];
+  assert.equal(chat.resumeTurn, undefined);
+  assert.deepEqual({ provider: chat.provider, current: chat.native_session_id }, { provider: "claude", current: "claude-1" });
+  assert.deepEqual(
+    dividers(saved.get(ALPHA), sessionId).map(({ status }) => status),
+    ["failed"],
+  );
+  assert.equal(
+    created.some((item) => item.provider === "codex"),
+    false,
+  );
 });
 
 test("a divider left preparing by a quit is marked failed on the next open", async (t) => {

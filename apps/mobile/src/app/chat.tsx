@@ -29,7 +29,7 @@ import { SimulatorChip } from "../simulator";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
-import { takeDesignMessage } from "../design-outbox";
+import { designMessageSent, peekDesignMessage } from "../design-outbox";
 import { chosenDesign } from "@milagre/shared/artifact";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
@@ -244,15 +244,19 @@ export default function ChatScreen() {
       <Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show("left")} />
     </Stack.Toolbar>
   );
-  // A comment or a choice from the design sheet is sent from here when the Chat comes back into view.
-  const sendDesign = useRef<(text: string) => void>(() => {});
+  // A comment or a choice from the design sheet is sent from here when the Chat comes back into view. Sent while the
+  // Chat is busy, it waits and goes once it no longer is; one that fails waits for the Chat's next focus.
+  const sendDesign = useRef<() => void>(() => {});
+  const designDeferred = useRef(false);
   const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
   useFocusEffect(
     useCallback(() => {
-      const text = designKey && params.id ? takeDesignMessage(designKey) : null;
-      if (text) sendDesign.current(text);
+      if (designKey && params.id) sendDesign.current();
     }, [designKey, params.id]),
   );
+  useEffect(() => {
+    if (!busy && !picking && designDeferred.current) sendDesign.current();
+  }, [busy, picking]);
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;
   if (!session.snapshot || !targetMatches || needsWorktree) {
     return (
@@ -329,9 +333,18 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
-  sendDesign.current = (text) => void send(text, false);
-  async function send(body = draft, withAttachments = true) {
-    if (busy || sendingRef.current || pending || picking || (!body && !(withAttachments && attachments.length))) return;
+  sendDesign.current = () => {
+    const message = designKey ? peekDesignMessage(designKey) : null;
+    if (!message || !designKey) return;
+    void send(message.text, false).then((sent) => {
+      designDeferred.current = sent === "busy";
+      if (sent === true) designMessageSent(designKey, message);
+    });
+  };
+  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. */
+  async function send(body = draft, withAttachments = true): Promise<boolean | "busy"> {
+    if (!body && !(withAttachments && attachments.length)) return false;
+    if (busy || sendingRef.current || pending || picking) return "busy";
     sendingRef.current = true;
     setBusy(true);
     setError("");
@@ -462,6 +475,7 @@ export default function ChatScreen() {
         if (!params.id) router.setParams({ id: String(result.sessionId) });
       }
       await session.refresh();
+      return true;
     } catch (e) {
       if (!accepted) {
         pendingStore.setPendingChats((current) => {
@@ -476,6 +490,7 @@ export default function ChatScreen() {
         }));
       }
       if (current()) setError((e as Error).message);
+      return accepted;
     } finally {
       sendingRef.current = false;
       setBusy(false);

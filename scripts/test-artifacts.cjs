@@ -43,7 +43,7 @@ window.milagre = {
   listEditors: async () => [],
   artifacts: {
     addComments: async ({ comments }) => {
-      const added = comments.map((comment, index) => ({ ...comment, id: "c0ffee0" + index, createdAt: 1 }));
+      const added = comments.map((comment) => ({ ...comment, createdAt: 1 }));
       window.kept = [...(window.kept ?? []), ...added];
       return added;
     },
@@ -279,11 +279,15 @@ async function browserChecks() {
     await screenshot("pending-feedback");
 
     // Send carries the choice and the comments in one message.
+    assert.equal(await evaluate("(window.kept ?? []).length"), 0, "nothing is recorded before it is sent");
     await evaluate(`${dock}.querySelector("[data-slot=artifact-send]").click()`);
     await waitFor("window.sent.length === 1");
+    // The comment goes with the id the app named it by, and is recorded under it once the message went.
+    const commentId = /\(comment ([a-f0-9]{8})\)/.exec(await evaluate("window.sent[0]"))?.[1];
+    await waitFor(`window.kept?.[0]?.id === "${commentId}"`);
     assert.match(
       await evaluate("window.sent[0]"),
-      /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. \(comment c0ffee00\) On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger\n\n.*artifact_resolve_comment/s,
+      /^I chose the design "Home" \(home, version 1\)\. Continue from this one\.\n\nA comment on the designs:\n\n1\. \(comment [a-f0-9]{8}\) On the design "Login screen, warmer" \(login, version 2\), 50% across and 2\d% down: Make the button bigger\n\n.*artifact_resolve_comment/s,
     );
     await waitFor(`!!${frame("home")}.querySelector("[data-slot=artifact-chosen]") && !${dock}.querySelector("[data-slot=artifact-send]")`);
     assert.equal(await evaluate(`${dock}.querySelectorAll("[data-slot=artifact-pin]").length`), 0, "nothing is left waiting to send");
@@ -386,6 +390,8 @@ async function browserChecks() {
     await screenshot("expanded");
     await evaluate(`${dock}.querySelector("[aria-label='Show the chat beside the designs']").click()`);
     await waitFor(`!${dock}.dataset.full`);
+    // Back beside the chat, the chat makes room for the panel again.
+    await waitFor('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock").trim() === "572px"');
     // Too narrow for a useful chat beside it, the design fills the workspace on its own.
     window.setContentSize(1100, 820);
     await waitFor(`${dock}.dataset.full === "true" && !${dock}.querySelector("[aria-label='Fill the window with the designs']")`);

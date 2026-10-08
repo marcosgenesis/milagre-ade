@@ -117,14 +117,18 @@ function createChatArtifacts({ directory, validateChat }) {
           if (!text) throw Error("A comment needs its text.");
           const at = (value) => (typeof value === "number" && value >= 0 && value <= 1 ? value : undefined);
           return {
-            id: randomUUID().replace(/-/g, "").slice(0, 8),
+            // The app names the comment in the message it sends first, and records it once that went; one it names
+            // again (a retried send) is kept once.
+            id: typeof comment.id === "string" && COMMENT_ID.test(comment.id) ? comment.id : randomUUID().replace(/-/g, "").slice(0, 8),
             design: { id: design.id, version: design.version, title: String(design.title ?? design.id).slice(0, 120) },
             ...(at(comment.x) === undefined || at(comment.y) === undefined ? {} : { x: at(comment.x), y: at(comment.y) }),
             text,
             createdAt: Date.now(),
           };
         });
-        await writeComments(folder, [...(await readComments(folder)), ...added].slice(-MAX_COMMENTS));
+        const kept = await readComments(folder);
+        const fresh = added.filter((comment) => !kept.some((item) => item.id === comment.id));
+        await writeComments(folder, [...kept, ...fresh].slice(-MAX_COMMENTS));
         return added;
       }),
     async comments(request) {

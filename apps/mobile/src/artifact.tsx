@@ -4,7 +4,15 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView } from "@expo/dom-webview";
 import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, CheckmarkCircle02Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
-import { artifactShell, designFeedbackMessage, type Artifact, type ArtifactComment, type ArtifactSummary, type DesignComment } from "@milagre/shared/artifact";
+import {
+  artifactShell,
+  designFeedbackMessage,
+  newCommentId,
+  type Artifact,
+  type ArtifactComment,
+  type ArtifactSummary,
+  type DesignComment,
+} from "@milagre/shared/artifact";
 import type { ArtifactRef } from "@milagre/shared/model";
 import type { ArtifactStep } from "@milagre/shared/reply-parts";
 import { postDesignMessage } from "./design-outbox";
@@ -273,11 +281,14 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
   const feedback = written.length + (choice ? 1 : 0);
   const send = async () => {
     if (!hostId || !chatId || !feedback || !source) return;
-    // Kept by the host, the comments get ids the agent resolves them by; a host from before that sends them without.
-    const comments = written.length
-      ? await source.call<DesignComment[]>("artifact:add-comments", [{ chatId, comments: written }]).catch(() => written)
-      : written;
-    postDesignMessage(`${hostId}|${chatId}`, designFeedbackMessage({ choice, comments }));
+    // Each comment gets the id the agent resolves it by; the host records the comments once the message went.
+    const comments = written.map((note) => ({ ...note, id: newCommentId() }));
+    postDesignMessage(`${hostId}|${chatId}`, {
+      text: designFeedbackMessage({ choice, comments }),
+      onSent: () => {
+        if (comments.length) source.call("artifact:add-comments", [{ chatId, comments }]).catch(() => {});
+      },
+    });
     router.back();
   };
   const ref = (design: Artifact): ArtifactRef => ({ id: design.id, version: design.version, title: design.title });

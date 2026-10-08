@@ -17,6 +17,12 @@ export interface ArtifactApi {
 /** A comment on a design: where on it (fractions of its screen) when it was pinned, and what the user wrote. */
 export type DesignComment = { design: ArtifactRef; x?: number; y?: number; text: string; id?: string };
 
+/**
+ * A new comment's id, named by the app so the message that carries it can be sent before the host records it: a send
+ * that fails then leaves nothing recorded, and the host keeps a comment it is given twice once.
+ */
+export const newCommentId = () => Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+
 /** A comment as the host keeps it: with its id, and, once the agent has addressed it, its note on what it did. */
 export type ArtifactComment = DesignComment & { id: string; createdAt: number; resolved?: { note: string; at: number } };
 

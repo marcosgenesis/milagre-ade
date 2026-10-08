@@ -100,3 +100,16 @@ test("the agent resolves the user's comments with a note, and lists the open one
   );
   await assert.rejects(api.comments({ chatId: "/other#1" }), /existing Chat/);
 });
+
+test("comments the app names are kept by that id, once", async (t) => {
+  const { api } = await fixture(t);
+  const design = { id: "home", version: 1, title: "Home" };
+  const comment = { design, text: "Bigger", id: "0a1b2c3d" };
+  assert.equal((await api.addComments({ chatId: CHAT, comments: [comment] }))[0].id, "0a1b2c3d");
+  await api.addComments({ chatId: CHAT, comments: [comment] });
+  assert.deepEqual(
+    (await api.comments({ chatId: CHAT })).map((item) => item.id),
+    ["0a1b2c3d"],
+    "a retried send records nothing twice",
+  );
+});

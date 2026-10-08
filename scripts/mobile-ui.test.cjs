@@ -3909,14 +3909,15 @@ test("the design sheet loads the version it opened under the design policy, fram
 test("on the design sheet, choosing and commenting wait for Send, which hands one message to the Chat", async () => {
   const outbox = require("../apps/mobile/src/design-outbox.ts");
   let backs = 0;
+  const recorded = [];
   const client = {
     url: "mac",
-    call: async (method, args) =>
-      method === "artifact:list"
+    call: async (method, args) => {
+      if (method === "artifact:add-comments") recorded.push(...args[0].comments);
+      return method === "artifact:list"
         ? [{ id: "home", version: 1, title: "Home", versions: 1, width: 390, height: 844 }]
-        : method === "artifact:add-comments"
-          ? args[0].comments.map((comment) => ({ ...comment, id: "c0ffee01", createdAt: 1 }))
-          : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" },
+        : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" };
+    },
   };
   const h = artifactHost(client, [], { back: () => backs++ });
   const props = { hostId: "mac", chatId: "/p#7", id: "home", version: "1" };
@@ -3926,7 +3927,7 @@ test("on the design sheet, choosing and commenting wait for Send, which hands on
   assert.ok(!find(tree, (node) => (node.props?.title ?? "").startsWith("Send")), "nothing to send yet");
   find(tree, (node) => node.props?.title === "Choose").props.onPress();
   tree = h.render("ArtifactSheet", props);
-  assert.equal(outbox.takeDesignMessage("mac|/p#7"), null, "choosing alone sends nothing");
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "choosing alone sends nothing");
   assert.ok(find(tree, (node) => node.props?.title === "Chosen ✓"));
   find(tree, (node) => node.props?.title === "Comment").props.onPress();
   tree = h.render("ArtifactSheet", props);
@@ -3936,11 +3937,21 @@ test("on the design sheet, choosing and commenting wait for Send, which hands on
   tree = h.render("ArtifactSheet", props);
   find(tree, (node) => node.props?.title === "Send 2").props.onPress();
   await settle();
+  const message = outbox.peekDesignMessage("mac|/p#7");
+  const id = /\(comment ([a-f0-9]{8})\)/.exec(message.text)?.[1];
   assert.equal(
-    outbox.takeDesignMessage("mac|/p#7"),
-    'I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. (comment c0ffee01) On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids. Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.',
+    message.text,
+    `I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. (comment ${id}) On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids. Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.`,
   );
-  assert.equal(outbox.takeDesignMessage("mac|/p#7"), null, "a message is sent once");
+  assert.equal(recorded.length, 0, "the comments are recorded only once the message went");
+  assert.ok(outbox.peekDesignMessage("mac|/p#7"), "it waits until it is sent");
+  outbox.designMessageSent("mac|/p#7", message);
+  await settle();
+  assert.deepEqual(
+    recorded.map((comment) => [comment.id, comment.text]),
+    [[id, "Bigger title"]],
+  );
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "a message is sent once");
   assert.equal(backs, 1);
   h.cleanup();
 });

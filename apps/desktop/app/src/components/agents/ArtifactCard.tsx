@@ -13,7 +13,7 @@ import {
   Add01Icon,
   PaintBoardIcon,
 } from "@hugeicons/core-free-icons";
-import { chosenDesign, designFeedbackMessage, parseDesignFeedback, type DesignComment } from "@milagre/shared/artifact";
+import { chosenDesign, designFeedbackMessage, newCommentId, parseDesignFeedback, type DesignComment } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 import { DESIGNS_EXPANDED, dockLayer, useDockArea } from "./dock-area";
@@ -500,11 +500,11 @@ function ArtifactDock({
     setSending(true);
     setError("");
     try {
-      let comments: DesignComment[] = written.map(({ design, x, y, text }) => ({ design, x, y, text }));
-      // Kept by the host, the comments get ids the agent resolves them by; a host from before that sends them without.
-      if (comments.length && window.milagre.artifacts.addComments)
-        comments = await window.milagre.artifacts.addComments({ chatId, comments }).catch(() => comments);
+      // Each pin's key is its comment's id, which the agent resolves it by. The host records the comments once the
+      // message went, so a send that fails records none.
+      const comments: DesignComment[] = written.map(({ key, design, x, y, text }) => ({ id: key, design, x, y, text }));
       if (await onSend(designFeedbackMessage({ choice, comments }))) {
+        if (comments.length) void window.milagre.artifacts.addComments?.({ chatId, comments }).catch(() => {});
         setPins([]);
         setOpenPin(null);
         setChoice(null);
@@ -519,7 +519,7 @@ function ArtifactDock({
     sent,
     open: openPin,
     onPin: (design, x, y) => {
-      const key = `${Date.now()}-${pins.length}`;
+      const key = newCommentId();
       // A new pin closes the open bubble, dropping it if it was left empty.
       setPins((current) => [...current.filter((pin) => pin.key !== openPin || pin.text.trim()), { key, design, x, y, text: "" }]);
       setOpenPin(key);

@@ -51,6 +51,9 @@ export const DockSlide = forwardRef<
       done();
       return;
     }
+    // The room is set from where the width is now: springing to the width it already has (back from filling the
+    // workspace) changes nothing, and so would never set it.
+    if (shown.get() > 0.5) document.documentElement.style.setProperty(reserve, `${shown.get() + 12}px`);
     setSliding(true);
     const controls = animate(shown, isPresent ? width : 0, {
       ...SPRING_LAYOUT,

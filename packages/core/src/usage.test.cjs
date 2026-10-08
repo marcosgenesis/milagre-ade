@@ -627,21 +627,31 @@ test("the store keeps a banked reset count and drops zero or junk", () => {
   assert.equal("bankedResets" in cachedSnapshot(store, NOW).providers[0], false);
 });
 
-test("Antigravity usage is always unavailable and is never cached as numbers", async () => {
+test("Antigravity usage goes through the reader, is cached as numbers and keeps the last good ones on an error", async () => {
   const updatedAt = new Date(NOW).toISOString();
-  assert.deepEqual(await readAntigravityUsage({ now: () => NOW }), {
-    provider: "antigravity",
-    status: "unavailable",
-    windows: [],
-    updatedAt,
-    message: "Google doesn't report Antigravity quota.",
-  });
+  const windows = [{ id: "gemini:weekly", label: "Gemini weekly", shortLabel: "wk", usedPercent: 25, resetsAt: "2026-10-15T00:00:00Z" }];
+  const results = [
+    { provider: "antigravity", status: "ok", windows, updatedAt },
+    { provider: "antigravity", status: "error", windows: [], updatedAt, message: "Antigravity usage timed out." },
+  ];
+  const store = createUsageStore();
   const readUsage = createUsageReader({
     now: () => NOW,
+    store,
     readClaude: async () => ({ provider: "claude", status: "ok", windows: [], updatedAt }),
     readCodex: async () => ({ provider: "codex", status: "ok", windows: [], updatedAt }),
+    readAntigravity: async () => results.shift(),
   });
-  const antigravity = (await readUsage()).providers.find((item) => item.provider === "antigravity");
+  const find = (snapshot) => snapshot.providers.find((item) => item.provider === "antigravity");
+  assert.deepEqual(find(await readUsage()).windows, windows);
+  assert.deepEqual(cachedSnapshot(store, NOW).providers.find((item) => item.provider === "antigravity").windows, windows);
+  const failed = find(await readUsage());
+  assert.equal(failed.status, "error");
+  assert.deepEqual(failed.windows, windows);
+});
+
+test("without a signed-in profile the default Antigravity reader is unavailable", async () => {
+  const antigravity = await readAntigravityUsage({ now: () => NOW });
   assert.equal(antigravity.status, "unavailable");
-  assert.equal(antigravity.message, "Google doesn't report Antigravity quota.");
+  assert.deepEqual(antigravity.windows, []);
 });

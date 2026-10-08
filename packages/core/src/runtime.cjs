@@ -22,6 +22,7 @@ const { antigravityAcp, sweepTempDirs } = require("./agents/antigravity-acp.cjs"
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { createAntigravity } = require("./agents/antigravity-install.cjs");
+const { recoverAntigravitySubagents } = require("./agents/antigravity-subagents.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
@@ -47,7 +48,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { createProjectFinder } = require("./project-finder.cjs");
-const { saveProjectState, readProjectState, compactProjectDetails, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, compactProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -175,27 +176,34 @@ function createRuntime(options) {
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
   const accountUsage = new Map();
+  // Tests replace single readers. Claude's and Codex's are called with no arguments; Antigravity's gets the Account's environment.
+  const readers = options.usageReaders ?? {};
   function usageForAccounts(scope) {
     const claude = accounts.selected("claude", scope),
-      codex = accounts.selected("codex", scope);
-    // Antigravity is not part of the key: it never reports usage (readAntigravityUsage), so there is nothing per
-    // Account to keep apart, and existing cache files keep their names.
-    const key = `${claude}-${codex}`;
+      codex = accounts.selected("codex", scope),
+      antigravity = accounts.selected("antigravity", scope);
+    // The default Antigravity Account adds nothing to the key, so existing cache files keep their names.
+    const key = `${claude}-${codex}${antigravity === "default" ? "" : `-${antigravity}`}`;
     if (!accountUsage.has(key)) {
-      const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
+      const store =
+        claude === "default" && codex === "default" && antigravity === "default"
+          ? usageStore
+          : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
       accountUsage.set(key, {
         key,
-        accountIds: { claude, codex },
+        accountIds: { claude, codex, antigravity },
         store,
         read: createUsageReader({
           ready: () => environmentReady,
           store,
-          readClaude: async () => {
-            const env = accounts.environment("claude", claude);
-            return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
-          },
-          readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
-          readAntigravity: () => readAntigravityUsage(),
+          readClaude:
+            readers.claude ??
+            (async () => {
+              const env = accounts.environment("claude", claude);
+              return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
+            }),
+          readCodex: readers.codex ?? (() => readCodexUsage({ env: accounts.environment("codex", codex) })),
+          readAntigravity: () => (readers.antigravity ?? readAntigravityUsage)({ env: accounts.environment("antigravity", antigravity) }),
         }),
       });
     }
@@ -281,7 +289,7 @@ function createRuntime(options) {
       return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered, await linkStore.ownedWorktrees());
     },
     save: saveProjectState,
-    compact: compactProjectDetails,
+    compact: compactProjectState,
   });
 
   const scopeStates = createChatScopes({
@@ -676,7 +684,12 @@ function createRuntime(options) {
   const chats = new ChatHost({
     states: scopeStates,
     startTurn: (request) => track(() => startAgentTurn(request), starting),
-    readSubagents: async ({ cwd, agents, projectPath }) => {
+    readSubagents: async ({ cwd, agents, projectPath, provider = "codex", nativeSessionId }) => {
+      // Antigravity's children are read from its transcripts in the chat's Account profile: no process starts.
+      if (provider === "antigravity") {
+        const cli = await agentCli("antigravity", projectPath).catch(() => null);
+        return recoverAntigravitySubagents({ home: cli?.env?.GEMINI_HOME, parentId: nativeSessionId, agents });
+      }
       const cli = await agentCli("codex", projectPath);
       return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
     },

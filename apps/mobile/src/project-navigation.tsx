@@ -1,3 +1,4 @@
+import { chatSummary } from "@milagre/shared/chat-summary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -190,7 +191,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           ({ chat, run }) =>
             // A Chat stays in its place while its archive runs, under the progress, until the archive ends.
             (show === "archived") === (!!chat.archived && !archives.chats.has(`${copy?.project.path}#${chat.id}`)) &&
-            (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)),
+            (run || isListedChat(chat, chatSummary(chat, byChat.get(chat.id)).count)),
         )
         .filter(({ mark }) => show !== "needs" || NEEDS.includes(mark))
         .filter(({ mark }) => show !== "running" || mark === "running");
@@ -223,7 +224,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           pending,
           worktree: pending?.newWorktree ? "New worktree" : copy?.project.state.worktrees[chat.worktree_id]?.name || "Worktree",
           prPath: !pending && !copy?.project.link ? copy?.project.state.worktrees[chat.worktree_id]?.path : undefined,
-          prRefs: copy?.project.pullRequestRefs?.[chat.id] ?? pullRequestRefs(byChat.get(chat.id) || []),
+          prRefs: chat.summary?.pullRequests ?? copy?.project.pullRequestRefs?.[chat.id] ?? pullRequestRefs(byChat.get(chat.id) || []),
           mark,
         });
       if (failures[project.path])

@@ -1,3 +1,4 @@
+import { chatSummary } from "@milagre/shared/chat-summary";
 import type { AgentSession, ChatMessage } from "../model";
 import { comparePins } from "@milagre/shared/chats";
 export { chatTitle, pinOrderAt } from "@milagre/shared/chats";
@@ -34,11 +35,14 @@ export type ChatOrder = "created" | "recent";
  * Pinned chats first, in their manual order, so a finishing turn never moves them; then the rest newest first.
  * Message ids only grow, so a chat's first message dates its start and its last one its latest activity.
  */
-export function orderChats<T extends { session: Pick<AgentSession, "pinned" | "pin_order">; sessionMessages: ChatMessage[] }>(
+export function orderChats<T extends { session: Pick<AgentSession, "pinned" | "pin_order" | "summary">; sessionMessages: readonly ChatMessage[] }>(
   chats: T[],
   order: ChatOrder,
 ): T[] {
-  const key = (chat: T) => (order === "recent" ? chat.sessionMessages.at(-1)?.id : chat.sessionMessages[0]?.id) ?? 0;
+  const key = (chat: T) => {
+    const summary = chatSummary(chat.session, chat.sessionMessages);
+    return (order === "recent" ? summary.lastId : summary.firstId) ?? 0;
+  };
   return [...chats].sort((a, b) => comparePins(a.session, b.session) || key(b) - key(a));
 }
 

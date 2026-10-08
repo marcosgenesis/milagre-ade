@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { createUsageStore } = require("./usage-cache.cjs");
+const { readAntigravityUsage } = require("./antigravity-usage.cjs");
 
 const PROVIDER_TIMEOUT_MS = 10_000;
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -249,13 +250,6 @@ async function readCodexUsage(deps = {}) {
   });
 }
 
-// Antigravity exposes no quota endpoint (docs/adr/0006-antigravity-over-acp.md), so Antigravity is always unavailable,
-// whichever Account is selected; nothing is started or read.
-const ANTIGRAVITY_UNAVAILABLE = "Google doesn't report Antigravity quota.";
-async function readAntigravityUsage({ now = Date.now } = {}) {
-  return providerResult("antigravity", now, "unavailable", [], ANTIGRAVITY_UNAVAILABLE);
-}
-
 // On an error, keep showing the last good numbers (minus windows that have since reset).
 function withLastGood(result, last, nowMs) {
   if (result.status !== "error" || !last) return result;
@@ -347,4 +341,4 @@ async function readClaudeProfileUsage({
   }
 }
 
-module.exports = { ANTIGRAVITY_UNAVAILABLE, createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage };
+module.exports = { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage };

@@ -9,6 +9,7 @@ import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
 import { reportChatAction } from "./lib/chat-action";
 import { stateEvents } from "./lib/state-events";
+import { chatSummary } from "@milagre/shared/chat-summary";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
@@ -16,6 +17,7 @@ import { flushSync } from "react-dom";
 import {
   ChatMessage,
   ImageAttachment,
+  AgentSession,
   CoordinatorState,
   Isolation,
   MODEL_CATALOG,
@@ -66,7 +68,7 @@ import { useDiffComments } from "./components/changes/useDiffComments";
 import { formatCommentsMessage } from "./lib/diff-comments";
 import { DiffToolbar, useDiffPreferences, useDiffPresence } from "./components/changes/DiffPrefs";
 import { useChanges } from "./components/changes/useChanges";
-import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
+import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
@@ -115,6 +117,14 @@ const LAZY_VIEWS = [DiffView, GitActionsDialog, SettingsNav, CommandPalette, Med
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
+  const sessions = Object.values(state.sessions).filter((session) => !session.archived);
+  if (sessions.every((session) => session.summary)) {
+    const latest = sessions.reduce<AgentSession | null>(
+      (best, session) => ((session.summary!.lastId ?? -1) > (best?.summary!.lastId ?? -1) ? session : best),
+      null,
+    );
+    return latest?.summary!.lastId === undefined ? null : latest.id;
+  }
   return (
     state.messages
       .filter((message) => !state.sessions[message.session_id]?.archived)
@@ -123,6 +133,7 @@ function latestSessionId(state: CoordinatorState) {
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
+const NO_REFS: string[] = [];
 // `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
 type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
 const NO_WORKTREE = -1;
@@ -609,15 +620,17 @@ function App() {
     [attentionChats, states, projectName],
   );
   const delegated = useStableSet(useMemo(() => delegatedChats(linkedWork, project?.path ?? ""), [linkedWork, project?.path]));
+  // Chats carry a summary of their messages; only an older host's state, without one, is grouped message by message.
   const messagesBySession = useMemo(() => {
     const grouped = new Map<number, ChatMessage[]>();
+    if (!Object.values(sidebarState?.sessions ?? {}).some((session) => !session.summary)) return grouped;
     for (const message of sidebarState?.messages ?? []) {
       const list = grouped.get(message.session_id);
       if (list) list.push(message);
       else grouped.set(message.session_id, [message]);
     }
     return grouped;
-  }, [sidebarState?.messages]);
+  }, [sidebarState?.messages, sidebarState?.sessions]);
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
@@ -629,13 +642,13 @@ function App() {
     const withMessages = Object.values(state.sessions)
       .filter((session) => !session.archived || (project && archivingChats.has(chatKey(project.path, session.id))))
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
-      .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
+      .filter(({ session, sessionMessages }) => isListedChat(session, chatSummary(session, sessionMessages).count));
     const rows = orderChats(withMessages, chatOrder).map(({ session, sessionMessages }) => {
       const worktree = state.worktrees[session.worktree_id];
       const failed = failedSends.find((send) => send.projectPath === project?.path && session.id === send.session.id);
       const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
-      // The commit dialog's notes aren't replies: they don't hide a failed turn.
-      const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
+      // The commit dialog's notes aren't replies: they don't hide a failed turn (see summarizeChat).
+      const summary = chatSummary(session, sessionMessages);
       return {
         id: String(session.id),
         label: chatTitle(session, sessionMessages),
@@ -656,12 +669,12 @@ function App() {
           diff: worktree?.diff,
           pullRequests: worktree
             ? chatPullRequests(
-                readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
+                session.summary ? (summary.pullRequests ?? NO_REFS) : readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
                 chatPrs[worktree.path] ?? {},
                 pullRequests[worktree.path] ?? undefined,
               )
             : [],
-          failed: Boolean(failed) || lastReply?.outcome === "failed",
+          failed: Boolean(failed) || summary.lastOutcome === "failed",
           ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
         },
       };

@@ -202,7 +202,16 @@ export type HandoffContext = {
 };
 
 /** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
-export type ChatContext = LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+export type AdvisorResultContext = {
+  kind: "advisor-result";
+  advisorId: string;
+  completionId: string;
+  title: string;
+  provider: ModelProvider;
+  outcome: "completed" | "failed" | "cancelled";
+};
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation

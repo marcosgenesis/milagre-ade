@@ -99,11 +99,26 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
                 updatedAt: timestamp,
                 endedAt: timestamp,
                 retryable: status !== "completed",
-                transcript: [...r.transcript, { id: completionId, kind: "message", text: output }].slice(-100),
+                transcript: [...r.transcript.filter((item) => item.id !== `stream:${r.turnNumber}`), { id: completionId, kind: "message", text: output }].slice(
+                  -100,
+                ),
                 completions: [...(r.completions ?? []), result],
               };
             }
-            return { ...r, status: "running", updatedAt: timestamp, latestActivity: event.type === "step-started" ? event.title : r.latestActivity };
+            const transcript =
+              event.type === "text-delta"
+                ? [
+                    ...r.transcript.filter((item) => item.id !== `stream:${r.turnNumber}`),
+                    { id: `stream:${r.turnNumber}`, kind: "message", text: entry.output },
+                  ].slice(-100)
+                : r.transcript;
+            return {
+              ...r,
+              transcript,
+              status: "running",
+              updatedAt: timestamp,
+              latestActivity: event.type === "step-started" ? event.title : r.latestActivity,
+            };
           });
           if (!current()) return;
           // eslint-disable-next-line promise/no-callback-in-promise -- this is a host port, not a Node callback

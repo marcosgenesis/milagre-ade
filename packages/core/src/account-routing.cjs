@@ -17,8 +17,7 @@ function createAccountRouting({ accounts, cli: baseCli, clientVersion, statusFac
     }
   }
   const cli = (provider, scope) => forAccount(provider, accounts.selected(provider, scope));
-  function services(scope) {
-    const ids = selection(scope);
+  function services(scope, ids = selection(scope)) {
     const key = JSON.stringify(ids);
     if (!cache.has(key)) {
       const pinnedCli = (provider) => forAccount(provider, ids[provider]);
@@ -35,6 +34,6 @@ function createAccountRouting({ accounts, cli: baseCli, clientVersion, statusFac
       entry.models.invalidate?.(provider);
     }
   }
-  return { cli, services, selection, invalidate };
+  return { cli, forAccount, services, selection, invalidate };
 }
 module.exports = { createAccountRouting };

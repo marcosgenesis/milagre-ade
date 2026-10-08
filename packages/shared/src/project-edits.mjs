@@ -62,16 +62,18 @@ export function archiveSubagent(state, sessionId, id, archived) {
 }
 
 /** The state with a chat's finished subagents archived; unchanged state is returned as is. */
-export function archiveFinishedSubagents(state, sessionId) {
+export function archiveFinishedSubagents(state, sessionId, { keepAdvisors = false } = {}) {
   const session = state.sessions[sessionId];
-  if (!session?.subagents?.some((agent) => !agent.archived && subagentFinished(agent))) return state;
+  if (!session?.subagents?.some((agent) => !agent.archived && subagentFinished(agent) && !(keepAdvisors && agent.source === "milagre-advisor"))) return state;
   return {
     ...state,
     sessions: {
       ...state.sessions,
       [sessionId]: {
         ...session,
-        subagents: session.subagents.map((agent) => (!agent.archived && subagentFinished(agent) ? { ...agent, archived: true } : agent)),
+        subagents: session.subagents.map((agent) =>
+          !agent.archived && subagentFinished(agent) && !(keepAdvisors && agent.source === "milagre-advisor") ? { ...agent, archived: true } : agent,
+        ),
       },
     },
   };

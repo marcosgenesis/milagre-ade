@@ -67,6 +67,7 @@ test("recovery reads only eligible unknown children and saves terminal outcomes 
     child("running", { status: "running" }),
     child("finished", { status: "completed" }),
     child("native-parent"),
+    child("advisor:owned", { source: "milagre-advisor" }),
   ];
   const state = projectState([...eligible, ...excluded]);
   const calls = [];

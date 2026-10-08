@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { readProjectState: readSavedState } = require("@milagre/core/project-store");
 const { applyStatePatch } = require("@milagre/shared/state-patch");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -158,7 +159,7 @@ test("explicit desktop update waits for the shared host to save and stop", async
   await desktop.invoke("chat:patch", [project, session.id, { title: "Before update" }]);
   await desktop.close({ stopHost: true });
   await assert.rejects(fs.stat(path.join(dataDir, "runtime.lock")), { code: "ENOENT" });
-  const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  const saved = await readSavedState(project);
   assert.equal(saved.sessions[session.id].title, "Before update");
 });
 
@@ -204,7 +205,7 @@ for (const stopHost of [false, true]) {
       fail = false;
     }
     await desktop.close({ stopHost });
-    const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+    const saved = await readSavedState(project);
     assert.ok(saved.messages.some((message) => message.body === "Keep this accepted note"));
     if (stopHost) await assert.rejects(fs.stat(path.join(dataDir, "runtime.lock")), { code: "ENOENT" });
     else {

@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { readProjectState: readSavedState } = require("./project-store.cjs");
 const test = require("node:test");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -122,7 +123,7 @@ test("a linked worktree's old chats come back with fresh ids, and the old file i
 
   await assert.rejects(fs.stat(oldFile(linked.linked)), { code: "ENOENT" });
   assert.equal((await migratedFiles(linked.linked)).length, 1);
-  const saved = JSON.parse(await fs.readFile(mainFile(project), "utf8"));
+  const saved = await readSavedState(project);
   assert.equal(Object.values(saved.sessions).filter((session) => session.native_session_id?.startsWith("native-")).length, 2);
   for (const key of ["approvals", "outputs", "connections", "events", "artifacts", "conflicts"]) assert.equal(key in saved, false, `${key} stays behind`);
 });
@@ -371,7 +372,7 @@ test("two loads at once merge once", async (t) => {
   assert.equal(opened.filter((result) => result.restoredChats).length, 1, "one window gets the notice");
   await runtime.close();
   await other.close();
-  const saved = JSON.parse(await fs.readFile(mainFile(project), "utf8"));
+  const saved = await readSavedState(project);
   assert.equal(Object.values(saved.sessions).filter((session) => session.title === "One").length, 1);
   assert.equal(saved.messages.filter((item) => item.body === "Single").length, 1);
   assert.equal((await migratedFiles(linked.linked)).length, 1);
@@ -524,7 +525,7 @@ test("a crash between the save and the rename brings nothing back twice", async 
     migrateWorktreeChats({ projectPath: project, state: emptyState('project'), linkedWorktrees: [{ path: linked, name: 'linked' }],
       save: async (...args) => { await saveProjectState(...args); process.exit(0); } });`;
   execFileSync(process.execPath, ["-e", script, project, linked.linked], { stdio: "ignore" });
-  assert.ok(Object.values(JSON.parse(await fs.readFile(mainFile(project), "utf8")).sessions).some((session) => session.title === "Crash survivor"));
+  assert.ok(Object.values((await readSavedState(project)).sessions).some((session) => session.title === "Crash survivor"));
   await fs.stat(oldFile(linked.linked));
   const opened = await make().openProject(project);
   assert.equal(opened.restoredChats, undefined, "nothing new came back");

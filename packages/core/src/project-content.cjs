@@ -101,14 +101,20 @@ async function compactSubagents(projectPath, state, tracker = {}) {
         subagents.push(agent);
         continue;
       }
-      const bytes = JSON.stringify(agent.transcript);
-      const hash = digest(bytes);
+      // States are replaced, never changed in place: a transcript array already hashed is the same transcript.
+      let bytes = null;
+      let hash = transcriptDigests.get(agent.transcript);
+      if (!hash) {
+        bytes = JSON.stringify(agent.transcript);
+        hash = digest(bytes);
+        transcriptDigests.set(agent.transcript, hash);
+      }
       const key = `${id}/${agent.id}`;
       // A remembered digest is trusted only while its file is still there (one readdir per save, not a stat per agent).
       if (known?.get(key) === hash) existing ??= new Set(await fs.readdir(path.join(projectPath, ".milagre", "subagents")).catch(() => []));
       if (known?.get(key) !== hash || !existing.has(`${hash}.json`)) {
         directory ??= await contentDirectory(projectPath, "subagents");
-        await writeContent(projectPath, "subagents", bytes, "json", directory);
+        await writeContent(projectPath, "subagents", (bytes ??= JSON.stringify(agent.transcript)), "json", directory);
         tracker.wrote = true;
       }
       next?.set(key, hash);
@@ -216,6 +222,8 @@ async function restoreDetails(projectPath, state) {
 function referencedDetails(state) {
   return new Set((state.messages ?? []).map((message) => message.detailFile).filter((name) => typeof name === "string"));
 }
+
+const transcriptDigests = new WeakMap();
 
 /** Every sidecar a saved state points at, current and superseded. */
 function referencedSidecars(state) {

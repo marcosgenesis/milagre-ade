@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { readProjectState: readSavedState } = require("@milagre/core/project-store");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -191,7 +192,7 @@ test("authenticated daemon runs fixture turns, persists replies, reconnects and 
   await client.call("agent:interrupt", [`${project}#${chat.id}`]);
   await until(() => cancellation.find((e) => e.channel === "agent:event" && e.payload.event.type === "turn-cancelled"));
   await client.call("daemon:flush");
-  state = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  state = await readSavedState(project);
   assert.ok(state.messages.some((message) => message.body === "Cancel this turn"));
   assert.equal(state.sessions[chat.id].native_session_id, "thread-1");
 });

@@ -147,3 +147,166 @@ test("rate limits and GraphQL errors surface as messages", async () => {
   const empty = createLinearClient({ store: memoryStore(null), clientId: "cid", apiBase: "https://api.test", fetchImpl: async () => json(200, {}) });
   await assert.rejects(empty.query("q"), { code: "not-connected" });
 });
+
+test("a 401 on a fresh token refreshes once and retries", async () => {
+  const store = memoryStore(fresh);
+  let refreshes = 0;
+  let revoked = 0;
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    revoked: () => revoked++,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        refreshes++;
+        return json(200, { access_token: "a2", refresh_token: "r2", expires_in: 86400 });
+      }
+      return init.headers.authorization === "Bearer a1" ? json(401, {}) : json(200, { data: { ok: 1 } });
+    },
+  });
+  assert.deepEqual(await client.query("q"), { ok: 1 });
+  assert.equal(refreshes, 1);
+  assert.equal(store.saved.accessToken, "a2");
+  assert.equal(revoked, 0);
+});
+
+test("a 401 that survives the forced refresh signs out once", async () => {
+  const store = memoryStore(fresh);
+  let revoked = 0;
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    revoked: () => revoked++,
+    fetchImpl: async (url) => (url.endsWith("/oauth/token") ? json(200, { access_token: "a2", expires_in: 86400 }) : json(401, {})),
+  });
+  await assert.rejects(client.query("q"), { code: "not-connected" });
+  assert.equal(store.saved, null);
+  assert.equal(revoked, 1);
+});
+
+test("a 401 whose forced refresh is revoked signs out", async () => {
+  const store = memoryStore(fresh);
+  let revoked = 0;
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    revoked: () => revoked++,
+    fetchImpl: async (url) => (url.endsWith("/oauth/token") ? json(400, { error: "invalid_grant" }) : json(401, {})),
+  });
+  await assert.rejects(client.query("q"), { code: "not-connected" });
+  assert.equal(store.saved, null);
+  assert.equal(revoked, 1);
+});
+
+test("a late 401 keeps a token rotated during the request and retries with it", async () => {
+  const store = memoryStore(fresh);
+  let revoked = 0;
+  let calls = 0;
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    revoked: () => revoked++,
+    fetchImpl: async (url, init) => {
+      calls++;
+      if (init.headers.authorization === "Bearer a1") {
+        store.saveToken({ ...fresh, accessToken: "a2", refreshToken: "r2" });
+        return json(401, {});
+      }
+      return json(200, { data: { ok: 2 } });
+    },
+  });
+  assert.deepEqual(await client.query("q"), { ok: 2 });
+  assert.equal(store.saved.accessToken, "a2");
+  assert.equal(revoked, 0);
+  assert.equal(calls, 2);
+});
+
+test("concurrent 401s on one token sign out and call revoked once", async () => {
+  const store = memoryStore(fresh);
+  let revoked = 0;
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    revoked: () => revoked++,
+    fetchImpl: async (url) => {
+      if (!url.endsWith("/oauth/token")) return json(401, {});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return json(200, { access_token: "a2", expires_in: 86400 });
+    },
+  });
+  const results = await Promise.allSettled([client.query("q"), client.query("q")]);
+  assert.deepEqual(
+    results.map((result) => result.reason?.code),
+    ["not-connected", "not-connected"],
+  );
+  assert.equal(store.saved, null);
+  assert.equal(revoked, 1);
+});
+
+test("a GraphQL 5xx reads as offline", async () => {
+  const client = createLinearClient({
+    store: memoryStore(fresh),
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async () => json(503, { errors: [{ message: "upstream" }] }),
+  });
+  await assert.rejects(client.query("q"), { code: "offline", message: "Linear is having trouble. Try again in a minute." });
+});
+
+test("a JSON null or non-object body is treated as an empty answer", async () => {
+  const ok = createLinearClient({
+    store: memoryStore(fresh),
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async () => json(200, null),
+  });
+  assert.equal(await ok.query("q"), undefined);
+  const text = createLinearClient({
+    store: memoryStore(fresh),
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async () => json(200, "oops"),
+  });
+  assert.equal(await text.query("q"), undefined);
+  const failed = createLinearClient({
+    store: memoryStore(fresh),
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async () => json(400, null),
+  });
+  await assert.rejects(failed.query("q"), { code: "failed", message: "Linear answered 400." });
+});
+
+test("a failed token save after refresh is a LinearError", async () => {
+  const store = memoryStore(expiring);
+  store.saveToken = () => {
+    throw new Error("disk full");
+  };
+  const client = createLinearClient({
+    store,
+    clientId: "cid",
+    apiBase: "https://api.test",
+    now: () => 1000,
+    fetchImpl: async (url) => (url.endsWith("/oauth/token") ? json(200, { access_token: "a2", expires_in: 86400 }) : json(200, { data: {} })),
+  });
+  await assert.rejects(client.query("q"), (error) => {
+    assert.equal(error.name, "LinearError");
+    assert.equal(error.code, "failed");
+    assert.equal(error.message, "Couldn't save the Linear sign-in: disk full");
+    return true;
+  });
+});

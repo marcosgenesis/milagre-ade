@@ -17,10 +17,12 @@ async function postGraphql({ fetchImpl, apiBase, accessToken, query, variables =
     throw new LinearError(`Couldn't reach Linear: ${error.message}`, "offline");
   }
   if (response.status === 401) throw new LinearError("Linear isn't connected.", "revoked");
-  const body = await response.json().catch(() => ({}));
+  const parsed = await response.json().catch(() => ({}));
+  const body = parsed && typeof parsed === "object" ? parsed : {};
   const errors = Array.isArray(body.errors) ? body.errors : [];
   if (response.status === 429 || errors.some((error) => error?.extensions?.code === "RATELIMITED"))
     throw new LinearError("Linear is limiting requests. Try again in a minute.", "rate-limited");
+  if (response.status >= 500) throw new LinearError("Linear is having trouble. Try again in a minute.", "offline");
   if (!response.ok || errors.length) throw new LinearError(errors[0]?.message || `Linear answered ${response.status}.`, "failed");
   return body.data;
 }
@@ -28,39 +30,72 @@ async function postGraphql({ fetchImpl, apiBase, accessToken, query, variables =
 // Queries as the connected user, refreshing the access token shortly before it expires.
 function createLinearClient({ store, clientId, apiBase, fetchImpl = globalThis.fetch, now = Date.now, revoked = () => {} }) {
   let refreshing = null;
-  function signOut() {
-    store.clearToken();
-    revoked();
+  let clearedToken = null;
+  // Clears the store only while it still holds the token that was rejected, so a token rotated
+  // by a concurrent refresh survives a late 401. `revoked()` runs at most once per token.
+  function signOut(accessToken) {
+    if (store.readToken()?.accessToken === accessToken) {
+      store.clearToken();
+      if (clearedToken !== accessToken) {
+        clearedToken = accessToken;
+        revoked();
+      }
+    }
     return notConnected();
   }
   async function refresh(saved) {
+    let next;
     try {
-      const next = { ...saved, ...(await refreshTokens({ fetchImpl, apiBase, clientId, refreshToken: saved.refreshToken, now: now() })) };
-      store.saveToken(next);
-      return next;
+      next = { ...saved, ...(await refreshTokens({ fetchImpl, apiBase, clientId, refreshToken: saved.refreshToken, now: now() })) };
     } catch (error) {
       // Offline or Linear down: keep the token and try again on the next call.
-      if (error.code === "revoked") throw signOut();
+      if (error.code === "revoked") throw signOut(saved.accessToken);
       throw error;
     }
+    try {
+      store.saveToken(next);
+    } catch (error) {
+      throw new LinearError(`Couldn't save the Linear sign-in: ${error.message}`, "failed");
+    }
+    return next;
+  }
+  // Linear rotates the refresh token on every use, so concurrent callers share one refresh.
+  function refreshShared(saved) {
+    refreshing ??= refresh(saved).finally(() => (refreshing = null));
+    return refreshing;
   }
   async function current() {
     const saved = store.readToken();
     if (!saved) throw notConnected();
     if (saved.expiresAt - now() > REFRESH_MARGIN_MS) return saved;
-    // Linear rotates the refresh token on every use, so concurrent callers share one refresh.
-    refreshing ??= refresh(saved).finally(() => (refreshing = null));
-    return refreshing;
+    return refreshShared(saved);
+  }
+  async function attempt(saved, run) {
+    try {
+      return await run(saved.accessToken);
+    } catch (error) {
+      if (error.code !== "revoked") throw error;
+      const stored = store.readToken();
+      if (!stored) throw notConnected();
+      // Rotated while the request was in flight: retry once with the newer token.
+      if (stored.accessToken !== saved.accessToken) return retryOnce(stored, run);
+      // Rejected though the token looked fresh: refresh once (or reuse a refresh another caller did), then retry once.
+      const next = await refreshShared(stored);
+      return retryOnce(next, run);
+    }
+  }
+  async function retryOnce(saved, run) {
+    try {
+      return await run(saved.accessToken);
+    } catch (error) {
+      if (error.code === "revoked") throw signOut(saved.accessToken);
+      throw error;
+    }
   }
   return {
     async query(document, variables) {
-      const { accessToken } = await current();
-      try {
-        return await postGraphql({ fetchImpl, apiBase, accessToken, query: document, variables });
-      } catch (error) {
-        if (error.code === "revoked") throw signOut();
-        throw error;
-      }
+      const saved = await current();
+      return attempt(saved, (accessToken) => postGraphql({ fetchImpl, apiBase, accessToken, query: document, variables }));
     },
   };
 }

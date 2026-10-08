@@ -20,6 +20,7 @@ import type {
   AgentCliStatus,
   AgentModels,
   AgentPorts,
+  Subagent,
   EditorInfo,
   AgentEvent,
   ChatSendRequest,
@@ -247,6 +248,8 @@ declare global {
       getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      stopAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      retryAdvisor: (chatId: string, id: string) => Promise<Subagent>;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;

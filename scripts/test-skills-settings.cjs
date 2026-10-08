@@ -18,6 +18,7 @@ window.milagre = {
       skill('review', 'workspace', 'claude', 'Review the current diff for bugs and missing tests before you open a pull request', root + '/.claude/skills/review/SKILL.md'),
       skill('ship', 'workspace', 'agents', 'Open a PR with the team template', root + '/.agents/skills/ship/SKILL.md'),
       skill('notes', 'user', 'codex', 'Write release notes from merged PRs', '/Users/ana/.codex/skills/notes/SKILL.md'),
+      ...['milagre','milagre-advisor','milagre-committee','milagre-help'].map(name => skill(name, 'bundled', 'milagre', 'Milagre orchestration and help', '/Applications/Milagre.app/skills/' + name + '/SKILL.md')),
       skill('tldr', 'bundled', 'milagre', 'Rewrite for a skimming reader', '/Applications/Milagre.app/skills/tldr/SKILL.md'),
     ],
     shadowed: [{ ...skill('review', 'user', 'claude', 'Older review', '/Users/ana/.claude/skills/review/SKILL.md'), shadowedBy: root + '/.claude/skills/review/SKILL.md' }],
@@ -72,12 +73,16 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`document.querySelectorAll('[data-skill-group]').length === 3`);
-    assert.deepEqual(await groups(), ["Project · 2", "User · 1", "Built-in · 1"]);
+    assert.deepEqual(await groups(), ["Project · 2", "User · 1", "Built-in · 5"]);
     assert.ok(await evaluate(`document.body.textContent.includes('~/.codex/skills/notes/SKILL.md')`), "paths shorten the home folder");
     assert.ok(await evaluate(`document.body.textContent.includes('Overrides 1 other')`), "the winner says what it hides");
     assert.ok(
       await evaluate(`document.querySelector('[data-skill-warnings]').textContent.includes('~/.gemini/skills/broken/SKILL.md')`),
       "warnings have their own section",
+    );
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll('[data-skill-group="bundled"] li')].map(li => li.querySelector('span span').textContent).sort()`),
+      ["/milagre", "/milagre-advisor", "/milagre-committee", "/milagre-help", "/tldr"],
     );
     await screenshot("list");
 

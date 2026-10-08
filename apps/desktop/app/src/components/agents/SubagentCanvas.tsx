@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
-import { agentActivityLabel, subagentActivityLabel } from "@milagre/shared/agent-activity";
+import { agentActivityLabel, subagentActivityLabel, subagentRoleLabel } from "@milagre/shared/agent-activity";
 import type { Subagent, SubagentCommunication } from "@milagre/shared/model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -33,6 +33,8 @@ export const SubagentCanvas = memo(function SubagentCanvas({
   waiting,
   activity,
   onClose,
+  onStop,
+  onRetry,
 }: {
   opened: boolean;
   agents: Subagent[];
@@ -40,6 +42,8 @@ export const SubagentCanvas = memo(function SubagentCanvas({
   waiting: boolean;
   activity?: string;
   onClose: () => void;
+  onStop?: (id: string) => void;
+  onRetry?: (id: string) => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const surface = useRef<HTMLDivElement>(null);
@@ -277,7 +281,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({
       id: agent.id,
       title: canvasAgentName(indices.get(agent.id)!),
       status: subagentActivityLabel(agent),
-      activity: `${agent.title}\n${agent.latestActivity || subagentActivityLabel(agent)}`,
+      activity: `${subagentRoleLabel(agent) ? subagentRoleLabel(agent) + "\n" : ""}${agent.title}\n${agent.latestActivity || subagentActivityLabel(agent)}`,
       active: subagentActive(agent),
       sleeping: false,
       dead: subagentFinished(agent),
@@ -477,7 +481,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({
             </button>
           </header>
           <ScrollArea>
-            <SubagentTranscript agent={inspectedAgent} />
+            <SubagentTranscript agent={inspectedAgent} onStop={onStop} onRetry={onRetry} />
           </ScrollArea>
         </aside>
       )}

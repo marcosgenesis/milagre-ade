@@ -79,6 +79,8 @@ const PATHS = Object.freeze({
     ...(Array.isArray(request?.files) ? request.files.map(attached) : []),
   ],
   "chat:resume": ([projectPath]) => [projectPath],
+  "advisor:stop": ([chatId]) => [chatProject(chatId)],
+  "advisor:retry": ([chatId]) => [chatProject(chatId)],
   "agent:interrupt": ([chatId]) => [chatProject(chatId)],
   "agent:respond-permission": ([value]) => [chatProject(value?.chatId)],
   "accounts:scopes": none,

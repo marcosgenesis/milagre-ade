@@ -14,6 +14,7 @@ const noop = () => {};
 window.sent = [];
 window.milagre = { listSkills: async root => ({ skills: root === '/other' ? [] : [
   { name: 'tldr', description: 'Rewrite for a skimming reader', scope: 'bundled', provider: 'milagre', path: '/skills/tldr/SKILL.md' },
+  ...['milagre','milagre-advisor','milagre-committee','milagre-help'].map(name => ({ name, description: 'Milagre orchestration and help', scope: 'bundled', provider: 'milagre', path: '/skills/' + name + '/SKILL.md' })),
   { name: 'plugin:review-code', description: 'Review code', scope: 'user', provider: 'codex', path: '/skills/review/SKILL.md' },
 ], warnings: [] }) };
 function Fixture() {
@@ -86,6 +87,13 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('textarea')`);
+    await type("/milagre");
+    await waitFor(`document.querySelectorAll('[aria-label="Commands and skills"] button').length === 4`);
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll('[aria-label="Commands and skills"] button')].map(b => b.querySelector('span')?.textContent).sort()`),
+      ["/milagre", "/milagre-advisor", "/milagre-committee", "/milagre-help"],
+    );
+    await screenshot("milagre-skills-menu");
     await type("run /tldr");
     await waitFor(`document.querySelector('[data-prompt-skill]')?.textContent === '/tldr'`);
     await escape();

@@ -1,3 +1,4 @@
+const { providerName } = require("@milagre/shared/providers");
 const { randomUUID } = require("node:crypto");
 const { createInput, promptInput } = require("./advisor-tools.cjs");
 const { ANALYSIS_INSTRUCTIONS } = require("./agents/advisor-policy.cjs");
@@ -46,7 +47,7 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
     const capabilities = await providersFor(chatId, pinned);
     const selected = capabilities[provider];
     if (!selected?.available || !selected.models?.length)
-      throw new Error(`${provider === "codex" ? "Codex" : "Claude"} is unavailable. Check its installation and Account in Settings.`);
+      throw new Error(`${providerName(provider)} is unavailable. Check its installation and Account in Settings.`);
     if (pinned && (selected.accountId ?? null) !== (pinned.accountId ?? null))
       throw new Error("The advisor Account is unavailable. Restore it or start a new advisor.");
     const model = input.model ? selected.models.find((m) => m.id === input.model) : (selected.models.find((m) => m.recommended) ?? selected.models[0]);

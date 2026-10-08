@@ -4,6 +4,7 @@ import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
+import { useEvent } from "../lib/stable";
 import type { AgentPort, AgentTask, ContextUsage, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
@@ -31,6 +32,7 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
+import { advisorResultLabel, messageSender } from "@milagre/shared/advisor-result";
 import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
 import { isHandoff } from "@milagre/shared/handoff";
 import { MessageScroller } from "./agents/message-scroller";
@@ -142,10 +144,11 @@ const MessageSection = memo(function MessageSection({
 }) {
   if (isHandoff(message)) return <HandoffDivider context={message.context} models={models} />;
   const linked = linkedContext(message);
+  const advisor = typeof message.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
   // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
-  const feedback = isUser && !linked ? parseDesignFeedback(message.body) : null;
-  const bubble = isUser && !linked && !feedback;
+  const feedback = isUser && !linked && !advisor ? parseDesignFeedback(message.body) : null;
+  const bubble = isUser && !linked && !advisor && !feedback;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -155,12 +158,17 @@ const MessageSection = memo(function MessageSection({
     <article
       id={`message-${message.id}`}
       data-slot="message"
-      data-from={isUser ? "user" : "assistant"}
+      data-from={messageSender(message)}
       data-linked={linked?.kind}
       data-streaming={streaming || undefined}
       className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
+      {advisor && (
+        <p data-advisor-result className="text-[11px] text-ink-3">
+          {advisorResultLabel(advisor)}
+        </p>
+      )}
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div
         className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
@@ -357,6 +365,8 @@ interface ChatComposerProps {
   subagents?: Subagent[];
   onArchiveFinishedSubagents?: () => void;
   onArchiveSubagent?: (id: string, archived: boolean) => void;
+  onStopAdvisor?: (id: string) => void;
+  onRetryAdvisor?: (id: string) => void;
   waitingForSubagents?: boolean;
   /** The running turn's to-do list, shown as a pill beside the subagents. */
   tasks?: AgentTask[];
@@ -598,6 +608,8 @@ export function ChatComposer({
   subagents = EMPTY_SUBAGENTS,
   onArchiveFinishedSubagents,
   onArchiveSubagent,
+  onStopAdvisor,
+  onRetryAdvisor,
   waitingForSubagents = false,
   tasks,
   contextUsage,
@@ -649,6 +661,8 @@ export function ChatComposer({
   const chatId = messages[0]?.session_id ?? "new";
   const [canvasChat, setCanvasChat] = useState<number | string | null>(null);
   const canvasOpened = canvasChat === chatId;
+  const stopAdvisor = useEvent((id: string) => onStopAdvisor?.(id));
+  const retryAdvisor = useEvent((id: string) => onRetryAdvisor?.(id));
   const closeCanvas = useCallback(() => {
     setCanvasChat(null);
     requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>("[data-slot=subagent-track] > button")?.focus());
@@ -695,6 +709,8 @@ export function ChatComposer({
           waiting={waitingForSubagents}
           activity={streamingSteps?.filter((step) => step.status === "running").at(-1)?.title}
           onClose={closeCanvas}
+          onStop={onStopAdvisor ? stopAdvisor : undefined}
+          onRetry={onRetryAdvisor ? retryAdvisor : undefined}
         />
         <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
           {/* Messages scrolled past the top soften into a progressive blur under the window-drag strip. The layers fade,
@@ -808,6 +824,8 @@ export function ChatComposer({
               onOpenCanvas={() => setCanvasChat(chatId)}
               onArchiveFinished={onArchiveFinishedSubagents}
               onArchive={onArchiveSubagent}
+              onStop={onStopAdvisor}
+              onRetry={onRetryAdvisor}
             />
           </div>
 

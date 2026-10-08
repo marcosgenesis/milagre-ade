@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { Archive02Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, Cancel01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { advisorAction } from "@milagre/shared/agent-activity";
 import { subagentFinished } from "@milagre/shared/project-edits";
 import { useSession } from "../session";
 import { SubagentItem } from "../subagent-item";
@@ -21,6 +22,22 @@ export default function AgentsSheet() {
   const visible = agents.filter((agent) => !agent.archived);
   const disabled = busy || !session.client || !chat;
 
+  async function control(action: "stop" | "retry", agentId: string) {
+    if (pending.current || !session.client || !project || !chat) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      session.expectActivity();
+      await session.client.call(`advisor:${action}`, [`${project.path}#${chat.id}`, agentId]);
+      await session.refresh();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
   async function archive(agentId?: string) {
     if (pending.current || !session.client || !project || !chat) return;
     pending.current = true;
@@ -72,7 +89,22 @@ export default function AgentsSheet() {
             <View style={{ flex: 1, paddingTop: 4 }}>
               <SubagentItem agent={agent} />
             </View>
-            <IconButton label={`Archive ${agent.title}`} icon={Archive02Icon} size={44} disabled={disabled} onPress={() => archive(agent.id)} />
+            {advisorAction(agent) && (
+              <IconButton
+                label={`${advisorAction(agent) === "stop" ? "Stop" : "Retry"} ${agent.title}`}
+                icon={advisorAction(agent) === "stop" ? Cancel01Icon : RefreshIcon}
+                size={44}
+                disabled={disabled}
+                onPress={() => control(advisorAction(agent)!, agent.id)}
+              />
+            )}
+            <IconButton
+              label={`Archive ${agent.title}`}
+              icon={Archive02Icon}
+              size={44}
+              disabled={disabled || advisorAction(agent) === "stop"}
+              onPress={() => archive(agent.id)}
+            />
           </View>
         ))}
       </View>

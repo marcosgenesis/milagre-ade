@@ -13,6 +13,7 @@ import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
 window.subagentProfilerCommits = [];
+window.advisorActions = [];
 window.recordSubagentCommit = (id, phase, actualDuration) => window.subagentProfilerCommits.push({ id, phase, actualDuration });
 function Fixture() {
   const [count, setCount] = useState(2);
@@ -24,6 +25,8 @@ function Fixture() {
   const archive = (id,archived) => setChildren(items=>items.map(child=>child.id===id ? {...child,archived} : child));
   const archiveFinished = () => setChildren(items=>items.map(child=>["completed","failed","cancelled"].includes(child.status) ? {...child,archived:true} : child));
   window.setChildren = setChildren;
+  const controlAdvisor = (action,id) => {window.advisorActions.push({action,id});setChildren(items=>items.map(item=>item.id===id?{...item,status:action==="stop"?"cancelled":"running",retryable:action==="stop"}:item));};
+  const [advisorResult,setAdvisorResult]=useState(false);window.setAdvisorResult=setAdvisorResult;
   window.setSending = setSending;
   window.finishChildren = () => {setChildren(items=>items.map(item=>({...item,status:"completed",endedAt:Date.now()})));setSending(false);};
   const [draft, setDraft] = useState("");
@@ -40,6 +43,7 @@ function Fixture() {
     id: index + 1, session_id: 1, context: null, role: index === 0 ? "user" : "assistant",
     body: index === 0 ? "Review authentication and run the relevant tests." : "I started two subagents. Their progress is available below.",
   }));
+  if(advisorResult)messages.push({id:999,session_id:1,role:"user",body:"Advisor finding: prefer validated reads.",context:{kind:"advisor-result",advisorId:"advisor:review",completionId:"completion",title:"Security",provider:"codex",outcome:"completed"}});
   return <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
     <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
       <aside data-fixture-sidebar style={{ width: sidebarWidth }} className="relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-window bg-surface p-2 shadow-card">
@@ -51,7 +55,7 @@ function Fixture() {
     <div data-chat-pane className={"min-h-0 flex-1 overflow-hidden" + (paneHidden ? " hidden" : "")}>
     <Profiler id="composer" onRender={window.recordSubagentCommit}><ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} onStopAdvisor={id=>controlAdvisor("stop",id)} onRetryAdvisor={id=>controlAdvisor("retry",id)} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -899,6 +903,32 @@ async function browserChecks() {
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===1');
     await evaluate("window.setChildren([])");
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
+    await evaluate(
+      'window.setChildren([{id:"advisor:review",source:"milagre-advisor",provider:"codex",model:"reported",title:"Security",status:"running",startedAt:Date.now(),updatedAt:Date.now(),transcript:[{id:"answer",kind:"message",text:"Advisor finding: prefer validated reads."}]}]); window.setAdvisorResult(true)',
+    );
+    await waitFor('!!document.querySelector("[data-slot=subagent-track]")');
+    if (await evaluate('!!document.querySelector("[data-slot=subagent-popover]")'))
+      await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-advisor-stop]")');
+    assert.ok(await evaluate('document.querySelector("[data-subagent-row]").textContent.includes("Codex advisor")'));
+    await screenshot("advisor-running");
+    await clickLabel("Stop Security");
+    await waitFor('!!document.querySelector("[data-advisor-retry]")');
+    await screenshot("advisor-interrupted");
+    await clickLabel("Retry Security");
+    assert.deepEqual(await evaluate("window.advisorActions"), [
+      { action: "stop", id: "advisor:review" },
+      { action: "retry", id: "advisor:review" },
+    ]);
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-transcript]")');
+    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Advisor finding")'));
+    await screenshot("advisor-output");
+    await clickLabel("Close subagents");
+    assert.ok(await evaluate('document.querySelector("[data-advisor-result]").textContent.includes("Codex advisor result: Security")'));
+    assert.equal(await evaluate('document.querySelector("[data-advisor-result]").closest("article").dataset.from'), "app");
+    await screenshot("advisor-result");
     console.log(
       "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, and original subagent list/archive/transcript checks",
     );

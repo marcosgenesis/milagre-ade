@@ -558,3 +558,13 @@ test("a confined bridge refuses phone:routes even when it has the hook", async (
   const f = await fixture(t, { bridgeOptions: { phoneRoutes: async () => ({ hostId: "h", key: "k", lan: [] }) } });
   assert.equal((await f.rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
 });
+
+test("advisor controls are allowlisted and confined to the owning Project", async (t) => {
+  const f = await fixture(t);
+  for (const method of ["advisor:stop", "advisor:retry"]) {
+    assert.ok(METHODS.has(method));
+    assert.ok(PATHS[method]);
+    const reply = await f.rpc(method, [`${f.outside}#1`, "advisor:foreign"]);
+    assert.equal(reply.status, 403);
+  }
+});

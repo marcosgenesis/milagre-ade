@@ -482,11 +482,17 @@ export function LinkWorkspace({
                         ? { onContinue: () => void window.milagre.resumeChat(owner, session.id).catch((error) => setError(ipcErrorMessage(error))) }
                         : undefined
                     }
+                    onStopAdvisor={(id) => {
+                      if (chatId) void window.milagre.stopAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                    }}
+                    onRetryAdvisor={(id) => {
+                      if (chatId) void window.milagre.retryAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                    }}
                     onArchiveSubagent={(id, archived) => {
-                      if (session) void window.milagre.archiveSubagent(owner, session.id, id, archived);
+                      if (session) void window.milagre.archiveSubagent(owner, session.id, id, archived).catch((error) => setError(ipcErrorMessage(error)));
                     }}
                     onArchiveFinishedSubagents={() => {
-                      if (session) void window.milagre.archiveFinishedSubagents(owner, session.id);
+                      if (session) void window.milagre.archiveFinishedSubagents(owner, session.id).catch((error) => setError(ipcErrorMessage(error)));
                     }}
                     onPermissionModeChange={(mode) => {
                       preferences.onPermissionModeChange(mode);

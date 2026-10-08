@@ -39,6 +39,9 @@ function firstFreeId(state) {
   return next;
 }
 
+// A provider's parked session is as much the chat's as the current one: a switched chat keeps both.
+const nativeIds = (session) => [session.native_session_id, ...Object.values(session.native_sessions ?? {})].filter(Boolean);
+
 /**
  * The old file's chats with messages merged into the main checkout's state; neither input is changed.
  * A chat the main state already has is skipped: the same provider id, or, when either side has none, the same worktree
@@ -54,11 +57,7 @@ function mergeWorktreeChats(main, old, { listed } = {}) {
   const take = () => nextId++;
 
   const worktreePathById = new Map(mainWorktrees.map((worktree) => [worktree.id, worktree.path]));
-  const knownNative = new Set(
-    values(main.sessions)
-      .map((session) => session.native_session_id)
-      .filter(Boolean),
-  );
+  const knownNative = new Set(values(main.sessions).flatMap(nativeIds));
   const knownCopies = new Map();
   const remember = (key, nativeId) => knownCopies.set(key, [...(knownCopies.get(key) ?? []), nativeId]);
   const mainMessages = messagesBySession(main.messages);
@@ -83,11 +82,11 @@ function mergeWorktreeChats(main, old, { listed } = {}) {
     }
     const key = fingerprint(worktree.path, messages);
     const nativeId = session.native_session_id;
-    if ((nativeId && knownNative.has(nativeId)) || (knownCopies.get(key) ?? []).some((other) => !other || !nativeId)) {
+    if (nativeIds(session).some((id) => knownNative.has(id)) || (knownCopies.get(key) ?? []).some((other) => !other || !nativeId)) {
       counts.duplicates++;
       continue;
     }
-    if (nativeId) knownNative.add(nativeId);
+    for (const id of nativeIds(session)) knownNative.add(id);
     remember(key, nativeId);
     chosen.push({ session, worktree, messages });
   }

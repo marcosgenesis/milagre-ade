@@ -24,6 +24,7 @@ type UsageCardProps = {
 export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEnter, onPointerLeave, onBlur }: UsageCardProps) {
   const [now, setNow] = useState(() => Date.now());
   const name = PROVIDER_NAMES[usage.provider];
+  const account = usage.account?.email || usage.account?.label;
   const { usageDisplay } = useSettings();
 
   useEffect(() => {
@@ -58,7 +59,9 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
           <ProviderMark provider={usage.provider} size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-semibold leading-5">{name}</p>
+          <p className="break-words text-[14px] font-semibold leading-5" data-usage-account>
+            {account || "Account unavailable"}
+          </p>
           <p className="text-[12px] text-ink-3">{formatUpdatedAgo(usage.updatedAt, now)}</p>
         </div>
         <button

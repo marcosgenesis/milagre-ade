@@ -1,3 +1,4 @@
+import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
@@ -55,6 +56,8 @@ import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { isMac } from "./lib/shortcut-hints";
+import { CORNER_PITCH, PanelToggles, sidePanelCount, useSidePanels } from "./components/agents/PanelToggles";
 import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
 import { AttentionButton, ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
@@ -72,14 +75,13 @@ import SidebarNav from "./components/SidebarNav";
 import { cachedProjectCopy, rememberProjectCopy, runKeys } from "./lib/sidebar-scopes";
 import { chatRevealPath } from "./lib/reveal";
 import type { SettingsSection } from "./components/Settings";
-import { handoverLinks, handoverModel, isHandoverChat } from "./lib/handover";
 import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat, type PendingChat } from "@milagre/shared/chats";
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
-import type { RuntimeConnection, UpdateState } from "./electron";
+import type { RuntimeConnection } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
@@ -240,12 +242,12 @@ function App() {
   // its provider's recommended model (see nextSelection).
   const pickedModel = useRef(false);
   const appliedDefault = useRef(false);
-  const lockedProviderRef = useRef<ModelProvider | undefined>(undefined);
+  const preferredProviderRef = useRef<ModelProvider | undefined>(undefined);
   useEffect(() => {
     const applyDefault = reported !== null && !appliedDefault.current && !pickedModel.current;
     if (reported !== null) appliedDefault.current = true;
     setSelectedModel((current) =>
-      nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, lockedProvider: lockedProviderRef.current }),
+      nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, preferredProvider: preferredProviderRef.current }),
     );
   }, [models]);
   const chooseModel = (model: ModelOption) => {
@@ -337,7 +339,7 @@ function App() {
   const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
   const [restartingHost, setRestartingHost] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const update = useAppUpdates();
   const [gitDialog, setGitDialog] = useState<{
     sessionId: number;
     worktreeId: number;
@@ -400,13 +402,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    let unsubscribe = () => {};
-    window.milagre.getUpdateState().then(setUpdate);
-    unsubscribe = window.milagre.onUpdateState(setUpdate);
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
     if (project) void window.milagre.listBranches(project.path).then(setBranches);
   }, [project?.path]);
 
@@ -454,9 +449,7 @@ function App() {
     // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages],
   );
-  // A handed-over chat's brief, attached to its first message until it is sent.
-  const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
-  lockedProviderRef.current = messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined;
+  preferredProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const owner = projectOfKey(chatId);
@@ -464,6 +457,7 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const sidePanels = useSidePanels();
   const changes = useChanges({
     cwd: selectedWorktree?.path,
     base: selectedWorktree?.base,
@@ -1115,16 +1109,14 @@ function App() {
     files: string[] = imageDraft.files,
     preserveComposer = false,
   ): Promise<boolean> {
-    // The brief is sent with the main process's copy of the draft, so the message may be empty.
-    const briefAttached = handoverDraft !== undefined;
-    if ((!body && !images.length && !files.length && !briefAttached) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading)
-      return false;
+    if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     sendInFlight.current = true;
     const view = chatView.current;
     const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
     setPreparingView(view);
     setNewChatError(null);
-    const model = modelForChat(selectedModel, selectedSession?.provider, messages, models);
+    // The picker decides the provider: a chat on another one hands off to it.
+    const model = selectedModel;
     const firstMessage = messages.length === 0;
     const submittedDraft = draftStore.get();
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
@@ -1146,7 +1138,6 @@ function App() {
       projectPath: project.path,
       originSessionId: selectedSession?.id ?? null,
       originWorktreeId: selectedWorktree.id,
-      message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
     });
     if (!preserveComposer) {
       setDraft("");
@@ -1181,8 +1172,7 @@ function App() {
         body,
         images,
         files,
-        // With the brief there is no fallback text for an empty message: the brief is the prompt.
-        prompt: briefAttached && !body ? (files.length ? `Attached files:\n${files.join("\n")}` : "") : attachmentPrompt(body, files),
+        prompt: attachmentPrompt(body, files),
         ...options,
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
@@ -1219,7 +1209,6 @@ function App() {
               draft: submittedDraft || body,
               error: message,
               target: target ? { ...target, view, projectPath: project.path } : null,
-              message: { ...preview.message, ...(briefAttached ? { handoverBrief: handoverDraft } : {}) },
             },
           ]);
         setNotice(message);
@@ -1245,43 +1234,8 @@ function App() {
 
   async function sendMessage() {
     const body = draftStore.get().trim();
-    if (
-      (!body && !imageDraft.images.length && !imageDraft.files.length && handoverDraft === undefined) ||
-      !state ||
-      !selectedWorktree ||
-      !project ||
-      preparing ||
-      imageDraft.loading
-    )
-      return;
+    if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
     await executeSend(body, permissionMode);
-  }
-
-  async function handover(provider: ModelProvider) {
-    if (!project || selectedSessionId === null) return;
-    const target = handoverModel(selectedModel, provider, openState()?.messages ?? [], models);
-    if (!target) return;
-    const capability = capabilityFor(target, capabilities);
-    try {
-      const { sessionId } = await window.milagre.handover({
-        projectPath: project.path,
-        sessionId: selectedSessionId,
-        provider,
-        model: target.id,
-        permissionMode,
-        effort: effortFor(capability, effort),
-        ultracode: capability.ultracode && ultracode,
-        fastMode: capability.fastMode && fastMode,
-        replies: getSettings().claudeReplies,
-        tldrEnabled: getSettings().tldrEnabled,
-      });
-      if (projectRef.current?.path !== project.path) return;
-      advanceChatView();
-      setSelectedSessionId(sessionId);
-      setSelectedModel(target);
-    } catch (error) {
-      setNotice(`Could not hand over: ${ipcErrorMessage(error)}`);
-    }
   }
 
   // Keep finished message cards out of the typing render path. Recommendations still use
@@ -1323,6 +1277,15 @@ function App() {
     openChat(sessionId);
   }
 
+  // The main process sends on the app's ⌘⇧ shortcuts pressed inside an embedded frame (a design, the simulator), which
+  // the window's listeners never see; replayed here, every handler takes them as if pressed in the window.
+  useEffect(
+    () =>
+      window.milagre.onAppShortcut?.((key) =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: isMac, ctrlKey: !isMac, shiftKey: true, bubbles: true, cancelable: true })),
+      ),
+    [],
+  );
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (selectedLinkRef.current) return;
@@ -1790,6 +1753,7 @@ function App() {
         )}
         <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
         {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+        <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
         {showAttentionButton && attentionChats[0] && (
           <AttentionButton
             label={attentionLabel(attentionPaths.map(projectName))}
@@ -1798,17 +1762,9 @@ function App() {
               asking: !agentRuns.runs[item.key]?.approvals.length,
               waitingFor: waitingFor(agentRuns.runs[item.key]),
             }))}
-            offset={changesAvailable}
+            offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
             onOpen={openChatByKey}
           />
-        )}
-        {update?.status === "downloaded" && (
-          <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-            <span>Milagre {update.version} is ready to update.</span>
-            <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-              Update and restart
-            </button>
-          </div>
         )}
         <div
           className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
@@ -1920,6 +1876,7 @@ function App() {
                   imageDraft={imageDraft}
                   projectPath={selectedWorktree?.path ?? project.path}
                   onSend={() => void sendMessage()}
+                  onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                   pullRequestAction={
                     selectedSession && selectedPullRequest && pullRequestBlocker
@@ -1934,7 +1891,7 @@ function App() {
                       : undefined
                   }
                   isSending={isSending}
-                  sendBlocked={preparing || Boolean(selectedSession?.handoverPending)}
+                  sendBlocked={preparing}
                   runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
                   streamingText={run?.text}
                   streamingSteps={run?.steps}
@@ -1948,19 +1905,8 @@ function App() {
                   onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}
+                  sessionProvider={selectedSession?.provider}
                   runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
-                  lockedProvider={messages.length > 0 || isHandoverChat(selectedSession) ? selectedSession?.provider : undefined}
-                  onHandover={(provider) => void handover(provider)}
-                  canHandover={messages.length > 0}
-                  handoverBrief={
-                    project && selectedSession && handoverDraft !== undefined
-                      ? {
-                          chatId: chatKey(project.path, selectedSession.id),
-                          brief: handoverDraft,
-                          onSave: (text) => window.milagre.setHandoverDraft(project.path, selectedSession.id, text),
-                        }
-                      : undefined
-                  }
                   resume={
                     project && selectedSession?.resumeTurn
                       ? {
@@ -1972,7 +1918,6 @@ function App() {
                       : undefined
                   }
                   onOpenLinkedChat={openLinkedChat}
-                  handover={state ? { ...handoverLinks(selectedSession, state), onOpen: openChat } : undefined}
                   models={models}
                   cliStatus={cliStatus}
                   onModelPickerOpen={refreshCliStatus}
@@ -2121,4 +2066,10 @@ function App() {
   );
 }
 
-export default App;
+export default function AppWithUpdates() {
+  return (
+    <UpdateShell>
+      <App />
+    </UpdateShell>
+  );
+}

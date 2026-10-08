@@ -9,6 +9,7 @@ import type {
 } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
+import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
@@ -21,7 +22,6 @@ import type {
   AgentPorts,
   EditorInfo,
   AgentEvent,
-  ChatHandoverRequest,
   ChatSendRequest,
   CoordinatorState,
   LinkedWork,
@@ -48,9 +48,10 @@ export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetu
 
 export type ReleaseChannel = "stable" | "beta";
 export type UpdateState = {
-  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable";
+  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "installing" | "error" | "unavailable";
   version: string | null;
   progress: number;
+  error?: string;
 };
 
 /** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
@@ -101,6 +102,7 @@ declare global {
   interface Window {
     milagre: {
       simulators: SimulatorApi;
+      artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
       restartHost: () => Promise<void>;
@@ -204,6 +206,8 @@ declare global {
       /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
       getLinkedWork: () => Promise<LinkedWork>;
       onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** An app ⌘⇧ shortcut pressed while an embedded frame had focus, forwarded by the main process (its letter). */
+      onAppShortcut: (callback: (key: string) => void) => () => void;
       /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
       stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;
@@ -220,10 +224,6 @@ declare global {
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
       /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
       resumeChat: (projectPath: string, sessionId: number) => Promise<boolean>;
-      /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
-      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
-      /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */
-      setHandoverDraft: (projectPath: string, sessionId: number, text: string) => Promise<void>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;

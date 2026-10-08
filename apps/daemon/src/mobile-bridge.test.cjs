@@ -1019,7 +1019,7 @@ test("drawer projection preserves listing metadata and pending-send identity wit
   assert.equal(copy.previewOnly, true);
   assert.equal(copy.project.state.sessions[2].generatedTitle, undefined, "compact snapshots preserve the full snapshot title fields");
   assert.equal(copy.project.state.sessions[2].unread, true);
-  assert.equal(copy.project.state.sessions[2].handoverDraft, "");
+  assert.equal(copy.project.state.sessions[2].handoverDraft, "A long brief", "the phone gets the session as it is, minus subagents");
   assert.equal(copy.project.state.sessions[2].subagents, undefined);
   assert.deepEqual(
     copy.project.state.messages.map((message) => message.id),

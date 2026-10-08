@@ -13,7 +13,13 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
   const queues = new Map();
   const known = new Set();
   const epochs = new Map();
+  const stops = new Map();
   let closed = false;
+  const ticket = (chatId, id) => ({ epoch: epochs.get(chatId) ?? 0, stop: stops.get(id) ?? 0 });
+  const admitted = (chatId, id, stamp) => !closed && stamp.epoch === (epochs.get(chatId) ?? 0) && stamp.stop === (stops.get(id) ?? 0);
+  function assertLaunch(chatId, id, stamp) {
+    if (!admitted(chatId, id, stamp)) throw new Error("This advisor launch was stopped.");
+  }
   function serial(chatId, work) {
     const run = (queues.get(chatId) ?? Promise.resolve()).catch(() => {}).then(work);
     queues.set(chatId, run);
@@ -65,14 +71,19 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
     if ((await store.read(chatId)).filter((r) => ACTIVE.has(r.status) || r.queuedPrompts.length).length >= 2)
       throw new Error("Two advisors are already active in this Chat. Stop one or wait for it to finish.");
   }
-  function start(record, ctx, selected, existing) {
+  function prepare(record, stamp, existing) {
     const entry = existing ?? { alive: true, session: null, events: Promise.resolve() };
     entry.busy = true;
     entry.output = "";
     entry.generation = Symbol();
-    const generation = entry.generation;
+    entry.ticket = stamp;
     sessions.set(record.id, entry);
-    const current = () => entry.alive && entry.generation === generation && !closed;
+    return entry;
+  }
+  function start(record, ctx, selected, entry) {
+    const generation = entry.generation;
+    const stamp = entry.ticket;
+    const current = () => entry.alive && entry.generation === generation && admitted(record.chatId, record.id, stamp);
     const emit = (event) => {
       if (!current()) return;
       entry.events = entry.events
@@ -133,6 +144,7 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
             next = await own(record.chatId, record.id);
             if (!next.queuedPrompts.length) return;
             const latest = await context(record.chatId, next);
+            if (!current()) return;
             const nextPrompt = next.queuedPrompts[0];
             next = await save(record.chatId, record.id, (r) => ({
               ...r,
@@ -143,6 +155,8 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
               updatedAt: now(),
               endedAt: undefined,
             }));
+            // eslint-disable-next-line promise/no-callback-in-promise -- prepares a cancellable generation before publication, not a callback
+            prepare(next, stamp, entry);
             // eslint-disable-next-line promise/no-callback-in-promise -- this is a host port, not a Node callback
             await show(next);
             // eslint-disable-next-line promise/no-callback-in-promise -- this is a host port, not a Node callback
@@ -188,14 +202,15 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
     },
     async create(chatId, value) {
       const input = createInput.parse(value);
-      const epoch = epochs.get(chatId) ?? 0;
+      const stamp = ticket(chatId);
       return serial(chatId, async () => {
         known.add(chatId);
         const ctx = await context(chatId);
         const { identity, selected } = await capability(chatId, input, ctx);
         await slot(chatId);
-        if (closed || epoch !== (epochs.get(chatId) ?? 0)) throw new Error("This advisor launch was stopped.");
+        assertLaunch(chatId, undefined, stamp);
         await context(chatId, { scopeIdentity: ctx.scopeIdentity });
+        assertLaunch(chatId, undefined, stamp);
         const timestamp = now();
         const record = {
           id: `advisor:${randomUUID()}`,
@@ -217,8 +232,9 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
           completions: [],
         };
         await store.update(chatId, (rows) => [...rows, record]);
+        const entry = prepare(record, stamp);
         await show(record);
-        start(record, ctx, selected);
+        start(record, ctx, selected, entry);
         return advisorRow(record);
       });
     },
@@ -227,9 +243,11 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
     },
     async followup(chatId, id, value) {
       const prompt = promptInput.parse(value);
+      const stamp = ticket(chatId, id);
       return serial(chatId, async () => {
         let record = await own(chatId, id);
         const ctx = await context(chatId, record);
+        assertLaunch(chatId, id, stamp);
         if (record.retryable) throw new Error("This advisor was interrupted. Use Retry before sending a follow-up.");
         const entry = sessions.get(id);
         if (ACTIVE.has(record.status)) {
@@ -238,22 +256,28 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
         } else {
           await slot(chatId);
           const { selected } = await capability(chatId, record.launchIdentity, ctx, record.launchIdentity);
-          record = await save(chatId, id, (r) => ({
-            ...r,
-            prompt,
-            status: "initializing",
-            turnNumber: r.turnNumber + 1,
-            updatedAt: now(),
-            endedAt: undefined,
-          }));
+          assertLaunch(chatId, id, stamp);
+          record = await save(chatId, id, (r) => {
+            assertLaunch(chatId, id, stamp);
+            return {
+              ...r,
+              prompt,
+              status: "initializing",
+              turnNumber: r.turnNumber + 1,
+              updatedAt: now(),
+              endedAt: undefined,
+            };
+          });
+          const pending = prepare(record, stamp, entry?.alive ? entry : undefined);
           await show(record);
-          start(record, ctx, selected, entry?.alive ? entry : undefined);
+          start(record, ctx, selected, pending);
         }
         return { accepted: true, advisorId: id };
       });
     },
     async stop(chatId, id) {
       let record = await own(chatId, id);
+      stops.set(id, (stops.get(id) ?? 0) + 1);
       const entry = sessions.get(id);
       if (entry) {
         entry.alive = false;
@@ -270,23 +294,29 @@ function createAdvisors({ store, contextFor, providersFor, launch, publish = asy
       return advisorRow(record);
     },
     retry(chatId, id) {
+      const stamp = ticket(chatId, id);
       return serial(chatId, async () => {
         let record = await own(chatId, id);
         const ctx = await context(chatId, record);
         if (!record.retryable || ACTIVE.has(record.status)) throw new Error("Only interrupted or failed advisors can be retried.");
         const { selected } = await capability(chatId, record.launchIdentity, ctx, record.launchIdentity);
         await slot(chatId);
-        record = await save(chatId, id, (r) => ({
-          ...r,
-          status: "initializing",
-          retryable: false,
-          turnNumber: r.turnNumber + 1,
-          updatedAt: now(),
-          endedAt: undefined,
-          prompt: `${r.prompt}\n\nPrevious saved output:\n${r.output}\n\n${ANALYSIS_INSTRUCTIONS}`,
-        }));
+        assertLaunch(chatId, id, stamp);
+        record = await save(chatId, id, (r) => {
+          assertLaunch(chatId, id, stamp);
+          return {
+            ...r,
+            status: "initializing",
+            retryable: false,
+            turnNumber: r.turnNumber + 1,
+            updatedAt: now(),
+            endedAt: undefined,
+            prompt: `${r.prompt}\n\nPrevious saved output:\n${r.output}\n\n${ANALYSIS_INSTRUCTIONS}`,
+          };
+        });
+        const entry = prepare(record, stamp);
         await show(record);
-        start(record, ctx, selected);
+        start(record, ctx, selected, entry);
         return advisorRow(record);
       });
     },

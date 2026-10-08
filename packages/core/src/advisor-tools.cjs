@@ -9,7 +9,14 @@ const createInput = z.strictObject({
   effort: z.string().min(1).max(40).optional(),
 });
 function advisorToolDefinitions(chatId, manager) {
-  const tool = (name, description, input, readOnly, run) => ({ name, description, input, readOnly, strict: true, run });
+  const tool = (name, description, input, readOnly, run) => ({
+    name,
+    description,
+    input,
+    readOnly,
+    strict: true,
+    run: async (args) => JSON.stringify(await run(args)),
+  });
   const id = { advisorId: z.string().startsWith("advisor:").max(100) };
   return [
     tool("advisor_providers", "Discover available advisor providers and their reported models/efforts for this Chat.", {}, true, () =>

@@ -5,11 +5,34 @@ const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { createGit, LIMITS } = require("./git/client.cjs");
+const { configuredHelper } = require("./git/test-helpers.cjs");
 
 const WORKTREES = ["/home/me/my shop", "/home/me/worktrees/cart"];
 const nulListing = "worktree /home/me/my shop\0HEAD abc\0branch refs/heads/main\0\0worktree /home/me/worktrees/cart\0HEAD def\0detached\0\0";
 const lineListing =
   "worktree /home/me/my shop\nHEAD abc\nbranch refs/heads/main\n\nworktree /home/me/worktrees/cart\nHEAD def\ndetached\nprunable gitdir file points to non-existent location\n\n";
+
+test("analysis Git ignores inherited command/config environment overrides", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-analysis-git-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", root]);
+  const { helper, marker } = await configuredHelper(root, "fsmonitor", "notes.txt");
+  execFileSync("git", ["-C", root, "config", "--unset", "core.fsmonitor"]);
+  const git = createGit({
+    analysisOnly: true,
+    env: {
+      ...process.env,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.fsmonitor",
+      GIT_CONFIG_VALUE_0: helper,
+      GIT_CONFIG_PARAMETERS: `'core.fsmonitor=${helper}'`,
+      GIT_EXTERNAL_DIFF: helper,
+      GIT_PAGER: helper,
+    },
+  });
+  await git.read.text(root, ["status", "--short"]);
+  await assert.rejects(fs.access(marker), { code: "ENOENT" });
+});
 
 function oldGit(calls, stderr = "error: unknown switch `z'\nusage: git worktree list [-v | --porcelain [-z]]\n") {
   return createGit({

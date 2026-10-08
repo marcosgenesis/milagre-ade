@@ -11,7 +11,7 @@ const under = (root, file) => {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 };
 
-function createAdvisorReads({ roots, referenceRoots = [], git = createGit().read }) {
+function createAdvisorReads({ roots, referenceRoots = [], git = createGit({ analysisOnly: true }).read }) {
   const owned = new Set(roots);
   const allowed = new Set([...roots, ...referenceRoots]);
   async function resolve(root, file = ".") {

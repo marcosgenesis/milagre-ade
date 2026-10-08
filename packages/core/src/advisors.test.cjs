@@ -228,3 +228,85 @@ test("Stop fences an admission still resolving the provider", async (t) => {
   await stopping;
   assert.equal(f.launched.length, 0);
 });
+
+for (const operation of ["create", "followup", "retry", "queued followup"]) {
+  test(`Stop before ${operation} publication finishes prevents the provider turn`, async (t) => {
+    let held = false,
+      seen,
+      release;
+    const published = new Promise((resolve) => (seen = resolve));
+    const gate = new Promise((resolve) => (release = resolve));
+    const f = await fixture(t, {
+      publish: async (_chat, row) => {
+        if (held && row.status === "initializing") {
+          seen(row);
+          await gate;
+        }
+      },
+    });
+    t.after(release);
+    let row;
+    if (operation !== "create") {
+      row = await f.manager.create("chat", input);
+      await running(f);
+      if (operation === "followup") await finish(f);
+      else if (operation === "retry") await f.manager.stop("chat", row.id);
+      else await f.manager.followup("chat", row.id, "queued");
+    }
+    held = true;
+    let pending;
+    if (operation === "create") pending = f.manager.create("chat", input);
+    else if (operation === "followup") pending = f.manager.followup("chat", row.id, "next");
+    else if (operation === "retry") pending = f.manager.retry("chat", row.id);
+    else f.launched[0].options.emit({ type: "turn-completed" });
+    const visible = await published;
+    await f.manager.stop("chat", visible.id);
+    release();
+    await pending;
+    await new Promise(setImmediate);
+    assert.equal(
+      f.launched.reduce((total, session) => total + session.turns.length, 0),
+      operation === "create" ? 0 : 1,
+    );
+    assert.equal((await f.manager.read("chat", visible.id)).status, "cancelled");
+  });
+}
+
+for (const operation of ["followup", "retry"])
+  for (const scope of ["Chat", "advisor"]) {
+    test(`${scope} Stop fences ${operation} still resolving its provider`, async (t) => {
+      let hold = false,
+        called,
+        release;
+      const waiting = new Promise((resolve) => (called = resolve));
+      const gate = new Promise((resolve) => (release = resolve));
+      let catalog;
+      const f = await fixture(t, {
+        providersFor: async () => {
+          if (hold) {
+            called();
+            await gate;
+          }
+          return catalog;
+        },
+      });
+      catalog = f.catalog;
+      t.after(release);
+      const row = await f.manager.create("chat", input);
+      await running(f);
+      if (operation === "retry") await f.manager.stop("chat", row.id);
+      else await finish(f);
+      hold = true;
+      const pending = operation === "retry" ? f.manager.retry("chat", row.id) : f.manager.followup("chat", row.id, "next");
+      await waiting;
+      const stopping = scope === "Chat" ? f.manager.stopChat("chat") : f.manager.stop("chat", row.id);
+      if (scope === "advisor") await stopping;
+      release();
+      await assert.rejects(pending, /stopped/);
+      await stopping;
+      assert.equal(
+        f.launched.reduce((total, session) => total + session.turns.length, 0),
+        1,
+      );
+    });
+  }

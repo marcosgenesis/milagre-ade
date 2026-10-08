@@ -9,7 +9,7 @@ const { NEGOTIATION_ROUNDS } = require("@milagre/shared/limits");
 const { createGit } = require("./git/client.cjs");
 const { buildLinkedSummary } = require("./linked-summary.cjs");
 
-const git = createGit().read;
+const git = createGit({ analysisOnly: true }).read;
 const MAX_OUTPUT = 40_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MESSAGES = 30;

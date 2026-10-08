@@ -7,6 +7,7 @@ const { promisify } = require("node:util");
 const execFile = promisify(require("node:child_process").execFile);
 const { createAdvisorReads } = require("./advisor-reads.cjs");
 const { runTool } = require("./linked-tools.cjs");
+const { configuredHelper } = require("./git/test-helpers.cjs");
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-advisor-reads-"));
@@ -78,3 +79,17 @@ test("advisor reads cap output and reject files over two MB", async (t) => {
   await fs.writeFile(path.join(root, "huge.txt"), "a".repeat(2 * 1024 * 1024 + 1));
   assert.equal((await call("advisor_read_file", { root, path: "huge.txt" })).isError, true);
 });
+
+for (const kind of ["external diff", "textconv", "fsmonitor", "clean", "process"]) {
+  test(`advisor Git never executes a configured ${kind} helper`, async (t) => {
+    const { root, call } = await fixture(t);
+    await execFile("git", ["-C", root, "add", "notes.txt"]);
+    await execFile("git", ["-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "Initial notes"]);
+    await fs.appendFile(path.join(root, "notes.txt"), "added\n");
+    const { marker } = await configuredHelper(root, kind, "notes.txt");
+    const response = await call("advisor_git", { root, operation: kind === "fsmonitor" ? "status" : "diff" });
+    await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    assert.equal(response.isError, false, response.text);
+    assert.match(response.text, kind === "fsmonitor" ? /notes\.txt/ : /\+added/);
+  });
+}

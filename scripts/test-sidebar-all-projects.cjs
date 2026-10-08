@@ -97,7 +97,11 @@ async function browserChecks() {
   // Other checks share this storage: leave the sidebar as they expect it.
   const reset = () => evaluate(`window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
   const scopes = () => evaluate(`[...document.querySelectorAll("[data-sidebar-scope]")].map((node) => node.dataset.sidebarScope)`);
-  const chats = (scope) => evaluate(`[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].map((node) => node.textContent.trim())`);
+  // A folded group keeps its rows mounted (inert, zero height) so it can animate shut; they don't count as shown.
+  const chats = (scope) =>
+    evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].filter((node) => !node.closest("[inert]")).map((node) => node.textContent.trim())`,
+    );
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-chat-id]')`);

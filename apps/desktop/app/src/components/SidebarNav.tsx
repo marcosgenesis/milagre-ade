@@ -921,7 +921,11 @@ export default memo(function SidebarNav({
   // Every Project, hidden ones too, since the project chooser lists them all.
   const scopeImage = useProjectImages(sidebarAllProjects ? projects.map((row) => row.path) : NO_PATHS);
   const showAll = sidebarAllProjects && !collapsed;
-  const scopeStates = useScopeStates(
+  const {
+    states: scopeStates,
+    failed: failedScopes,
+    retry: retryScope,
+  } = useScopeStates(
     showAll,
     scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
   );
@@ -1303,12 +1307,32 @@ export default memo(function SidebarNav({
                         }
                         menu={scopeMenu(scope, current)}
                       />
-                      {open &&
-                        (rest.length > 0 ? (
-                          <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
-                        ) : pinned.length > 0 ? null : (
-                          <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
-                        ))}
+                      {/* Rows grow open and shut instead of appearing at once; closed ones leave the tab order. */}
+                      <div
+                        inert={!open}
+                        data-scope-body
+                        className="grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+                        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
+                      >
+                        <div className="min-w-0 overflow-hidden">
+                          {rest.length > 0 ? (
+                            <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
+                          ) : pinned.length > 0 ? null : !state && !current && failedScopes.has(scope.key) ? (
+                            <p className="mx-2 flex h-8 items-center gap-1 pl-9 text-[13px] text-ink-3">
+                              Couldn't load chats.
+                              <button
+                                type="button"
+                                onClick={() => retryScope(scope.key)}
+                                className="cursor-pointer text-ink-2 underline-offset-2 hover:underline"
+                              >
+                                Retry
+                              </button>
+                            </p>
+                          ) : (
+                            <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                          )}
+                        </div>
+                      </div>
                     </section>
                   );
                 })}

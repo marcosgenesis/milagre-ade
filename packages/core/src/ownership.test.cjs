@@ -85,6 +85,16 @@ test("an unclear lock stays: another computer's, a live process that may own it,
   assert.ok(fs.existsSync(lockPath));
 });
 
+test("an empty lock older than a minute was abandoned mid-write and is taken over", (t) => {
+  const lockPath = lockFixture(t);
+  fs.mkdirSync(lockPath);
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lockPath, old, old);
+  const ownership = acquireOwnership(lockPath);
+  assert.equal(JSON.parse(readOwner(lockPath)).pid, process.pid);
+  ownership.release();
+});
+
 test("release is idempotent and cannot remove a replacement ownership record", (t) => {
   const lockPath = lockFixture(t);
   const first = acquireOwnership(lockPath);

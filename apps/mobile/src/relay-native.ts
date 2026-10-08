@@ -2,6 +2,7 @@ import { AppState } from "react-native";
 import { Directory, File, Paths } from "expo-file-system";
 import { createRelayTransport, type RelayTransport } from "./relay-transport";
 import { phoneIdentity, phoneRandom } from "./phone-identity";
+import { phoneName } from "./phone-name-native";
 import type { RelayRuntime } from "./client";
 import { lanRoutes } from "./routes-native";
 
@@ -28,7 +29,7 @@ export const relayRuntime: RelayRuntime & { forget(hostId: string): void } = {
     const current = open.get(relay.hostId);
     if (current?.pairing === pairing) return current.transport;
     current?.transport.close();
-    const transport = createRelayTransport({ relay: relay.url, hostId: relay.hostId, key: relay.key, token, identity, random: phoneRandom });
+    const transport = createRelayTransport({ relay: relay.url, hostId: relay.hostId, key: relay.key, token, identity, random: phoneRandom, name: phoneName });
     open.set(relay.hostId, { pairing, transport });
     return transport;
   },

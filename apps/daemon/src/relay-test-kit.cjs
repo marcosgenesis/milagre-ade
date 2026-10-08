@@ -93,7 +93,7 @@ async function startFakeBridge(t) {
 }
 
 /** A phone speaking the encrypted protocol over a raw relay socket. */
-function connectPhone({ relayUrl, identity, token = TOKEN, key = boxKeyPair(random) }) {
+function connectPhone({ relayUrl, identity, token = TOKEN, key = boxKeyPair(random), name, kind }) {
   const ws = new WebSocket(`${relayUrl}/v1/phone?id=${identity.hostId}`);
   const inbox = [];
   const waiters = [];
@@ -126,7 +126,7 @@ function connectPhone({ relayUrl, identity, token = TOKEN, key = boxKeyPair(rand
     /** Resolves with the channel, or with { error } when the Mac refused the hello. */
     async hello() {
       await phone.opened;
-      const { message, ephemeral } = phoneHello({ phone: key, host: identity.box.publicKey, token, random });
+      const { message, ephemeral } = phoneHello({ phone: key, host: identity.box.publicKey, token, random, name, kind });
       ws.send(message);
       const reply = await nextRaw();
       if (reply[0] === 0x04) return { error: JSON.parse(new TextDecoder().decode(reply.subarray(1))) };

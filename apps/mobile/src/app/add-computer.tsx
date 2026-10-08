@@ -149,7 +149,7 @@ export default function AddComputer() {
             </View>
             <View style={{ gap: 6 }}>
               <Text style={styles.label}>On your Mac</Text>
-              <Text style={styles.text}>Open Milagre, go to Settings → Phone, turn on phone access and scan the QR code it shows.</Text>
+              <Text style={styles.text}>Open Milagre, go to Settings → Devices, turn on Allow devices to connect and scan the QR code it shows.</Text>
             </View>
             <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
               {[

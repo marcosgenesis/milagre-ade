@@ -55,7 +55,7 @@ export function localEndpoint(input: string): string {
 export type RelayLink = { url: string; hostId: string; key: string };
 export function validRelay(value: unknown): RelayLink {
   const relay = value as Partial<RelayLink> | undefined;
-  const damaged = () => new Error("This pairing code is damaged. Scan the code again in Settings → Phone on your Mac.");
+  const damaged = () => new Error("This pairing code is damaged. Scan the code again in Settings → Devices on your Mac.");
   let url: URL;
   try {
     url = new URL(String(relay?.url ?? ""));
@@ -257,7 +257,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
         throw new Error(
           [401, 403].includes(response.status)
             ? through
-              ? "Your Mac refused this phone. Scan its code again in Settings → Phone."
+              ? "Your Mac refused this phone. Scan its code again in Settings → Devices."
               : "Your computer's Cloudflare access was refused. Scan its pairing code again."
             : response.status >= 500
               ? "Your computer isn't answering. Check that Milagre and its mobile host are running on your Mac."

@@ -9,10 +9,10 @@ const random = (n: number) => new Uint8Array(randomBytes(n));
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const TOKEN = "a".repeat(64);
-const OLDER_CODE = "This phone was paired with an older code. Scan the new one in Settings → Phone.";
-const RESET = "This Mac was reset. Scan its new pairing code in Settings → Phone.";
-const CLOSED_PAIRING = "Pairing is closed on your Mac. Open Settings → Phone on it and scan the code again.";
-const OFFLINE = "Your Mac isn't reachable. Open Milagre on it and check Settings → Phone.";
+const OLDER_CODE = "This phone was paired with an older code. Scan the new one in Settings → Devices.";
+const RESET = "This Mac was reset. Scan its new pairing code in Settings → Devices.";
+const CLOSED_PAIRING = "Pairing is closed on your Mac. Open Settings → Devices on it and scan the code again.";
+const OFFLINE = "Your Mac isn't reachable. Open Milagre on it and check Settings → Devices.";
 const LOST = "Connection lost. Reconnect to your computer. Check the Chat before sending again.";
 /** Everything queued as microtasks has run. */
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -50,7 +50,7 @@ function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":
   const sockets: FakeSocket[] = [];
   const seen: Seen[] = [];
   const sent: Uint8Array[] = [];
-  const state = { mode: "host" as Mode, ping: 0 };
+  const state = { mode: "host" as Mode, ping: 0, names: [] as (string | null)[] };
   class FakeSocket implements RelaySocket {
     binaryType = "blob";
     onopen: (() => void) | null = null;
@@ -106,6 +106,7 @@ function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":
         }
         try {
           const accepted = hostAccept({ host, hello: bytes, isKnown: () => true, token: TOKEN, random });
+          state.names.push(accepted.name);
           this.channel = accepted.channel;
           // An impostor cannot read the hello, so the closest thing is a reply that was not sealed for this phone and host.
           if (state.mode === "impostor") accepted.reply[accepted.reply.length - 1] ^= 1;
@@ -550,4 +551,15 @@ test("an onLost that throws cannot skip the teardown: what was pending still fai
   fake.sockets[0].drop(1006);
   await assert.rejects(pending, { message: LOST });
   transport.close();
+});
+
+test("the hello carries the phone's name when it has one", async () => {
+  const fake = relay();
+  const named = transportFor(fake, { name: "Victor's iPhone" });
+  await named.transport.ready();
+  named.transport.close();
+  const unnamed = transportFor(fake);
+  await unnamed.transport.ready();
+  unnamed.transport.close();
+  assert.deepEqual(fake.state.names, ["Victor's iPhone", null]);
 });

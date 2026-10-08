@@ -33,7 +33,8 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-function ago(at: number, now: number): string {
+/** "just now", "5 min ago", "3 h ago" or "2 d ago". */
+export function ago(at: number, now: number): string {
   const elapsed = now - at;
   // NaN and negative (clock skew) both land here.
   if (!(elapsed >= MINUTE)) return "just now";

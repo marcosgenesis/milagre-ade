@@ -3083,6 +3083,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
       },
     },
     "./phone-identity": { phoneIdentity: async () => identity, phoneRandom },
+    "./phone-name-native": { phoneName: "Victor's iPhone" },
     "./routes-native": routesNative(),
   });
   const link = (hostId, key = "K".repeat(43)) => ({ url: "wss://relay.milagre.cloud", hostId, key });
@@ -3090,6 +3091,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
   assert.equal(await relayRuntime.transport({ relay: link("A".repeat(22)), token: "a".repeat(64) }), a, "one transport per Mac");
   assert.equal(a.options.identity, identity);
   assert.equal(a.options.random, phoneRandom);
+  assert.equal(a.options.name, "Victor's iPhone");
   assert.equal(a.options.hostId, "A".repeat(22));
   const b = await relayRuntime.transport({ relay: link("B".repeat(22)), token: "a".repeat(64) });
   assert.notEqual(b, a);

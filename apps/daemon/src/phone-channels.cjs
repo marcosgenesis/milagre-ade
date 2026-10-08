@@ -72,23 +72,42 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     if (retired) return refuse(current, conn, "bad-token", { reason: "reset" });
     let accepted;
     try {
-      accepted = hostAccept({ host: identity.box, hello: bytes, isKnown: (id) => phones.isKnown(id), canPair: !!canPair(), token, random });
+      accepted = hostAccept({ host: identity.box, hello: bytes, isKnown: (id) => phones.isKnown(id), canPair: (id) => !!canPair(id), token, random });
     } catch (error) {
       if (error instanceof RelayAuthError) return refuse(current, conn, error.code);
       return refuse(current, conn, "bad-hello");
     }
+    // A desktop speaks another protocol over this channel. Until this Mac does, it turns desktops away unsaved.
+    if (accepted.kind !== "phone") return refuse(current, conn, "bad-hello", { reason: "kind" });
+    // Set before any wait, so a removal that lands meanwhile finds this channel.
+    record.key = accepted.phoneKey;
     if (accepted.firstPairing) {
       try {
-        await phones.add(accepted.phoneKey);
+        await phones.add(accepted.phoneKey, { kind: "phone", name: accepted.name });
       } catch {
         return dropConn(current, conn, true);
       }
+    } else {
+      // When it was last here, and its name if it changed. A failed write never closes a known phone's channel.
+      void Promise.resolve(phones.seen?.(accepted.phoneKey, { name: accepted.name })).catch(() => {});
     }
     if (current.conns.get(conn) !== record) return;
     record.channel = accepted.channel;
     record.state = "open";
     clearTimeout(record.helloTimer);
     sendFrame(current, DATA, conn, accepted.reply);
+  }
+
+  /** Keys of the devices whose channel on this carrier finished its hello. */
+  function keysOf(current) {
+    const keys = new Set();
+    for (const record of current.conns.values()) if (record.state === "open" && record.key) keys.add(record.key);
+    return [...keys];
+  }
+
+  /** Closes every channel `key` has on this carrier, and tells the carrier to close their sockets. */
+  function dropKey(current, key) {
+    for (const [conn, record] of [...current.conns]) if (record.key === key) dropConn(current, conn, true);
   }
 
   /** Sends a whole response as `res` parts. */
@@ -249,6 +268,7 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
         rejected: new Set(),
         assembler: createAssembler(),
         helloTimer: null,
+        key: null,
       };
       current.conns.set(conn, record);
       record.helloTimer = setTimeout(() => {
@@ -275,7 +295,7 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     }
   }
 
-  return { onFrame, dropConn };
+  return { onFrame, dropConn, dropKey, keysOf };
 }
 
 module.exports = { createPhoneChannels, frame, OPEN, DATA, CLOSE };

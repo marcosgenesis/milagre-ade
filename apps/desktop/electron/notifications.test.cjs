@@ -152,13 +152,13 @@ test("Dock counts distinct waiting or unread chats, survives project changes, an
   assert.equal(badge, "");
 });
 
-test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Phone", () => {
+test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Devices", () => {
   const { notifier, shown, opened } = setup({ focused: true });
   assert.equal(notifier.notifyPhonePaired(), true);
   assert.equal(shown.length, 1);
   assert.equal(shown[0].visible, true);
   assert.equal(shown[0].options.title, "New phone paired");
-  assert.match(shown[0].options.body, /If it wasn't you, reset access in Settings → Phone/);
+  assert.match(shown[0].options.body, /If it wasn't you, remove it in Settings → Devices/);
   shown[0].emit("click");
   assert.deepEqual(opened, ["settings:phone"]);
   // A second pairing replaces the first notice.

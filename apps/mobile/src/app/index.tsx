@@ -219,7 +219,7 @@ export default function ComputersScreen() {
             <Icon icon={LaptopIcon} tone="ink3" size={44} />
             <Text style={[styles.subtitle, { textAlign: "center" }]}>Pair your computer</Text>
             <Text style={[styles.muted, { textAlign: "center" }]}>
-              Open Settings → Phone in Milagre on your Mac, then scan its pairing code. Your projects and chats will appear here.
+              Open Settings → Devices in Milagre on your Mac, then scan its pairing code. Your projects and chats will appear here.
             </Text>
           </View>
         )}

@@ -3,9 +3,9 @@ const os = require("node:os");
 const path = require("node:path");
 
 // Antigravity is Google's agent (agy_acp_server) over ACP; see docs/adr/0006-antigravity-over-acp.md.
-// This is everything AcpSession needs to know about it. Verified against agy 1.3.0 on macOS arm64.
+// This is everything AcpSession needs to know about it. Run against agy 1.3.0 on macOS arm64; the other platforms' archives are pinned by hash and layout.
 
-const { AMBIENT_ENV, HARNESS } = require("./antigravity-install.cjs");
+const { AMBIENT_ENV, argsFor, memberNames } = require("./antigravity-install.cjs");
 const { ANTIGRAVITY_AGENT_OPTIONS, antigravityFamilies, resolveAntigravityModel } = require("@milagre/shared/antigravity-models");
 
 // Ambient credentials and settings that would pick another account, project or token store, or open a
@@ -19,20 +19,24 @@ const MODES = { ask: "default", auto: "auto_edit", full: "yolo" };
 // credentials, with the account's profile, file token storage (profiles never share a keychain entry)
 // and a temporary directory Milagre owns, because the agent unpacks large files there on every launch.
 // `harness` comes from the resolved install; without one, the tool binary that ships beside the agent.
-function antigravityEnv({ env = process.env, command, harness, tmpdir }) {
+function antigravityEnv({ env = process.env, command, harness, tmpdir, platform = process.platform }) {
   const home = env.GEMINI_HOME;
   const next = { ...env };
   for (const name of SCRUBBED_ENV) delete next[name];
   if (home) next.GEMINI_HOME = home;
   next.AGY_ACP_FORCE_FILE_STORAGE = "1";
   next.PYTHONUNBUFFERED = "1";
-  if (tmpdir) next.TMPDIR = tmpdir;
-  if (harness || command) next.ANTIGRAVITY_HARNESS_PATH = harness ?? path.join(path.dirname(command), HARNESS);
+  if (tmpdir) {
+    next.TMPDIR = tmpdir;
+    // Windows programs find their temporary directory through TEMP and TMP, not TMPDIR.
+    if (platform === "win32") Object.assign(next, { TEMP: tmpdir, TMP: tmpdir });
+  }
+  if (harness || command) next.ANTIGRAVITY_HARNESS_PATH = harness ?? path.join(path.dirname(command), memberNames(platform).harness);
   return next;
 }
 
 function antigravitySpawn({ command, args, harness, env, tmpdir, platform = process.platform }) {
-  return { command, args: args ?? (platform === "linux" ? ["--uid="] : []), env: antigravityEnv({ env, command, harness, tmpdir }) };
+  return { command, args: args ?? argsFor(platform), env: antigravityEnv({ env, command, harness, tmpdir, platform }) };
 }
 
 // "I1007 21:18:18.878412 8444297088 server.py:2824] message": absl's log prefix, with its level letter.

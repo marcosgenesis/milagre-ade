@@ -59,6 +59,10 @@
       "types": "./src/attention.d.mts",
       "default": "./src/attention.mjs"
     },
+    "./antigravity-models": {
+      "types": "./src/antigravity-models.d.mts",
+      "default": "./src/antigravity-models.mjs"
+    },
     "./providers": {
       "types": "./src/providers.d.mts",
       "default": "./src/providers.mjs"

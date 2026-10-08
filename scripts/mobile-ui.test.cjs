@@ -668,9 +668,10 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {} } = {}) {
+function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {}, linear = { active: false } } = {}) {
   const sending = deferred();
   const calls = [];
+  const choices = [];
   const params = { worktreeId: "1" };
   const session = {
     client: {
@@ -803,6 +804,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "@milagre/shared/agent-runs": { lastUserModel: () => "" },
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "../use-linear": { useLinear: () => linear },
+    "../use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
+    "../choice-store": { showChoiceSheet: (request) => choices.push(request) },
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "../attachment-picker": { pickAttachments },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
@@ -833,7 +838,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     return { ...props, value: props.draft };
   };
   const send = () => find(render(), (node) => node.type === "IconButton" && ["Send message", "Send follow-up"].includes(node.props.label)).props.onPress();
-  return { session, sending, params, field, send, render, router, calls };
+  return { session, sending, params, field, send, render, router, calls, choices };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -1160,6 +1165,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
     "./icons": { Icon: "Icon" },
     "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
   });
@@ -1192,6 +1198,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
     "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
+    "./use-linear": { useLinear: () => ({ active: false }) },
+    "./use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
     "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
@@ -5090,4 +5098,70 @@ test("mobile advisor Stop and Retry call the owning Chat and show failures witho
   assert.equal(host.state.sessions[7].subagents.length, 2);
   await host.button("Retry Plan").props.onPress();
   assert.deepEqual(host.calls[1], { method: "advisor:retry", args: ["/project#7", "advisor:failed"] });
+});
+
+const linearIssue = {
+  key: "ENG-12",
+  title: "Fix login",
+  url: "https://linear.app/acme/issue/ENG-12",
+  branchName: "eng-12-fix-login",
+  state: { name: "In Progress", type: "started", color: "#f2c94c" },
+};
+
+test("a new Chat offers a Linear issue chip only while Linear is on and connected", () => {
+  const chip = (screen) => find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue");
+  assert.ok(!chip(chatHost({ linear: { active: false } })), "off hides the chip");
+  assert.ok(chip(chatHost({ linear: { active: true } })), "on and connected shows it after the branch picker");
+});
+
+test("picking a Linear issue starts a Chat in its own worktree with the issue as the first message", async () => {
+  const { issueFirstMessage } = require("@milagre/shared/linear");
+  const screen = chatHost({
+    effects: true,
+    linear: { active: true },
+    call: async (method) => {
+      if (method === "project:branches") return ["main"];
+      if (method === "linear:issues") return { issues: [linearIssue] };
+      if (method === "worktree:create") return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+      return { sessionId: 7 };
+    },
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: "main" } };
+  find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue").props.onPress();
+  await settle();
+  // Objects built inside the Chat's vm realm: compare as JSON, not by prototype.
+  assert.equal(JSON.stringify(screen.calls.find((call) => call.method === "linear:issues").args), "[{}]");
+  const request = screen.choices.at(-1);
+  assert.equal(request.title, "Start from a Linear issue");
+  assert.equal(JSON.stringify(request.items), JSON.stringify([{ id: "ENG-12", title: "ENG-12 Fix login", subtitle: "In Progress" }]));
+  // The branch list lands after the sheet opened; the screen re-renders with it before the pick.
+  screen.render();
+  request.onSelect("ENG-12");
+  await settle();
+  const created = screen.calls.find((call) => call.method === "worktree:create").args[0];
+  assert.equal(created.issueKey, "ENG-12");
+  assert.equal(created.baseBranch, "main");
+  const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+  assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
+  assert.equal(screen.params.id, "7");
+});
+
+test("a Chat row shows its Worktree's Linear issue even without pull requests", () => {
+  const external = [];
+  const { ChatPullRequestChips } = load("chat-pull-request-chips.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-linking": { openURL: async (url) => external.push(url) },
+    "@hugeicons/core-free-icons": {},
+    "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "./icons": { Icon: "Icon" },
+    "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
+  });
+  const tree = ChatPullRequestChips({ pullRequests: [], linearIssue });
+  const link = find(tree, (node) => node.props?.accessibilityLabel === "Open Linear issue ENG-12");
+  assert.ok(find(link, (node) => node.type === "Text" && node.props.children === "ENG-12 · In Progress"));
+  link.props.onPress({ stopPropagation() {} });
+  assert.deepEqual(external, [linearIssue.url]);
+  assert.equal(ChatPullRequestChips({ pullRequests: [] }), null, "no pull requests and no issue renders nothing");
 });

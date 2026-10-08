@@ -31,7 +31,7 @@ export interface AppSettings {
   tldrEnabled: boolean;
   /** Sidebar chats by start date, or with the latest message first. */
   chatOrder: ChatOrder;
-  /** The sidebar lists every recent Project and Link with its chats, not only the open one's. */
+  /** Experimental: the sidebar lists every recent Project and Link with its chats, not only the open one's. */
   sidebarAllProjects: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;

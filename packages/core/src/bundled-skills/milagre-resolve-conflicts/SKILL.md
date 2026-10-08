@@ -7,10 +7,11 @@ description: Resolve a GitHub pull request's merge conflicts with its base branc
 
 The message names the pull request. The user clicking Resolve conflicts is their request to resolve them and push, so commit and push without asking again.
 
-1. Find the base branch with `gh pr view <number> --json baseRefName --jq .baseRefName`, then `git fetch origin <base>`.
-2. Merge it: `git merge origin/<base>`. Don't rebase; the branch is already pushed and may be reviewed.
-3. For each conflicted file, read both sides and the commits behind them (`git log --oneline HEAD...origin/<base> -- <file>`) to learn what each side meant. Keep both intents. When they truly contradict, keep the base branch's behavior and say so in the report.
-4. Regenerate lockfiles and generated files with their own tools instead of merging them by hand.
-5. Run the typecheck, the linter and the tests that cover the conflicted files.
-6. Commit the merge and push. Never force-push.
-7. Report each conflicted file and how you resolved it.
+1. Run `git status`. If the tree has uncommitted changes, stop and report them: a merge would sweep them into its commit.
+2. Find the base with `gh pr view <number> --json baseRefName,baseRepository`. The base repository may not be `origin` (on a fork it is usually `upstream`): pick the remote in `git remote -v` whose URL matches `baseRepository`, and add it if none does. Then `git fetch <remote> <base>`.
+3. Merge it: `git merge <remote>/<base>`. Don't rebase; the branch is already pushed and may be reviewed.
+4. For each conflicted file, read both sides and the commits behind them (`git log --oneline HEAD...<remote>/<base> -- <file>`) to learn what each side meant. Keep both intents. When they truly contradict, keep the base branch's behavior and say so in the report.
+5. Regenerate lockfiles and generated files with their own tools instead of merging them by hand.
+6. Run the typecheck, the linter and the tests that cover the conflicted files.
+7. Commit the merge and push. Never force-push.
+8. Report each conflicted file and how you resolved it.

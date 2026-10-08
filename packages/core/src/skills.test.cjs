@@ -261,3 +261,21 @@ test("PR action skills expand from a pill's prompt, and a project skill override
   assert.equal((await discoverSkills(project, { home })).skills.find((s) => s.name === "milagre-fix-ci").path, custom);
   assert.ok((await expandSkillPrompt(project, "Fix CI. /milagre-fix-ci", { home })).includes("Our own CI steps"));
 });
+
+test("PR action skills use commands that work on forks and keep the user's uncommitted work out", async (t) => {
+  const { project, home } = await fixture(t);
+  const { skills } = await discoverSkills(project, { home });
+  const read = async (name) => fs.readFile(skills.find((s) => s.name === name).path, "utf8");
+  for (const name of ["milagre-fix-ci", "milagre-address-review", "milagre-resolve-conflicts", "milagre-update-branch"]) {
+    assert.match(await read(name), /git status/, `${name} checks for uncommitted changes first`);
+  }
+  for (const name of ["milagre-resolve-conflicts", "milagre-update-branch"]) {
+    const content = await read(name);
+    assert.match(content, /baseRepository/, `${name} finds the base repository's remote`);
+    assert.doesNotMatch(content, /origin\/<base>|fetch origin/, `${name} doesn't assume origin is the base`);
+  }
+  assert.match(await read("milagre-fix-ci"), /gh pr checks <number> --json/);
+  const review = await read("milagre-address-review");
+  assert.match(review, /isResolved/);
+  assert.match(review, /--paginate/);
+});

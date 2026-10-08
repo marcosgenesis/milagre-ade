@@ -24,7 +24,7 @@ import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
-import { pullRequestActionBody, pullRequestActionContext } from "@milagre/shared/pr-action";
+import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
 import { useComposer, usePendingChats, useSession } from "../session";
 import { pickAttachments } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
@@ -464,7 +464,8 @@ export default function ChatScreen() {
               clientMessageId: preview.message.clientMessageId,
               body: sent,
               ...media,
-              prompt: attachmentPrompt(sent, media.files),
+              // A Mac that predates PR actions ignores prAction and sends this prompt as it is.
+              prompt: prAction ? pullRequestActionPrompt(prAction) : attachmentPrompt(sent, media.files),
               ...options,
               ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
             },

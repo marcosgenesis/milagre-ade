@@ -53,7 +53,7 @@ import {
 } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
-import { pullRequestActionBody, pullRequestActionContext } from "@milagre/shared/pr-action";
+import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "@milagre/shared/project-edits";
@@ -1256,7 +1256,8 @@ function App() {
         body,
         images,
         files,
-        prompt: attachmentPrompt(body, files),
+        // A Mac that predates PR actions ignores prAction and sends this prompt as it is.
+        prompt: prAction ? pullRequestActionPrompt(prAction) : attachmentPrompt(body, files),
         ...options,
         ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
       });

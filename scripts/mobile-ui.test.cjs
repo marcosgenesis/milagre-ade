@@ -2085,6 +2085,8 @@ test("the PR pill sends a PR action whose preview is already a card", async () =
     await settle();
     const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
     assert.equal(sent.body, "Fix CI on pull request #77");
+    // An older Mac ignores prAction: the prompt still carries the URL and the skill token.
+    assert.equal(sent.prompt, `Fix CI on pull request #77 (${url}). /milagre-fix-ci`);
     assert.equal(JSON.stringify(sent.prAction), JSON.stringify({ action: "checks-failed", pr: 77, url }));
     const [pending] = Object.values(screen.session.pendingChats);
     assert.equal(JSON.stringify(pending.preview.message.context), JSON.stringify({ kind: "pr-action", action: "checks-failed", pr: 77, url }));

@@ -1,58 +1,29 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
-const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { randomBytes } = require("node:crypto");
-const { WebSocketServer } = require("ws");
 const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
 const { createAssembler, fromBase64 } = require("@milagre/shared/relay-rpc");
 const { readIdentity } = require("./relay-identity.cjs");
 const { createDevices } = require("./devices.cjs");
 const { startRelayHost } = require("./relay-host.cjs");
-const { random, TOKEN, LIVE_ORIGIN, sleep, listen, until, startFakeBridge, connectPhone } = require("./relay-test-kit.cjs");
+const {
+  random,
+  TOKEN,
+  LIVE_ORIGIN,
+  sleep,
+  listen,
+  until,
+  startFakeBridge,
+  connectPhone,
+  connectDesktop,
+  fakePeerDaemon,
+  startLocalRelay: startRelay,
+} = require("./relay-test-kit.cjs");
 
-/** Plays the Cloudflare Worker: real sockets, the real room logic. */
-async function startRelay(t, { autoPong = true, hostBehavior } = {}) {
-  const { createRoom } = await import("../../relay/src/room.mjs");
-  const rooms = new Map();
-  const roomFor = (id) => {
-    if (!rooms.has(id)) rooms.set(id, createRoom({ id }));
-    return rooms.get(id);
-  };
-  const server = http.createServer();
-  const wss = new WebSocketServer({ noServer: true, autoPong });
-  const hostSockets = [];
-  server.on("upgrade", (request, socket, head) => {
-    const url = new URL(request.url, "http://relay");
-    const id = url.searchParams.get("id");
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      const room = roomFor(id);
-      const payload = (data, isBinary) => (isBinary ? data : data.toString());
-      if (url.pathname === "/v1/host") {
-        const index = hostSockets.length;
-        hostSockets.push(ws);
-        if (hostBehavior?.(ws, index)) return;
-        ws.on("message", (data, isBinary) => room.hostMessage(ws, payload(data, isBinary)));
-        ws.on("close", () => room.hostClosed(ws));
-        room.hostOpened(ws);
-      } else {
-        ws.on("message", (data, isBinary) => room.phoneMessage(ws, payload(data, isBinary)));
-        ws.on("close", () => room.phoneClosed(ws));
-        room.phoneOpened(ws);
-      }
-    });
-  });
-  const port = await listen(server);
-  t.after(() => {
-    for (const client of wss.clients) client.terminate();
-    server.close();
-  });
-  return { url: `ws://127.0.0.1:${port}`, hostSockets };
-}
-
-async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus } = {}) {
+async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus, openPeer, WebSocket } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
@@ -67,6 +38,8 @@ async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token =
     bridgeUrl,
     canPair: (key) => canPair(key),
     timing,
+    openPeer,
+    ...(WebSocket ? { WebSocket } : {}),
     onStatus: (status) => {
       statuses.push(status);
       onStatus?.(status);
@@ -506,5 +479,182 @@ test("the pairing window can stay closed to one phone while another pairs", asyn
   const phone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: blocked });
   t.after(() => phone.close());
   assert.deepEqual(await phone.hello(), { error: { t: "error", code: "unknown-phone" } });
+  await connect();
+});
+
+test("a desktop pairs in the window as a computer, and its frames reach the daemon and come back, in parts past 768 KiB", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity, name: "studio" });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  const id = b64url(desktop.key.publicKey);
+  assert.deepEqual(
+    mac.phones.list().map((device) => [device.key, device.kind, device.name]),
+    [[id, "computer", "studio"]],
+  );
+  assert.deepEqual(mac.host.connectedKeys(), [id]);
+  assert.deepEqual((await desktop.call("daemon:status")).result, { echo: [] });
+  // Both ways through the real room, whose frames stop at 1 MiB.
+  const big = "ação🙂".repeat(150_000);
+  assert.deepEqual((await desktop.call("echo", [big])).result, { echo: [big] });
+  assert.ok(desktop.messages.filter((message) => message.t === "part").length >= 3, "the reply came in parts");
+  desktop.sendMessage({ t: "ping" });
+  await until(() => desktop.messages.some((message) => message.t === "pong"), "pong");
+  assert.equal(desktop.error, null);
+});
+
+test("a desktop cannot speak HTTP-over-channel: a req closes its channel and its daemon connection", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, bridge, mac } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  desktop.sendMessage({ t: "req", id: 1, method: "POST", path: "/rpc", headers: {}, chunk: "", more: false });
+  await desktop.closed;
+  await until(() => daemon.connections[0].closed, "the daemon connection closed");
+  assert.equal(bridge.seen.requests.length, 0, "nothing reached the bridge");
+});
+
+test("a device keeps the kind it paired as: a phone's key saying desktop, and a computer's saying phone, are turned away", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac, connect } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const phone = await connect();
+  const asDesktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity, key: phone.key });
+  t.after(() => asDesktop.close());
+  assert.deepEqual(await asDesktop.hello(), { error: { t: "error", code: "bad-hello", reason: "kind" } });
+  assert.equal(daemon.connections.length, 0);
+  const computer = boxKeyPair(random);
+  await mac.phones.add(b64url(computer.publicKey), { kind: "computer", name: "studio" });
+  const asPhone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: computer });
+  t.after(() => asPhone.close());
+  assert.deepEqual(await asPhone.hello(), { error: { t: "error", code: "bad-hello", reason: "kind" } });
+  assert.deepEqual(
+    mac.phones.list().map((device) => device.kind),
+    ["phone", "computer"],
+    "both stay as they paired",
+  );
+});
+
+test("dropping a desktop's key closes its channel and its daemon connection", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  mac.host.drop(b64url(desktop.key.publicKey));
+  assert.equal((await desktop.closed).code, 1000);
+  assert.equal(daemon.connections[0].closed, true);
+  assert.deepEqual(mac.host.connectedKeys(), []);
+});
+
+test("losing the relay closes every desktop's daemon connection", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  relay.hostSockets[0].terminate();
+  await until(() => daemon.connections[0].closed, "closed with the relay");
+});
+
+test("a desktop outside the pairing window gets unknown-phone and is saved nowhere", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer, canPair: () => false } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.deepEqual(await desktop.hello(), { error: { t: "error", code: "unknown-phone" } });
+  assert.equal(mac.phones.count(), 0);
+  assert.equal(daemon.connections.length, 0);
+});
+
+test("a bad part gets its error reply before the channel closes", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  // A part of a frame nobody started: the reader refuses it, the daemon answers with the error and then ends.
+  desktop.sendMessage({ t: "part", id: 99, i: 5, n: 7, data: "x" });
+  const reply = await until(() => desktop.frames.find((frame) => frame.error), "the error reply");
+  assert.ok(reply.error.code, "the error carries a code");
+  await desktop.closed;
+  assert.equal(daemon.connections[0].closed, true);
+  assert.equal(desktop.error, null);
+});
+
+test("a desktop whose daemon connection can't open is dropped, and never reaches the bridge", async (t) => {
+  const openPeer = () => {
+    throw new Error("no daemon");
+  };
+  const { relay, bridge, mac } = await paired(t, { mac: { openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  // Sent at once, like a desktop that doesn't wait: if the channel stayed open this would reach the bridge.
+  try {
+    desktop.sendMessage({ t: "req", id: 1, method: "POST", path: "/rpc", headers: {}, chunk: "", more: false });
+  } catch {
+    /* already closed */
+  }
+  await desktop.closed;
+  await sleep(50);
+  assert.equal(bridge.seen.requests.length, 0, "nothing reached the bridge");
+  assert.deepEqual(mac.host.connectedKeys(), []);
+  assert.equal(mac.host.status(), "online", "the host carries on");
+});
+
+test("a daemon connection that ends while it is being opened is closed, not leaked", async (t) => {
+  const connections = [];
+  const openPeer = (carrier) => {
+    const connection = { closed: false };
+    connections.push(connection);
+    carrier.end();
+    return { receive() {}, invalid() {}, close: () => (connection.closed = true) };
+  };
+  const { relay, mac } = await paired(t, { mac: { openPeer } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  await desktop.closed;
+  await until(() => connections[0]?.closed, "the connection closed");
+  assert.deepEqual(mac.host.connectedKeys(), []);
+});
+
+test("a phone response in flight on the shared relay socket does not drop a connected desktop", async (t) => {
+  // What one ~30 MiB phone response holds on the Mac's relay socket (about 40 MiB on the wire) while a desktop is connected.
+  const busy = { amount: 0 };
+  class BusySocket extends require("ws").WebSocket {
+    get bufferedAmount() {
+      return busy.amount || super.bufferedAmount;
+    }
+  }
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer, WebSocket: BusySocket } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  busy.amount = 40 * 1024 * 1024;
+  assert.deepEqual((await desktop.call("daemon:status")).result, { echo: [] });
+  assert.equal(daemon.connections[0].closed, false, "the desktop's channel stands");
+  assert.deepEqual(mac.host.connectedKeys(), [b64url(desktop.key.publicKey)]);
+  busy.amount = 0;
+});
+
+test("a device store that throws while a hello is read drops that channel and the host carries on", async (t) => {
+  const { relay, mac, connect } = await paired(t, { mac: { openPeer: fakePeerDaemon().openPeer } });
+  const known = boxKeyPair(random);
+  await mac.phones.add(b64url(known.publicKey), { kind: "phone", name: "known" });
+  const original = mac.phones.kindOf;
+  mac.phones.kindOf = () => {
+    throw new Error("store broke");
+  };
+  const phone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: known });
+  t.after(() => phone.close());
+  // Closed with no reply, or refused: either way the channel is gone.
+  await Promise.race([phone.closed, phone.hello().catch(() => null)]);
+  await phone.closed;
+  mac.phones.kindOf = original;
+  assert.equal(mac.host.status(), "online", "the host carries on");
   await connect();
 });

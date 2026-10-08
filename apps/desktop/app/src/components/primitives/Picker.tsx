@@ -97,6 +97,7 @@ export function PickerRow({
   icon,
   label,
   description,
+  meta,
   selected,
   onClick,
   option = false,
@@ -106,6 +107,8 @@ export function PickerRow({
   icon?: ReactNode;
   label: string;
   description?: string;
+  /** A short fact in a chip beside the label: a model's context window. */
+  meta?: string;
   selected: boolean;
   onClick: () => void;
   option?: boolean;
@@ -126,6 +129,14 @@ export function PickerRow({
       {icon && <span className="shrink-0">{icon}</span>}
       <span className={`flex min-w-0 flex-1 ${wrapLabel ? "flex-col gap-1" : "items-baseline gap-1.5"}`}>
         <strong className={`${wrapLabel ? "w-full break-all whitespace-normal font-mono leading-5" : "shrink-0"} text-xs font-medium text-ink`}>{label}</strong>
+        {meta && (
+          <span
+            data-picker-meta
+            className="shrink-0 self-center rounded-chip border border-line px-1 text-[10px] leading-[14px] font-medium tabular-nums text-ink-3"
+          >
+            {meta}
+          </span>
+        )}
         {description && <span className="truncate text-[10px] text-ink-3">{description}</span>}
       </span>
       {selected && (

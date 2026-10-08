@@ -84,16 +84,20 @@ function channel(key, sendDirection) {
     return n;
   };
   const receiveDirection = sendDirection === PHONE_TO_HOST ? HOST_TO_PHONE : PHONE_TO_HOST;
+  /** Seals `plain`, the UTF-8 bytes of one JSON message. */
+  function sealEncoded(plain) {
+    sent += 1n;
+    const box = nacl.secretbox(plain, nonce(sendDirection, sent), key);
+    const frame = new Uint8Array(9 + box.length);
+    frame[0] = DATA;
+    new DataView(frame.buffer).setBigUint64(1, sent);
+    frame.set(box, 9);
+    return frame;
+  }
   return {
-    seal(value) {
-      sent += 1n;
-      const box = nacl.secretbox(json(value), nonce(sendDirection, sent), key);
-      const frame = new Uint8Array(9 + box.length);
-      frame[0] = DATA;
-      new DataView(frame.buffer).setBigUint64(1, sent);
-      frame.set(box, 9);
-      return frame;
-    },
+    seal: (value) => sealEncoded(json(value)),
+    // A daemon frame is serialised once for every client; sealing its bytes saves a second JSON pass per desktop.
+    sealEncoded,
     open(frame) {
       if (frame[0] !== DATA || frame.length < 9 + nacl.secretbox.overheadLength) throw new Error("Not a channel frame");
       const counter = new DataView(frame.buffer, frame.byteOffset).getBigUint64(1);

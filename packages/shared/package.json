@@ -9,6 +9,7 @@
     "src/git-diff.ts",
     "src/model-options.ts",
     "src/model-copy.ts",
+    "src/provider-logos.ts",
     "src/reply-parts.ts",
     "src/streaming-markdown.ts",
     "src/pr-blockers.ts",
@@ -107,8 +108,13 @@
       "types": "./src/relay-rpc.d.mts",
       "default": "./src/relay-rpc.mjs"
     },
+    "./peer-frames": {
+      "types": "./src/peer-frames.d.mts",
+      "default": "./src/peer-frames.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
+    "./provider-logos": "./src/provider-logos.ts",
     "./reconcile": {
       "types": "./src/reconcile.d.mts",
       "default": "./src/reconcile.mjs"

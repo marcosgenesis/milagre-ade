@@ -32,11 +32,11 @@ export function HandoffDivider({
         <Text style={{ color: colors.ink3, fontSize: 12 }}>{sides.restored ? "Context restored" : "Context handoff"}</Text>
         {!sides.restored && (
           <>
-            <ProviderLogo provider={context.from.provider} size={13} tone="ink3" />
+            <ProviderLogo provider={context.from.provider} size={13} />
             <Text style={{ color: colors.ink3, fontSize: 12 }}>{sides.from} →</Text>
           </>
         )}
-        <ProviderLogo provider={context.to.provider} size={13} tone="ink2" />
+        <ProviderLogo provider={context.to.provider} size={13} />
         <Text style={{ color: colors.ink2, fontSize: 12, fontWeight: "500" }}>{sides.to}</Text>
         {context.status === "failed" && <Text style={{ color: colors.orange, fontSize: 12 }}>· Handoff failed</Text>}
       </View>

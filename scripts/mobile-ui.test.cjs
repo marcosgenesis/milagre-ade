@@ -118,7 +118,7 @@ const archiveProgress = load("archive-progress.tsx", {
   "react/jsx-runtime": { jsx, jsxs: jsx },
   "react-native": { Text: "Text", View: "View", StyleSheet: { absoluteFill: {}, create: (styles) => styles } },
   "./archive": archiveStore,
-  "./loading-logo": { LoadingLogo: "LoadingLogo" },
+  "./icons": { SpinnerRing: "SpinnerRing" },
   "./ui": { styles: {}, colors: {} },
 });
 const enterAnimation = {
@@ -4445,6 +4445,10 @@ test("sidebar archive shows progress over the Chat's row and clears it on failur
   );
   const row = nav.row("chat");
   assert.equal(archiveIndicator(row).props.accessibilityLabel, "Archiving Fix", "archive feedback sits on the row and survives closing the action sheet");
+  assert.ok(
+    find(archiveIndicator(row), (node) => node.type === "SpinnerRing"),
+    "the row's pill spins desktop's ring",
+  );
   assert.equal(nav.more(row), undefined, "an archiving row offers no menu");
   assert.equal(row.props.pointerEvents, "none");
   // Hidden on the Mac while the worktree is still going: the row stays, under the progress.

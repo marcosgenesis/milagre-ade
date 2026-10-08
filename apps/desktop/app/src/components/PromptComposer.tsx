@@ -1,4 +1,4 @@
-import { PROVIDERS, cliName, providerName } from "@milagre/shared/providers";
+import { cliName, pickerProviders, providerName } from "@milagre/shared/providers";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -19,6 +19,8 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
 import { ContextRing } from "./ContextRing";
+import { contextWindowFor } from "../lib/model-options";
+import { formatTokens } from "./usage/format";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -84,6 +86,12 @@ const POPOVER_BOTTOM_INSET = 16;
 const POPOVER_MIN_BELOW = 220;
 
 /** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
+/** The model's context window as the picker shows it: "1M", "272k". */
+function contextLabel(model: ModelOption) {
+  const size = contextWindowFor(model);
+  return size ? formatTokens(size) : undefined;
+}
+
 function EffortMeter({ level, total }: { level: number; total: number }) {
   return (
     <span aria-hidden className="flex h-3 items-end gap-[2px]">
@@ -207,6 +215,7 @@ export function PromptComposer({
         ? commands.filter((command) => `${command.name.slice(1)} ${command.desc}`.toLowerCase().includes(tokenQuery))
         : [];
   const providerNotice = cliNotice(cliStatus?.[provider]);
+  const providerTabs = pickerProviders(cliStatus, selectedModel.provider, provider);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canStop = running && Boolean(onStop);
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0;
@@ -459,9 +468,9 @@ export function PromptComposer({
               <div
                 data-provider-tabs
                 className="grid gap-1 rounded-control bg-inset p-1"
-                style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${providerTabs.length}, minmax(0, 1fr))` }}
               >
-                {PROVIDERS.map((item) => (
+                {providerTabs.map((item) => (
                   <button
                     key={item}
                     type="button"
@@ -470,7 +479,9 @@ export function PromptComposer({
                     className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
                     onClick={() => setProvider(item)}
                   >
-                    <ProviderLogo provider={item} size={14} />
+                    <span className={provider === item ? "" : "opacity-60 grayscale-[0.4]"}>
+                      <ProviderLogo provider={item} size={14} />
+                    </span>
                     {cliTabLabel(cliStatus?.[item]) ? (
                       <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
                     ) : (
@@ -526,6 +537,7 @@ export function PromptComposer({
                 icon={<ProviderLogo provider={model.provider} size={14} />}
                 label={model.name}
                 description={model.description}
+                meta={contextLabel(model)}
                 selected={model.id === selectedModel.id}
                 onClick={() => chooseModel(model)}
               />

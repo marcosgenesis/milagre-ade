@@ -96,3 +96,51 @@ test("a hidden project is listed until it is shown again", async (t) => {
   await settings.setHidden("/work/shop", false);
   assert.deepEqual([...(await settings.hiddenPaths())], []);
 });
+
+test("main sync follows the global default until a Project overrides it", async (t) => {
+  const { settings } = await store(t);
+  assert.deepEqual(await settings.getMainSync("/work/shop"), { override: null, defaultValue: false, enabled: false, last: null });
+  assert.deepEqual(await settings.setMainSyncDefault(true), { syncMain: true });
+  assert.equal((await settings.getMainSync("/work/shop")).enabled, true);
+  assert.deepEqual(await settings.setMainSyncOverride("/work/shop", false), { override: false, defaultValue: true, enabled: false, last: null });
+  await settings.setMainSyncOverride("/work/shop", null);
+  assert.deepEqual(await settings.getMainSync("/work/shop"), { override: null, defaultValue: true, enabled: true, last: null });
+});
+
+test("the global default survives per-Project saves and a restart", async (t) => {
+  const { file, settings } = await store(t);
+  await settings.setMainSyncDefault(true);
+  await settings.setFilesToCopy("/work/shop", [".env"]);
+  const reopened = createProjectSettings(file);
+  assert.deepEqual(await reopened.getMainSyncDefault(), { syncMain: true });
+  assert.deepEqual(await reopened.get("/work/shop"), { filesToCopy: [".env"], setupCommand: "", icon: null });
+});
+
+test("clearing an override leaves no empty Project entry", async (t) => {
+  const { file, settings } = await store(t);
+  await settings.setMainSyncOverride("/work/shop", true);
+  await settings.setMainSyncOverride("/work/shop", null);
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")).projects, {});
+});
+
+test("the last sync result is kept per Project, and a damaged one reads as none", async (t) => {
+  const { file, settings } = await store(t);
+  const last = { at: 1760000000000, outcome: "updated", branch: "main", commit: "a1b2c3d" };
+  await settings.recordMainSync("/work/shop", last);
+  assert.deepEqual((await settings.getMainSync("/work/shop")).last, last);
+  assert.equal((await settings.getMainSync("/work/blog")).last, null);
+  const data = JSON.parse(await fs.readFile(file, "utf8"));
+  data.projects[path.resolve("/work/shop")].mainSync = { outcome: "exploded" };
+  await fs.writeFile(file, JSON.stringify(data));
+  assert.equal((await settings.getMainSync("/work/shop")).last, null);
+});
+
+test("damaged defaults read as off and keep Project entries", async (t) => {
+  const { file, settings } = await store(t);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ defaults: "yes", projects: { [path.resolve("/work/shop")]: { setupCommand: "npm i" } } }));
+  assert.deepEqual(await settings.getMainSyncDefault(), { syncMain: false });
+  await settings.setMainSyncDefault(true);
+  assert.deepEqual(await settings.get("/work/shop"), { filesToCopy: [], setupCommand: "npm i", icon: null });
+  assert.deepEqual(await settings.getMainSyncDefault(), { syncMain: true });
+});

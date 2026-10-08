@@ -80,6 +80,11 @@ const PATHS = Object.freeze({
   "project:image": ([projectPath]) => [projectPath],
   "project:set-icon": ([projectPath]) => [projectPath],
   "project:set-hidden": ([projectPath]) => [projectPath],
+  "main-sync:read": ([projectPath]) => [projectPath],
+  "main-sync:save": ([projectPath]) => [projectPath],
+  // The global default names no folder. Changing it reaches every Project on the Mac, so a confined phone only reads it.
+  "main-sync:default:read": none,
+  "main-sync:default:save": denied,
   "chat:runs": none,
   "chat:ports": ([chatId]) => [chatProject(chatId)],
   "agent:stop-port": ([chatId]) => [chatProject(chatId)],

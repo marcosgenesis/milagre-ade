@@ -3900,3 +3900,37 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     ["Checking. Done."],
   );
 });
+
+test("mobile usage identifies the account by email, falls back to its label, and accepts older hosts", () => {
+  const { ProviderRows } = load(
+    "usage-section.tsx",
+    {
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      react: {},
+      "react-native": { Text: "Text", View: "View" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": { providerName: () => "Codex" },
+      "@milagre/shared/usage": { formatUpdatedAgo: () => "Updated just now" },
+      "./icons": {},
+      "./ui": { colors: {}, styles: {} },
+      "./session": {},
+      "./use-usage": {},
+    },
+    "\nexport { ProviderRows };\n",
+  );
+  const provider = { provider: "codex", status: "ok", windows: [], updatedAt: new Date().toISOString() };
+  for (const account of [
+    { id: "work", label: "Work", email: "work@example.test" },
+    { id: "work", label: "Work" },
+  ]) {
+    const tree = ProviderRows({ provider: { ...provider, account }, now: Date.now() });
+    const label = find(tree, (node) => node.type === "Text" && node.props.children === (account.email || account.label));
+    assert.ok(label, "The account identity is visible");
+    assert.equal(label.props.selectable, true);
+    assert.equal(
+      find(tree, (node) => node.type === "Text" && node.props.children === "Codex"),
+      undefined,
+    );
+  }
+  assert.doesNotThrow(() => ProviderRows({ provider, now: Date.now() }));
+});

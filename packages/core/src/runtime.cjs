@@ -43,6 +43,7 @@ const { registerGitHandlers } = require("./git-ipc.cjs");
 const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
+const { createLinear } = require("./linear/index.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -851,6 +852,14 @@ function createRuntime(options) {
       accountMutation = pending.catch(() => {});
       return pending;
     });
+
+  // The Mac's Linear connection. Phones read it and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
+  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  commands.handle("linear:status", () => linear.status());
+  commands.handle("linear:connect", () => linear.connect());
+  commands.handle("linear:disconnect", () => linear.disconnect());
+  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
+  commands.handle("linear:enabled:save", (_event, value) => ({ enabled: linear.setEnabled(value === true) }));
 
   const chatTitles = new ChatTitles({
     states: scopeStates,

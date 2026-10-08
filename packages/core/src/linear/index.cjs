@@ -1,0 +1,94 @@
+const crypto = require("node:crypto");
+const { openInBrowser } = require("../antigravity-account.cjs");
+const { CLIENT_ID, API_BASE, CALLBACK_PORT } = require("./config.cjs");
+const { LinearError } = require("./errors.cjs");
+const { createPkce, authorizeUrl, listenForCallback, exchangeCode, revokeToken } = require("./oauth.cjs");
+const { createLinearStore } = require("./store.cjs");
+const { postGraphql, createLinearClient } = require("./client.cjs");
+
+const VIEWER = "query Viewer { viewer { name email } organization { name urlKey } }";
+
+// The Mac's one Linear connection (see docs/superpowers/specs/2026-10-08-linear-integration-design.md).
+function createLinear({
+  dataDir,
+  clientId = CLIENT_ID,
+  apiBase = API_BASE,
+  port = CALLBACK_PORT,
+  timeoutMs,
+  fetchImpl = globalThis.fetch,
+  openBrowser = openInBrowser,
+  now = Date.now,
+  changed = () => {},
+}) {
+  const store = createLinearStore({ dataDir });
+  const client = createLinearClient({ store, clientId, apiBase, fetchImpl, now, revoked: changed });
+  let pending = null;
+
+  function status() {
+    const token = store.readToken();
+    return token ? { connected: true, viewer: token.viewer, organization: token.organization } : { connected: false };
+  }
+
+  async function signIn(attempt) {
+    const pkce = createPkce();
+    const state = crypto.randomBytes(16).toString("hex");
+    const callback = await listenForCallback({ state, port, timeoutMs });
+    attempt.callback = callback;
+    try {
+      if (attempt.cancelled) throw new LinearError("Replaced by a newer Linear sign-in.", "cancelled");
+      openBrowser(authorizeUrl({ clientId, redirectUri: callback.redirectUri, state, challenge: pkce.challenge }));
+      const code = await callback.code;
+      const tokens = await exchangeCode({ fetchImpl, apiBase, clientId, code, redirectUri: callback.redirectUri, verifier: pkce.verifier, now: now() });
+      const { viewer, organization } = await postGraphql({ fetchImpl, apiBase, accessToken: tokens.accessToken, query: VIEWER });
+      store.saveToken({
+        ...tokens,
+        viewer: { name: viewer.name, email: viewer.email },
+        organization: { name: organization.name, urlKey: organization.urlKey },
+      });
+    } finally {
+      await callback.close();
+    }
+    changed();
+    return status();
+  }
+
+  return {
+    status,
+    query: client.query,
+    async connect() {
+      if (!clientId) throw new LinearError("Linear sign-in isn't set up in this build.", "not-configured");
+      // A second Connect replaces the first: the user may have closed the browser tab, and the callback port is fixed.
+      if (pending) {
+        pending.cancel();
+        await pending.done.catch(() => {});
+      }
+      const attempt = { cancelled: false, callback: null };
+      const done = signIn(attempt);
+      pending = {
+        done,
+        cancel() {
+          attempt.cancelled = true;
+          void attempt.callback?.cancel();
+        },
+      };
+      try {
+        return await done;
+      } finally {
+        if (pending?.done === done) pending = null;
+      }
+    },
+    async disconnect() {
+      const token = store.readToken();
+      store.clearToken();
+      if (!token) return status();
+      changed();
+      // Best effort: the token is gone from this Mac whether or not Linear hears about it.
+      await revokeToken({ fetchImpl, apiBase, accessToken: token.accessToken }).catch(() => {});
+      return status();
+    },
+    enabled: () => store.readEnabled(),
+    setEnabled: (value) => store.saveEnabled(value),
+  };
+}
+
+module.exports = { createLinear };

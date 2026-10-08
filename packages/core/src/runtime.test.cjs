@@ -675,3 +675,34 @@ test("main-sync commands refuse a folder Milagre hasn't opened", async (t) => {
   await assert.rejects(runtime.invoke("main-sync:read", ["/not/opened"]), /Open this project in Milagre first/);
   await assert.rejects(runtime.invoke("main-sync:save", ["/not/opened", true]), /Open this project in Milagre first/);
 });
+
+test("linear commands connect, report and disconnect, and emit the status", async (t) => {
+  const { make, events } = await fixture(t);
+  const json = (status, body) => ({ ok: true, status, json: async () => body });
+  const runtime = make({
+    linear: {
+      clientId: "cid",
+      apiBase: "https://api.test",
+      port: 0,
+      fetchImpl: async (url) =>
+        url.endsWith("/oauth/token")
+          ? json(200, { access_token: "a1", refresh_token: "r1", expires_in: 86400 })
+          : json(200, { data: { viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } } }),
+      openBrowser: (url) => {
+        const params = new URL(url).searchParams;
+        void fetch(`${params.get("redirect_uri")}?code=abc&state=${params.get("state")}`);
+      },
+    },
+  });
+  assert.deepEqual(await runtime.invoke("linear:status"), { connected: false });
+  assert.deepEqual(await runtime.invoke("linear:enabled:read"), { enabled: false });
+  assert.deepEqual(await runtime.invoke("linear:enabled:save", [true]), { enabled: true });
+  const connected = await runtime.invoke("linear:connect");
+  assert.equal(connected.connected, true);
+  assert.deepEqual(
+    events.filter((event) => event.channel === "linear:status-changed").map((event) => event.payload),
+    [connected],
+  );
+  assert.deepEqual(await runtime.invoke("linear:disconnect"), { connected: false });
+  assert.deepEqual(events.filter((event) => event.channel === "linear:status-changed").at(-1).payload, { connected: false });
+});

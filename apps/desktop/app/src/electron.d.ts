@@ -88,6 +88,17 @@ export type PhoneStatus = {
   lan?: { enabled: boolean; addresses: string[]; error?: string };
 };
 
+/** A phone or computer paired to this Mac, as Settings › Devices lists it. `route`: how it is connected now, or null. */
+export type PairedDevice = {
+  key: string;
+  kind: "phone" | "computer";
+  /** What the device called itself in its hello; null for phones paired before names. */
+  name: string | null;
+  pairedAt: number | null;
+  lastSeen: number | null;
+  route: "lan" | "relay" | null;
+};
+
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
@@ -327,6 +338,10 @@ declare global {
       resetPhoneAccess: () => Promise<PhoneStatus>;
       /** Lets phones that have not paired yet do so for another ten minutes. */
       openPhonePairing: () => Promise<PhoneStatus>;
+      /** Every phone and computer paired to this Mac. */
+      listDevices: () => Promise<PairedDevice[]>;
+      /** Forgets one and closes its connections; resolves with the devices left. */
+      removeDevice: (key: string) => Promise<PairedDevice[]>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       accountAction: (
@@ -354,7 +369,7 @@ declare global {
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;
-      /** The "phone paired" notification was clicked: the window is back, and Settings → Phone should open. */
+      /** The "phone paired" notification was clicked: the window is back, and Settings → Devices should open. */
       onOpenPhoneSettings: (callback: () => void) => () => void;
     };
   }

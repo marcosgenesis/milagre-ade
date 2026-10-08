@@ -123,12 +123,12 @@ class AttentionNotifier {
   }
 
   // A phone paired with this Mac for the first time. Shown even while Milagre has focus: it is about who can reach
-  // the agents, and the pairing window opens just by looking at Settings → Phone. Clicking it opens that page.
+  // the agents, and the pairing window opens just by looking at Settings → Devices. Clicking it opens that page.
   notifyPhonePaired() {
     const notification = this.createNotification({
       title: "New phone paired",
       subtitle: "",
-      body: "A phone can now reach your agents on this Mac. If it wasn't you, reset access in Settings → Phone.",
+      body: "A phone can now reach your agents on this Mac. If it wasn't you, remove it in Settings → Devices.",
     });
     this.phonePaired?.close();
     this.phonePaired = notification;

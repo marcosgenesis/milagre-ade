@@ -8,7 +8,8 @@ const { randomBytes } = require("node:crypto");
 const { WebSocketServer } = require("ws");
 const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
 const { createAssembler, fromBase64 } = require("@milagre/shared/relay-rpc");
-const { readIdentity, createPhones } = require("./relay-identity.cjs");
+const { readIdentity } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
 const { startRelayHost } = require("./relay-host.cjs");
 const { random, TOKEN, LIVE_ORIGIN, sleep, listen, until, startFakeBridge, connectPhone } = require("./relay-test-kit.cjs");
 
@@ -53,9 +54,9 @@ async function startRelay(t, { autoPong = true, hostBehavior } = {}) {
 
 async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-host-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
-  const phones = createPhones(dir);
+  const phones = createDevices(dir);
   await phones.load();
   const statuses = [];
   const host = startRelayHost({
@@ -64,7 +65,7 @@ async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token =
     phones,
     token,
     bridgeUrl,
-    canPair: () => canPair(),
+    canPair: (key) => canPair(key),
     timing,
     onStatus: (status) => {
       statuses.push(status);
@@ -150,7 +151,7 @@ test('an unknown phone with a stale token gets {t:"error",code:"bad-token"} and 
 test("a retired host holds its old room only to tell every phone the Mac was reset", async (t) => {
   const relay = await startRelay(t);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-retired-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const old = await readIdentity(dir);
   const host = startRelayHost({ relayUrl: relay.url, identity: { hostId: old.hostId, sign: old.sign }, retired: true });
   t.after(() => host.close());
@@ -179,7 +180,7 @@ test("a new phone outside the pairing window gets unknown-phone; inside it, it p
   assert.deepEqual(await inside.next(), { t: "pong" });
   const id = b64url(key.publicKey);
   assert.equal(mac.phones.isKnown(id), true);
-  assert.match(await fs.readFile(path.join(mac.dir, "relay-phones.json"), "utf8"), new RegExp(id));
+  assert.match(await fs.readFile(path.join(mac.dir, "devices.json"), "utf8"), new RegExp(id));
   inside.close();
 
   open = false;
@@ -462,4 +463,48 @@ test("a 4409 before ready keeps the short backoff: a replaced pending socket is 
   await until(() => mac.host.status() === "online" && dials.length === 2, "back online");
   const gap = dials[1] - closes[0];
   assert.ok(gap < 300, `a pending 4409 waited only ${gap} ms`);
+});
+
+test("a phone's hello names it: a first pairing saves the name, a later hello renames it, and drop closes it", async (t) => {
+  const { relay, mac } = await paired(t);
+  const key = boxKeyPair(random);
+  const id = b64url(key.publicKey);
+  const first = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, name: "iPhone 16 Pro" });
+  t.after(() => first.close());
+  assert.ok((await first.hello()).channel);
+  assert.equal(mac.phones.list().find((device) => device.key === id).name, "iPhone 16 Pro");
+  assert.deepEqual(mac.host.connectedKeys(), [id]);
+  first.close();
+  await until(() => mac.host.connectedKeys().length === 0, "the closed channel is gone");
+
+  const second = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, name: "Victor's iPhone" });
+  t.after(() => second.close());
+  assert.ok((await second.hello()).channel);
+  await until(() => mac.phones.list().find((device) => device.key === id).name === "Victor's iPhone", "renamed by the hello");
+  // The hello does not wait for the write, so wait for the file before the test's cleanup removes the directory.
+  await until(
+    async () => (await fs.readFile(path.join(mac.dir, "devices.json"), "utf8").catch(() => "")).includes("Victor's iPhone"),
+    "the name written to devices.json",
+  );
+  mac.host.drop(id);
+  await second.closed;
+  assert.deepEqual(mac.host.connectedKeys(), []);
+});
+
+test("a desktop's hello is turned away with reason kind and saved nowhere", async (t) => {
+  const { relay, mac } = await paired(t);
+  const key = boxKeyPair(random);
+  const desktop = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, kind: "desktop", name: "studio" });
+  t.after(() => desktop.close());
+  assert.deepEqual(await desktop.hello(), { error: { t: "error", code: "bad-hello", reason: "kind" } });
+  assert.equal(mac.phones.isKnown(b64url(key.publicKey)), false);
+});
+
+test("the pairing window can stay closed to one phone while another pairs", async (t) => {
+  const blocked = boxKeyPair(random);
+  const { relay, mac, connect } = await paired(t, { mac: { canPair: (key) => key !== b64url(blocked.publicKey) } });
+  const phone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: blocked });
+  t.after(() => phone.close());
+  assert.deepEqual(await phone.hello(), { error: { t: "error", code: "unknown-phone" } });
+  await connect();
 });

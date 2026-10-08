@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
+import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
 
 test("the status line says what is happening and where the phone can reach this Mac", () => {
   assert.equal(phoneStatusLine(null), "Checking…");
@@ -38,16 +38,6 @@ test("the pairing window counts whole minutes up and closes at the deadline", ()
   assert.deepEqual(pairingWindow(status(600_000), 600_000), { open: false, minutes: 0 });
 });
 
-test("the paired-phone count is shown only for a relay phone", () => {
-  const relay = (pairedPhones?: number) => ({ enabled: true, state: "on" as const, remote: "relay" as const, relay: "online" as const, pairedPhones });
-  assert.equal(pairedPhonesLine(null), null);
-  assert.equal(pairedPhonesLine({ enabled: true, state: "on", remote: "cloudflare" }), null);
-  assert.equal(pairedPhonesLine(relay()), null);
-  assert.equal(pairedPhonesLine(relay(0)), "No phones yet");
-  assert.equal(pairedPhonesLine(relay(1)), "1 phone");
-  assert.equal(pairedPhonesLine(relay(3)), "3 phones");
-});
-
 test("the QR image source is an inert data URL", () => {
   const src = phoneQrSrc('<svg viewBox="0 0 1 1"><path d="M0 0h1"/></svg>');
   assert.match(src, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/);
@@ -64,4 +54,11 @@ test("phoneLanLine says where a phone on the same network reaches this Mac", () 
     phoneLanLine({ ...on, lan: { enabled: true, addresses: [], error: "listen EADDRINUSE" } }),
     "Couldn't listen on the local network: listen EADDRINUSE",
   );
+});
+
+test("only phones on a Cloudflare tunnel get the note that Remove doesn't cut them off", () => {
+  assert.equal(cloudflarePhonesNote(null), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "relay" }), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "none" }), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "cloudflare" }), "Phones on your Cloudflare tunnel keep access until Reset access.");
 });

@@ -4,12 +4,13 @@ import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
   InformationCircleIcon,
+  LaptopIcon,
   MagicWand01Icon,
   PaintBoardIcon,
   SecurityCheckIcon,
@@ -18,7 +19,7 @@ import {
   TestTube01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, PairedDevice, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -29,7 +30,8 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ProviderLogo } from "./ProviderLogo";
@@ -47,7 +49,7 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "experimental" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "devices" | "experimental" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -55,7 +57,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "skills", label: "Skills", icon: MagicWand01Icon },
-  { key: "phone", label: "Phone", icon: SmartphoneIcon },
+  { key: "devices", label: "Devices", icon: SmartphoneIcon },
   { key: "experimental", label: "Experimental", icon: TestTube01Icon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
@@ -397,10 +399,11 @@ function AppearanceSettings() {
 }
 
 /* ─────────────────────────────────────────────────────────
- * PHONE
+ * DEVICES
  * The host runs the bridge the Milagre phone app talks to.
  * Turning it on shows a QR code that carries the access token;
- * resetting makes a new token, so paired phones scan again.
+ * resetting makes a new token, so every paired device pairs again.
+ * Below it, the phones and computers paired to this Mac.
  * ───────────────────────────────────────────────────────── */
 function usePhoneStatus() {
   const [status, setStatus] = useState<PhoneStatus | null>(null);
@@ -419,7 +422,7 @@ function usePhoneStatus() {
         if (live && !pushed) setStatus(next);
       },
       (error) => {
-        if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
+        if (live) setLoadError(`Couldn't read device access: ${ipcErrorMessage(error)}`);
       },
     );
     return () => {
@@ -430,11 +433,147 @@ function usePhoneStatus() {
   return { status, setStatus, loadError };
 }
 
+/**
+ * The paired devices. A pairing, a removal or a reset arrives as a phone status, which reads the list again; a device
+ * connecting or leaving doesn't, so it is also read every 15 seconds while the section is open.
+ */
+function usePairedDevices() {
+  const [list, setList] = useState<PairedDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  // A list the caller already has (a removal's answer): shown at once, and an earlier read error no longer applies.
+  const replace = useCallback((devices: PairedDevice[]) => {
+    setList(devices);
+    setError(null);
+    setNow(Date.now());
+  }, []);
+  useEffect(() => {
+    let live = true;
+    const read = () => {
+      window.milagre.listDevices().then(
+        (devices) => {
+          if (!live) return;
+          setList(devices);
+          setError(null);
+          setNow(Date.now());
+        },
+        (failure) => {
+          if (live) setError(`Couldn't read paired devices: ${ipcErrorMessage(failure)}`);
+        },
+      );
+    };
+    read();
+    const off = window.milagre.onPhoneStatus(read);
+    const timer = window.setInterval(read, 15_000);
+    return () => {
+      live = false;
+      off();
+      window.clearInterval(timer);
+    };
+  }, []);
+  return { list, replace, error, now };
+}
+
 const SECONDARY_BUTTON =
   "rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50";
+const DANGER_BUTTON =
+  "rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50";
 
-function PhoneSettings() {
+function DeviceGroup({
+  title,
+  devices,
+  now,
+  busy,
+  empty,
+  error,
+  footer,
+  onRemove,
+}: {
+  title: string;
+  devices: PairedDevice[];
+  now: number;
+  busy: boolean;
+  empty?: string;
+  error?: string | null;
+  footer?: string | null;
+  onRemove: (key: string) => void;
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  return (
+    <Group title={title}>
+      {error ? (
+        <p data-devices-error className="break-words px-4 py-3 text-[12px] text-red">
+          {error}
+        </p>
+      ) : (
+        devices.length === 0 &&
+        empty && (
+          <p data-devices-empty className="px-4 py-3 text-[12px] text-ink-3">
+            {empty}
+          </p>
+        )
+      )}
+      {devices.map((device) => {
+        const asking = confirming === device.key;
+        return (
+          <div key={device.key} data-device-row={device.kind} className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="relative flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-hover text-ink-2">
+              <Icon icon={device.kind === "computer" ? LaptopIcon : SmartphoneIcon} size={15} />
+              <span
+                aria-hidden
+                className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-surface ${device.route ? "bg-green" : "bg-ink-3"}`}
+              />
+            </span>
+            <div className="grid min-w-0 flex-1 gap-0.5">
+              <span className="truncate text-[13.5px] font-medium text-ink">{deviceName(device)}</span>
+              <span data-device-line className="text-[12px] text-ink-3">
+                {asking ? removeDeviceQuestion(device) : deviceSeenLine(device, now)}
+              </span>
+            </div>
+            {asking ? (
+              <span className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => setConfirming(null)} className={SECONDARY_BUTTON}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-device-remove-confirm
+                  onClick={() => {
+                    setConfirming(null);
+                    onRemove(device.key);
+                  }}
+                  className={DANGER_BUTTON}
+                >
+                  Remove
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                data-device-remove
+                onClick={() => setConfirming(device.key)}
+                className="shrink-0 rounded-control px-2 py-1 text-[12.5px] text-red transition-colors hover:bg-red/5 disabled:cursor-default disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {footer && (
+        <p data-devices-note className="px-4 py-3 text-[12px] text-ink-3">
+          {footer}
+        </p>
+      )}
+    </Group>
+  );
+}
+
+function DevicesSettings() {
   const { status, setStatus, loadError } = usePhoneStatus();
+  const paired = usePairedDevices();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -454,6 +593,14 @@ function PhoneSettings() {
       .then(setStatus, (failure) => setError(ipcErrorMessage(failure)))
       .finally(() => setBusy(false));
   };
+  const removeDevice = (key: string) => {
+    setBusy(true);
+    setError(null);
+    window.milagre
+      .removeDevice(key)
+      .then(paired.replace, (failure) => setError(ipcErrorMessage(failure)))
+      .finally(() => setBusy(false));
+  };
   const copyLink = () => {
     if (!status?.pairingLink) return;
     void navigator.clipboard.writeText(status.pairingLink).then(
@@ -467,7 +614,7 @@ function PhoneSettings() {
   };
 
   const on = status?.state === "on" && status.qrSvg && status.pairingLink;
-  // Showing the QR is what invites a new phone to pair, so it opens the window; a status that arrives later keeps the countdown honest.
+  // Showing the QR is what invites a new device to pair, so it opens the window; a status that arrives later keeps the countdown honest.
   const showingQr = Boolean(on) && status?.remote === "relay";
   useEffect(() => {
     if (!showingQr) return;
@@ -491,13 +638,14 @@ function PhoneSettings() {
     return () => window.clearInterval(timer);
   }, [showingQr, status?.pairingUntil]);
   const pairing = pairingWindow(status, now);
-  const paired = pairedPhonesLine(status);
+  const { computers, phones } = devicesByKind(paired.list ?? []);
   return (
     <>
-      <Group title="Phone access">
-        <Row label="Allow your phone to connect" description={loadError ?? phoneStatusLine(status)}>
+      <p className="mt-1 text-[13px] text-ink-2">Phones and other Macs that can see and drive this Mac's chats.</p>
+      <Group title="Access">
+        <Row label="Allow devices to connect" description={loadError ?? phoneStatusLine(status)}>
           <Switch
-            label="Allow your phone to connect"
+            label="Allow devices to connect"
             checked={status?.enabled === true}
             onChange={(enabled) => {
               if (!busy && status) run(() => window.milagre.setPhoneEnabled(enabled));
@@ -527,12 +675,12 @@ function PhoneSettings() {
         )}
         {error && (
           <p data-phone-action-error className="break-words px-4 py-3 text-[12px] text-red">
-            Couldn't change phone access: {error}
+            Couldn't change device access: {error}
           </p>
         )}
       </Group>
       {on && (
-        <Group title="Pair your phone">
+        <Group title="Pair a device">
           <div className="flex items-start gap-5 px-4 py-4">
             <img
               data-phone-qr
@@ -549,7 +697,7 @@ function PhoneSettings() {
               </div>
               <div>
                 <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>
-                  {copied ? "Copied" : "Copy pairing link"}
+                  {copied ? "Copied" : "Copy link"}
                 </button>
               </div>
               <p data-phone-warning className="text-[12px] text-ink-2">
@@ -559,8 +707,8 @@ function PhoneSettings() {
                 <div data-phone-pairing={pairing.open ? "open" : "closed"} className="flex flex-wrap items-center gap-3">
                   <span className="text-[12px] text-ink-3">
                     {pairing.open
-                      ? `New phones can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}`
-                      : "Pairing is closed to new phones."}
+                      ? `New devices can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}`
+                      : "Pairing is closed to new devices."}
                   </span>
                   {!pairing.open && (
                     <button
@@ -579,19 +727,25 @@ function PhoneSettings() {
           </div>
         </Group>
       )}
+      {computers.length > 0 && <DeviceGroup title="Computers" devices={computers} now={paired.now} busy={busy} onRemove={removeDevice} />}
+      <DeviceGroup
+        title="Phones"
+        devices={phones}
+        now={paired.now}
+        busy={busy}
+        empty={paired.list === null ? undefined : "No phones yet"}
+        error={paired.error}
+        footer={cloudflarePhonesNote(status)}
+        onRemove={removeDevice}
+      />
       {status?.enabled && (
-        <Group title="Access">
-          {paired && (
-            <Row label="Paired phones" description="Milagre tells you when a new phone pairs.">
-              <span data-phone-paired>{paired}</span>
-            </Row>
-          )}
+        <Group title="Reset">
           <Row
             label="Reset access"
             description={
               confirmReset
-                ? "Phones that already paired stop working and must scan again. This can't be undone."
-                : "Make a new code. Phones that already paired scan again."
+                ? "Devices that already paired stop working and must pair again. This can't be undone."
+                : "Make a new code. Devices that already paired pair again."
             }
           >
             {confirmReset ? (
@@ -607,7 +761,7 @@ function PhoneSettings() {
                     setConfirmReset(false);
                     run(() => window.milagre.resetPhoneAccess());
                   }}
-                  className="rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50"
+                  className={DANGER_BUTTON}
                 >
                   Reset and disconnect
                 </button>
@@ -1171,7 +1325,7 @@ export function SettingsPanel({
           ) : (
             <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
           ))}
-        {section === "phone" && <PhoneSettings />}
+        {section === "devices" && <DevicesSettings />}
         {section === "experimental" && <ExperimentalSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}

@@ -49,7 +49,8 @@ async function main() {
       let message, snapshot;
       while (Date.now() < deadline) {
         snapshot = await client.snapshot(project);
-        message = snapshot.project.state.messages.findLast((m) => m.session_id === sessionId && m.role === "assistant");
+        // The snapshot leaves messages out; the Chat's come as a page.
+        message = (await client.chatMessages(project, sessionId)).messages.findLast((m) => m.role === "assistant");
         const run = snapshot.runs.runs[`${project}#${sessionId}`];
         if (message && !run) break;
         if (run?.approvals?.length || run?.questions?.length) throw new Error(`${provider}: unexpected approval/question in no-tool smoke test`);
@@ -64,11 +65,12 @@ async function main() {
     host = await startMobileHost(options);
     const next = JSON.parse(await fs.readFile(host.connectionFile, "utf8"));
     assert.equal(next.token, details.token);
-    const reopened = await createClient({ address: next.url, token: next.token }).snapshot(project);
+    const reconnected = createClient({ address: next.url, token: next.token });
+    const reopened = await reconnected.snapshot(project);
     for (const entry of saved) {
       assert.deepEqual(reopened.project.state.sessions[entry.sessionId], entry.chat);
       assert.deepEqual(
-        reopened.project.state.messages.find((m) => m.id === entry.message.id),
+        (await reconnected.chatMessages(project, entry.sessionId)).messages.find((m) => m.id === entry.message.id),
         entry.message,
       );
     }

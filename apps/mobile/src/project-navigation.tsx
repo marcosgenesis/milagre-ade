@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { chatMarkTone, chatPullRequests, comparePins, isListedChat, pendingChatSessionId, pullRequestRefs, withPendingChat } from "@milagre/shared/chats";
 import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession, PullRequest } from "@milagre/shared/model";
-import type { RegisteredProject } from "./client";
+import type { ChatSearchMatch, RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { usePendingChats, useSession, type MobilePendingChat } from "./session";
 import { chatMark, type ChatMark } from "./indicators";
@@ -150,13 +150,45 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     // One slow Project must not hold up the other expanded groups.
     void Promise.all(paths.map(load));
   }, [expanded, searching, listed, load]);
+  // Projects held without their messages (a drawer preview, or a host that keeps them by Chat) are searched on the host.
+  const [hostMatches, setHostMatches] = useState<{ query: string; matches: Record<string, ChatSearchMatch[]> }>({ query: "", matches: {} });
+  const hostSearchPaths = useMemo(
+    () =>
+      query.trim()
+        ? listed
+            .filter((item) => {
+              const copy = cachedProject(item.path);
+              return copy && (copy.previewOnly || copy.project.state.messagesInChats);
+            })
+            .map((item) => item.path)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revision changes when a cached Project does.
+    [query, listed, cachedProject, revision],
+  );
+  const hostSearchKey = hostSearchPaths.join("\n");
+  useEffect(() => {
+    const needle = query.trim();
+    if (!needle || !hostSearchKey || !session.client) return;
+    let cancelled = false;
+    const client = session.client;
+    const timer = setTimeout(() => {
+      void Promise.all(hostSearchKey.split("\n").map(async (path) => [path, await client.searchChats(path, needle).catch(() => [])] as const)).then(
+        (found) => !cancelled && setHostMatches({ query: needle.toLowerCase(), matches: Object.fromEntries(found) }),
+      );
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, hostSearchKey, session.client]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
     // Each Project's Chats under the current filter, for the message search below when no Chat title matches.
     const searchable: {
       path: string;
-      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"];
+      // Null for a Project searched on the host (hostMatches).
+      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"] | null;
       chats: Map<number, AgentSession>;
     }[] = [];
     for (const project of listed) {
@@ -198,7 +230,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       if (needle && copy)
         searchable.push({
           path: project.path,
-          messages: copy.project.state.messages,
+          messages: copy.previewOnly || copy.project.state.messagesInChats ? null : copy.project.state.messages,
           chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat }) => [chat.id, chat])),
         });
       const chats = shown
@@ -248,7 +280,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       const found: Row[] = [];
       for (const { path, messages, chats } of searchable) {
         const perChat = new Map<number, number>();
-        for (const match of searchMessages(messages, needle, 200)) {
+        const matches = messages ? searchMessages(messages, needle, 200) : hostMatches.query === needle ? (hostMatches.matches[path] ?? []) : [];
+        for (const match of matches) {
           const chat = chats.get(match.message.session_id);
           const count = perChat.get(match.message.session_id) ?? 0;
           if (!chat || count >= 3) continue;
@@ -285,6 +318,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     session.client?.url,
     pendingChats,
     archives.chats,
+    hostMatches,
   ]);
 
   const prTargets = useMemo(() => {

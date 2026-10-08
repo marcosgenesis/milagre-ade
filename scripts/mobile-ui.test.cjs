@@ -746,6 +746,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    // A test can stand in for a host that keeps messages by Chat with globalThis.chatPage.
+    "../chat-pages": {
+      useChatPage: (...args) => globalThis.chatPage?.(...args) ?? { messages: [], hasMore: false, total: 0, loading: false, loadEarlier: async () => {} },
+    },
     "@sbaiahmed1/react-native-blur": { LiquidGlassView: "LiquidGlassView" },
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
@@ -1113,8 +1117,8 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId } = {}) {
-  const react = hookHost();
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId, effects = false } = {}) {
+  const react = hookHost({ effects });
   const routes = [];
   const secondaryRoutes = [];
   const opened = [];
@@ -1465,6 +1469,37 @@ test("a chat search with no matching title lists matching messages, and a tap op
     false,
     "a Chat title match keeps messages out",
   );
+});
+
+test("a drawer search over Projects held without messages asks the host, which finds what was said", async () => {
+  const asked = [];
+  const preview = {
+    previewOnly: true,
+    project: { path: "/last", name: "last", state: { sessions: { 3: { id: 3, title: "Relay work" } }, messages: [], worktrees: {}, messagesInChats: true } },
+    runs: { runs: {} },
+  };
+  const nav = navigationHost(deferred().promise, {
+    effects: true,
+    session: {
+      cachedProject: () => preview,
+      client: {
+        url: "mac",
+        call: async () => {},
+        searchChats: async (path, query) => {
+          asked.push([path, query]);
+          return [{ message: { id: 7, session_id: 3 }, score: 9, snippet: "Deploy the relay with wrangler", highlight: [21, 29], term: "wrangler" }];
+        },
+      },
+    },
+  });
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  nav.render();
+  // The host is asked after a short pause while typing.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await settleAll();
+  assert.deepEqual(asked, [["/last", "wranglr"]]);
+  assert.match(nav.row("message").props.accessibilityLabel, /^Deploy the relay with wrangler, in /);
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {
@@ -3845,6 +3880,36 @@ test("mobile opens a long Chat with its newest 40 messages and loads another pag
   assert.equal(transcriptMessages(screen).length, 80);
   assert.equal(transcriptMessages(screen)[0].id, 921);
   assert.equal(transcriptMessages(screen).at(-1).id, 1000);
+});
+
+test("with a host that keeps messages by Chat, the screen shows its Chat's page and reads the next one on request", async (t) => {
+  const screen = ongoingChatHost();
+  const state = screen.session.snapshot.project.state;
+  state.messages = [];
+  state.messagesInChats = true;
+  const message = (id) => ({ id, session_id: 7, role: id % 2 ? "assistant" : "user", body: "Message " + id, context: null });
+  let held = Array.from({ length: 40 }, (_, index) => message(961 + index));
+  const asked = [];
+  globalThis.chatPage = (client, projectPath, chatId) =>
+    chatId === 7 && client
+      ? {
+          messages: held,
+          hasMore: true,
+          total: 1000,
+          loading: false,
+          loadEarlier: async () => {
+            asked.push(projectPath);
+            held = [...Array.from({ length: 40 }, (_, index) => message(921 + index)), ...held];
+          },
+        }
+      : undefined;
+  t.after(() => delete globalThis.chatPage);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [40, 961]);
+  const earlier = () => find(screen.render(), (node) => node.type === "PillButton" && node.props.title?.startsWith("Show earlier messages"));
+  assert.equal(earlier().props.title, "Show earlier messages (960)");
+  await earlier().props.onPress();
+  assert.deepEqual(asked, ["/p"]);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [80, 921]);
 });
 
 test("legacy mobile follow-up retires after acceptance and an untagged saved input", async () => {

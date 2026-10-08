@@ -22,6 +22,8 @@ test("demo sends, approves, answers, stops and reconnects through the real HTTP/
   async function wait(predicate) {
     for (let i = 0; i < 150; i++) {
       const state = await client.snapshot(demo.project);
+      // The snapshot leaves messages out (the app reads them as pages): read the Chat's into it as the screen does.
+      if (state.project.state.messagesInChats) state.project.state.messages = (await client.chatMessages(demo.project, chat.id, { turns: 100 })).messages;
       if (predicate(state)) return state;
       await delay(20);
     }

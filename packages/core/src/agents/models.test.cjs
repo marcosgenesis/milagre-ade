@@ -3,7 +3,18 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
-const { claudeCapability, claudeModels, codexModels, createModelCache, listClaudeModels, listCodexModels } = require("./models.cjs");
+const {
+  claudeCapability,
+  claudeModels,
+  codexModels,
+  createModelCache,
+  forgetAntigravityModels,
+  antigravityModels,
+  listClaudeModels,
+  listCodexModels,
+  listAntigravityModels,
+  recordAntigravityModels,
+} = require("./models.cjs");
 
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const FULL = ["low", "medium", "high", "xhigh", "max"];
@@ -247,9 +258,91 @@ test("each agent is asked once per run; a missing CLI or a failed lookup is aske
       return [{ id: "gpt-6-astra" }];
     },
   };
+  list.antigravity = () => [{ id: "gemini-3.8-flash-high" }];
   const models = createModelCache({ cli, cwd: "/tmp", clientVersion: "1.0.0", list });
-  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: null });
-  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: null });
-  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: [{ id: "gpt-6-astra" }] });
+  const antigravity = [{ id: "gemini-3.8-flash-high" }];
+  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: null, antigravity });
+  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: null, antigravity });
+  assert.deepEqual(await models(), { claude: [{ id: "claude-opus-5-5" }], codex: [{ id: "gpt-6-astra" }], antigravity });
   assert.deepEqual(asked, { claude: 1, codex: 2 });
+});
+
+test("Antigravity lists the catalog's families until a session reports models, then that account's grouped list", () => {
+  forgetAntigravityModels();
+  const fallback = listAntigravityModels({ accountId: "work" });
+  assert.deepEqual(
+    fallback.map((model) => model.id),
+    ["gemini-3.8-flash", "gemini-3.1-pro", "gemini-3.7-flash", "gemini-3.6-flash"],
+  );
+  assert.deepEqual(fallback[0], {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    description: "Fast",
+    recommended: true,
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "high",
+    ultracode: false,
+    fastMode: false,
+  });
+  assert.deepEqual(fallback[1].efforts, ["low", "high"]);
+  assert.equal(fallback[1].recommended, true);
+  recordAntigravityModels(
+    "work",
+    [
+      { value: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", description: "gemini-3.8-flash-high" },
+      { value: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", description: "gemini-3.8-flash-low" },
+      { value: "gemini-4-preview", name: "Gemini 4 Preview", description: "gemini-4-preview" },
+      { value: "gemini-5", name: "Gemini 5", description: "Next generation" },
+    ],
+    "gemini-3.8-flash-low",
+  );
+  assert.deepEqual(listAntigravityModels({ accountId: "work" }), [
+    {
+      id: "gemini-3.8-flash",
+      name: "Gemini 3.8 Flash",
+      description: "Fast",
+      recommended: true,
+      efforts: ["low", "high"],
+      defaultEffort: "low",
+      ultracode: false,
+      fastMode: false,
+    },
+    { id: "gemini-4-preview", name: "Gemini 4 Preview", description: "", recommended: false, efforts: [], ultracode: false, fastMode: false },
+    { id: "gemini-5", name: "Gemini 5", description: "Next generation", recommended: false, efforts: [], ultracode: false, fastMode: false },
+  ]);
+  // Another account, and an account the app doesn't name, keep their own lists.
+  assert.deepEqual(listAntigravityModels({ accountId: "home" }), fallback);
+  assert.deepEqual(listAntigravityModels(), fallback);
+  recordAntigravityModels(undefined, [{ value: "x", name: "X" }]);
+  assert.equal(listAntigravityModels({ accountId: "default" })[0].id, "x");
+  recordAntigravityModels("work", []);
+  assert.equal(listAntigravityModels({ accountId: "work" }).length, 3);
+  assert.deepEqual(
+    antigravityModels(null).map((model) => model.id),
+    fallback.map((model) => model.id),
+  );
+  forgetAntigravityModels();
+});
+
+test("the model cache always has an Antigravity list, even for a missing or logged-out agent, keyed by the account", async () => {
+  forgetAntigravityModels();
+  recordAntigravityModels("a2", [{ value: "m", name: "M" }]);
+  const cli = async (provider) => (provider === "antigravity" ? { command: null, problem: "missing", accountId: "a2" } : { command: null, problem: "missing" });
+  const models = createModelCache({ cli, cwd: "/tmp", clientVersion: "1.0.0" });
+  const read = await models();
+  assert.equal(read.claude, null);
+  assert.deepEqual(
+    read.antigravity.map((model) => model.id),
+    ["m"],
+  );
+  forgetAntigravityModels();
+  assert.ok((await models()).antigravity.length > 1);
+  const failing = createModelCache({
+    cli: async () => {
+      throw new Error("no cli");
+    },
+    cwd: "/tmp",
+    clientVersion: "1.0.0",
+  });
+  assert.ok((await failing()).antigravity.length > 1);
 });

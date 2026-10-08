@@ -1,4 +1,4 @@
-const { claudeModel, codexModel } = require("./git-text.cjs");
+const { claudeModel, codexModel, antigravityModel } = require("./git-text.cjs");
 
 const TITLE_SCHEMA = {
   type: "object",
@@ -98,6 +98,7 @@ function createChatTitleModels({ cli, clientVersion }) {
   return {
     claude: claudeModel({ getCommand: getCommand("claude") }),
     codex: codexModel({ getCommand: getCommand("codex"), clientVersion, outputSchema: TITLE_SCHEMA }),
+    antigravity: antigravityModel({ getCommand: getCommand("antigravity"), clientVersion, outputSchema: TITLE_SCHEMA }),
   };
 }
 

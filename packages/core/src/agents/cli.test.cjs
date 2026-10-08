@@ -151,3 +151,31 @@ test("the refresh runs only before looking again at a CLI that had a problem", a
   await cli("claude");
   assert.equal(refreshed, 1);
 });
+
+test("Antigravity is the Milagre-managed install: no PATH lookup, no --version spawn", async () => {
+  const never = () => assert.fail("not looked up on PATH");
+  const found = { command: "/d/agy_acp_server.par", harness: "/d/localharness_external", args: [], version: "1.3.0" };
+  assert.deepEqual(await inspectCli("antigravity", { resolve: never, version: never, antigravity: { supported: () => true, resolve: () => found } }), {
+    command: found.command,
+    version: "1.3.0",
+    harness: found.harness,
+    args: [],
+  });
+  assert.deepEqual(await inspectCli("antigravity", { antigravity: { supported: () => true, resolve: () => null } }), {
+    command: null,
+    version: null,
+    problem: missingCliMessage("antigravity"),
+  });
+  assert.match(
+    (await inspectCli("antigravity", { antigravity: { supported: () => false, resolve: () => null } })).problem,
+    /isn't available on this computer yet/,
+  );
+  assert.equal((await inspectCli("antigravity", {})).problem, missingCliMessage("antigravity"));
+});
+
+test("the CLI cache hands its Antigravity install to inspectCli", async () => {
+  const found = { command: "/d/agy_acp_server.par", harness: "/d/h", args: [], version: "1.3.0" };
+  const antigravity = { supported: () => true, resolve: () => found };
+  const cli = createCliCache({ antigravity });
+  assert.equal((await cli("antigravity")).command, found.command);
+});

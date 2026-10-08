@@ -104,6 +104,19 @@ async function browserChecks() {
     assert.match((await chats("/work/arketa"))[0], /Fix the login flow/);
     assert.match((await chats("/work/shop"))[0], /Shop chat/);
     assert.equal(
+      await evaluate(`(() => {
+        const arc = document.querySelector('[data-sidebar-scope="/work/shop"] [data-mark="running"] circle:last-child');
+        const expected = document.createElement('span');
+        expected.style.color = 'var(--accent)';
+        document.body.append(expected);
+        const matches = !!arc && getComputedStyle(arc).stroke === getComputedStyle(expected).color;
+        expected.remove();
+        return matches;
+      })()`),
+      true,
+      "Running Chats use the accent color, as on mobile",
+    );
+    assert.equal(
       await evaluate(
         `document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-chat-id="3"] [data-mark]')?.dataset.mark`,
       ),

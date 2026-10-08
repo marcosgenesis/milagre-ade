@@ -1,4 +1,13 @@
 // How a chat is named, shared by the sidebar and the main process's notifications. Types: chats.d.mts.
+export { pullRequestRefs, pullRequestRefsCache, chatPullRequests } from "./chat-pull-requests.mjs";
+
+/** The same status palette for desktop and mobile chat lists. */
+export function chatMarkTone(mark) {
+  if (mark === "waiting" || mark === "interrupted") return "orange";
+  if (mark === "failed") return "red";
+  if (mark === "idle") return "ink3";
+  return "accent";
+}
 
 /** The chat's name: the one the user gave it, else the first line of its first message. */
 export function chatTitle(session, messages) {

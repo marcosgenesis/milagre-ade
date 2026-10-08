@@ -50,7 +50,7 @@ export function ProviderLogo({ provider, size = 15, tone = "ink" }: { provider: 
 }
 
 /** Desktop's SpinnerRing: a line-colored track with a short ink-3 arc turning once every 1.1s. */
-export function SpinnerRing({ size = 14, stroke = 2 }: { size?: number; stroke?: number }) {
+export function SpinnerRing({ size = 14, stroke = 2, tone = "ink3" }: { size?: number; stroke?: number; tone?: Tone }) {
   const palette = hex(useColorScheme());
   const [spin] = useState(() => new Animated.Value(0));
   useEffect(() => {
@@ -70,7 +70,7 @@ export function SpinnerRing({ size = 14, stroke = 2 }: { size?: number; stroke?:
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke={palette.ink3}
+          stroke={palette[tone]}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={`${circumference * 0.28} ${circumference * 0.72}`}

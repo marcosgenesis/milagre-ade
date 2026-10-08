@@ -362,19 +362,21 @@ async function browserChecks() {
     assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no simulator button without a simulator");
     await evaluate(`${toggle}.click()`);
     await waitFor(`!${dock} && ${toggle}.getAttribute("aria-pressed") === "false"`);
-    // Holding ⌘ shows each corner button's shortcut under it, short enough not to run into its neighbour's.
-    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Meta", modifiers: ["meta"] });
+    // Holding ⌘ (Control off the Mac) shows each corner button's shortcut under it, short enough not to run into its
+    // neighbour's.
+    const hintKey = process.platform === "darwin" ? "Meta" : "Control";
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: hintKey, modifiers: [process.platform === "darwin" ? "meta" : "control"] });
     await waitFor('document.querySelectorAll("body > [aria-hidden=true].fixed").length >= 2');
     const badges = await evaluate(
       '[...document.querySelectorAll("body > [aria-hidden=true].fixed")].map((b) => { const r = b.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, text: b.textContent }; }).sort((a, b) => a.left - b.left)',
     );
     for (let i = 1; i < badges.length; i++) assert.ok(badges[i - 1].right <= badges[i].left, `hints overlap: ${JSON.stringify(badges)}`);
     assert.ok(
-      badges.every((badge) => !badge.text.includes("⌘") && badge.top > 40),
+      badges.every((badge) => !/⌘|Ctrl/.test(badge.text) && badge.top > 40),
       "short hints, under the buttons",
     );
     await screenshot("corner-hints");
-    window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Meta" });
+    window.webContents.sendInputEvent({ type: "keyUp", keyCode: hintKey });
     // Closed and opened again before it finishes closing, the panel turns around and opens whole, not stuck at nothing.
     await evaluate(`${toggle}.click()`);
     await waitFor(`!!${dock} && Math.round(${dock}.getBoundingClientRect().width) === 560`);

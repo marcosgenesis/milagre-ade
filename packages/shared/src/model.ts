@@ -367,6 +367,10 @@ export interface SubagentCommunication {
 
 export interface Subagent {
   id: string;
+  source?: "milagre-advisor";
+  provider?: ModelProvider;
+  model?: string;
+  retryable?: boolean;
   archived?: boolean;
   parentId?: string;
   title: string;

@@ -6,8 +6,8 @@ export type WorktreeStatus = { uncommitted: number; unpushed: number; branch: st
 /** How an archive goes: only hide the chat, or also remove its worktree (`delete` discards what it holds). */
 export type ArchiveMode = "hide" | "remove" | "delete";
 
-/** Everything the menu needs to offer the right choices for one chat. */
-export type ArchivePlan = { milagreOwned: boolean; shared: boolean; status: WorktreeStatus | null };
+/** Everything the menu needs to offer the right choices for one chat. `terminals` names what its busy Terminals run. */
+export type ArchivePlan = { milagreOwned: boolean; shared: boolean; status: WorktreeStatus | null; terminals?: string[] };
 
 export type ArchiveChoice = { mode: ArchiveMode; label: string; tone: "plain" | "danger" };
 
@@ -41,5 +41,6 @@ export function worktreeShared(state: CoordinatorState, sessionId: number): bool
 export function lossReason(status: WorktreeStatus): string;
 export function deleteNote(status: WorktreeStatus): string;
 export function archiveChoices(options: { plan: ArchivePlan; running: boolean }): { choices: ArchiveChoice[]; reason: string | null };
+export function terminalNote(busy: string[]): string | null;
 export function removeFailureNotice(error: unknown): string;
 export function archiveChat(deps: ArchiveDeps, sessionId: number, mode: ArchiveMode, plan: ArchivePlan | null): Promise<"hidden" | "removed" | "kept">;

@@ -103,6 +103,8 @@ import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
 import { reuseRows, useEvent, useStableSet } from "./lib/stable";
 import { delegatedChats, useLinkedWork } from "./lib/linked-work";
 import { DraftChatComposer } from "./components/DraftChatComposer";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
+import { busyTerminals, newTerminal, useTerminalSync } from "./lib/terminal-actions";
 import type { ChatRowActions, SidebarRecent } from "./components/sidebar/ChatRow";
 
 // Not on screen at first paint, so each loads as its own chunk; the effect in App fetches them once the window is idle.
@@ -509,6 +511,11 @@ function App() {
   const changesAvailable = view === "chat" && Boolean(selectedSession && selectedWorktree);
   const changesAvailableRef = useRef(false);
   changesAvailableRef.current = changesAvailable;
+  // The open Chat's Terminals; a draft has none until it is sent.
+  const terminalChatId = view === "chat" && project && selectedSession && !selectedSession.archived ? chatKey(project.path, selectedSession.id) : null;
+  const terminalChatRef = useRef(terminalChatId);
+  terminalChatRef.current = terminalChatId;
+  useTerminalSync(terminalChatId);
   const selectedPullRequest = selectedWorktree && pullRequests[selectedWorktree.path];
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
@@ -840,9 +847,11 @@ function App() {
   async function checkArchive(sessionId: number): Promise<ArchivePlan> {
     const latest = openState();
     const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
-    if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots())) return { milagreOwned: false, shared: false, status: null };
-    if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null };
-    return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!) };
+    const terminals = project ? await busyTerminals(chatKey(project.path, sessionId)) : [];
+    if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots()))
+      return { milagreOwned: false, shared: false, status: null, terminals };
+    if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null, terminals };
+    return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!), terminals };
   }
 
   // "Commit and open PR…" opens the chat, with the dialog over it.
@@ -1391,6 +1400,9 @@ function App() {
       } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
         void openProject();
+      } else if (event.key.toLowerCase() === "t" && terminalChatRef.current) {
+        event.preventDefault();
+        newTerminal(terminalChatRef.current, undefined, setNotice);
       }
     }
 
@@ -1657,6 +1669,19 @@ function App() {
     const modifier = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
     const commands: Command[] = [
       { id: "new-chat", label: "New chat", group: "Actions", icon: "add", shortcut: `${modifier}N`, keywords: "create agent session", run: startNewChat },
+      ...(terminalChatId
+        ? [
+            {
+              id: "new-terminal",
+              label: "New Terminal",
+              group: "Actions",
+              icon: "add" as const,
+              shortcut: `${modifier}T`,
+              keywords: "shell console command line",
+              run: () => newTerminal(terminalChatId, undefined, setNotice),
+            },
+          ]
+        : []),
       {
         id: "open-project",
         label: "Add project…",
@@ -1959,7 +1984,7 @@ function App() {
             {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
             <div
               data-chat-pane
-              className={`min-h-0 flex-1 overflow-hidden ${view === "chat" && !diffPresence.occupied ? "" : "hidden"}`}
+              className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
               style={{ animation: "fade-in 160ms ease-out" }}
             >
               <EditorLinks root={selectedWorktree?.path ?? project.path}>
@@ -2084,6 +2109,7 @@ function App() {
                   }
                 />
               </EditorLinks>
+              <TerminalPanel chatId={terminalChatId} notify={setNotice} />
             </div>
           </main>
           <ChangesPanelSlot open={changes.open}>

@@ -56,7 +56,7 @@ function parseLsof(output) {
 }
 
 /**
- * The pids that belong to each chat's commands. `roots` maps a chat id to its agent's { pid, cwd }
+ * The pids that belong to each chat's commands. `roots` maps a chat id to its agent's { pid, cwd } and its Terminals' `shells`
  * (absent once its session closed); `groups` maps a chat id to the process groups it has seen, and is
  * updated in place.
  */
@@ -87,6 +87,8 @@ function chatProcesses(processes, roots, groups) {
         if (SHELLS.has(basename(child.command)) || child.pgid !== root.pgid) add(child);
       }
     }
+    // A Terminal's shell and everything it started belong to its Chat.
+    for (const pid of roots.get(chatId)?.shells ?? []) if (byPid.has(pid)) add(byPid.get(pid));
     for (const row of processes) if (known.has(row.pgid) && row.pgid !== root?.pgid) add(row);
     const live = new Set();
     for (const pid of pids) live.add(byPid.get(pid).pgid);
@@ -234,7 +236,9 @@ class PortWatcher {
       return true;
     }
     const pgid = this.processes.get(pid)?.pgid;
-    const target = pgid && this.groups.get(chatId)?.has(pgid) ? -pgid : pid;
+    // A Terminal's shell leads its own group: stopping a port there must leave the Terminal open.
+    const shellGroups = new Set((this.roots().get(chatId)?.shells ?? []).map((shell) => this.processes.get(shell)?.pgid));
+    const target = pgid && this.groups.get(chatId)?.has(pgid) && !shellGroups.has(pgid) ? -pgid : pid;
     const signal = (name) => {
       try {
         this.kill(target, name);

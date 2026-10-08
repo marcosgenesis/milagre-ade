@@ -770,6 +770,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
+    "../terminal": { TerminalChip: "TerminalChip", terminalPlaces: () => undefined },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": native,
@@ -1869,7 +1870,7 @@ test("a sidebar Chat Archive asks with the worktree choice, then stops, hides an
   ]);
   assert.deepEqual(
     project.calls.map(([method]) => method),
-    ["worktree:roots", "worktree:status", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
+    ["worktree:roots", "worktree:status", "terminal:list", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
   );
   assert.deepEqual(project.calls.find(([method]) => method === "worktree:remove").slice(1), [
     "/wt/p/fix",
@@ -4296,6 +4297,12 @@ test("new mobile Chat has no simulator pill; an existing Chat carries its identi
     undefined,
   );
   assert.equal(find(existing.render(), (n) => n.type === "PortsChip").props.chatId, "/p#7");
+  // A Terminal opens in a sent Chat's Worktree, so a new Chat has no Terminal pill either.
+  assert.equal(
+    find(fresh.render(), (n) => n.type === "TerminalChip"),
+    undefined,
+  );
+  assert.equal(find(existing.render(), (n) => n.type === "TerminalChip").props.chatId, "/p#7");
 });
 
 test("mobile simulator pill stays hidden until this Chat has attachments, including stopped devices", async (t) => {

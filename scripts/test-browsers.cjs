@@ -52,7 +52,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const api = (prefix, names) => Object.fromEntries(names.map(name => [name, request => ipcRenderer.invoke(prefix + name, request)]));
 contextBridge.exposeInMainWorld('milagre', {
   browsers: api('browser:', ['list', 'attach', 'open', 'frame', 'status', 'control', 'input', 'close']),
-  simulators: { list: async () => ({ devices: [], supported: true }) },
+  simulators: { list: async ({ chatId }) => ({ chatId, devices: [{ id: "sim-1", name: "iPhone 17", state: "Booted", runtime: "iOS 26" }], attached: [{ id: "sim-1", name: "iPhone 17", state: "Booted", runtime: "iOS 26" }], available: [], supported: true }) },
 });`;
 
 async function browserChecks(url) {

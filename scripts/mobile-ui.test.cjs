@@ -3895,7 +3895,7 @@ function artifactHost(client, pushes = [], router = { back() {} }) {
       "./icons": { Icon: "Icon" },
       "./ui": { CircleButton: "CircleButton", PillButton: "PillButton", colors: {}, styles: {} },
     },
-    "\nexports.TestArtifactWebView = ArtifactWebView;",
+    "\nexports.TestArtifactWebView = ArtifactWebView;\nexports.ArtifactCard = ArtifactCard;",
   );
   return {
     files,

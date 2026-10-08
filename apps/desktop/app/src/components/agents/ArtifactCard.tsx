@@ -93,7 +93,7 @@ function useResolutions(chatId: string | null, moved: number) {
 }
 
 /** The newest version of each design among a Chat's steps, in the order they were first shown. */
-export function latestArtifacts(steps: ChatStep[]): Map<string, ArtifactRef> {
+function latestArtifacts(steps: ChatStep[]): Map<string, ArtifactRef> {
   const latest = new Map<string, ArtifactRef>();
   for (const step of steps)
     if (step.kind === "artifact" && step.artifact && (latest.get(step.artifact.id)?.version ?? 0) < step.artifact.version)
@@ -163,7 +163,7 @@ function ScaledPreview({
 }
 
 /** A design the agent showed: its first screen, and a button that opens it on the canvas beside the chat. */
-export const ArtifactCard = memo(function ArtifactCard({ step }: { step: ChatStep & { artifact: ArtifactRef } }) {
+const ArtifactCard = memo(function ArtifactCard({ step }: { step: ChatStep & { artifact: ArtifactRef } }) {
   const { chatId, latest, open } = useContext(Artifacts);
   const { id, version, title } = step.artifact;
   const { artifact, error } = useArtifact(chatId, id, version);

@@ -179,7 +179,7 @@ export function ArtifactCards({ steps, chatId, chosen }: { steps: ArtifactStep[]
 }
 
 /** A design the agent showed. It opens the Chat's designs full screen; a saved Chat is needed to read them. */
-export function ArtifactCard({ step, chatId, chosen }: { step: ArtifactStep; chatId?: string; chosen?: string }) {
+function ArtifactCard({ step, chatId, chosen }: { step: ArtifactStep; chatId?: string; chosen?: string }) {
   const { client } = useSession();
   const { id, version, title } = step.artifact;
   const openable = !!client && !!chatId && !chatId.includes("#new:");

@@ -1368,6 +1368,8 @@ function createRuntime(options) {
       await advisorStore.close();
       // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
       await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
+      // A waiting Linear sign-in is an accepted command too: end it, or the wait below lasts until its timeout.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
+const http = require("node:http");
 const path = require("node:path");
 const { createLinear } = require("./index.cjs");
 
@@ -91,4 +92,50 @@ test("the Experimental switch round-trips", async (t) => {
   assert.equal(service.enabled(), false);
   assert.equal(service.setEnabled(true), true);
   assert.equal(service.enabled(), true);
+});
+
+// A port that was free a moment ago, so a test can use a fixed one.
+async function freePort() {
+  const server = http.createServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+test("dispose cancels a waiting sign-in and frees the callback port", async (t) => {
+  const port = await freePort();
+  let opened = 0;
+  const { service, linear } = setup(t, {
+    port,
+    openBrowser: (url) => {
+      opened++;
+      if (opened === 2) linear.approve(url);
+    },
+  });
+  const waiting = service.connect();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await service.dispose();
+  await assert.rejects(waiting, { code: "cancelled" });
+  assert.equal((await service.connect()).connected, true);
+});
+
+test("three connects in a row: only the newest survives", async (t) => {
+  const port = await freePort();
+  // The superseded sign-ins are cancelled before they reach the browser; the one that does open it is approved.
+  let opened = 0;
+  const { service, linear } = setup(t, {
+    port,
+    openBrowser: (url) => {
+      opened++;
+      linear.approve(url);
+    },
+  });
+  const first = service.connect();
+  const second = service.connect();
+  const third = service.connect();
+  await assert.rejects(first, { code: "cancelled" });
+  await assert.rejects(second, { code: "cancelled" });
+  assert.equal((await third).connected, true);
+  assert.equal(opened, 1);
 });

@@ -24,6 +24,13 @@ function createLinear({
   const client = createLinearClient({ store, clientId, apiBase, fetchImpl, now, revoked: changed });
   let pending = null;
 
+  async function cancelPending() {
+    const current = pending;
+    current.cancel();
+    await current.done.catch(() => {});
+    if (pending === current) pending = null;
+  }
+
   function status() {
     const token = store.readToken();
     return token ? { connected: true, viewer: token.viewer, organization: token.organization } : { connected: false };
@@ -58,10 +65,8 @@ function createLinear({
     async connect() {
       if (!clientId) throw new LinearError("Linear sign-in isn't set up in this build.", "not-configured");
       // A second Connect replaces the first: the user may have closed the browser tab, and the callback port is fixed.
-      if (pending) {
-        pending.cancel();
-        await pending.done.catch(() => {});
-      }
+      // Newest call wins: with several in a row, each one cancels whichever registered last, until none is left.
+      while (pending) await cancelPending();
       const attempt = { cancelled: false, callback: null };
       const done = signIn(attempt);
       pending = {
@@ -85,6 +90,9 @@ function createLinear({
       // Best effort: the token is gone from this Mac whether or not Linear hears about it.
       await revokeToken({ fetchImpl, apiBase, accessToken: token.accessToken }).catch(() => {});
       return status();
+    },
+    async dispose() {
+      while (pending) await cancelPending();
     },
     enabled: () => store.readEnabled(),
     setEnabled: (value) => store.saveEnabled(value),

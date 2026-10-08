@@ -86,6 +86,7 @@ import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
+import { messageCommands } from "./lib/message-commands";
 import type { RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
@@ -1268,14 +1269,33 @@ function App() {
   // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
   const [findOpen, setFindOpen] = useState(false);
   const [findSignal, setFindSignal] = useState(0);
+  // Text the find bar starts with, from a ⌘K message result; ⌘F clears it.
+  const [findSeed, setFindSeed] = useState<string | undefined>();
   const findRef = useRef({ open: false, canOpen: false });
   findRef.current = { open: findOpen, canOpen: view === "chat" && messages.length > 0 };
-  function openFind() {
+  function openFind(seed?: string) {
     if (!findRef.current.canOpen) return;
+    setFindSeed(seed);
     setFindOpen(true);
     setFindSignal((current) => current + 1);
   }
   useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
+  // A ⌘K message result opens its chat first; the find bar opens once that chat's messages are on screen.
+  const pendingFind = useRef<{ sessionId: number; term: string } | null>(null);
+  useEffect(() => {
+    const pending = pendingFind.current;
+    if (!pending || view !== "chat" || selectedSession?.id !== pending.sessionId || !messages.length) return;
+    pendingFind.current = null;
+    openFind(pending.term);
+  }, [selectedSession?.id, view, messages.length]);
+  function openMessage(sessionId: number, term: string) {
+    if (view === "chat" && selectedSession?.id === sessionId) {
+      openFind(term);
+      return;
+    }
+    pendingFind.current = { sessionId, term };
+    openChat(sessionId);
+  }
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -1947,6 +1967,7 @@ function App() {
                   newChatError={newChatError}
                   findOpen={findOpen}
                   findSignal={findSignal}
+                  findSeed={findSeed}
                   onFindClose={() => setFindOpen(false)}
                   notice={notice}
                   onDismissNotice={() => setNotice(null)}
@@ -1986,7 +2007,16 @@ function App() {
           </ChangesPanelSlot>
         </div>
         {linkDialog}
-        {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
+        {commandPaletteOpen && (
+          <CommandPalette
+            commands={buildCommands(project)}
+            searchMessages={(query) =>
+              messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+            }
+            onClose={() => setCommandPaletteOpen(false)}
+            onError={setNotice}
+          />
+        )}
         {gitDialog && (
           <GitActionsDialog
             key={gitDialog.sessionId}

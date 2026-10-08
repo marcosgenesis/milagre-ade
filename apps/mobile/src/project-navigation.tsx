@@ -21,6 +21,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { comparePins, isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
+import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession } from "@milagre/shared/model";
 import type { RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
@@ -43,6 +44,7 @@ type Row = { key: string; path: string } & (
   | { kind: "project"; name: string; expanded: boolean; members?: RegisteredProject[] }
   | { kind: "section"; name: string }
   | { kind: "chat"; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
+  | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
 );
 type Show = "all" | "needs" | "running" | "archived";
@@ -138,6 +140,12 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
+    // Each Project's Chats under the current filter, for the message search below when no Chat title matches.
+    const searchable: {
+      path: string;
+      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"];
+      chats: Map<number, AgentSession>;
+    }[] = [];
     for (const project of listed) {
       const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
       const previews = Object.values(pendingChats).filter((item) => item.hostId === session.client?.url && item.projectPath === project.path);
@@ -165,10 +173,17 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         return { chat, run, pending, sortId, mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []) };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
-      const chats = marked
+      const shown = marked
         .filter(({ chat, run }) => (show === "archived") === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
         .filter(({ mark }) => show !== "needs" || NEEDS.includes(mark))
-        .filter(({ mark }) => show !== "running" || mark === "running")
+        .filter(({ mark }) => show !== "running" || mark === "running");
+      if (needle && copy)
+        searchable.push({
+          path: project.path,
+          messages: copy.project.state.messages,
+          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat }) => [chat.id, chat])),
+        });
+      const chats = shown
         .filter(
           ({ chat }) =>
             !needle ||
@@ -207,6 +222,32 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           kind: "notice",
           message: !copy ? "Loading chats..." : searching ? "No matching chats" : "No chats yet. Start one with +.",
         });
+    }
+    // Nothing in a Chat title matched: search what was said in the Chats instead, at most three hits per Chat.
+    if (needle && !result.some((row) => row.kind === "chat")) {
+      const found: Row[] = [];
+      for (const { path, messages, chats } of searchable) {
+        const perChat = new Map<number, number>();
+        for (const match of searchMessages(messages, needle, 200)) {
+          const chat = chats.get(match.message.session_id);
+          const count = perChat.get(match.message.session_id) ?? 0;
+          if (!chat || count >= 3) continue;
+          perChat.set(chat.id, count + 1);
+          found.push({
+            key: `${path}#${chat.id}:message:${match.message.id}`,
+            path,
+            kind: "message",
+            chat,
+            title: chat.title || chat.generatedTitle || "New Chat",
+            snippet: match.snippet,
+            highlight: match.highlight,
+          });
+        }
+      }
+      if (found.length) {
+        result.push({ key: "section:Messages", path: "", kind: "section", name: "Messages" });
+        result.push(...found.slice(0, 30));
+      }
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
@@ -519,6 +560,30 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   </View>
                 </PullDown>
               </View>
+            );
+          }
+          if (item.kind === "message") {
+            const [start, end] = item.highlight;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${item.snippet}, in ${item.title}`}
+                onPress={() => select(item.path, item.chat.id)}
+                style={({ pressed }) => [s.chat, { backgroundColor: pressed ? colors.hover : "transparent" }]}
+              >
+                <View style={[s.chatBody, { flex: 1 }]}>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    <Text numberOfLines={2} style={s.chatTitle}>
+                      {item.snippet.slice(0, start)}
+                      <Text style={{ fontWeight: "600" }}>{item.snippet.slice(start, end)}</Text>
+                      {item.snippet.slice(end)}
+                    </Text>
+                    <Text numberOfLines={1} style={s.detail}>
+                      {item.title}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
             );
           }
           if (item.kind === "notice")

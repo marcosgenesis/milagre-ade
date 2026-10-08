@@ -72,9 +72,20 @@ const iconButton =
   "flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40";
 
 /** Find-in-page for the open chat, scoped to the message list under `rootRef` (highlights via the CSS Custom Highlight API). */
-export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<HTMLElement | null>; focusSignal: number; onClose: () => void }) {
+export function FindBar({
+  rootRef,
+  focusSignal,
+  seed,
+  onClose,
+}: {
+  rootRef: RefObject<HTMLElement | null>;
+  focusSignal: number;
+  /** Replaces the query each time `focusSignal` changes. */
+  seed?: string;
+  onClose: () => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(seed ?? "");
   const [active, setActive] = useState(0);
   const [total, setTotal] = useState(0);
   const [version, setVersion] = useState(0);
@@ -130,6 +141,7 @@ export function FindBar({ rootRef, focusSignal, onClose }: { rootRef: RefObject<
 
   // Reopening while open selects the text, so a new search replaces the old one.
   useLayoutEffect(() => {
+    if (seed !== undefined) setQuery(seed);
     input.current?.focus();
     input.current?.select();
   }, [focusSignal]);

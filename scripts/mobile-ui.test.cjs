@@ -1109,6 +1109,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@hugeicons/core-free-icons": {},
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     "@milagre/shared/chats": { ...require("@milagre/shared/chats"), isListedChat: () => true },
+    "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "./indicators": { chatMark: () => "idle" },
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
@@ -1223,6 +1224,29 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(nav.filter().props.sections[0].items.find((item) => item.id === "archived").checked, true);
   nav.filter().props.onSelect("running");
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
+});
+
+test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
+  const nav = navigationHost(deferred().promise);
+  nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };
+  nav.state.project.state.messages = [{ id: 7, session_id: 3, body: "Deploy the relay with wrangler, then check /health" }];
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  const data = nav.rows().props.data;
+  assert.equal(
+    JSON.stringify(data.filter((item) => item.kind === "section" || item.kind === "message").map((item) => item.name ?? item.snippet)),
+    JSON.stringify(["Messages", "Deploy the relay with wrangler, then check /health"]),
+  );
+  const message = nav.row("message");
+  assert.equal(message.props.accessibilityLabel, "Deploy the relay with wrangler, then check /health, in Relay work");
+  message.props.onPress();
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: "/chat", params: { projectPath: "/last", hostId: "mac", id: "3" } }]));
+  search().props.onChangeText("relay");
+  assert.equal(
+    nav.rows().props.data.some((item) => item.kind === "message"),
+    false,
+    "a Chat title match keeps messages out",
+  );
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {

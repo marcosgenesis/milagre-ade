@@ -15,6 +15,16 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("simulator:input", request),
     close: (request) => ipcRenderer.invoke("simulator:close", request),
   },
+  browsers: {
+    list: (request) => ipcRenderer.invoke("browser:list", request),
+    attach: (request) => ipcRenderer.invoke("browser:attach", request),
+    open: (request) => ipcRenderer.invoke("browser:open", request),
+    frame: (request) => ipcRenderer.invoke("browser:frame", request),
+    status: (request) => ipcRenderer.invoke("browser:status", request),
+    control: (request) => ipcRenderer.invoke("browser:control", request),
+    input: (request) => ipcRenderer.invoke("browser:input", request),
+    close: (request) => ipcRenderer.invoke("browser:close", request),
+  },
   artifacts: {
     get: (request) => ipcRenderer.invoke("artifact:get", request),
     list: (request) => ipcRenderer.invoke("artifact:list", request),

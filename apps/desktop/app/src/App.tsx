@@ -1916,6 +1916,7 @@ function App() {
                   tasks={run?.tasks}
                   contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
                   ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+                  agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
                   onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}

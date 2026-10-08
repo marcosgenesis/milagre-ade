@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
@@ -364,6 +365,8 @@ interface ChatComposerProps {
   contextUsage?: ContextUsage;
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
+  /** The runtime's key for this Chat (`projectPath#id`), which browser ownership is recorded under. */
+  agentChatId?: string;
   /** Stops the command listening on one of the chat's ports. */
   onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
@@ -602,6 +605,7 @@ export function ChatComposer({
   tasks,
   contextUsage,
   ports,
+  agentChatId,
   onStopPort,
   waitingStepIds,
   asking = false,
@@ -798,6 +802,7 @@ export function ChatComposer({
             )}
             <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
             <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+            <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
             {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && (
               <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />
             )}

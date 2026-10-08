@@ -22,6 +22,10 @@ One conversation with one agent. A Project Chat is bound to exactly one **Worktr
 An archived **Chat** stays readable from a linked side but is never chosen to receive a **Delegation**.
 _Avoid_: session, thread (the providers' names for the agent process behind a **Chat**)
 
+**Browser page**:
+A page in a Chromium browser on the host that a **Chat** may view and control. It belongs to the **Chat** whose agent process started its browser, or to a **Chat** the user attached that browser to. See ADR-0006.
+_Avoid_: tab (a browser's own UI term), session (the page's sign-in state is part of it, not a separate thing)
+
 ### Linking
 
 **Named Link**:

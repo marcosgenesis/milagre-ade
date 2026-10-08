@@ -481,6 +481,7 @@ export function LinkWorkspace({
                     contextUsage={run?.contextUsage ?? session?.contextUsage}
                     subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
                     ports={chatId ? ports[chatId] : undefined}
+                    agentChatId={chatId ?? undefined}
                     waitingForSubagents={run?.waitingForSubagents}
                     asking={Boolean(question)}
                     waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}

@@ -5,10 +5,11 @@ import { EASE_OUT } from "../../lib/ease";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
-import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme } from "@milagre/shared/simulator-receiver";
+import { createSimulatorBridge, createSimulatorReceiverHtml } from "@milagre/shared/simulator-receiver";
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
+import { viewerTheme } from "./viewerTheme";
 import { dockLayer, useCloseWhenDesignsExpand, useDockArea, useSidePanelRoom } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
@@ -289,25 +290,10 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   );
 }
 
-function simulatorTheme(): SimulatorTheme {
-  const root = document.documentElement,
-    style = getComputedStyle(root);
-  const color = (name: string) => style.getPropertyValue(name).trim();
-  return {
-    scheme: root.classList.contains("dark") ? "dark" : "light",
-    surface: color("--surface"),
-    ink: color("--ink"),
-    ink2: color("--ink-2"),
-    line: color("--line"),
-    hover: color("--hover"),
-    accent: color("--accent"),
-  };
-}
-
 function SimulatorFrame({ api, deviceId, chatId, onClose }: { api: SimulatorApi; deviceId: string; chatId: string; onClose(): void }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const html = useMemo(() => createSimulatorReceiverHtml({ deviceId, theme: simulatorTheme() }), [deviceId]);
-  const syncTheme = useCallback(() => frame.current?.contentWindow?.postMessage({ channel: "milagre-simulator-theme", theme: simulatorTheme() }, "*"), []);
+  const html = useMemo(() => createSimulatorReceiverHtml({ deviceId, theme: viewerTheme() }), [deviceId]);
+  const syncTheme = useCallback(() => frame.current?.contentWindow?.postMessage({ channel: "milagre-simulator-theme", theme: viewerTheme() }, "*"), []);
   useEffect(() => {
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });

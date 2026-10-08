@@ -155,6 +155,12 @@ function startRelayHost({
 
   return {
     status: () => status,
+    /** Keys of the devices with a channel open through the relay now. */
+    connectedKeys: () => (session ? channels.keysOf(session) : []),
+    /** Closes every channel the device with `key` has open through the relay. */
+    drop(key) {
+      if (session) channels.dropKey(session, key);
+    },
     async close() {
       if (closed) return;
       closed = true;

@@ -21,7 +21,7 @@ async function lanMac(t, { knownPhone = true, ...hostOptions } = {}) {
   const bridge = await startFakeBridge(t);
   const host = await startLanHost({ port: 0, hostname: "127.0.0.1", identity, phones, token: "a".repeat(64), bridgeUrl: bridge.url, ...hostOptions });
   t.after(() => host.close());
-  return { identity, key, bridge, host, url: `ws://127.0.0.1:${host.port}` };
+  return { identity, key, bridge, host, phones, url: `ws://127.0.0.1:${host.port}` };
 }
 
 test("/v1/hello names this Mac and nothing else", async (t) => {
@@ -267,4 +267,17 @@ test("no more than 64 sockets are held at once", async (t) => {
   extra.on("error", () => {});
   t.after(() => extra.destroy());
   assert.equal(await endsWithin(extra, 3000), true);
+});
+
+test("a known phone on the LAN shows as connected, is seen with its name, and drop closes it", async (t) => {
+  const { identity, key, host, phones, url } = await lanMac(t);
+  const id = b64url(key.publicKey);
+  const phone = connectPhone({ relayUrl: url, identity, key, name: "Victor's iPhone" });
+  t.after(() => phone.close());
+  assert.ok((await phone.hello()).channel);
+  assert.deepEqual(host.connectedKeys(), [id]);
+  await until(() => phones.list()[0].name === "Victor's iPhone", "the name from the hello");
+  host.drop(id);
+  await phone.closed;
+  await until(() => host.connectedKeys().length === 0, "dropped");
 });

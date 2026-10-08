@@ -65,7 +65,7 @@ async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token =
     phones,
     token,
     bridgeUrl,
-    canPair: () => canPair(),
+    canPair: (key) => canPair(key),
     timing,
     onStatus: (status) => {
       statuses.push(status);
@@ -463,4 +463,43 @@ test("a 4409 before ready keeps the short backoff: a replaced pending socket is 
   await until(() => mac.host.status() === "online" && dials.length === 2, "back online");
   const gap = dials[1] - closes[0];
   assert.ok(gap < 300, `a pending 4409 waited only ${gap} ms`);
+});
+
+test("a phone's hello names it: a first pairing saves the name, a later hello renames it, and drop closes it", async (t) => {
+  const { relay, mac } = await paired(t);
+  const key = boxKeyPair(random);
+  const id = b64url(key.publicKey);
+  const first = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, name: "iPhone 16 Pro" });
+  t.after(() => first.close());
+  assert.ok((await first.hello()).channel);
+  assert.equal(mac.phones.list().find((device) => device.key === id).name, "iPhone 16 Pro");
+  assert.deepEqual(mac.host.connectedKeys(), [id]);
+  first.close();
+  await until(() => mac.host.connectedKeys().length === 0, "the closed channel is gone");
+
+  const second = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, name: "Victor's iPhone" });
+  t.after(() => second.close());
+  assert.ok((await second.hello()).channel);
+  await until(() => mac.phones.list().find((device) => device.key === id).name === "Victor's iPhone", "renamed by the hello");
+  mac.host.drop(id);
+  await second.closed;
+  assert.deepEqual(mac.host.connectedKeys(), []);
+});
+
+test("a desktop's hello is turned away with reason kind and saved nowhere", async (t) => {
+  const { relay, mac } = await paired(t);
+  const key = boxKeyPair(random);
+  const desktop = connectPhone({ relayUrl: relay.url, identity: mac.identity, key, kind: "desktop", name: "studio" });
+  t.after(() => desktop.close());
+  assert.deepEqual(await desktop.hello(), { error: { t: "error", code: "bad-hello", reason: "kind" } });
+  assert.equal(mac.phones.isKnown(b64url(key.publicKey)), false);
+});
+
+test("the pairing window can stay closed to one phone while another pairs", async (t) => {
+  const blocked = boxKeyPair(random);
+  const { relay, mac, connect } = await paired(t, { mac: { canPair: (key) => key !== b64url(blocked.publicKey) } });
+  const phone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: blocked });
+  t.after(() => phone.close());
+  assert.deepEqual(await phone.hello(), { error: { t: "error", code: "unknown-phone" } });
+  await connect();
 });

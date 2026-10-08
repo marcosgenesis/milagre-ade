@@ -21,7 +21,7 @@ const random = (n: number) => new Uint8Array(randomBytes(n));
 /** A LAN host on 127.0.0.1 (port 0) behind a fake bridge, and a transport for a phone with `key`, known to it or not. */
 async function lanPair(t: TestContext, { known, name }: { known: boolean; name?: string }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-interop-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
   const phones = createDevices(dir);
   await phones.load();
@@ -39,7 +39,7 @@ async function lanPair(t: TestContext, { known, name }: { known: boolean; name?:
     name,
   });
   t.after(() => transport.close());
-  return { transport, bridge, phones };
+  return { transport, bridge, phones, dir };
 }
 
 test("a known phone's transport finishes the hello and gets the bridge's answer to a POST /rpc", async (t) => {
@@ -59,7 +59,12 @@ test("an unknown phone's transport is refused with the unknown-phone error", asy
 });
 
 test("a phone that names itself over the LAN shows that name on the Mac", async (t) => {
-  const { transport, phones } = await lanPair(t, { known: true, name: "Victor's iPhone" });
+  const { transport, phones, dir } = await lanPair(t, { known: true, name: "Victor's iPhone" });
   await transport.ready();
   await until(() => phones.list()[0]?.name === "Victor's iPhone", "the name from the hello");
+  // The hello does not wait for the write, so wait for the file before the test's cleanup removes the directory.
+  await until(
+    async () => (await fs.readFile(path.join(dir, "devices.json"), "utf8").catch(() => "")).includes("Victor's iPhone"),
+    "the name written to devices.json",
+  );
 });

@@ -726,3 +726,148 @@ test("flush ends a waiting Linear sign-in instead of waiting out its timeout", a
   assert.ok(Date.now() - started < 5000, "flush returned promptly");
   await rejected;
 });
+
+async function connectLinearFixture(dataDir) {
+  // A signed-in Mac with the Experimental switch on, without running the OAuth flow.
+  await fs.mkdir(path.join(dataDir, "linear"), { recursive: true });
+  await fs.writeFile(
+    path.join(dataDir, "linear", "token.json"),
+    JSON.stringify({
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresAt: Date.now() + 86_400_000,
+      viewer: { name: "Victor", email: "v@example.test" },
+      organization: { name: "Acme", urlKey: "acme" },
+    }),
+  );
+  await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true }));
+}
+
+const linearIssueNode = (key, branchName) => ({
+  identifier: key,
+  title: "Fix the login redirect",
+  url: `https://linear.app/acme/issue/${key}`,
+  branchName,
+  description: null,
+  state: { name: "Todo", type: "unstarted", color: "#aaa" },
+});
+
+test("worktree:create from a Linear issue names the branch after it, skips the Haiku name and remembers the issue", async (t) => {
+  const { project, dataDir, events, make } = await fixture(t);
+  execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+    stdio: "ignore",
+  });
+  await connectLinearFixture(dataDir);
+  const bodies = [];
+  let issue = linearIssueNode("ENG-12", "eng-12-fix-login");
+  const json = (body) => ({ ok: true, status: 200, json: async () => body });
+  const runtime = make({
+    worktreeRoot: path.join(path.dirname(project), "worktrees"),
+    linear: {
+      clientId: "cid",
+      apiBase: "https://api.test",
+      port: 0,
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(init.body);
+        bodies.push(body.query);
+        if (body.query.includes("teams(")) return json({ data: { teams: { nodes: [{ key: "ENG" }] } } });
+        return json({ data: { i0: issue } });
+      },
+      openBrowser: () => {},
+    },
+  });
+  await runtime.openProject(project);
+  const created = await runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "Ignored", issueKey: "ENG-12" }]);
+  const worktree = created.project.state.worktrees[created.worktreeId];
+  assert.equal(worktree.name, "eng-12-fix-login");
+  assert.equal(worktree.linearIssue, "ENG-12");
+  assert.match(path.basename(worktree.path), /^eng-12-fix-login-[a-z0-9]{4}$/);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    events.some(({ channel }) => channel === "worktree:renamed"),
+    false,
+    "An issue's branch keeps its name: the Haiku rename never runs",
+  );
+
+  issue = null;
+  const before = execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  await assert.rejects(runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "", issueKey: "ENG-99" }]), {
+    message: "ENG-99 no longer exists in Linear.",
+  });
+  assert.equal(execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" }), before);
+});
+
+test("linear:worktree-issues names a worktree's issue and linear:issues reports the switch", async (t) => {
+  const { project, dataDir, events, make } = await fixture(t);
+  execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+    stdio: "ignore",
+  });
+  const json = (body) => ({ ok: true, status: 200, json: async () => body });
+  const runtime = make({
+    worktreeRoot: path.join(path.dirname(project), "worktrees"),
+    linear: {
+      clientId: "cid",
+      apiBase: "https://api.test",
+      port: 0,
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(init.body);
+        if (body.query.includes("teams(")) return json({ data: { teams: { nodes: [{ key: "ENG" }] } } });
+        if (body.query.includes("assignedIssues")) return json({ data: { viewer: { assignedIssues: { nodes: [linearIssueNode("ENG-3", "eng-3")] } } } });
+        return json({ data: { i0: linearIssueNode("ENG-12", "eng-12-fix-login") } });
+      },
+      openBrowser: () => {},
+    },
+  });
+  await runtime.openProject(project);
+  assert.deepEqual(await runtime.invoke("linear:issues", [{}]), { error: "Linear is off in Settings › Experimental.", notConnected: true });
+  assert.deepEqual(await runtime.invoke("linear:worktree-issues", [project]), {});
+  assert.deepEqual(await runtime.invoke("linear:enabled:save", [true]), { enabled: true });
+  assert.deepEqual(events.filter((event) => event.channel === "linear:enabled-changed").at(-1).payload, { enabled: true });
+  await connectLinearFixture(dataDir);
+
+  const issues = await runtime.invoke("linear:issues", [{}]);
+  assert.deepEqual(
+    issues.issues.map((item) => item.key),
+    ["ENG-3"],
+  );
+  const created = await runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "Plain" }]);
+  const plain = created.project.state.worktrees[created.worktreeId];
+  assert.equal(plain.linearIssue, undefined);
+  await runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "x", issueKey: "ENG-12" }]);
+  const mapped = await runtime.invoke("linear:worktree-issues", [project]);
+  const [only] = Object.values(mapped);
+  assert.equal(only?.key, "ENG-12");
+});
+
+test("worktree:create from a Linear issue refuses while Linear is off or disconnected, before any query", async (t) => {
+  const { project, dataDir, make } = await fixture(t);
+  execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+    stdio: "ignore",
+  });
+  const queried = [];
+  const linear = {
+    clientId: "cid",
+    apiBase: "https://api.test",
+    port: 0,
+    fetchImpl: async (url, init) => {
+      queried.push(init.body);
+      return { ok: true, status: 200, json: async () => ({ data: {} }) };
+    },
+    openBrowser: () => {},
+  };
+  const runtime = make({ worktreeRoot: path.join(path.dirname(project), "worktrees"), linear });
+  await runtime.openProject(project);
+  const before = execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  const attempt = () => runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "x", issueKey: "ENG-12" }]);
+
+  // Off: nothing stored, so the switch is off and no token exists.
+  await assert.rejects(attempt(), { message: "Linear is off in Settings › Experimental." });
+
+  // On, but never connected.
+  await fs.mkdir(path.join(dataDir, "linear"), { recursive: true });
+  await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true }));
+  await assert.rejects(attempt(), { message: "Linear isn't connected." });
+
+  assert.deepEqual(queried, [], "No Linear query while Linear is off or disconnected");
+  assert.equal(execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" }), before, "Nothing is created");
+});

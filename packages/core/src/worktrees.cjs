@@ -74,19 +74,47 @@ async function checkBase(projectPath, baseBranch) {
     throw new Error(`The base branch ${JSON.stringify(String(baseBranch))} is missing from this project.`);
 }
 
+const newSuffix = () => Math.random().toString(36).slice(2, 6);
+
+// The rules `git check-ref-format --branch` applies, mirrored here because the read surface of the git client doesn't
+// allow that command. A name starting with "-" can never be read as an option; git refuses the rest on `worktree add`.
+function validBranchName(branch) {
+  if (typeof branch !== "string" || branch === "" || branch.startsWith("-") || branch === "@" || branch.includes("@{")) return false;
+  if (branch === "HEAD" || branch.startsWith("refs/")) return false;
+  if ([...branch].some((char) => char.charCodeAt(0) < 0x21 || char.charCodeAt(0) === 0x7f || " ~^:?*[\\".includes(char))) return false;
+  if (branch.includes("..")) return false;
+  if (branch.startsWith("/") || branch.endsWith("/") || branch.endsWith(".") || branch.includes("//")) return false;
+  return branch.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock"));
+}
+
+// The branch a worktree started from a Linear issue gets: the issue's own branch name, or its key and title when git
+// refuses that, plus the suffix when the name is already a branch. The caller gives the same suffix to the folder.
+async function issueBranch({ projectPath, issue, suffix }) {
+  let branch = issue.branchName;
+  if (!validBranchName(branch)) branch = [issue.key.toLowerCase(), slugify(issue.title)].filter(Boolean).join("-");
+  // A teammate's remote-tracking branch counts as taken too: a local copy of it would shadow their work.
+  const taken =
+    (await client.read.refExists(projectPath, `refs/heads/${branch}`)) || (await client.read.refExists(projectPath, `refs/remotes/origin/${branch}`));
+  if (taken) branch = `${branch}-${suffix}`;
+  return branch;
+}
+
 async function createWorktree({
   projectPath,
   baseBranch,
   prompt = "",
+  branch: named,
   root = DEFAULT_WORKTREE_ROOT,
-  suffix = Math.random().toString(36).slice(2, 6),
+  suffix = newSuffix(),
   copyPatterns,
   copyLimits,
   fetched = false,
 }) {
   await checkBase(projectPath, baseBranch);
-  const name = `${slugify(prompt) || "chat"}-${suffix}`;
-  const branch = `milagre/${name}`;
+  // A named branch (from issueBranch) keeps its name; its folder takes the last segment of that name.
+  if (named !== undefined && !validBranchName(named)) throw new Error(`${JSON.stringify(String(named))} is not a valid branch name.`);
+  const name = named ? `${slugify(named.split("/").pop()) || "chat"}-${suffix}` : `${slugify(prompt) || "chat"}-${suffix}`;
+  const branch = named ?? `milagre/${name}`;
   const worktreePath = path.join(root, path.basename(projectPath), name);
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
   const start = await resolveStartRef(projectPath, baseBranch, { fetched });
@@ -115,4 +143,4 @@ async function renameWorktreeBranch({ worktreePath, branch, slug }) {
   }
 }
 
-module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch, slugify };
+module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, newSuffix, renameWorktreeBranch, slugify };

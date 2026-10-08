@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createWorktree, listBranches, renameWorktreeBranch, slugify } = require("./worktrees.cjs");
+const { createWorktree, issueBranch, listBranches, renameWorktreeBranch, slugify } = require("./worktrees.cjs");
 const { COPY_LIMITS, EXCLUDED_FOLDERS, previewFilesToCopy } = require("./worktree-files.cjs");
 
 async function fixture(t) {
@@ -356,4 +356,48 @@ test("createWorktree skips its own fetch when the upstream was just fetched", as
   });
   assert.equal(git("rev-parse", created.branch).trim(), stale);
   assert.equal(git("rev-parse", "origin/main").trim(), stale);
+});
+
+test("createWorktree can start on a named branch, whose folder takes the branch's last segment", async (t) => {
+  const { root, project, git } = await fixture(t);
+  const worktreeRoot = path.join(root, "worktrees");
+  const created = await createWorktree({ projectPath: project, baseBranch: "main", branch: "eng-12-fix-login", root: worktreeRoot, suffix: "ab12" });
+  assert.deepEqual(created, {
+    branch: "eng-12-fix-login",
+    path: path.join(worktreeRoot, "shop", "eng-12-fix-login-ab12"),
+    base: "main",
+  });
+  assert.match(git("worktree", "list", "--porcelain"), /branch refs\/heads\/eng-12-fix-login\n/);
+  for (const branch of ["-rf", "bad\nname", "bad..name", "", "x\0y"]) {
+    await assert.rejects(createWorktree({ projectPath: project, baseBranch: "main", branch, root: worktreeRoot, suffix: "q1" }), /not a valid branch name/);
+  }
+});
+
+test("issueBranch uses the issue's branch name, falls back when git refuses it, and suffixes a taken name", async (t) => {
+  const { project, git } = await fixture(t);
+  const issue = { key: "ENG-12", title: "Fix the login redirect!", branchName: "eng-12-fix-login-redirect" };
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-fix-login-redirect");
+  assert.equal(await issueBranch({ projectPath: project, issue: { ...issue, branchName: "-bad..name" }, suffix: "ab12" }), "eng-12-fix-the-login-redirect");
+  assert.equal(await issueBranch({ projectPath: project, issue: { key: "ENG-12", title: "", branchName: "" }, suffix: "ab12" }), "eng-12");
+  git("branch", "eng-12-fix-login-redirect");
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-fix-login-redirect-ab12");
+});
+
+test("issueBranch suffixes a name a teammate already pushed to origin", async (t) => {
+  const { project, git } = await fixture(t);
+  const issue = { key: "ENG-12", title: "Fix the login redirect!", branchName: "eng-12-fix-login-redirect" };
+  git("update-ref", "refs/remotes/origin/eng-12-fix-login-redirect", "HEAD");
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-fix-login-redirect-ab12");
+});
+
+test("validBranchName refuses HEAD, and createWorktree refuses it as a branch", async (t) => {
+  const { project } = await fixture(t);
+  const issue = { key: "ENG-12", title: "Head", branchName: "HEAD" };
+  assert.equal(await issueBranch({ projectPath: project, issue, suffix: "ab12" }), "eng-12-head");
+  assert.equal(await issueBranch({ projectPath: project, issue: { ...issue, branchName: "refs/heads/x" }, suffix: "ab12" }), "eng-12-head");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-head-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await assert.rejects(createWorktree({ projectPath: project, baseBranch: "main", branch: "HEAD", root, suffix: "ab12" }), {
+    message: '"HEAD" is not a valid branch name.',
+  });
 });

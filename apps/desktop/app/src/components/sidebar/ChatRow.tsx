@@ -1,4 +1,6 @@
 import { ChatTitle } from "./ChatTitle";
+import { issueChipLabel, type LinearIssue } from "@milagre/shared/linear";
+import { LinearLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -57,6 +59,8 @@ type ChatDetails = {
   diff?: DiffStat;
   /** PRs the chat created or merged, then its worktree branch's PR, in the order they were made. */
   pullRequests?: PullRequest[];
+  /** The Linear issue the chat's Worktree was started from or names. */
+  linearIssue?: LinearIssue;
   /** The chat's last turn failed. */
   failed?: boolean;
   /** Ports the chat's commands listen on. */
@@ -186,7 +190,10 @@ export const ChatRow = memo(function ChatRow({
   const archivePending = useRef(false);
   const mark = item.mark ?? "idle";
   const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
+  const linearIssue = !collapsed ? item.details?.linearIssue : undefined;
   const hasPullRequests = pullRequests.length > 0;
+  // The chip row shows for a Linear issue alone, too.
+  const hasChips = hasPullRequests || linearIssue !== undefined;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -267,7 +274,7 @@ export const ChatRow = memo(function ChatRow({
             aria-busy={archiving || undefined}
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
-            className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+            className={`sidebar-row relative z-10 mx-2 flex ${hasChips || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
               active ? "bg-hover-2" : "hover:bg-hover-2"
             } ${archiving ? "opacity-30" : ""}`}
           >
@@ -281,9 +288,9 @@ export const ChatRow = memo(function ChatRow({
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasPullRequests || item.worktreeCount !== undefined} />
+            <ChatMarkDot mark={mark} topAligned={hasChips || item.worktreeCount !== undefined} />
             <span
-              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasChips ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
@@ -293,11 +300,12 @@ export const ChatRow = memo(function ChatRow({
           </button>
         )}
 
-        {hasPullRequests && !renaming && (
+        {hasChips && !renaming && (
           <div
             data-chat-prs
             className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
           >
+            {linearIssue && <LinearIssueChip issue={linearIssue} />}
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
             ))}
@@ -342,7 +350,7 @@ export const ChatRow = memo(function ChatRow({
               if (menu) setMenu(null);
               else openMenu(rect.left, rect.bottom + 4);
             }}
-            className={`absolute right-3 ${hasPullRequests ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+            className={`absolute right-3 ${hasChips ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
               menu ? "bg-hover text-ink opacity-100" : "opacity-0"
             }`}
           >
@@ -401,6 +409,25 @@ const isReadyToMerge = (pr: PullRequest) => pullRequestPresentation(pr).ready;
 const isChecking = (pr: PullRequest) => pullRequestPresentation(pr).checking;
 
 /** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
+function LinearIssueChip({ issue }: { issue: LinearIssue }) {
+  return (
+    <button
+      type="button"
+      data-linear-issue-chip
+      title={issue.title}
+      aria-label={`Open Linear issue ${issue.key}: ${issue.title}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        window.open(issue.url, "_blank", "noopener,noreferrer");
+      }}
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <LinearLogo size={11} />
+      <span className="truncate">{issueChipLabel(issue)}</span>
+    </button>
+  );
+}
+
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
   const blocker = pullRequestBlockers(pr)[0];
   const readyToMerge = isReadyToMerge(pr);
@@ -603,6 +630,20 @@ function ChatHoverCard({
         {details.branch && (
           <CardLine icon={<HugeIcon icon={GitBranchIcon} size={14} />}>
             <span className="truncate">{details.branch}</span>
+          </CardLine>
+        )}
+        {details.linearIssue && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <a
+              href={details.linearIssue.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-chat-card-linear-issue
+              onClick={onOpenLink}
+              className="min-w-0 truncate text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {issueChipLabel(details.linearIssue)} · {details.linearIssue.title}
+            </a>
           </CardLine>
         )}
         {details.path && (

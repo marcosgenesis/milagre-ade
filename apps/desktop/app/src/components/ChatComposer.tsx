@@ -17,6 +17,8 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, LaptopIcon } from "@hugeicons/core-free-icons";
+import { LinearLogo } from "./ProviderLogo";
+import type { LinearIssue } from "@milagre/shared/linear";
 import type {
   AgentCliStatus,
   EffortLevel,
@@ -457,6 +459,9 @@ interface ChatComposerProps {
   branches: string[];
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
+  /** Linear is on and connected: the new-chat header offers a Linear issue to start from. */
+  linearActive?: boolean;
+  onStartFromIssue?: (issue: LinearIssue) => void;
   newChatError: string | null;
   notice?: string | null;
   onDismissNotice?: () => void;
@@ -467,7 +472,20 @@ const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon
   { id: "worktree", name: "New worktree", description: "Start a new branch in its own worktree", icon: GitForkIcon },
 ];
 
-function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: string; open: boolean; onClick: (trigger: HTMLElement) => void }) {
+function ChipButton({
+  icon,
+  leading,
+  label,
+  open,
+  onClick,
+}: {
+  icon?: IconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */
+  leading?: ReactNode;
+  label: string;
+  open: boolean;
+  onClick: (trigger: HTMLElement) => void;
+}) {
   return (
     <button
       type="button"
@@ -475,7 +493,7 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
       onClick={(event) => onClick(event.currentTarget)}
       className={`flex h-7 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-2"}`}
     >
-      <Icon icon={icon} size={14} />
+      {leading ?? (icon && <Icon icon={icon} size={14} />)}
       {label}
       <span className="text-ink-3">
         <Icon icon={ArrowDown01Icon} size={12} />
@@ -486,8 +504,19 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
 
 type NewChatHeaderProps = Pick<
   ChatComposerProps,
-  "worktrees" | "selectedWorktreeId" | "onWorktreeChange" | "isolation" | "onIsolationChange" | "branches" | "baseBranch" | "onBaseBranchChange"
+  | "worktrees"
+  | "selectedWorktreeId"
+  | "onWorktreeChange"
+  | "isolation"
+  | "onIsolationChange"
+  | "branches"
+  | "baseBranch"
+  | "onBaseBranchChange"
+  | "linearActive"
+  | "onStartFromIssue"
 >;
+
+type IssueList = { issues: LinearIssue[]; error?: string };
 
 function NewChatHeader({
   worktrees,
@@ -498,10 +527,13 @@ function NewChatHeader({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive = false,
+  onStartFromIssue,
 }: NewChatHeaderProps) {
-  const [menu, setMenu] = useState<"isolation" | "branch" | null>(null);
+  const [menu, setMenu] = useState<"isolation" | "branch" | "issue" | null>(null);
   const [query, setQuery] = useState("");
   const [popover, setPopover] = useState({ left: 0, maxHeight: 480 });
+  const [issues, setIssues] = useState<IssueList | null>(null);
   const selected = worktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? worktrees[0];
   const isolationOption = ISOLATIONS.find((option) => option.id === isolation) ?? ISOLATIONS[0];
   const search = query.trim().toLowerCase();
@@ -521,6 +553,28 @@ function NewChatHeader({
           .filter((branch) => branch.toLowerCase().includes(search))
           .map((branch) => ({ key: branch, name: branch, description: undefined, selected: branch === baseBranch, choose: () => onBaseBranchChange(branch) }));
 
+  // Issues come from the workspace search; a typed query waits 250 ms, and a stale answer is dropped.
+  useEffect(() => {
+    if (menu !== "issue") return;
+    let live = true;
+    const timer = window.setTimeout(() => {
+      Promise.resolve()
+        .then(() => window.milagre.listLinearIssues(query.trim() || undefined))
+        .then(
+          (result) => {
+            if (live) setIssues("error" in result ? { issues: [], error: result.error } : { issues: result.issues });
+          },
+          (error: unknown) => {
+            if (live) setIssues({ issues: [], error: error instanceof Error ? error.message : String(error) });
+          },
+        );
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [menu, query]);
+
   const lastTrigger = useRef<HTMLElement | null>(null);
   function place(trigger: HTMLElement) {
     lastTrigger.current = trigger;
@@ -538,9 +592,10 @@ function NewChatHeader({
     },
   );
 
-  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+  function toggle(next: "isolation" | "branch" | "issue", trigger: HTMLElement) {
     place(trigger);
     setQuery("");
+    setIssues(null);
     setMenu((current) => (current === next ? null : next));
   }
 
@@ -548,6 +603,8 @@ function NewChatHeader({
     setMenu(null);
     setQuery("");
   }
+
+  const issueRows = issues?.issues ?? [];
 
   const popoverStyle = { left: popover.left, maxHeight: popover.maxHeight, transformOrigin: "top left" };
 
@@ -571,6 +628,9 @@ function NewChatHeader({
             open={menu === "branch"}
             onClick={(trigger) => toggle("branch", trigger)}
           />
+          {linearActive && onStartFromIssue && (
+            <ChipButton leading={<LinearLogo size={13} />} label="Linear issue" open={menu === "issue"} onClick={(trigger) => toggle("issue", trigger)} />
+          )}
           {menu === "isolation" && (
             <PickerPanel title="Isolation" className="absolute top-[calc(100%+0.375rem)] w-[320px]" style={popoverStyle}>
               {ISOLATIONS.map((option) => (
@@ -585,6 +645,41 @@ function NewChatHeader({
                     close();
                   }}
                 />
+              ))}
+            </PickerPanel>
+          )}
+          {menu === "issue" && (
+            <PickerPanel
+              title="Start from a Linear issue"
+              query={query}
+              onQueryChange={setQuery}
+              placeholder="Search issues"
+              searchPlacement="bottom"
+              emptyLabel={issues ? (issues.error ?? "No issues found.") : "Loading issues…"}
+              isEmpty={issueRows.length === 0}
+              className="absolute top-[calc(100%+0.375rem)] w-[420px] max-w-[calc(100vw-2rem)]"
+              style={popoverStyle}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  close();
+                }
+              }}
+            >
+              {issueRows.map((issue) => (
+                <div key={issue.key} data-linear-issue-row>
+                  <PickerRow
+                    icon={<LinearLogo size={13} />}
+                    label={`${issue.key} ${issue.title}`}
+                    description={issue.state.name}
+                    selected={false}
+                    wrapLabel
+                    onClick={() => {
+                      onStartFromIssue?.(issue);
+                      close();
+                    }}
+                  />
+                </div>
               ))}
             </PickerPanel>
           )}
@@ -691,6 +786,8 @@ export function ChatComposer({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive,
+  onStartFromIssue,
   newChatError,
   findOpen = false,
   findSignal = 0,
@@ -891,6 +988,8 @@ export function ChatComposer({
                 branches={branches}
                 baseBranch={baseBranch}
                 onBaseBranchChange={onBaseBranchChange}
+                linearActive={linearActive}
+                onStartFromIssue={onStartFromIssue}
               />
             )}
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}

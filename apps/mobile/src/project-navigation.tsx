@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { chatMarkTone, chatPullRequests, comparePins, isListedChat, pendingChatSessionId, pullRequestRefs, withPendingChat } from "@milagre/shared/chats";
 import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession, PullRequest } from "@milagre/shared/model";
+import type { LinearIssue } from "@milagre/shared/linear";
 import type { ChatSearchMatch, RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { usePendingChats, useSession, type MobilePendingChat } from "./session";
@@ -43,6 +44,8 @@ import { AttentionDot, useAttention } from "./attention";
 import { projectOfKey } from "@milagre/shared/agent-runs";
 import { useChatPullRequests } from "./use-chat-pull-requests";
 import { ChatPullRequestChips } from "./chat-pull-request-chips";
+import { useLinear } from "./use-linear";
+import { useWorktreeLinearIssues } from "./use-worktree-linear-issues";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -57,6 +60,7 @@ type Row = { key: string; path: string } & (
       prPath?: string;
       prRefs?: string[];
       pullRequests?: PullRequest[];
+      linearIssue?: LinearIssue;
     }
   | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
@@ -333,10 +337,18 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     return [...byPath].map(([path, refs]) => ({ path, refs: [...refs] }));
   }, [rows]);
   const prStatus = useChatPullRequests(session.client, prTargets);
+  // A Worktree's Linear issue shows its chip on the Chat row, with or without pull requests, while Linear is on.
+  const { active: linearActive } = useLinear(session.client);
+  const linearPaths = useMemo(() => [...new Set(rows.flatMap((row) => (row.kind === "chat" && row.prPath ? [row.path] : [])))], [rows]);
+  const linearIssues = useWorktreeLinearIssues(session.client, linearActive ? linearPaths : []);
   const displayedRows = rows.map((row) => {
     if (row.kind !== "chat") return row;
     const status = row.prPath ? prStatus[row.prPath] : undefined;
-    return { ...row, pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch) };
+    return {
+      ...row,
+      pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch),
+      linearIssue: row.prPath ? linearIssues[row.prPath] : undefined,
+    };
   });
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
@@ -683,7 +695,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           const title = item.chat.title || item.chat.generatedTitle || "New Chat";
           const selected = currentPath === item.path && activeChatId === item.chat.id;
           const tone = chatMarkTone(item.mark);
-          const hasPullRequests = !!item.pullRequests?.length;
+          const hasChips = !!item.pullRequests?.length || !!item.linearIssue;
           const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
           const menu = chatMenu(
             item.chat,
@@ -711,16 +723,16 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   }}
                   style={{ flex: 1 }}
                 >
-                  <View style={[s.chatBody, hasPullRequests && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
+                  <View style={[s.chatBody, hasChips && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
                     <ChatMarkIcon mark={item.mark} />
                     <View style={{ flex: 1, gap: 3 }}>
                       <Text
-                        numberOfLines={hasPullRequests ? 1 : 2}
+                        numberOfLines={hasChips ? 1 : 2}
                         style={[s.chatTitle, { color: item.chat.unread || selected ? colors.ink : colors.ink2, fontWeight: item.chat.unread ? "600" : "500" }]}
                       >
                         {title}
                       </Text>
-                      {!hasPullRequests && (
+                      {!hasChips && (
                         <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
                           {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                           {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
@@ -735,8 +747,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                     </View>
                   </View>
                 </PullDown>
-                {hasPullRequests && (
-                  <ChatPullRequestChips pullRequests={item.pullRequests || []}>
+                {hasChips && (
+                  <ChatPullRequestChips pullRequests={item.pullRequests || []} linearIssue={item.linearIssue}>
                     {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                     {!!labels[item.mark] && (
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1, color: tone === "accent" ? colors.accentInk : colors[tone] }]}>

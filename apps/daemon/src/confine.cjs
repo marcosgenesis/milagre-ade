@@ -96,6 +96,9 @@ const PATHS = Object.freeze({
   "linear:status": none,
   "linear:enabled:read": none,
   "linear:enabled:save": denied,
+  // Issues name no folder. A Project's worktree issues name the Project's folder, like its other reads.
+  "linear:issues": none,
+  "linear:worktree-issues": ([projectPath]) => [projectPath],
   "chat:runs": none,
   "chat:ports": ([chatId]) => [chatProject(chatId)],
   "agent:stop-port": ([chatId]) => [chatProject(chatId)],

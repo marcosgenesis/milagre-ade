@@ -97,6 +97,13 @@ const bridge = {
   disconnectLinear: () => ipcRenderer.invoke("linear:disconnect"),
   readLinearEnabled: () => ipcRenderer.invoke("linear:enabled:read"),
   saveLinearEnabled: (value) => ipcRenderer.invoke("linear:enabled:save", value),
+  onLinearEnabledChanged: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("linear:enabled-changed", listener);
+    return () => ipcRenderer.removeListener("linear:enabled-changed", listener);
+  },
+  listLinearIssues: (query) => ipcRenderer.invoke("linear:issues", { query }),
+  readWorktreeLinearIssues: (projectPath) => ipcRenderer.invoke("linear:worktree-issues", projectPath),
   onLinearStatusChanged: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("linear:status-changed", listener);

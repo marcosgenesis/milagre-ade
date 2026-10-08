@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Animated, Easing, View, useColorScheme } from "react-native";
 import Svg, { Circle, Defs, FeGaussianBlur, Filter, G, LinearGradient, Mask, Path, Stop } from "react-native-svg";
-import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO } from "@milagre/shared/provider-logos";
+import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO, LINEAR_LOGO } from "@milagre/shared/provider-logos";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react-native";
 import type { ModelProvider } from "@milagre/shared/model";
 import { hex } from "./theme";
@@ -133,5 +133,15 @@ export function EffortMeter({ level, total, tone = "ink2" }: { level: number; to
         />
       ))}
     </View>
+  );
+}
+
+/** Linear's mark, on Linear issue chips and pickers (same shape as desktop's LinearLogo), in the color of the text beside it. */
+export function LinearLogo({ size = 12, tone = "ink2" }: { size?: number; tone?: Tone }) {
+  const palette = hex(useColorScheme());
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Path d={LINEAR_LOGO.d} fill={palette[tone]} />
+    </Svg>
   );
 }

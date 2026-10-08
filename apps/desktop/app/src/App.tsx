@@ -73,6 +73,9 @@ import { DiffToolbar, useDiffPreferences, useDiffPresence } from "./components/c
 import { useChanges } from "./components/changes/useChanges";
 import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
+import { useLinear } from "./components/useLinear";
+import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
+import { issueFirstMessage, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
@@ -500,6 +503,8 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const linear = useLinear();
+  const linearIssues = useWorktreeLinearIssues(project?.path ?? "", linear.active);
   const sidePanels = useSidePanels();
   const changes = useChanges({
     cwd: selectedWorktree?.path,
@@ -698,6 +703,7 @@ function App() {
           branch: worktree?.name,
           path: worktree?.path,
           diff: worktree?.diff,
+          linearIssue: worktree ? linearIssues[worktree.path] : undefined,
           pullRequests: worktree
             ? chatPullRequests(
                 session.summary ? (summary.pullRequests ?? NO_REFS) : readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
@@ -725,6 +731,7 @@ function App() {
     running,
     pullRequests,
     chatPrs,
+    linearIssues,
     agentPorts,
     project,
     archivingChats,
@@ -1163,14 +1170,20 @@ function App() {
 
   // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
   // from the main process, and a new chat in "New worktree" isolation gets its own worktree first.
-  async function resolveSendTarget(body: string) {
+  // A chat started from a Linear issue always gets its own worktree, whatever the isolation picker says.
+  async function resolveSendTarget(body: string, issueKey?: string) {
     if (!state || !project || !selectedWorktree) return null;
-    if (preparedTarget.current?.view === chatView.current && preparedTarget.current.projectPath === project.path) return preparedTarget.current;
+    if (!issueKey && preparedTarget.current?.view === chatView.current && preparedTarget.current.projectPath === project.path) return preparedTarget.current;
     if (selectedSession) return { sessionId: selectedSession.id as number | null, worktreeId: selectedWorktree.id };
-    if (isolation === "local") return { sessionId: null, worktreeId: selectedWorktree.id };
+    if (isolation === "local" && !issueKey) return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
-    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
+    const created = await window.milagre.createWorktree({
+      projectPath: project.path,
+      baseBranch: effectiveBaseBranch,
+      prompt: body,
+      ...(issueKey ? { issueKey } : {}),
+    });
     receiveState(project.path, created.project.state);
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
@@ -1192,6 +1205,7 @@ function App() {
     files: string[] = imageDraft.files,
     preserveComposer = false,
     prAction?: PullRequestActionContext,
+    issueKey?: string,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     sendInFlight.current = true;
@@ -1205,7 +1219,7 @@ function App() {
     const submittedDraft = draftStore.get();
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
     const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
-    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || isolation === "local" ? selectedWorktree.id : NO_WORKTREE);
+    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || (isolation === "local" && !issueKey) ? selectedWorktree.id : NO_WORKTREE);
     const preview = createPendingChat({
       state,
       sessionId: selectedSession?.id,
@@ -1242,7 +1256,7 @@ function App() {
     let target: Awaited<ReturnType<typeof resolveSendTarget>> = null;
     let sent = false;
     try {
-      target = await resolveSendTarget(body);
+      target = await resolveSendTarget(body, issueKey);
       if (!target) return false;
       if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
       setPendingSend((pending) =>
@@ -1284,7 +1298,7 @@ function App() {
         setNewChatError(message);
         if (!preserveComposer) {
           const nextDraft = draftStore.get();
-          setDraft([submittedDraft || body, nextDraft].filter(Boolean).join("\n\n"));
+          setDraft([restoredDraft(body, submittedDraft, issueKey !== undefined), nextDraft].filter(Boolean).join("\n\n"));
           imageDraft.restore(images, files);
         }
       } else {
@@ -1297,7 +1311,7 @@ function App() {
               projectPath: project.path,
               originSessionId: selectedSession?.id ?? null,
               originWorktreeId: selectedWorktree.id,
-              draft: submittedDraft || body,
+              draft: restoredDraft(body, submittedDraft, issueKey !== undefined),
               error: message,
               target: target ? { ...target, view, projectPath: project.path } : null,
             },
@@ -1321,6 +1335,11 @@ function App() {
     changes.closeDiff();
     if (await executeSend(formatCommentsMessage(sent, { mode: changes.mode, base }), permissionMode, [], [], true))
       diffComments.removeMany(sent.map((comment) => comment.id));
+  }
+
+  // The new chat starts at once from an issue: its first message is the issue, then whatever the user typed.
+  function startFromIssue(issue: LinearIssue) {
+    void executeSend(issueFirstMessage(issue, draftStore.get()), permissionMode, imageDraft.images, imageDraft.files, false, undefined, issue.key);
   }
 
   async function sendMessage() {
@@ -2011,6 +2030,8 @@ function App() {
                   earlier={earlierMessages}
                   onSend={() => void sendMessage()}
                   onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
+                  linearActive={linear.active}
+                  onStartFromIssue={startFromIssue}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                   pullRequestAction={
                     selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest

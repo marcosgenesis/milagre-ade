@@ -11,6 +11,7 @@ const {
   sweepDetailContent,
 } = require("./project-content.cjs");
 const { MESSAGES_MARKER, isMarker, readMessages, writeMessages } = require("./chat-db.cjs");
+const { withChatSummaries } = require("./chat-summaries.cjs");
 // ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
 const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 let counter = 0;
@@ -96,6 +97,10 @@ async function readProjectState(projectPath) {
 function compactProjectDetails(projectPath, next, previous) {
   return next.messages === previous?.messages ? next : compactDetails(projectPath, next, { previous: previous?.messages });
 }
+/** For ProjectStates: what every change goes through before it is kept (tool output moved out, Chat summaries current). */
+async function compactProjectState(projectPath, next, previous) {
+  return withChatSummaries(await compactProjectDetails(projectPath, next, previous), previous);
+}
 /** Makes a rename in `directory` durable. Best effort: a file system that can't sync a folder still saves. */
 async function syncDirectory(directory) {
   let handle;
@@ -107,4 +112,4 @@ async function syncDirectory(directory) {
     await handle?.close().catch(() => {});
   }
 }
-module.exports = { saveProjectState, readProjectState, compactProjectDetails, stateFile, syncDirectory };
+module.exports = { saveProjectState, readProjectState, compactProjectDetails, compactProjectState, stateFile, syncDirectory };

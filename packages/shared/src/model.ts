@@ -85,11 +85,31 @@ export interface Worktree {
   sharedChat?: { linkId: string; sessionId: number };
 }
 
+/** What the chat lists need from a Chat's messages, kept on the Chat by the host (chat-summary.mjs). */
+export interface ChatSummary {
+  count: number;
+  /** The first and last message in the Project's order: when the Chat started, and its latest activity. */
+  firstId?: number;
+  lastId?: number;
+  /** The first line of the first thing the user wrote, which names a Chat that has no title. */
+  titleLine?: string;
+  /** How the last reply ended (the commit dialog's notes aren't replies). */
+  lastOutcome?: "completed" | "failed" | "cancelled";
+  /** The PRs the Chat's commands created or merged. */
+  pullRequests?: string[];
+  /** The model of the last message the user sent. */
+  lastModel?: string;
+  /** A handoff divider still preparing, by message id. */
+  openHandoff?: number;
+}
+
 export interface AgentSession {
   id: number;
   worktree_id: number;
   agent_name: string;
   status: SessionStatus;
+  /** Kept by the host from the Chat's messages; absent from an older host. */
+  summary?: ChatSummary;
   /** The agent this chat runs on now. A send on the other provider hands the chat off in place (see handoff.mjs). */
   provider?: ModelProvider;
   /** Claude session id or Codex thread id of the current `provider`, used to resume the agent's memory. */

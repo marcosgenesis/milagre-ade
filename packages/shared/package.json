@@ -31,6 +31,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./chat-summary": {
+      "types": "./src/chat-summary.d.mts",
+      "default": "./src/chat-summary.mjs"
+    },
     "./state-patch": {
       "types": "./src/state-patch.d.mts",
       "default": "./src/state-patch.mjs"

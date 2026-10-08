@@ -48,7 +48,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { createProjectFinder } = require("./project-finder.cjs");
-const { saveProjectState, readProjectState, compactProjectDetails, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, compactProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -291,7 +291,7 @@ function createRuntime(options) {
       return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered, await linkStore.ownedWorktrees());
     },
     save: saveProjectState,
-    compact: compactProjectDetails,
+    compact: compactProjectState,
   });
 
   const scopeStates = createChatScopes({

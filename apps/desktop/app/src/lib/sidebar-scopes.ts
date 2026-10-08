@@ -4,6 +4,7 @@ import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { isListedChat } from "@milagre/shared/chats";
 import { stateEvents } from "./state-events.ts";
+import { chatSummary } from "@milagre/shared/chat-summary";
 import type { SidebarRecent } from "../components/sidebar/ChatRow";
 import { chatMark, chatTitle, orderChats, type ChatOrder } from "./chat-list.ts";
 
@@ -42,12 +43,18 @@ export function scopeChats(
   order: ChatOrder,
   { running, waiting, asking }: { running: Set<string>; waiting: Set<string>; asking: Set<string> },
 ): SidebarRecent[] {
+  // Chats carry a summary of their messages; only an older host's state, without one, is read message by message.
   const bySession = new Map<number, CoordinatorState["messages"]>();
-  for (const message of state.messages) bySession.set(message.session_id, [...(bySession.get(message.session_id) ?? []), message]);
+  if (Object.values(state.sessions).some((session) => !session.summary))
+    for (const message of state.messages) {
+      const list = bySession.get(message.session_id);
+      if (list) list.push(message);
+      else bySession.set(message.session_id, [message]);
+    }
   const listed = Object.values(state.sessions)
     .filter((session) => !session.archived)
     .map((session) => ({ session, sessionMessages: bySession.get(session.id) ?? [] }))
-    .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
+    .filter(({ session, sessionMessages }) => isListedChat(session, chatSummary(session, sessionMessages).count));
   return orderChats(listed, order).map(({ session, sessionMessages }) => {
     const worktree = "worktree_id" in session && "worktrees" in state ? state.worktrees[session.worktree_id] : undefined;
     const chatKey = `${key}#${session.id}`;

@@ -56,8 +56,8 @@ Steps:
    (30 s). Failure: `failed`, with git's first stderr line ("Could not reach origin" when it is a network error).
 4. **Compare.** Local and tracking point at the same commit: `up-to-date`. Local isn't an ancestor of tracking
    (`merge-base --is-ancestor`): `skipped`, "<name> has commits that aren't on <remote>".
-5. **Find the checkout.** Parse `git worktree list` (the client already has a `-z` reader) for a Worktree whose
-   branch is `refs/heads/<name>`.
+5. **Find the checkout.** `git for-each-ref --format=%(worktreepath) refs/heads/<name>` names the Worktree that
+   has the branch checked out, or nothing.
 6. **Not checked out anywhere:** `git update-ref refs/heads/<name> <new> <old>`. The old value makes it a
    compare-and-swap, so a commit that lands in between makes it fail (`skipped`, "<name> moved during sync").
 7. **Checked out:** in that Worktree, `git status --porcelain=v1 --untracked-files=no` must be empty and no
@@ -128,7 +128,8 @@ After each sync the runtime records the result and emits `main-sync:status` with
 
 Phone access: add the four commands to `METHODS` in `apps/daemon/src/mobile-bridge.cjs` and to the rules in
 `apps/daemon/src/confine.cjs` (`([projectPath]) => [projectPath]` for the per-Project two, `none` for the
-default pair). Forward `main-sync:status` to the phone the same way other Project events go.
+default pair). The phone doesn't get `main-sync:status`: the bridge only forwards events for subscribed Projects,
+so the phone's Project settings screen re-reads `main-sync:read` whenever it gains focus.
 
 ## UI
 

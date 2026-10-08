@@ -69,6 +69,7 @@ const PATHS = Object.freeze({
   "project:registry": denied,
   "link:list": denied,
   "link:create": denied,
+  "link:update": denied,
   "link:open": denied,
   "link:send": denied,
   "project:open": ([projectPath]) => [projectPath],

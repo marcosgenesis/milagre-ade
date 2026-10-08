@@ -69,6 +69,7 @@ export function LinkWorkspace({
   onSwitchProject,
   onSwitchLink,
   onLinkProject,
+  onEditLink,
   onOpenProject,
   onSettings,
   linkedWork,
@@ -90,6 +91,7 @@ export function LinkWorkspace({
   onSwitchProject: (path: string) => void;
   onSwitchLink: (id: string) => void;
   onLinkProject: () => void;
+  onEditLink: (id: string) => void;
   onOpenProject: () => void;
   onSettings: () => void;
   linkedWork: LinkedWork;
@@ -380,6 +382,7 @@ export function LinkWorkspace({
             selectedLink={{ id: opened.link.id, projects: opened.projects }}
             onSwitchLink={onSwitchLink}
             onLinkProject={onLinkProject}
+            onEditLink={onEditLink}
             onSwitchProject={onSwitchProject}
             onOpenProject={onOpenProject}
             onOpenCommands={() => setCommandsOpen(true)}
@@ -629,6 +632,7 @@ export function LinkWorkspace({
           commands={[
             { id: "new", label: "New Chat", group: "Actions", icon: "chat", run: () => pick(null) },
             { id: "link", label: "Link projects…", group: "Actions", icon: "folder", run: onLinkProject },
+            { id: "edit-link", label: "Edit Link…", group: "Actions", icon: "folder", run: () => onEditLink(opened.link.id) },
             ...recents.map((row) => ({ id: row.id, label: row.label, group: "Chats", icon: "chat" as const, run: () => pick(Number(row.id)) })),
             ...opened.projects.map((project) => ({
               id: project.id,

@@ -93,6 +93,7 @@ const bridge = {
   readProject: (projectPath) => ipcRenderer.invoke("project:read", projectPath),
   listNamedLinks: () => ipcRenderer.invoke("link:list"),
   createNamedLink: (request) => ipcRenderer.invoke("link:create", request),
+  updateNamedLink: (request) => ipcRenderer.invoke("link:update", request),
   openNamedLink: (id) => ipcRenderer.invoke("link:open", id),
   readLink: (id) => ipcRenderer.invoke("link:snapshot", id),
   sendLinkMessage: (request) => ipcRenderer.invoke("link:send", request),

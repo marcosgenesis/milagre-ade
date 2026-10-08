@@ -58,6 +58,7 @@ const METHODS = new Set([
   "project:registry",
   "link:list",
   "link:create",
+  "link:update",
   "link:open",
   "link:send",
   "chat:send",

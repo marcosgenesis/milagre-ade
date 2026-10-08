@@ -552,10 +552,12 @@ class AcpSession {
     await this.finishTurn([{ type: "turn-cancelled" }]);
   }
 
-  async removeTemp() {
+  // An exit starts the removal without waiting; close() then waits for that same removal instead of finding nothing to do.
+  removeTemp() {
     const directory = this.tmpdir;
     this.tmpdir = null;
-    if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    if (directory) this.removing = fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    return this.removing ?? Promise.resolve();
   }
 
   async close({ descendants = false } = {}) {

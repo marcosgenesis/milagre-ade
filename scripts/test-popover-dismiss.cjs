@@ -26,7 +26,7 @@ function Fixture() {
     <PromptComposer projectPath="/fixture" draft={draft} onDraftChange={setDraft}
       imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
       onSend={noop} sendBlocked={false} running
-      models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+      models={MODEL_CATALOG} cliStatus={{ codex: { state: 'outdated', message: 'Milagre needs Codex 0.99. Run codex update.' } }} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop} />
   </div>;
@@ -79,6 +79,11 @@ async function browserChecks() {
     await click(model);
     await waitFor(`!!document.querySelector('[data-picker-panel] input')`);
     await screenshot("model-picker-open");
+    assert.equal(
+      await evaluate(`[...document.querySelectorAll('[data-picker-panel] .grid-cols-2 > button')].map((tab) => tab.disabled).join()`),
+      "false,false",
+      "A provider tab stays clickable while its CLI needs an update",
+    );
     await click("[data-picker-panel] input");
     assert.equal(await panels(), 1, "Pressing inside the picker keeps it open");
     await click("textarea");

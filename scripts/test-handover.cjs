@@ -32,6 +32,8 @@ document.body.style.cssText = "margin:0;background:#202123";
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 
+const divider = (name) => `document.querySelector('[data-shot="${name}"] [data-handoff-divider]')`;
+
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
@@ -53,7 +55,6 @@ async function browserChecks() {
     await fs.mkdir(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
     await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), (await win.webContents.capturePage()).toPNG());
   }
-  const divider = (name) => `document.querySelector('[data-shot="${name}"] [data-handoff-divider]')`;
   const text = (name) => evaluate(`${divider(name)}.textContent`);
   const press = (keyCode) => {
     win.webContents.sendInputEvent({ type: "keyDown", keyCode });

@@ -492,9 +492,8 @@ export function PromptComposer({
                   <button
                     key={item}
                     type="button"
-                    disabled={Boolean(cliMessage(cliStatus?.[item]))}
                     title={cliMessage(cliStatus?.[item]) ?? undefined}
-                    className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
+                    className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
                     onClick={() => setProvider(item)}
                   >
                     <ProviderLogo provider={item} size={14} />
